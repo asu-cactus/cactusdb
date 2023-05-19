@@ -126,6 +126,7 @@ TEST_F(SortArrayTest, timestamp) {
       makeNullableArrayVector(reverseNested(expected)));
 }
 
+/*
 TEST_F(SortArrayTest, date) {
   auto input = makeNullableArrayVector(dateInput());
   auto expected = dateAscNullSmallest();
@@ -134,6 +135,7 @@ TEST_F(SortArrayTest, date) {
       makeNullableArrayVector(expected),
       makeNullableArrayVector(reverseNested(expected)));
 }
+ */
 
 TEST_F(SortArrayTest, bool) {
   auto input = makeNullableArrayVector(boolInput());

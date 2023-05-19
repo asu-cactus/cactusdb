@@ -45,7 +45,6 @@ const std::vector<std::string> primitiveTypeNames() {
       "varchar",
       "varbinary",
       "timestamp",
-      "date",
   };
 
   return kPrimitiveTypeNames;
@@ -167,7 +166,7 @@ void validateBaseTypeAndCollectTypeParams(
 
     if (!isPositiveInteger(typeName) &&
         !tryMapNameToTypeKind(typeName).has_value() &&
-        !isDecimalName(typeName)) {
+        !isDecimalName(typeName) && !isDateName(typeName)) {
       VELOX_USER_CHECK(hasType(typeName), "Type doesn't exist: {}", typeName);
     }
 

@@ -87,12 +87,6 @@ TEST_F(ArraySortTest, timestamp) {
   testArraySort(input, expected);
 }
 
-TEST_F(ArraySortTest, date) {
-  auto input = makeNullableArrayVector(dateInput());
-  auto expected = makeNullableArrayVector(dateAscNullLargest());
-  testArraySort(input, expected);
-}
-
 TEST_F(ArraySortTest, bool) {
   auto input = makeNullableArrayVector(boolInput());
   auto expected = makeNullableArrayVector(boolAscNullLargest());

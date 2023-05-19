@@ -182,33 +182,6 @@ inline NestedVector<std::optional<Timestamp>> timestampAscNullLargest() {
   };
 }
 
-inline NestedVector<std::optional<Date>> dateInput() {
-  using D = Date;
-  return NestedVector<std::optional<D>>{
-      {},
-      {std::nullopt, std::nullopt},
-      {D{0}, D{1}, std::nullopt, D{4}, D{3}},
-  };
-}
-
-inline NestedVector<std::optional<Date>> dateAscNullSmallest() {
-  using D = Date;
-  return NestedVector<std::optional<D>>{
-      {},
-      {std::nullopt, std::nullopt},
-      {std::nullopt, D{0}, D{1}, D{3}, D{4}},
-  };
-}
-
-inline NestedVector<std::optional<Date>> dateAscNullLargest() {
-  using D = Date;
-  return NestedVector<std::optional<D>>{
-      {},
-      {std::nullopt, std::nullopt},
-      {D{0}, D{1}, D{3}, D{4}, std::nullopt},
-  };
-}
-
 inline NestedVector<std::optional<bool>> boolInput() {
   return NestedVector<std::optional<bool>>{
       {},

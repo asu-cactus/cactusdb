@@ -28,10 +28,8 @@ namespace facebook::velox::connector::hive {
       case TypeKind::BIGINT:                                                \
       case TypeKind::VARCHAR:                                               \
       case TypeKind::VARBINARY:                                             \
-      case TypeKind::DATE: {                                                \
         return VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(                          \
             TEMPLATE_FUNC, typeKind, __VA_ARGS__);                          \
-      }                                                                     \
       default:                                                              \
         VELOX_UNSUPPORTED(                                                  \
             "Unsupported partition type: {}", mapTypeKindToName(typeKind)); \
@@ -49,11 +47,6 @@ inline std::string makePartitionValueString(T value) {
 template <>
 inline std::string makePartitionValueString(bool value) {
   return value ? "true" : "false";
-}
-
-template <>
-inline std::string makePartitionValueString(Date value) {
-  return value.toString();
 }
 
 template <TypeKind Kind>

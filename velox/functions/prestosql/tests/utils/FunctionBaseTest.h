@@ -104,29 +104,32 @@ class FunctionBaseTest : public testing::Test,
   std::shared_ptr<T> evaluate(
       const core::TypedExprPtr& typedExpr,
       const RowVectorPtr& data,
-      const std::optional<SelectivityVector>& rows = std::nullopt) {
+      const std::optional<SelectivityVector>& rows = std::nullopt,
+      const TypePtr& resultType = nullptr) {
     auto result = evaluate(typedExpr, data, rows);
-    return castEvaluateResult<T>(result, typedExpr->toString());
+    return castEvaluateResult<T>(result, typedExpr->toString(), resultType);
   }
 
   template <typename T>
   std::shared_ptr<T> evaluate(
       const std::string& expression,
       const RowVectorPtr& data,
-      const std::optional<SelectivityVector>& rows = std::nullopt) {
+      const std::optional<SelectivityVector>& rows = std::nullopt,
+      const TypePtr& resultType = nullptr) {
     auto result = evaluate(expression, data, rows);
-    return castEvaluateResult<T>(result, expression);
+    return castEvaluateResult<T>(result, expression, resultType);
   }
 
   template <typename T>
   std::shared_ptr<T> evaluateSimplified(
       const std::string& expression,
       const RowVectorPtr& data,
-      const std::optional<SelectivityVector>& rows = std::nullopt) {
+      const std::optional<SelectivityVector>& rows = std::nullopt,
+      const TypePtr& resultType = nullptr) {
     auto typedExpr = makeTypedExpr(expression, asRowType(data->type()));
     auto result = evaluateImpl<exec::ExprSetSimplified>(typedExpr, data, rows);
 
-    return castEvaluateResult<T>(result, expression);
+    return castEvaluateResult<T>(result, expression, resultType);
   }
 
   template <typename T>
@@ -143,7 +146,7 @@ class FunctionBaseTest : public testing::Test,
     exprSet.eval(rows, evalCtx, results);
     result = results[0];
 
-    return std::dynamic_pointer_cast<T>(results[0]);
+    return std::reinterpret_pointer_cast<T>(results[0]);
   }
 
   // Evaluate the given expression once, returning the result as a std::optional
@@ -247,16 +250,27 @@ class FunctionBaseTest : public testing::Test,
   template <typename T>
   std::shared_ptr<T> castEvaluateResult(
       const VectorPtr& result,
-      const std::string& expression) {
+      const std::string& expression,
+      const TypePtr& expectedType) {
     VELOX_CHECK(result, "Expression evaluation result is null: {}", expression);
+    if (expectedType) {
+      VELOX_CHECK_EQ(
+          result->type()->kind(),
+          expectedType->kind(),
+          "Expression evaluation result is not of expected type kind: {} -> {} vector of type {}",
+          expression,
+          result->encoding(),
+          result->type()->kindName());
+    }
 
-    auto castedResult = std::dynamic_pointer_cast<T>(result);
+    auto castedResult = std::reinterpret_pointer_cast<T>(result);
     VELOX_CHECK(
         castedResult,
-        "Expression evaluation result is not of expected type: {} -> {} vector of type {}",
+        "Expression evaluation result is not of expected type kind: {} -> {} vector of type {}",
         expression,
         result->encoding(),
-        result->type()->toString());
+        result->type()->name());
+
     return castedResult;
   }
 

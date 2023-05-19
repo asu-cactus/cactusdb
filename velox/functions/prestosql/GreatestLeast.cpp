@@ -120,6 +120,11 @@ class ExtremeValueFunction : public exec::VectorFunction {
         applyTyped<TypeTraits<TypeKind::HUGEINT>::NativeType>(
             rows, args, outputType, context, result);
         return;
+      // This TypeKind is used by DATE.
+      case TypeKind::INTEGER:
+        applyTyped<TypeTraits<TypeKind::INTEGER>::NativeType>(
+            rows, args, outputType, context, result);
+        return;
       case TypeKind::DOUBLE:
         applyTyped<TypeTraits<TypeKind::DOUBLE>::NativeType>(
             rows, args, outputType, context, result);
@@ -130,10 +135,6 @@ class ExtremeValueFunction : public exec::VectorFunction {
         return;
       case TypeKind::TIMESTAMP:
         applyTyped<TypeTraits<TypeKind::TIMESTAMP>::NativeType>(
-            rows, args, outputType, context, result);
-        return;
-      case TypeKind::DATE:
-        applyTyped<TypeTraits<TypeKind::DATE>::NativeType>(
             rows, args, outputType, context, result);
         return;
       default:

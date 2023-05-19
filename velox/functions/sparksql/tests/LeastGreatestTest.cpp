@@ -37,22 +37,26 @@ class LeastTest : public SparkFunctionBaseTest {
   }
 
   template <typename T>
-  void flat() {
+  void flat(const TypePtr& type = CppToType<T>::create()) {
     vector_size_t size = 20;
 
     // {0, null, null, 3, null, null, 6, null, null, ...}.
     auto first = makeFlatVector<T>(
         size,
         [](vector_size_t row) { return row; },
-        [](vector_size_t row) { return row % 3 != 0; });
+        [](vector_size_t row) { return row % 3 != 0; },
+        type);
 
     // {0, 10, null, 30, 40, null, 60, 70, null, ...}.
     auto second = makeFlatVector<T>(
-        size, [](vector_size_t row) { return row * 10; }, nullEvery(3, 2));
+        size,
+        [](vector_size_t row) { return row * 10; },
+        nullEvery(3, 2),
+        type);
 
     // {0, 100, 200, 300, 400, 500, 600, 700, 800, ...}.
-    auto third =
-        makeFlatVector<T>(size, [](vector_size_t row) { return row * 100; });
+    auto third = makeFlatVector<T>(
+        size, [](vector_size_t row) { return row * 100; }, nullptr, type);
 
     auto data = makeRowVector({first, second, third});
 
@@ -81,17 +85,18 @@ class LeastTest : public SparkFunctionBaseTest {
   }
 
   template <typename T>
-  void constant() {
+  void constant(const TypePtr& type = CppToType<T>::create()) {
     vector_size_t size = 20;
 
     // {0, null, null, 3, null, null, 6, null, null, ...}.
     auto first = makeFlatVector<T>(
         size,
         [](vector_size_t row) { return row; },
-        [](vector_size_t row) { return row % 3 != 0; });
+        [](vector_size_t row) { return row % 3 != 0; },
+        type);
 
     // {9, 9, 9, ...}.
-    auto second = makeConstant<T>(9, size);
+    auto second = makeConstant<T>(9, size, type);
 
     auto data = makeRowVector({first, second});
 
@@ -116,6 +121,9 @@ TEST_F(LeastTest, integral) {
 
   flat<int64_t>();
   constant<int64_t>();
+
+  flat<int32_t>(DATE());
+  constant<int32_t>(DATE());
 }
 
 TEST_F(LeastTest, floating) {
@@ -156,10 +164,6 @@ TEST_F(LeastTest, timestamp) {
       Timestamp(581, 1651));
 }
 
-TEST_F(LeastTest, date) {
-  EXPECT_EQ(least<Date>(Date(100), Date(1000), Date(10000)), Date(100));
-}
-
 class GreatestTest : public SparkFunctionBaseTest {
  protected:
   template <typename T>
@@ -180,21 +184,26 @@ class GreatestTest : public SparkFunctionBaseTest {
   }
 
   template <typename T>
-  void flat() {
+  void flat(const TypePtr& type = CppToType<T>::create()) {
     vector_size_t size = 20;
 
     // {0, null, null, 300, null, null, 600, null, null, ...}.
     auto first = makeFlatVector<T>(
         size,
         [](vector_size_t row) { return row * 100; },
-        [](vector_size_t row) { return row % 3 != 0; });
+        [](vector_size_t row) { return row % 3 != 0; },
+        type);
 
     // {0, 10, null, 30, 40, null, 60, 70, null, ...}.
     auto second = makeFlatVector<T>(
-        size, [](vector_size_t row) { return row * 10; }, nullEvery(3, 2));
+        size,
+        [](vector_size_t row) { return row * 10; },
+        nullEvery(3, 2),
+        type);
 
     // {0, 1, 2, 3, 4, 5, 6, 7, 8, ...}.
-    auto third = makeFlatVector<T>(size, [](vector_size_t row) { return row; });
+    auto third = makeFlatVector<T>(
+        size, [](vector_size_t row) { return row; }, nullptr, type);
 
     auto data = makeRowVector({first, second, third});
 
@@ -223,17 +232,18 @@ class GreatestTest : public SparkFunctionBaseTest {
   }
 
   template <typename T>
-  void constant() {
+  void constant(const TypePtr& type = CppToType<T>::create()) {
     vector_size_t size = 20;
 
     // {0, null, null, 3, null, null, 6, null, null, ...}.
     auto first = makeFlatVector<T>(
         size,
         [](vector_size_t row) { return row; },
-        [](vector_size_t row) { return row % 3 != 0; });
+        [](vector_size_t row) { return row % 3 != 0; },
+        type);
 
     // {9, 9, 9, ...}.
-    auto second = makeConstant<T>(9, size);
+    auto second = makeConstant<T>(9, size, type);
 
     auto data = makeRowVector({first, second});
 
@@ -259,6 +269,9 @@ TEST_F(GreatestTest, integral) {
 
   flat<int64_t>();
   constant<int64_t>();
+
+  flat<int32_t>(DATE());
+  constant<int32_t>(DATE());
 }
 
 TEST_F(GreatestTest, floating) {
@@ -299,8 +312,5 @@ TEST_F(GreatestTest, timestamp) {
       Timestamp(4859, 482));
 }
 
-TEST_F(GreatestTest, date) {
-  EXPECT_EQ(greatest<Date>(Date(100), Date(1000), Date(10000)), Date(10000));
-}
 } // namespace
 } // namespace facebook::velox::functions::sparksql::test
