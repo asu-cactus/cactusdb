@@ -96,6 +96,5 @@ The main communication channel with the Velox OSS community is through the
 hesitate in reaching out.
 
 ## License
-
 Velox is licensed under the Apache 2.0 License. A copy of the license
 [can be found here.](LICENSE)
