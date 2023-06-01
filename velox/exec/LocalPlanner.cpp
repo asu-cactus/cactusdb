@@ -40,6 +40,8 @@
 #include "velox/exec/Values.h"
 #include "velox/exec/Window.h"
 
+#include <iostream>
+
 namespace facebook::velox::exec {
 
 namespace detail {
