@@ -57,6 +57,10 @@
 #include "velox/exec/FilterProject.h"
 #include "velox/optimizer/Optimizer.h"
 
+// #include "velox/exec/tests/HashJoinTest.cpp"
+// #include "velox/serializers/PrestoSerializer.h"
+
+
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
 using namespace facebook::velox::exec::test;
@@ -73,6 +77,8 @@ using namespace facebook::velox::exec::test;
 
 
 using exec::test::HiveConnectorTestBase;
+
+
 
 // Create a new memory pool to in this example.
 auto pool_ = memory::addDefaultLeafMemoryPool();
@@ -335,32 +341,32 @@ float* weights = values->asMutable<float>();
   MatrixMultiply::signatures(),
   std::make_unique<MatrixMultiply>(weights,10));
 
-  auto col11 = BaseVector::create<FlatVector<float>>(REAL(), 10, pool_.get());
-  auto col22 = BaseVector::create<FlatVector<float>>(REAL(), 10, pool_.get());
-  for(int i=0; i < 10; i++){
-	  weights[i] = i*10;
-  	col11->set(i, i*5);
-	  col22->set(i, i*2);
-  } 
+  // auto col11 = BaseVector::create<FlatVector<float>>(REAL(), 10, pool_.get());
+  // auto col22 = BaseVector::create<FlatVector<float>>(REAL(), 10, pool_.get());
+  // for(int i=0; i < 10; i++){
+	//   weights[i] = i*10;
+  // 	col11->set(i, i*5);
+	//   col22->set(i, i*2);
+  // } 
   
-  auto inputRowVector1 = maker.rowVector({"col11", "col22"}, {col11, col22});
+  // auto inputRowVector1 = maker.rowVector({"col11", "col22"}, {col11, col22});
 
 
-  auto myPlan = exec::test::PlanBuilder()
-                  .values({inputRowVector1})
-                  .filter("col11 > 5.0")
-                  .project({"mat_mul(col11)"})
-		              .planFragment();
+  // auto myPlan = exec::test::PlanBuilder()
+  //                 .values({inputRowVector1})
+  //                 .filter("col11 > 5.0")
+  //                 .project({"mat_mul(col11)"})
+	// 	              .planFragment();
 
-  auto op = Optimizer(queryCtx_);
-  op.traverse(myPlan);
+  // auto op = Optimizer(queryCtx_);
+  // op.traverse(myPlan);
 
 
-  auto task3 = std::make_shared<exec::Task>("task3", myPlan, 0, queryCtx_);
-  // Execute the plan above
-  auto result3 = task3->next();
-  std::cout << "Results for Query 1:" << result3->toString() << std::endl;
-  std::cout << result3->toString(0, result3->size()) << std::endl;
+  // auto task3 = std::make_shared<exec::Task>("task3", myPlan, 0, queryCtx_);
+  // // Execute the plan above
+  // auto result3 = task3->next();
+  // std::cout << "Results for Query 1:" << result3->toString() << std::endl;
+  // std::cout << result3->toString(0, result3->size()) << std::endl;
   // From now on we will create a query plan and input dataset, execute it, an
   // assert that the output results contain the dataset properly duplicated.
 
@@ -370,23 +376,40 @@ float* weights = values->asMutable<float>();
   // VARCHAR), and 5 records:
  
   auto col1 = maker.flatVector({0, 1, 2, 3, 4});
-  auto col2 = maker.flatVector({1, 2, 3, 4, 5});
+  auto col2 = maker.flatVector({1, 2, 2, 4, 5});
   auto inputRowVector = maker.rowVector({"col1", "col2"}, {col1, col2});
 
    
   // Create a query plan containing a ValuesNode (to let you pump input datasets
   // directly into the operator chain), and our custom plan node.
-  auto plan1 = PlanBuilder()
-                  .values({inputRowVector})
-		          .filter("vec_add(col1,col2) > 5")
-                  .planFragment();
+  // auto plan1 = PlanBuilder()
+  //                 .values({inputRowVector})
+	// 	          .filter("vec_add(col1,col2) > 5")
+  //                 .planFragment();
 
-  auto task1 = std::make_shared<exec::Task>("task1", plan1, 0, queryCtx_);
-  // Execute the plan above
-  auto result1 = task1->next();
-  std::cout << "Results for Query 1:" << result1->toString() << std::endl;
-  std::cout << result1->toString(0, result1->size()) << std::endl;
-  
+  // auto task1 = std::make_shared<exec::Task>("task1", plan1, 0, queryCtx_);
+  // // Execute the plan above
+  // auto result1 = task1->next();
+  // std::cout << "Results for Query 1:" << result1->toString() << std::endl;
+  // std::cout << result1->toString(0, result1->size()) << std::endl;
+  //   facebook::velox::serializer::presto::PrestoVectorSerde::
+  //       registerVectorSerde();
+
+  //    filesystems::registerLocalFileSystem();
+  //  dwrf::registerDwrfReaderFactory();
+
+  // DuckDbQueryRunner duckDbQueryRunner_;
+  // HashJoinBuilder(*pool_, duckDbQueryRunner_, executor_.get())
+  //     .numDrivers(1)
+  //     .keyTypes({BIGINT()})
+  //     .probeVectors(1600, 5)
+  //     .buildVectors(1500, 5)
+  //     .referenceQuery(
+  //         "SELECT t_k0, t_data, u_k0, u_data FROM t, u WHERE t.t_k0 = u.u_k0")
+  //     .run();
+
+
+
   auto plan2 = PlanBuilder()
                   .values({inputRowVector}).filter("vec_add(col1,col2) > 5")
                   .project({"vec_add_to_constant(vec_add_3(vec_add_2(vec_add(col1,col2), col2), col2))"})

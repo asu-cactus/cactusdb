@@ -14,6 +14,7 @@ void Optimizer::traverse(const core::PlanFragment& planFragment) {
   auto drivers = task_op->op();
   auto operators = drivers[0]->operators();
   for (const auto& op : operators) {
+    // TODO
     auto fp = dynamic_cast<exec::FilterProject*>(op);
     if (fp) {
       std::cout << "The planNodeId is: " << op->planNodeId() << std::endl;
