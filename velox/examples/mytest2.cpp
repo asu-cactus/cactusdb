@@ -57,9 +57,9 @@
 #include "velox/exec/FilterProject.h"
 #include "velox/optimizer/Optimizer.h"
 
-// #include "velox/exec/tests/HashJoinTest.cpp"
-// #include "velox/serializers/PrestoSerializer.h"
-
+#include "velox/exec/tests/HashJoinTest.cpp"
+#include "velox/serializers/PrestoSerializer.h"
+#include "velox/parse/PlanNodeIdGenerator.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -379,6 +379,14 @@ float* weights = values->asMutable<float>();
   auto col2 = maker.flatVector({1, 2, 2, 4, 5});
   auto inputRowVector = maker.rowVector({"col1", "col2"}, {col1, col2});
 
+  auto row = maker.flatVector({0, 0, 1, 1});
+  auto col = maker.flatVector({0, 1, 0, 1});
+  auto va = maker.flatVector({1, 2, 3, 4});
+  auto vb = maker.flatVector({11, 12, 13, 14});
+  // {1,2 plus {11,12
+  //  3,4}      13,14}
+  auto inputRowVectorJoinA = maker.rowVector({"rowa", "cola", "valuea"}, {row, col, va});
+  auto inputRowVectorJoinB = maker.rowVector({"rowb", "colb", "valueb"}, {row, col, vb});
    
   // Create a query plan containing a ValuesNode (to let you pump input datasets
   // directly into the operator chain), and our custom plan node.
@@ -392,21 +400,47 @@ float* weights = values->asMutable<float>();
   // auto result1 = task1->next();
   // std::cout << "Results for Query 1:" << result1->toString() << std::endl;
   // std::cout << result1->toString(0, result1->size()) << std::endl;
-  //   facebook::velox::serializer::presto::PrestoVectorSerde::
-  //       registerVectorSerde();
+    facebook::velox::serializer::presto::PrestoVectorSerde::
+        registerVectorSerde();
 
-  //    filesystems::registerLocalFileSystem();
-  //  dwrf::registerDwrfReaderFactory();
+     filesystems::registerLocalFileSystem();
+   dwrf::registerDwrfReaderFactory();
 
-  // DuckDbQueryRunner duckDbQueryRunner_;
-  // HashJoinBuilder(*pool_, duckDbQueryRunner_, executor_.get())
-  //     .numDrivers(1)
-  //     .keyTypes({BIGINT()})
-  //     .probeVectors(1600, 5)
-  //     .buildVectors(1500, 5)
-  //     .referenceQuery(
-  //         "SELECT t_k0, t_data, u_k0, u_data FROM t, u WHERE t.t_k0 = u.u_k0")
-  //     .run();
+  DuckDbQueryRunner duckDbQueryRunner_;
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, executor_.get())
+      .numDrivers(1)
+      .keyTypes({BIGINT()})
+      .probeVectors(1600, 5)
+      .buildVectors(1500, 5)
+      .referenceQuery(
+          "SELECT t_k0, t_data, u_k0, u_data FROM t, u WHERE t.t_k0 = u.u_k0")
+      .run();
+
+  
+auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+core::PlanNodeId nationScanId;
+core::PlanNodeId regionScanId;
+auto planjoin = PlanBuilder(planNodeIdGenerator)
+           .values({inputRowVectorJoinA})
+           .capturePlanNodeId(nationScanId)
+           .hashJoin(
+               {"cola"},
+               {"rowb"},
+               PlanBuilder(planNodeIdGenerator)
+                   .values({inputRowVectorJoinB})
+                   .capturePlanNodeId(regionScanId)
+                   .planNode(),
+               "", // extra filter
+               {"rowa","colb", "valuea", "valueb"})
+          //  .singleAggregation({"rowa","colb"}, {"sum()"})
+           .planNode();
+
+auto nationCnt = AssertQueryBuilder(planjoin).copyResults(pool_.get());
+
+std::cout << std::endl
+          << "> number of nations per region in TPC-H: "
+          << nationCnt->toString() << std::endl;
+std::cout << nationCnt->toString(0, 10) << std::endl;
 
 
 
