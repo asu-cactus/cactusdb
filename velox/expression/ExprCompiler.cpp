@@ -603,8 +603,8 @@ std::vector<std::shared_ptr<Expr>> compileExpressions(
   // Precompute a set of function calls that support flattening. This allows to
   // lock function registry once vs. locking for each function call.
   auto flatteningCandidates = collectFlatteningCandidates(sources);
-
-  auto optimizingCandidates = collectOptimizingCandidates(sources, flag);
+  std::unordered_set<std::string> optimizingCandidates{};
+  // auto optimizingCandidates = collectOptimizingCandidates(sources, flag);
 
   auto optimizedSize = optimizingCandidates.size() + sources.size();
 

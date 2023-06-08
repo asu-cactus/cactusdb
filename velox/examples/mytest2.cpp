@@ -400,21 +400,22 @@ float* weights = values->asMutable<float>();
   // auto result1 = task1->next();
   // std::cout << "Results for Query 1:" << result1->toString() << std::endl;
   // std::cout << result1->toString(0, result1->size()) << std::endl;
-    facebook::velox::serializer::presto::PrestoVectorSerde::
-        registerVectorSerde();
 
-     filesystems::registerLocalFileSystem();
-   dwrf::registerDwrfReaderFactory();
+  //   facebook::velox::serializer::presto::PrestoVectorSerde::
+  //       registerVectorSerde();
 
-  DuckDbQueryRunner duckDbQueryRunner_;
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, executor_.get())
-      .numDrivers(1)
-      .keyTypes({BIGINT()})
-      .probeVectors(1600, 5)
-      .buildVectors(1500, 5)
-      .referenceQuery(
-          "SELECT t_k0, t_data, u_k0, u_data FROM t, u WHERE t.t_k0 = u.u_k0")
-      .run();
+  //    filesystems::registerLocalFileSystem();
+  //  dwrf::registerDwrfReaderFactory();
+
+  // DuckDbQueryRunner duckDbQueryRunner_;
+  // HashJoinBuilder(*pool_, duckDbQueryRunner_, executor_.get())
+  //     .numDrivers(1)
+  //     .keyTypes({BIGINT()})
+  //     .probeVectors(1600, 5)
+  //     .buildVectors(1500, 5)
+  //     .referenceQuery(
+  //         "SELECT t_k0, t_data, u_k0, u_data FROM t, u WHERE t.t_k0 = u.u_k0")
+  //     .run();
 
   
 auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
@@ -431,29 +432,31 @@ auto planjoin = PlanBuilder(planNodeIdGenerator)
                    .capturePlanNodeId(regionScanId)
                    .planNode(),
                "", // extra filter
-               {"rowa","colb", "valuea", "valueb"})
-          //  .singleAggregation({"rowa","colb"}, {"sum()"})
+               {"rowa","colb", "valuea", "valueb"}).project({"rowa", "colb","valuea * valueb AS mp"})
+           .singleAggregation({"rowa","colb"}, {"sum(mp)"})
            .planNode();
 
+// auto taskj = std::make_shared<exec::Task>("taskj", planjoin, 0, queryCtx_);
+// auto nationCnt = taskj->next();
 auto nationCnt = AssertQueryBuilder(planjoin).copyResults(pool_.get());
 
 std::cout << std::endl
           << "> number of nations per region in TPC-H: "
           << nationCnt->toString() << std::endl;
-std::cout << nationCnt->toString(0, 10) << std::endl;
+std::cout << nationCnt->toString(0, nationCnt->size()) << std::endl;
 
 
 
-  auto plan2 = PlanBuilder()
-                  .values({inputRowVector}).filter("vec_add(col1,col2) > 5")
-                  .project({"vec_add_to_constant(vec_add_3(vec_add_2(vec_add(col1,col2), col2), col2))"})
-                  .planFragment();
+  // auto plan2 = PlanBuilder()
+  //                 .values({inputRowVector}).filter("vec_add(col1,col2) > 5")
+  //                 .project({"vec_add_to_constant(vec_add_3(vec_add_2(vec_add(col1,col2), col2), col2))"})
+  //                 .planFragment();
 
-  auto task2 = std::make_shared<exec::Task>("task2", plan2, 0, queryCtx_);
-  // Execute the plan above
-  auto result2 = task2->next();
-  std::cout << "Results for Query 2:" << result2->toString() << std::endl;
-  std::cout << result2->toString(0, result2->size()) << std::endl;
+  // auto task2 = std::make_shared<exec::Task>("task2", plan2, 0, queryCtx_);
+  // // Execute the plan above
+  // auto result2 = task2->next();
+  // std::cout << "Results for Query 2:" << result2->toString() << std::endl;
+  // std::cout << result2->toString(0, result2->size()) << std::endl;
 
-  return 0;
+  // return 0;
 }
