@@ -385,8 +385,8 @@ float* weights = values->asMutable<float>();
   auto vb = maker.flatVector({11, 12, 13, 14});
   // {1,2 plus {11,12
   //  3,4}      13,14}
-  auto inputRowVectorJoinA = maker.rowVector({"rowa", "cola", "valuea"}, {row, col, va});
-  auto inputRowVectorJoinB = maker.rowVector({"rowb", "colb", "valueb"}, {row, col, vb});
+  auto inputRowVectorJoinA = maker.rowVector({"a_row", "a_col", "a_value"}, {row, col, va});
+  auto inputRowVectorJoinB = maker.rowVector({"b_row", "b_col", "b_value"}, {row, col, vb});
    
   // Create a query plan containing a ValuesNode (to let you pump input datasets
   // directly into the operator chain), and our custom plan node.
@@ -425,15 +425,17 @@ auto planjoin = PlanBuilder(planNodeIdGenerator)
            .values({inputRowVectorJoinA})
            .capturePlanNodeId(nationScanId)
            .hashJoin(
-               {"cola"},
-               {"rowb"},
+               {"a_col"},
+               {"b_row"},
                PlanBuilder(planNodeIdGenerator)
                    .values({inputRowVectorJoinB})
                    .capturePlanNodeId(regionScanId)
                    .planNode(),
                "", // extra filter
-               {"rowa","colb", "valuea", "valueb"}).project({"rowa", "colb","valuea * valueb AS mp"})
-           .singleAggregation({"rowa","colb"}, {"sum(mp)"})
+               {"a_row","b_col", "a_value", "b_value"})
+           .project({"a_row", "b_col","a_value * b_value AS mp"})
+           .singleAggregation({"a_row","b_col"}, {"sum(mp) AS result"})
+           .project({"relu(matrixAdd(result, b0))"})
            .planNode();
 
 // auto taskj = std::make_shared<exec::Task>("taskj", planjoin, 0, queryCtx_);
