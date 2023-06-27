@@ -114,6 +114,382 @@ public:
 };
 
 
+
+std::string throwAggregateFunctionDoesntExist(const std::string& name) {
+  std::stringstream error;
+  error << "Aggregate function doesn't exist: " << name << ".";
+  if (exec::aggregateFunctions().empty()) {
+    error << " Registry of aggregate functions is empty. "
+             "Make sure to register some aggregate functions.";
+  }
+  VELOX_USER_FAIL(error.str());
+}
+
+std::string toString(
+    const std::string& name,
+    const std::vector<TypePtr>& types) {
+  std::ostringstream signature;
+  signature << name << "(";
+  for (auto i = 0; i < types.size(); i++) {
+    if (i > 0) {
+      signature << ", ";
+    }
+    signature << types[i]->toString();
+  }
+  signature << ")";
+  return signature.str();
+}
+
+std::string toString(
+    const std::vector<std::shared_ptr<facebook::velox::exec::AggregateFunctionSignature>>&
+        signatures) {
+  std::stringstream out;
+  for (auto i = 0; i < signatures.size(); ++i) {
+    if (i > 0) {
+      out << ", ";
+    }
+    out << signatures[i]->toString();
+  }
+  return out.str();
+}
+
+std::string throwAggregateFunctionSignatureNotSupported(
+    const std::string& name,
+    const std::vector<TypePtr>& types,
+    const std::vector<std::shared_ptr<facebook::velox::exec::AggregateFunctionSignature>>&
+        signatures) {
+  std::stringstream error;
+  error << "Aggregate function signature is not supported: "
+        << toString(name, types)
+        << ". Supported signatures: " << toString(signatures) << ".";
+  VELOX_USER_FAIL(error.str());
+}
+
+TypePtr resolveAggregateType(
+    const std::string& aggregateName,
+    core::AggregationNode::Step step,
+    const std::vector<TypePtr>& rawInputTypes,
+    bool nullOnFailure) {
+  if (auto signatures = exec::getAggregateFunctionSignatures(aggregateName)) {
+    for (const auto& signature : signatures.value()) {
+      exec::SignatureBinder binder(*signature, rawInputTypes);
+      if (binder.tryBind()) {
+        return binder.tryResolveType(
+            exec::isPartialOutput(step) ? signature->intermediateType()
+                                        : signature->returnType());
+      }
+    }
+
+    if (nullOnFailure) {
+      return nullptr;
+    }
+
+    throwAggregateFunctionSignatureNotSupported(
+        aggregateName, rawInputTypes, signatures.value());
+  }
+
+  if (nullOnFailure) {
+    return nullptr;
+  }
+
+  throwAggregateFunctionDoesntExist(aggregateName);
+  return nullptr;
+}
+
+class AggregateTypeResolver {
+ public:
+  explicit AggregateTypeResolver(core::AggregationNode::Step step)
+      : step_(step), previousHook_(core::Expressions::getResolverHook()) {
+    core::Expressions::setTypeResolverHook(
+        [&](const auto& inputs, const auto& expr, bool nullOnFailure) {
+          return resolveType(inputs, expr, nullOnFailure);
+        });
+  }
+
+  ~AggregateTypeResolver() {
+    core::Expressions::setTypeResolverHook(previousHook_);
+  }
+
+  void setResultType(const TypePtr& type) {
+    resultType_ = type;
+  }
+
+ private:
+  TypePtr resolveType(
+      const std::vector<core::TypedExprPtr>& inputs,
+      const std::shared_ptr<const core::CallExpr>& expr,
+      bool nullOnFailure) const {
+    if (resultType_) {
+      return resultType_;
+    }
+
+    std::vector<TypePtr> types;
+    for (auto& input : inputs) {
+      types.push_back(input->type());
+    }
+
+    auto functionName = expr->getFunctionName();
+
+    // Use raw input types (if available) to resolve intermediate and final
+    // result types.
+    if (exec::isRawInput(step_)) {
+      return resolveAggregateType(functionName, step_, types, nullOnFailure);
+    }
+
+    if (!nullOnFailure) {
+      VELOX_USER_FAIL(
+          "Cannot resolve aggregation function return type without raw input types: {}",
+          functionName);
+    }
+    return nullptr;
+  }
+
+  const core::AggregationNode::Step step_;
+  const core::Expressions::TypeResolverHook previousHook_;
+  TypePtr resultType_;
+};
+
+
+class optimizerBuilder : public exec::test::PlanBuilder {
+
+
+public:
+  memory::MemoryPool* pool_;
+
+
+  core::TypedExprPtr inferTypes(
+    const std::shared_ptr<const core::IExpr>& untypedExpr,
+    core::PlanNodePtr source) {
+  return core::Expressions::inferTypes(
+      untypedExpr, source->outputType(), pool_);
+}
+
+  core::PlanNodePtr& project_O(const std::vector<std::string>& projections, core::PlanNodePtr source) {
+    std::vector<core::TypedExprPtr> expressions;
+    std::vector<std::string> projectNames;
+    
+    for (auto i = 0; i < projections.size(); ++i) {
+      auto untypedExpr = parse::parseExpr(projections[i], options_);
+      expressions.push_back(inferTypes(untypedExpr, source));
+      if (untypedExpr->alias().has_value()) {
+        projectNames.push_back(untypedExpr->alias().value());
+      } else if (
+          auto fieldExpr = dynamic_cast<const core::FieldAccessExpr*>(untypedExpr.get())) {
+        projectNames.push_back(fieldExpr->getFieldName());
+      } else {
+        projectNames.push_back(fmt::format("p{}", i));
+      }
+    }
+    
+    planNode_ = std::make_shared<core::ProjectNode>(
+        nextPlanNodeId(),
+        std::move(projectNames),
+        std::move(expressions),
+        source);
+    
+    return planNode_;
+  }
+
+  // core::PlanNodePtr& hashjoin_O
+  RowTypePtr concat(const RowTypePtr& a, const RowTypePtr& b) {
+  std::vector<std::string> names = a->names();
+  std::vector<TypePtr> types = a->children();
+  names.insert(names.end(), b->names().begin(), b->names().end());
+  types.insert(types.end(), b->children().begin(), b->children().end());
+  return ROW(std::move(names), std::move(types));
+}
+
+RowTypePtr extract(
+    const RowTypePtr& type,
+    const std::vector<std::string>& childNames) {
+  std::vector<std::string> names = childNames;
+
+  std::vector<TypePtr> types;
+  types.reserve(childNames.size());
+  for (const auto& name : childNames) {
+    types.emplace_back(type->findChild(name));
+  }
+  return ROW(std::move(names), std::move(types));
+}
+
+core::TypedExprPtr parseExpr(
+    const std::string& text,
+    RowTypePtr& rowType,
+    const parse::ParseOptions& options,
+    memory::MemoryPool* pool) {
+  auto untyped = parse::parseExpr(text, options);
+  return core::Expressions::inferTypes(untyped, rowType, pool);
+}
+
+std::vector<std::shared_ptr<const core::FieldAccessTypedExpr>> fields(
+    const RowTypePtr& inputType,
+    const std::vector<std::string>& names) {
+  std::vector<std::shared_ptr<const core::FieldAccessTypedExpr>> fields;
+  for (const auto& name : names) {
+    fields.push_back(field(inputType, name));
+  }
+  return fields;
+}
+
+std::shared_ptr<const core::FieldAccessTypedExpr> field(
+    const RowTypePtr& inputType,
+    const std::string& name) {
+  auto index = inputType->getChildIdx(name);
+  return field(inputType, index);
+}
+
+std::shared_ptr<const core::FieldAccessTypedExpr> field(
+    const RowTypePtr& inputType,
+    column_index_t index) {
+  auto name = inputType->names()[index];
+  auto type = inputType->childAt(index);
+  return std::make_shared<core::FieldAccessTypedExpr>(type, name);
+}
+
+  core::PlanNodePtr& hashjoin_O(
+    const std::vector<std::string>& leftKeys,
+    const std::vector<std::string>& rightKeys,
+    const core::PlanNodePtr& build,
+    const std::string& filter,
+    const std::vector<std::string>& outputLayout,
+    core::PlanNodePtr source,
+    core::JoinType joinType,
+    bool nullAware) {
+    VELOX_CHECK_EQ(leftKeys.size(), rightKeys.size());
+
+    auto leftType = source->outputType();
+    auto rightType = build->outputType();
+    auto resultType = concat(leftType, rightType);
+    core::TypedExprPtr filterExpr;
+    if (!filter.empty()) {
+      filterExpr = parseExpr(filter, resultType, options_, pool_);
+    }
+
+    RowTypePtr outputType;
+    if (isLeftSemiProjectJoin(joinType) || isRightSemiProjectJoin(joinType)) {
+      std::vector<std::string> names = outputLayout;
+
+      // Last column in 'outputLayout' must be a boolean 'match'.
+      std::vector<TypePtr> types;
+      types.reserve(outputLayout.size());
+      for (auto i = 0; i < outputLayout.size() - 1; ++i) {
+        types.emplace_back(resultType->findChild(outputLayout[i]));
+      }
+      types.emplace_back(BOOLEAN());
+
+      outputType = ROW(std::move(names), std::move(types));
+    } else {
+      outputType = extract(resultType, outputLayout);
+    }
+
+    auto leftKeyFields = fields(leftType, leftKeys);
+    auto rightKeyFields = fields(rightType, rightKeys);
+
+    planNode_ = std::make_shared<core::HashJoinNode>(
+        nextPlanNodeId(),
+        joinType,
+        nullAware,
+        leftKeyFields,
+        rightKeyFields,
+        std::move(filterExpr),
+        std::move(source),
+        build,
+        outputType);
+    return planNode_;
+  }
+
+std::vector<std::shared_ptr<const core::FieldAccessTypedExpr>> fields(const std::vector<std::string>& names) {
+  return fields(planNode_->outputType(), names);
+}
+
+  struct ExpressionsAndNames {
+    std::vector<std::shared_ptr<const core::CallTypedExpr>> expressions;
+    std::vector<std::string> names;
+  };
+
+ExpressionsAndNames createAggregateExpressionsAndNames(
+    const std::vector<std::string>& aggregates,
+    core::AggregationNode::Step step,
+    const std::vector<TypePtr>& resultTypes,
+    core::PlanNodePtr source) {
+  AggregateTypeResolver resolver(step);
+  std::vector<std::shared_ptr<const core::CallTypedExpr>> exprs;
+  std::vector<std::string> names;
+  exprs.reserve(aggregates.size());
+  names.reserve(aggregates.size());
+  for (auto i = 0; i < aggregates.size(); i++) {
+    auto& agg = aggregates[i];
+    if (i < resultTypes.size()) {
+      resolver.setResultType(resultTypes[i]);
+    }
+
+    auto untypedExpr = parse::parseExpr(agg, options_);
+
+    auto expr = std::dynamic_pointer_cast<const core::CallTypedExpr>(
+        inferTypes(untypedExpr, source));
+    exprs.emplace_back(expr);
+
+    if (untypedExpr->alias().has_value()) {
+      names.push_back(untypedExpr->alias().value());
+    } else {
+      names.push_back(fmt::format("a{}", i));
+    }
+  }
+
+  return {exprs, names};
+}
+
+std::vector<std::shared_ptr<const core::FieldAccessTypedExpr>> createAggregateMasks(
+    size_t numAggregates,
+    const std::vector<std::string>& masks,
+    const RowTypePtr& inputType) {
+  std::vector<std::shared_ptr<const core::FieldAccessTypedExpr>> maskExprs(
+      numAggregates);
+  if (masks.empty()) {
+    return maskExprs;
+  }
+
+  VELOX_CHECK_EQ(numAggregates, masks.size());
+  for (auto i = 0; i < numAggregates; ++i) {
+    if (!masks[i].empty()) {
+      maskExprs[i] = field(inputType, masks[i]);
+    }
+  }
+
+  return maskExprs;
+}
+
+core::PlanNodePtr& aggregation_O(
+    const std::vector<std::string>& groupingKeys,
+    const std::vector<std::string>& preGroupedKeys,
+    const std::vector<std::string>& aggregates,
+    const std::vector<std::string>& masks,
+    core::AggregationNode::Step step,
+    bool ignoreNullKeys,
+    core::PlanNodePtr source,
+    const std::vector<TypePtr>& resultTypes) {
+  auto numAggregates = aggregates.size();
+  auto aggregatesAndNames =
+      createAggregateExpressionsAndNames(aggregates, step, resultTypes, source);
+  planNode_ = std::make_shared<core::AggregationNode>(
+      nextPlanNodeId(),
+      step,
+      fields(source->outputType(), groupingKeys),
+      fields(source->outputType(), preGroupedKeys),
+      aggregatesAndNames.names,
+      aggregatesAndNames.expressions,
+      createAggregateMasks(numAggregates, masks, source->outputType()),
+      ignoreNullKeys,
+      source);
+  return planNode_;
+}
+
+
+};
+
+
+
+
 auto pool_ = memory::addDefaultLeafMemoryPool();
 std::shared_ptr<folly::Executor> executor_{
       std::make_shared<folly::CPUThreadPoolExecutor>(
@@ -144,6 +520,18 @@ int main(int argc, char** argv) {
         VectorPlus::signatures(),
         std::make_unique<VectorPlus>(),
         VectorPlus::metadata());
+
+  exec::registerVectorFunction(
+      "vec_plus2",
+      VectorPlus::signatures(),
+      std::make_unique<VectorPlus>(),
+      VectorPlus::metadata());
+
+  exec::registerVectorFunction(
+      "vec_plus3",
+      VectorPlus::signatures(),
+      std::make_unique<VectorPlus>(),
+      VectorPlus::metadata());
   // auto col1 = maker.flatVector({0, 1, 2, 3, 4});
   // auto col2 = maker.flatVector({1, 2, 3, 4, 5});
   // auto inputRowVector = maker.rowVector({"col1", "col2"}, {col1, col2});
@@ -174,7 +562,7 @@ int main(int argc, char** argv) {
   core::PlanNodeId Id;
   auto myPlan2 = exec::test::PlanBuilder()
                   .values({JoinT})
-                  .project({"vec_plus(table_a.a_value, table_b.b_value) AS result"})
+                  .project({"vec_plus3(vec_plus2(vec_plus(table_a.a_value, table_b.b_value), table_b.b_value), table_b.b_value)"})
 		            .planNode();
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
@@ -183,14 +571,14 @@ int main(int argc, char** argv) {
   auto planjoin = exec::test::PlanBuilder(planNodeIdGenerator)
             .values({JoinT})
             .project({"table_a.a_col", "table_a.a_row","table_a.a_value"})
-            .capturePlanNodeId(AId)
+            // .capturePlanNodeId(AId)
             .hashJoin(
                 {"a_col"},
                 {"b_row"},
                 exec::test::PlanBuilder(planNodeIdGenerator)
                     .values({JoinT})
                     .project({"table_b.b_col", "table_b.b_row","table_b.b_value"})
-                    .capturePlanNodeId(BId)
+                    // .capturePlanNodeId(BId)
                     .planNode(),
                 "", // extra filter
                 {"a_row","b_col", "a_value", "b_value"})
@@ -203,13 +591,41 @@ int main(int argc, char** argv) {
   // auto res = taskj->next();
   // std::cout << "Results for Query 1:" << res->toString() << std::endl;
   // std::cout << res->toString(0, res->size()) << std::endl;
+
+
+    auto myPlan3 = exec::test::PlanBuilder()
+                  .values({JoinT})
+                  .project({"vec_plus3(vec_plus2(vec_plus(table_a.a_value, table_b.b_value), table_b.b_value), table_b.b_value)"})
+		            .planNode();
+
+
 auto oldplan = myPlan2->sources()[0];
-auto source = planjoin->sources()[0]->sources()[0]->sources()[0]->sources()[0]->sources()[0];
-source = oldplan;
+int oldPlanId = std::stoi(oldplan->id());
+auto generator = std::make_shared<core::PlanNodeIdGenerator>(oldPlanId + 1);
+optimizerBuilder opbuilder;
+opbuilder.setPlanNodeIdGenerator(generator);
+
+
+
+// should add source()[1] to solve 
+
+// optimizerBuilder opbuilder;
+auto plana = opbuilder.project_O({"table_a.a_col", "table_a.a_row","table_a.a_value"}, oldplan);
+auto plan_b = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, oldplan);
+auto planb = opbuilder.hashjoin_O({"a_col"}, {"b_row"}, plan_b, "", {"a_row","b_col", "a_value", "b_value"}, plana, core::JoinType::kInner, false);
+auto planc = opbuilder.project_O({"a_row", "b_col","a_value * b_value AS mp"}, planb);
+auto pland = opbuilder.aggregation_O({"a_row","b_col"}, {}, {"sum(mp) AS result"}, {}, core::AggregationNode::Step::kSingle, false, planc, {});
+
+// auto source = planjoin->sources()[0]->sources()[0]->sources()[0]->sources()[0]->sources()[0];
+// source = oldplan;
 
   auto res2 = AssertQueryBuilder(myPlan2).copyResults(pool_.get());
   std::cout << "Results for Query 3:" << res2->toString() << std::endl;
   std::cout << res2->toString(0, res2->size()) << std::endl;
+
+  auto res4 = AssertQueryBuilder(pland).copyResults(pool_.get());
+  std::cout << "Results for Query 4:" << res4->toString() << std::endl;
+  std::cout << res4->toString(0, res4->size()) << std::endl;
 
 
   auto res = AssertQueryBuilder(planjoin).copyResults(pool_.get());
