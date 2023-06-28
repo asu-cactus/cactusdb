@@ -83,16 +83,33 @@ public:
         exec::EvalCtx& context,
         VectorPtr& output) const override {
 
-        auto arg1 = args[0]->as<FlatVector<int64_t>>();
-        auto arg2 = args[1]->as<FlatVector<int64_t>>();
-        auto size = arg1->size();
-        auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
+        auto arg = args[0]->as<FlatVector<int64_t>>();
+
+        if (arg == nullptr) {
+          auto arg1 = args[0]->wrappedVector()->as<FlatVector<int64_t>>();;
+
+          auto arg2 = args[1]->as<FlatVector<int64_t>>();
+          auto size = arg1->size();
+          auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
         
         
-        for (auto i = 0; i < size; ++i) {
-            result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
+          for (auto i = 0; i < size; ++i) {
+              result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
+          }
+          output = result;
         }
-        output = result;
+        else {
+          auto arg1 = std::move(arg);
+          auto arg2 = args[1]->as<FlatVector<int64_t>>();
+          auto size = arg1->size();
+          auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
+        
+        
+          for (auto i = 0; i < size; ++i) {
+              result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
+          }
+          output = result;
+        }
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -484,6 +501,15 @@ core::PlanNodePtr& aggregation_O(
   return planNode_;
 }
 
+core::PlanNodePtr& values_O(
+    const std::vector<RowVectorPtr>& values,
+    bool parallelizable,
+    size_t repeatTimes) {
+  auto valuesCopy = values;
+  planNode_ = std::make_shared<core::ValuesNode>(
+      nextPlanNodeId(), std::move(valuesCopy), parallelizable, repeatTimes);
+  return planNode_;
+}
 
 };
 
@@ -611,11 +637,22 @@ opbuilder.setPlanNodeIdGenerator(generator);
 
 // optimizerBuilder opbuilder;
 auto plana = opbuilder.project_O({"table_a.a_col", "table_a.a_row","table_a.a_value"}, oldplan);
-auto plan_b = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, oldplan);
-auto planb = opbuilder.hashjoin_O({"a_col"}, {"b_row"}, plan_b, "", {"a_row","b_col", "a_value", "b_value"}, plana, core::JoinType::kInner, false);
-auto planc = opbuilder.project_O({"a_row", "b_col","a_value * b_value AS mp"}, planb);
-auto pland = opbuilder.aggregation_O({"a_row","b_col"}, {}, {"sum(mp) AS result"}, {}, core::AggregationNode::Step::kSingle, false, planc, {});
 
+auto plan_b1 = opbuilder.values_O({JoinT}, false, 1);
+
+auto plan_b = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, plan_b1);
+auto planb = opbuilder.hashjoin_O({"a_col"}, {"b_row"}, plan_b, "", {"a_row","b_col", "a_value", "b_value"}, plana, core::JoinType::kInner, false);
+auto planc = opbuilder.project_O({"a_row", "b_col", "a_value * b_value AS mp"}, planb);
+auto pland = opbuilder.aggregation_O({"a_row","b_col"}, {}, {"sum(mp) AS result"}, {}, core::AggregationNode::Step::kSingle, false, planc, {});
+auto plan_d2 = opbuilder.project_O({"a_row","b_col", "result"}, pland);
+
+auto plan_e1 = opbuilder.values_O({JoinT}, false, 1);
+auto plan_e2 = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, plan_e1);
+auto plan_e3 = opbuilder.hashjoin_O({"a_row","b_col"}, {"b_row","b_col"}, plan_e2, "", {"b_value", "result"}, plan_d2, core::JoinType::kInner, false);
+auto plan_e = opbuilder.project_O({"b_value", "result"}, plan_e3);
+auto plan_e4 = opbuilder.project_O({"vec_plus3(vec_plus2(vec_plus(result, b_value), b_value), b_value)"}, plan_e);
+
+// auto plane = opbuilder.project_O({"vec_plus3(vec_plus2(result, b_value), b_value)"}, plan_e4);
 // auto source = planjoin->sources()[0]->sources()[0]->sources()[0]->sources()[0]->sources()[0];
 // source = oldplan;
 
@@ -623,7 +660,7 @@ auto pland = opbuilder.aggregation_O({"a_row","b_col"}, {}, {"sum(mp) AS result"
   std::cout << "Results for Query 3:" << res2->toString() << std::endl;
   std::cout << res2->toString(0, res2->size()) << std::endl;
 
-  auto res4 = AssertQueryBuilder(pland).copyResults(pool_.get());
+  auto res4 = AssertQueryBuilder(plan_e4).copyResults(pool_.get());
   std::cout << "Results for Query 4:" << res4->toString() << std::endl;
   std::cout << res4->toString(0, res4->size()) << std::endl;
 

@@ -687,6 +687,9 @@ class PlanBuilder {
     return *this;
   }
 
+    void setPlanNodeIdGenerator(std::shared_ptr<core::PlanNodeIdGenerator> generator) {
+            planNodeIdGenerator_ = std::move(generator);
+        }
   /// Return the latest plan node, e.g. the root node of the plan tree.
   const core::PlanNodePtr& planNode() const {
     return planNode_;
