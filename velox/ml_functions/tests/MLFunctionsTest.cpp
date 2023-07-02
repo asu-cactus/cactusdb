@@ -289,7 +289,7 @@ void MLFunctionsTest::test_torch_dense_layer(){
   int input_size = 784; // num_features
   int layer1_size = 20; // num units in hidden layer 1
   int layer2_size = 10;
-  int num_samples = 10;
+  int num_samples = 2;
   
   std::vector<int> dimensions;
   dimensions.push_back(input_size);
@@ -305,7 +305,6 @@ void MLFunctionsTest::test_torch_dense_layer(){
   FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
   FlatVectorPtr<float> weights_2 = get_tensor(weights_file, layer2_size * layer1_size, layer1_size);
   FlatVectorPtr<float> bias_2 = get_tensor(bias_file, layer2_size, 1);
-
   weights_file.close();
   bias_file.close();
 
@@ -347,7 +346,7 @@ void MLFunctionsTest::test_mnist() {
     int input_size = 784; // num_features
     int layer1_size = 20; // num units in hidden layer 1
     int layer2_size = 10;
-    int num_samples = 10;
+    int num_samples = 2;
 
     std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
     std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
@@ -425,7 +424,7 @@ void MLFunctionsTest::run() {
   // test_relu();
   // test_dense_layer();
      test_torch_dense_layer();
-  //   test_mnist();
+     test_mnist();
    
 
 }

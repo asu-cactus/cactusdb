@@ -315,7 +315,7 @@ public:
         for (int i = 0; i < rows.size(); ++i) {
             std::vector<float> result;
             for (int j = 0; j < dims[2]; ++j) {
-                result.push_back(data[i*rows.size() + j]);
+                result.push_back(data[i*dims[2] + j]);
             }
             results.push_back(result);
         }
