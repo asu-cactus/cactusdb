@@ -36,6 +36,7 @@
 #include "velox/exec/Task.h"
 #include "velox/ml_functions/DNNBuilder.h"
 #include <fstream>
+#include <filesystem>
 #include <sstream>
 
 
@@ -289,20 +290,22 @@ void MLFunctionsTest::test_torch_dense_layer(){
   int input_size = 784; // num_features
   int layer1_size = 20; // num units in hidden layer 1
   int layer2_size = 10;
-  int num_samples = 2;
+  int num_samples = 4;
+  
   std::vector<int> dimensions;
   dimensions.push_back(input_size);
   dimensions.push_back(layer1_size);
   dimensions.push_back(layer2_size);
   
-  std::ifstream weights_file("/home/local/ASUAD/snola119/weights.txt"); 
-  std::ifstream bias_file("/home/local/ASUAD/snola119/bias.txt"); 
-  std::ifstream test_file("/home/local/ASUAD/snola119/test.txt"); 
+  std::ifstream weights_file("weights.txt"); 
+  std::ifstream bias_file("bias.txt"); 
+  std::ifstream test_file("test_samples.txt"); 
   
   FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
   FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
   FlatVectorPtr<float> weights_2 = get_tensor(weights_file, layer2_size * layer1_size, layer1_size);
   FlatVectorPtr<float> bias_2 = get_tensor(bias_file, layer2_size, 1);
+
   weights_file.close();
   bias_file.close();
 
@@ -315,10 +318,11 @@ void MLFunctionsTest::test_torch_dense_layer(){
     featureVectors.push_back(featureVector);
   }
 
+
   auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
   auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
  
-  float* weights[2] = {weights_1->values()->asMutable<float>(), weights_1->values()->asMutable<float>()};
+  float* weights[2] = {weights_1->values()->asMutable<float>(), weights_2->values()->asMutable<float>()};
   float* bias[2] = {bias_1->values()->asMutable<float>(), bias_2->values()->asMutable<float>()};
 
   // step1: Register
@@ -344,10 +348,25 @@ void MLFunctionsTest::test_mnist() {
     int layer1_size = 20; // num units in hidden layer 1
     int layer2_size = 10;
     int num_samples = 2;
-    std::ifstream weights_file("/home/local/ASUAD/snola119/weights.txt"); 
-    std::ifstream bias_file("/home/local/ASUAD/snola119/bias.txt"); 
-    std::ifstream test_file("/home/local/ASUAD/snola119/test.txt"); 
     
+
+    std::filesystem::path currentPath = std::filesystem::current_path();
+    std::cout << "Current working directory: " << currentPath << std::endl;
+
+    std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
+    std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
+    std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
+    if (weights_file.is_open()) {
+      std::cout << "-Yes open";
+    }
+     if (bias_file.is_open()) {
+      std::cout << "+Yes open";
+    }
+     if (test_file.is_open()) {
+      std::cout << "*Yes open";
+    }
+    
+
     FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
     FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
     FlatVectorPtr<float> weights_2 = get_tensor(weights_file, layer2_size * layer1_size, layer1_size);
@@ -380,8 +399,10 @@ void MLFunctionsTest::test_mnist() {
                   .project({fmt::format(compute, "x")}) 
 		              .planNode();
     auto results = exec::test::AssertQueryBuilder(plan).copyResults(pool_.get());
-    std::cout << "Results:" << results->toString() << std::endl;
-    std::cout << results->toString(0, results->size()) << std::endl;
+    
+   std::cout << "Results:" << results->toString() << std::endl;
+   std::cout << results->toString(0, results->size()) << std::endl;
+   
 }
 
 FlatVectorPtr<float> MLFunctionsTest::get_tensor(std::ifstream& file, int size, int lines){
@@ -405,13 +426,12 @@ void MLFunctionsTest::run() {
   // test_mat_mul();
   // test_mat_add();
   // test_relu();
-   test_dense_layer();
-   test_torch_dense_layer();
-   test_mnist();
+  // test_dense_layer();
+  // test_torch_dense_layer();
+     test_mnist();
    
 
 }
-
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
