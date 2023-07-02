@@ -36,7 +36,6 @@
 #include "velox/exec/Task.h"
 #include "velox/ml_functions/DNNBuilder.h"
 #include <fstream>
-#include <filesystem>
 #include <sstream>
 
 
@@ -347,25 +346,11 @@ void MLFunctionsTest::test_mnist() {
     int input_size = 784; // num_features
     int layer1_size = 20; // num units in hidden layer 1
     int layer2_size = 10;
-    int num_samples = 2;
-    
-
-    std::filesystem::path currentPath = std::filesystem::current_path();
-    std::cout << "Current working directory: " << currentPath << std::endl;
+    int num_samples = 10;
 
     std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
     std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
     std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
-    if (weights_file.is_open()) {
-      std::cout << "-Yes open";
-    }
-     if (bias_file.is_open()) {
-      std::cout << "+Yes open";
-    }
-     if (test_file.is_open()) {
-      std::cout << "*Yes open";
-    }
-    
 
     FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
     FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
