@@ -289,16 +289,17 @@ void MLFunctionsTest::test_torch_dense_layer(){
   int input_size = 784; // num_features
   int layer1_size = 20; // num units in hidden layer 1
   int layer2_size = 10;
-  int num_samples = 4;
+  int num_samples = 10;
   
   std::vector<int> dimensions;
   dimensions.push_back(input_size);
   dimensions.push_back(layer1_size);
   dimensions.push_back(layer2_size);
   
-  std::ifstream weights_file("weights.txt"); 
-  std::ifstream bias_file("bias.txt"); 
-  std::ifstream test_file("test_samples.txt"); 
+  
+  std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
+  std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
+  std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
   
   FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
   FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
@@ -359,6 +360,17 @@ void MLFunctionsTest::test_mnist() {
     weights_file.close();
     bias_file.close();
 
+    float* bias_1_values = bias_1->values()->asMutable<float>();
+    float* bias_2_values = bias_2->values()->asMutable<float>();
+
+    FlatVectorPtr<float> bias_1_mat = maker.flatVector<float>(num_samples * layer1_size);
+    for(int i=0; i < bias_1_mat->size(); i++)
+      bias_1_mat->set(i, bias_1_values[i%layer1_size]);
+    
+    FlatVectorPtr<float> bias_2_mat = maker.flatVector<float>(num_samples * layer2_size);
+    for(int i=0; i < bias_2_mat->size(); i++)
+      bias_2_mat->set(i, bias_2_values[i%layer2_size]);
+
     FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples);
     float* data = input->values()->asMutable<float>();
 
@@ -373,9 +385,9 @@ void MLFunctionsTest::test_mnist() {
 
     std::string compute =  DNNBuilder()
                           .denseLayer(layer1_size ,input_size, weights_1->values()->asMutable<float>(), 
-                            bias_1->values()->asMutable<float>(), DNNBuilder::RELU)
+                            bias_1_mat->values()->asMutable<float>(), DNNBuilder::RELU)
                           .denseLayer(layer2_size ,layer1_size, weights_2->values()->asMutable<float>(), 
-                            bias_2->values()->asMutable<float>(), DNNBuilder::SOFTMAX)
+                            bias_2_mat->values()->asMutable<float>(), DNNBuilder::SOFTMAX)
                           .build();
 
     std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
@@ -412,8 +424,8 @@ void MLFunctionsTest::run() {
   // test_mat_add();
   // test_relu();
   // test_dense_layer();
-  // test_torch_dense_layer();
-     test_mnist();
+     test_torch_dense_layer();
+  //   test_mnist();
    
 
 }

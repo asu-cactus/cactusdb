@@ -116,12 +116,8 @@ public:
         float* input_values = input_elements->values()->asMutable<float>();
         int input_size = input_elements->size();
 
-      
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, rows.size(), dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, rows.size(), dims[0]);
-        for (int i = 1; i < rows.size(); ++i) {
-            m2.row(i) = Eigen::Map<Eigen::RowVectorXf>(weights_, dims[0]);
-        }
         
         std::cout << "Matrix shapes MatAdd" << std::endl;
         std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
@@ -138,10 +134,10 @@ public:
         int result_size = m.size();
         float* data = m.data();
         
-        std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
-        for (int i = 0; i < m.rows(); ++i) {
-            for (int j = 0; j < m.cols(); ++j) {
-                result[i][j] = m(i, j);
+        std::vector<std::vector<float>> result(rows.size(), std::vector<float>(dims[0]));
+        for (int i = 0; i < rows.size(); ++i) {
+            for (int j = 0; j < dims[0]; ++j) {
+                result[i][j] = m(i,j);
             }
         }
         VectorMaker maker{context.pool()};
@@ -313,16 +309,18 @@ public:
         torch::Tensor reluOutput = relu->forward(layer1_output);
         torch::Tensor layer2_output = dense2->forward(reluOutput);
         torch::Tensor softmax_output = torch::nn::functional::softmax(layer2_output, 1);
-
         float* data = softmax_output.data_ptr<float>();
-        std::vector<std::vector<float>> result(rows.size(), std::vector<float>(dims[2]));
+
+        std::vector<std::vector<float>> results;
         for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result;
             for (int j = 0; j < dims[2]; ++j) {
-                result[i][j] = data[i*rows.size() + j];
+                result.push_back(data[i*rows.size() + j]);
             }
+            results.push_back(result);
         }
         VectorMaker maker{context.pool()};
-        output = maker.arrayVector<float>(result, REAL());
+        output = maker.arrayVector<float>(results, REAL());
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
