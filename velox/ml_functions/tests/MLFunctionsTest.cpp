@@ -37,14 +37,16 @@
 #include "velox/ml_functions/DNNBuilder.h"
 #include <fstream>
 #include <sstream>
+#include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
+using namespace facebook::velox::exec;
 using namespace facebook::velox::exec::test;
 
 // TODO: Refactor
-class MLFunctionsTest {
+class MLFunctionsTest : public HiveConnectorTestBase {
  public:
 
   MLFunctionsTest() {
@@ -56,6 +58,8 @@ class MLFunctionsTest {
 
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
+
+    SetUp();
 
   }
 
@@ -70,15 +74,33 @@ class MLFunctionsTest {
   void test_dense_layer();
   void test_torch_dense_layer();
   void test_mnist();
+  void test_multithreading();
   FlatVectorPtr<float> get_tensor(std::ifstream& file, int size, int lines);
 
+
+  void SetUp() {
+    HiveConnectorTestBase::SetUp();
+  }
+
+  void TearDown() {
+     HiveConnectorTestBase::TearDown();
+  }
+
+  static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
+    while (!task->isFinished()) {     
+      usleep(100'000); // 0.1 second.
+    }
+  }
+
+  void TestBody() override {}
+
   std::shared_ptr<memory::MemoryPool> pool_ = memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<folly::Executor> executor_{std::make_shared<folly::CPUThreadPoolExecutor>(std::thread::hardware_concurrency())};
+  std::shared_ptr<core::QueryCtx> queryCtx_{std::make_shared<core::QueryCtx>(executor_.get())};
+  
+  std::shared_ptr<memory::MemoryPool> rootPool_{memory::defaultMemoryManager().addRootPool()};
+  std::shared_ptr<memory::MemoryPool> childPool = rootPool_->addAggregateChild("HiveConnectorTestBase.Writer");
   VectorMaker maker{pool_.get()};
-  std::shared_ptr<folly::Executor> executor_{
-      std::make_shared<folly::CPUThreadPoolExecutor>(
-          std::thread::hardware_concurrency())};
-  std::shared_ptr<core::QueryCtx> queryCtx_{
-      std::make_shared<core::QueryCtx>(executor_.get())};
 
 };
 
@@ -418,13 +440,79 @@ FlatVectorPtr<float> MLFunctionsTest::get_tensor(std::ifstream& file, int size, 
     return tensor;
 }
 
+
+void MLFunctionsTest::test_multithreading() { 
+  int input_size = 1000;
+  int output_size = 500;
+  int num_samples = 600;
+  int size = output_size * input_size;
+  
+  auto weights = maker.flatVector<float>(size);
+
+  for(int i=0; i < size; i++){
+    weights->set(i, i*10);
+  } 
+  // register Vector Function
+  exec::registerVectorFunction(
+    "mat_mul",
+    MatrixMultiply::signatures(),
+    std::make_unique<MatrixMultiply>(weights->values()->asMutable<float>(), input_size, output_size)
+  );
+
+  // Create input
+  std::vector<std::vector<float>> featureVectors;
+  for(int i=0; i < num_samples; i++){ 
+    std::vector<float> featureVector;
+    for(int j=0; j < input_size; j++){
+      featureVector.push_back(i*j);
+    }
+    featureVectors.push_back(featureVector);
+  }
+  auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+  auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+  
+  // Create Plan
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  core::PlanNodeId p0;
+  auto plan0 = exec::test::PlanBuilder(planNodeIdGenerator, childPool.get())
+                  .tableScan(asRowType(inputRowVector->type()))
+                  .capturePlanNodeId(p0)
+		              .project({"mat_mul(x)"})
+                  .planFragment();
+
+  // Create task
+  auto task = exec::Task::create("0", plan0 , 0, queryCtx_, 
+        [](RowVectorPtr /*unused*/, ContinueFuture* /*unused*/) {
+          return exec::BlockingReason::kNotBlocked;
+  });
+
+  // Create 4 hive splits and add them to task
+  auto file = TempFilePath::create();
+  writeToFile(file->path, {inputRowVector});
+  auto hiveSplits = makeHiveConnectorSplits(file->path, 4, dwio::common::FileFormat::DWRF);
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    std::cout << split->toString() << std::endl;
+    task->addSplit(p0, exec::Split(std::move(split)));
+  }
+  task->noMoreSplits(p0);
+  std::cout << std::endl;
+  // Start task with 2 as maximum drivers and wait for execution to finish
+  task->start(task, 2);
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+}
+
 void MLFunctionsTest::run() {
   // test_mat_mul();
   // test_mat_add();
   // test_relu();
   // test_dense_layer();
-     test_torch_dense_layer();
-     test_mnist();
+  //   test_torch_dense_layer();
+  //   test_mnist();
+     test_multithreading();
    
 
 }
