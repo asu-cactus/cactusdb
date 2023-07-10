@@ -11,26 +11,27 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-include_directories(/home/linqi/velox/velox)
-set(SOURCES
-  OptimizerTest.cpp
-  Optimizer.cpp
-)
 
+cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 set (CMAKE_PREFIX_PATH "$HOME/libtorch")
 find_package(Torch REQUIRED)
 
-add_executable(velox_op ${SOURCES})
 
+add_executable(ml_functions_test tests/MLFunctionsTest.cpp)
 
 target_link_libraries(
-  velox_op
+  ml_functions_test
+  velox_aggregates
   velox_type
   velox_vector
+  velox_vector_test_lib
   velox_exec
   velox_exec_test_lib
+  velox_tpch_connector
   velox_memory
-  velox_vector_test_lib
+  velox_common_base 
   openblas
   ${TORCH_LIBRARIES}
 )
+
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -march=corei7-avx")

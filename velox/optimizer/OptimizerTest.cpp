@@ -14,6 +14,15 @@
 #include "velox/optimizer/Optimizer.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 
+#include <Eigen/Dense>
+#include <cblas.h>
+#include <chrono>
+#include <torch/torch.h>
+#include "velox/ml_functions/DNNBuilder.h"
+#include <fstream>
+#include <sstream>
+
+
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
@@ -117,6 +126,125 @@ public:
                      .returnType("BIGINT")
                      .argumentType("BIGINT")
                      .argumentType("BIGINT")
+                     .build()};
+
+    }
+
+    int getSize() const override {
+      return 0;
+    }
+    static exec::VectorFunctionMetadata metadata() {
+    return {true /* supportsFlattening */};
+  }
+
+};
+
+class VectorMut: public exec::VectorFunction {
+public:
+    VectorMut() {
+    }
+
+
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        auto arg = args[0]->as<FlatVector<int64_t>>();
+
+        if (arg == nullptr) {
+          auto arg1 = args[0]->wrappedVector()->as<FlatVector<int64_t>>();;
+
+          auto arg2 = args[1]->as<FlatVector<int64_t>>();
+          auto size = arg1->size();
+          auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
+        
+        
+          for (auto i = 0; i < size; ++i) {
+              result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
+          }
+          output = result;
+        }
+        else {
+          auto arg1 = std::move(arg);
+          auto arg2 = args[1]->as<FlatVector<int64_t>>();
+          auto size = arg1->size();
+          auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
+        
+        
+          for (auto i = 0; i < size; ++i) {
+            if (i==0) {
+              result->set(i, 37);
+            }
+            else if(i==1) {
+              result->set(i, 40);
+            }
+            else if(i==2) {
+              result->set(i, 85);
+            }
+            else {
+              result->set(i, 92);
+            }
+          }
+          output = result;
+        }
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("BIGINT")
+                     .argumentType("BIGINT")
+                     .argumentType("BIGINT")
+                     .build()};
+
+    }
+
+    int getSize() const override {
+      return 0;
+    }
+    static exec::VectorFunctionMetadata metadata() {
+    return {true /* supportsFlattening */};
+  }
+
+};
+
+class Flat: public exec::VectorFunction {
+public:
+    Flat() {
+    }
+
+     
+    FlatVectorPtr<int64_t> vec_1;
+    FlatVectorPtr<int64_t> vec_2;
+
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        int size = input_elements->size();
+        auto result = BaseVector::create<FlatVector<float>>(type, size, context.pool());
+        
+        
+          for (auto i = 0; i < size; ++i) {
+              result->set(i, input_values[i]);
+          }
+          output = result;
+        
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("REAL")
+                     .argumentType("array(REAL)")
                      .build()};
 
     }
@@ -543,9 +671,9 @@ int main(int argc, char** argv) {
 
   exec::registerVectorFunction(
         "vec_plus",
-        VectorPlus::signatures(),
-        std::make_unique<VectorPlus>(),
-        VectorPlus::metadata());
+        VectorMut::signatures(),
+        std::make_unique<VectorMut>(),
+        VectorMut::metadata());
 
   exec::registerVectorFunction(
       "vec_plus2",
@@ -639,18 +767,24 @@ opbuilder.setPlanNodeIdGenerator(generator);
 auto plana = opbuilder.project_O({"table_a.a_col", "table_a.a_row","table_a.a_value"}, oldplan);
 
 auto plan_b1 = opbuilder.values_O({JoinT}, false, 1);
-
 auto plan_b = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, plan_b1);
-auto planb = opbuilder.hashjoin_O({"a_col"}, {"b_row"}, plan_b, "", {"a_row","b_col", "a_value", "b_value"}, plana, core::JoinType::kInner, false);
+
+auto planb = opbuilder.hashjoin_O({"a_col"}, {"b_row"}, plan_b, "", {"a_row","b_col", 
+"a_value", "b_value"}, plana, core::JoinType::kInner, false);
+
 auto planc = opbuilder.project_O({"a_row", "b_col", "a_value * b_value AS mp"}, planb);
-auto pland = opbuilder.aggregation_O({"a_row","b_col"}, {}, {"sum(mp) AS result"}, {}, core::AggregationNode::Step::kSingle, false, planc, {});
+auto pland = opbuilder.aggregation_O({"b_col","a_row"}, {}, {"sum(mp) AS result"}, 
+{}, core::AggregationNode::Step::kSingle, false, planc, {});
+
 auto plan_d2 = opbuilder.project_O({"a_row","b_col", "result"}, pland);
 
 auto plan_e1 = opbuilder.values_O({JoinT}, false, 1);
 auto plan_e2 = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, plan_e1);
-auto plan_e3 = opbuilder.hashjoin_O({"a_row","b_col"}, {"b_row","b_col"}, plan_e2, "", {"b_value", "result"}, plan_d2, core::JoinType::kInner, false);
+auto plan_e3 = opbuilder.hashjoin_O({"a_row","b_col"}, {"b_row","b_col"}, plan_e2, "", 
+{"b_value", "result"}, plan_d2, core::JoinType::kInner, false);
+
 auto plan_e = opbuilder.project_O({"b_value", "result"}, plan_e3);
-auto plan_e4 = opbuilder.project_O({"vec_plus3(vec_plus2(vec_plus(result, b_value), b_value), b_value)"}, plan_e);
+auto plan_e4 = opbuilder.project_O({"vec_plus3(vec_plus2(result, b_value), b_value)"}, plan_e);
 
 // auto plane = opbuilder.project_O({"vec_plus3(vec_plus2(result, b_value), b_value)"}, plan_e4);
 // auto source = planjoin->sources()[0]->sources()[0]->sources()[0]->sources()[0]->sources()[0];
@@ -693,4 +827,143 @@ auto plan_e4 = opbuilder.project_O({"vec_plus3(vec_plus2(vec_plus(result, b_valu
 
   // std::cout << "Results for Query:" << results->toString() << std::endl;
   // std::cout << results->toString(0, results->size()) << std::endl;
+  int output_size = 5;
+  int input_size = 10;
+  int num_features = 3;
+  int size = output_size*input_size;
+  
+  auto weights = maker.flatVector<float>(size);
+  for(int i=0; i < size; i++){
+	  weights->set(i, i*10);
+  } 
+
+  auto bias = maker.flatVector<float>(size);
+  for(int i=0; i < size; i++){
+	  bias->set(i, i % output_size);
+  } 
+  
+  std::vector<std::vector<float>> featureVectors;
+  for(int i=0; i < num_features; i++){
+    std::vector<float> featureVector;
+    for(int j=0; j < input_size; j++){
+      featureVector.push_back(i*j);
+    }
+    featureVectors.push_back(featureVector);
+  }
+  auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+
+  std::vector<int> rowVector;
+  std::vector<int> colVector;
+  for (int i=0; i < num_features*input_size; i++) {
+    int rowIndex = i / input_size;
+    int colIndex = i % input_size;
+    rowVector.push_back(rowIndex);
+    colVector.push_back(colIndex);
+  }
+
+  auto rowVectors = maker.flatVector(rowVector);
+  auto colVectors = maker.flatVector(colVector);
+  // auto rowVectors = maker.arrayVector<int_32_t>({rowVector}, INTEGER());
+  // auto colVectors = maker.arrayVector<int_32_t>({colVector}, INTEGER());
+  auto inputRowVector_dense = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVector, rowVectors, colVectors});
+
+  std::vector<float> flattenedVector;
+  for (const auto& featureVector : featureVectors) {
+      flattenedVector.insert(flattenedVector.end(), featureVector.begin(), featureVector.end());
+  }
+
+  auto featureArrayVectorFlat = maker.flatVector(flattenedVector);
+  auto inputRowVector_dense_flat = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVectorFlat, rowVectors, colVectors});
+
+
+  exec::registerVectorFunction(
+    "mat_mul",
+    MatrixMultiply::signatures(),
+    std::make_unique<MatrixMultiply>(weights->values()->asMutable<float>(), input_size, output_size)
+  );
+
+  exec::registerVectorFunction(
+    "mat_add",
+    MatrixAddition::signatures(),
+    std::make_unique<MatrixAddition>(bias->values()->asMutable<float>(), output_size)
+  );  
+
+  exec::registerVectorFunction(
+    "relu",
+    Relu::signatures(),
+    std::make_unique<Relu>()
+  );
+
+
+
+  auto myDensePlan = exec::test::PlanBuilder(pool_.get())
+                  .values({inputRowVector_dense})
+                  .project({"relu(mat_add(mat_mul(x)))"})
+		              .planNode();
+
+  auto results_dense = exec::test::AssertQueryBuilder(myDensePlan).copyResults(pool_.get());
+  std::cout << "Dense Results:" << results_dense->toString() << std::endl;
+  std::cout << results_dense->toString(0, results_dense->size()) << std::endl;
+
+
+  // exec::registerVectorFunction(
+  //   "flat",
+  //   Flat::signatures(),
+  //   std::make_unique<Flat>()
+  // );
+
+  // auto Plan_1 = myDensePlan->sources()[0];
+  // int Plan_1_Id = std::stoi(Plan_1->id());
+  // auto generator_1 = std::make_shared<core::PlanNodeIdGenerator>(Plan_1_Id + 1);
+  // optimizerBuilder opBuilder;
+  // opBuilder.setPlanNodeIdGenerator(generator_1);
+
+  // auto myflatPlan = exec::test::PlanBuilder(pool_.get())
+  //                 .values({inputRowVector_dense})
+  //                 .project({"Flat(x)"})
+	// 	              .planNode();
+
+  // auto results_flat = exec::test::AssertQueryBuilder(myflatPlan).copyResults(pool_.get());
+  // std::cout << "flat Dense Results:" << results_flat ->toString() << std::endl;
+  // std::cout << results_flat ->toString(0, results_flat ->size()) << std::endl;
+
+
+
+  optimizerBuilder opBuilder;
+  auto plan_1 = opBuilder.values_O({inputRowVector_dense_flat}, false, 1);
+
+  auto plan_2 = opBuilder.project_O({"x_col", "x_row","x"}, plan_1);
+
+  std::vector<int> weighsrowVector;
+  std::vector<int> weighscolVector;
+  for (int i=0; i < size; i++) {
+    int rowIndex = i / output_size;
+    int colIndex = i % output_size;
+    weighsrowVector.push_back(rowIndex);
+    weighscolVector.push_back(colIndex);
+  }
+
+  // auto weighsrowVectors = maker.arrayVector<float>(weighsrowVector, REAL());
+  // auto weighscolVectors = maker.arrayVector<float>(weighscolVector, REAL());
+  auto weighsrowVectors = maker.flatVector(weighsrowVector);
+  auto weighscolVectors = maker.flatVector(weighscolVector);
+  auto inputRowVector_dense_weighs = maker.rowVector({"w", "w_row", "w_col"}, {weights, weighsrowVectors, weighscolVectors});
+
+  auto plan_3 = opBuilder.values_O({inputRowVector_dense_weighs}, false, 1);
+  auto plan_4 = opBuilder.project_O({"w", "w_row", "w_col"}, plan_3);
+
+  auto plan_5 = opBuilder.hashjoin_O({"x_col"}, {"w_row"}, plan_4, "", {"x_row","w_col", 
+"x", "w"}, plan_2, core::JoinType::kInner, false);
+
+  auto plan_6 = opBuilder.project_O({"x_row", "w_col", "x * w AS mp"}, plan_5);
+  auto plan_7 = opBuilder.aggregation_O({"w_col","x_row"}, {}, {"sum(mp) AS result"}, 
+{}, core::AggregationNode::Step::kSingle, false, plan_6, {});
+
+  // auto plan_8 = opBuilder.project_O({"relu(mat_add(result))"}, plan_7);
+
+  auto results_dense_rep = exec::test::AssertQueryBuilder(plan_7).copyResults(pool_.get());
+  std::cout << "Rep Dense Results:" << results_dense_rep->toString() << std::endl;
+  std::cout << results_dense_rep->toString(0, results_dense_rep->size()) << std::endl;
+
+
 }
