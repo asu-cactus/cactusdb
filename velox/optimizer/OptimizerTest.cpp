@@ -258,7 +258,59 @@ public:
 
 };
 
+class ADP: public exec::VectorFunction {
+public:
+    ADP() {
+    }
 
+     
+    FlatVectorPtr<int64_t> vec_1;
+    FlatVectorPtr<int64_t> vec_2;
+
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+        
+
+        auto col = args[0]->as<FlatVector<int32_t>>();
+        auto row = args[1]->as<FlatVector<int32_t>>();
+        auto res = args[2]->as<FlatVector<float>>();
+        auto colnum = col->valueAt(0)+1;
+        auto size = res->size();
+        auto rownum = size / colnum;
+
+      
+          
+        std::vector<std::vector<float>> result(rownum, std::vector<float>(colnum));
+        for (int i = 0; i < size; ++i) {
+              result[row->valueAt(i)][col->valueAt(i)] = res->valueAt(i);
+        }  
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(result, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("INTEGER")
+                     .argumentType("INTEGER")
+                     .argumentType("REAL")
+                     .build()};
+
+    }
+
+    int getSize() const override {
+      return 0;
+    }
+    static exec::VectorFunctionMetadata metadata() {
+    return {true /* supportsFlattening */};
+  }
+
+};
 
 std::string throwAggregateFunctionDoesntExist(const std::string& name) {
   std::stringstream error;
@@ -927,7 +979,11 @@ auto plan_e4 = opbuilder.project_O({"vec_plus3(vec_plus2(result, b_value), b_val
   // std::cout << "flat Dense Results:" << results_flat ->toString() << std::endl;
   // std::cout << results_flat ->toString(0, results_flat ->size()) << std::endl;
 
-
+    exec::registerVectorFunction(
+    "adaptive",
+    ADP::signatures(),
+    std::make_unique<ADP>()
+  );
 
   optimizerBuilder opBuilder;
   auto plan_1 = opBuilder.values_O({inputRowVector_dense_flat}, false, 1);
@@ -958,10 +1014,11 @@ auto plan_e4 = opbuilder.project_O({"vec_plus3(vec_plus2(result, b_value), b_val
   auto plan_6 = opBuilder.project_O({"x_row", "w_col", "x * w AS mp"}, plan_5);
   auto plan_7 = opBuilder.aggregation_O({"w_col","x_row"}, {}, {"sum(mp) AS result"}, 
 {}, core::AggregationNode::Step::kSingle, false, plan_6, {});
+  
+  auto plan_8 = opBuilder.project_O({"adaptive(w_col, x_row, result) AS res"}, plan_7);
+  auto plan_9 = opBuilder.project_O({"relu(mat_add(res))"}, plan_8);
 
-  // auto plan_8 = opBuilder.project_O({"relu(mat_add(result))"}, plan_7);
-
-  auto results_dense_rep = exec::test::AssertQueryBuilder(plan_7).copyResults(pool_.get());
+  auto results_dense_rep = exec::test::AssertQueryBuilder(plan_9).copyResults(pool_.get());
   std::cout << "Rep Dense Results:" << results_dense_rep->toString() << std::endl;
   std::cout << results_dense_rep->toString(0, results_dense_rep->size()) << std::endl;
 
