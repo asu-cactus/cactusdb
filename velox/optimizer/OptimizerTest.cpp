@@ -14,249 +14,250 @@
 #include "velox/optimizer/Optimizer.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 
-#include <Eigen/Dense>
-#include <cblas.h>
-#include <chrono>
-#include <torch/torch.h>
+// #include <Eigen/Dense>
+// #include <cblas.h>
+// #include <chrono>
+// #include <torch/torch.h>
 #include "velox/ml_functions/DNNBuilder.h"
 #include <fstream>
 #include <sstream>
 
+#include "velox/exec/FilterProject.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 using namespace facebook::velox::optimizer;
 
-class AddVectorToConstant: public exec::VectorFunction {
-public:
-    AddVectorToConstant(FlatVectorPtr<int64_t> vec, int size) {
-        vec_ = vec;
-	      size_ = size;
-    }
+// class AddVectorToConstant: public exec::VectorFunction {
+// public:
+//     AddVectorToConstant(FlatVectorPtr<int64_t> vec, int size) {
+//         vec_ = vec;
+// 	      size_ = size;
+//     }
 
      
-    FlatVectorPtr<int64_t> vec_;
-    int size_;
+//     FlatVectorPtr<int64_t> vec_;
+//     int size_;
 
 
-    void apply(
-        const SelectivityVector& rows,
-        std::vector<VectorPtr>& args,
-        const TypePtr& type,
-        exec::EvalCtx& context,
-        VectorPtr& output) const override {
+//     void apply(
+//         const SelectivityVector& rows,
+//         std::vector<VectorPtr>& args,
+//         const TypePtr& type,
+//         exec::EvalCtx& context,
+//         VectorPtr& output) const override {
 
-        auto arg1 = args[0]->as<FlatVector<int64_t>>();
-        auto size = arg1->size();
-        auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
+//         auto arg1 = args[0]->as<FlatVector<int64_t>>();
+//         auto size = arg1->size();
+//         auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
         
         
-        for (auto i = 0; i < size; ++i) {
-            result->set(i, arg1->valueAt(i) + vec_->valueAt(i));
-        }
-        output = result;
-    }
+//         for (auto i = 0; i < size; ++i) {
+//             result->set(i, arg1->valueAt(i) + vec_->valueAt(i));
+//         }
+//         output = result;
+//     }
 
-    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-        return {exec::FunctionSignatureBuilder()
-                     .returnType("BIGINT")
-                     .argumentType("BIGINT")
-                     .build()};
+//     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+//         return {exec::FunctionSignatureBuilder()
+//                      .returnType("BIGINT")
+//                      .argumentType("BIGINT")
+//                      .build()};
 
-    }
+//     }
 
-    int getSize() const override {
-      return size_;
-    }
-    static exec::VectorFunctionMetadata metadata() {
-    return {true /* supportsFlattening */};
-  }
+//     int getSize() const override {
+//       return size_;
+//     }
+//     static exec::VectorFunctionMetadata metadata() {
+//     return {true /* supportsFlattening */};
+//   }
 
-};
+// };
 
-class VectorPlus: public exec::VectorFunction {
-public:
-    VectorPlus() {
-    }
+// class VectorPlus: public exec::VectorFunction {
+// public:
+//     VectorPlus() {
+//     }
 
      
-    FlatVectorPtr<int64_t> vec_1;
-    FlatVectorPtr<int64_t> vec_2;
+//     FlatVectorPtr<int64_t> vec_1;
+//     FlatVectorPtr<int64_t> vec_2;
 
 
-    void apply(
-        const SelectivityVector& rows,
-        std::vector<VectorPtr>& args,
-        const TypePtr& type,
-        exec::EvalCtx& context,
-        VectorPtr& output) const override {
+//     void apply(
+//         const SelectivityVector& rows,
+//         std::vector<VectorPtr>& args,
+//         const TypePtr& type,
+//         exec::EvalCtx& context,
+//         VectorPtr& output) const override {
 
-        auto arg = args[0]->as<FlatVector<int64_t>>();
+//         auto arg = args[0]->as<FlatVector<int64_t>>();
 
-        if (arg == nullptr) {
-          auto arg1 = args[0]->wrappedVector()->as<FlatVector<int64_t>>();;
+//         if (arg == nullptr) {
+//           auto arg1 = args[0]->wrappedVector()->as<FlatVector<int64_t>>();;
 
-          auto arg2 = args[1]->as<FlatVector<int64_t>>();
-          auto size = arg1->size();
-          auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
+//           auto arg2 = args[1]->as<FlatVector<int64_t>>();
+//           auto size = arg1->size();
+//           auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
         
         
-          for (auto i = 0; i < size; ++i) {
-              result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
-          }
-          output = result;
-        }
-        else {
-          auto arg1 = std::move(arg);
-          auto arg2 = args[1]->as<FlatVector<int64_t>>();
-          auto size = arg1->size();
-          auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
+//           for (auto i = 0; i < size; ++i) {
+//               result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
+//           }
+//           output = result;
+//         }
+//         else {
+//           auto arg1 = std::move(arg);
+//           auto arg2 = args[1]->as<FlatVector<int64_t>>();
+//           auto size = arg1->size();
+//           auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
         
         
-          for (auto i = 0; i < size; ++i) {
-              result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
-          }
-          output = result;
-        }
-    }
+//           for (auto i = 0; i < size; ++i) {
+//               result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
+//           }
+//           output = result;
+//         }
+//     }
 
-    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-        return {exec::FunctionSignatureBuilder()
-                     .returnType("BIGINT")
-                     .argumentType("BIGINT")
-                     .argumentType("BIGINT")
-                     .build()};
+//     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+//         return {exec::FunctionSignatureBuilder()
+//                      .returnType("BIGINT")
+//                      .argumentType("BIGINT")
+//                      .argumentType("BIGINT")
+//                      .build()};
 
-    }
+//     }
 
-    int getSize() const override {
-      return 0;
-    }
-    static exec::VectorFunctionMetadata metadata() {
-    return {true /* supportsFlattening */};
-  }
+//     int getSize() const override {
+//       return 0;
+//     }
+//     static exec::VectorFunctionMetadata metadata() {
+//     return {true /* supportsFlattening */};
+//   }
 
-};
+// };
 
-class VectorMut: public exec::VectorFunction {
-public:
-    VectorMut() {
-    }
+// class VectorMut: public exec::VectorFunction {
+// public:
+//     VectorMut() {
+//     }
 
 
 
-    void apply(
-        const SelectivityVector& rows,
-        std::vector<VectorPtr>& args,
-        const TypePtr& type,
-        exec::EvalCtx& context,
-        VectorPtr& output) const override {
+//     void apply(
+//         const SelectivityVector& rows,
+//         std::vector<VectorPtr>& args,
+//         const TypePtr& type,
+//         exec::EvalCtx& context,
+//         VectorPtr& output) const override {
 
-        auto arg = args[0]->as<FlatVector<int64_t>>();
+//         auto arg = args[0]->as<FlatVector<int64_t>>();
 
-        if (arg == nullptr) {
-          auto arg1 = args[0]->wrappedVector()->as<FlatVector<int64_t>>();;
+//         if (arg == nullptr) {
+//           auto arg1 = args[0]->wrappedVector()->as<FlatVector<int64_t>>();;
 
-          auto arg2 = args[1]->as<FlatVector<int64_t>>();
-          auto size = arg1->size();
-          auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
+//           auto arg2 = args[1]->as<FlatVector<int64_t>>();
+//           auto size = arg1->size();
+//           auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
         
         
-          for (auto i = 0; i < size; ++i) {
-              result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
-          }
-          output = result;
-        }
-        else {
-          auto arg1 = std::move(arg);
-          auto arg2 = args[1]->as<FlatVector<int64_t>>();
-          auto size = arg1->size();
-          auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
+//           for (auto i = 0; i < size; ++i) {
+//               result->set(i, arg1->valueAt(i) * arg2->valueAt(i));
+//           }
+//           output = result;
+//         }
+//         else {
+//           auto arg1 = std::move(arg);
+//           auto arg2 = args[1]->as<FlatVector<int64_t>>();
+//           auto size = arg1->size();
+//           auto result = BaseVector::create<FlatVector<int64_t>>(type, size, context.pool());
         
         
-          for (auto i = 0; i < size; ++i) {
-            if (i==0) {
-              result->set(i, 37);
-            }
-            else if(i==1) {
-              result->set(i, 40);
-            }
-            else if(i==2) {
-              result->set(i, 85);
-            }
-            else {
-              result->set(i, 92);
-            }
-          }
-          output = result;
-        }
-    }
+//           for (auto i = 0; i < size; ++i) {
+//             if (i==0) {
+//               result->set(i, 37);
+//             }
+//             else if(i==1) {
+//               result->set(i, 40);
+//             }
+//             else if(i==2) {
+//               result->set(i, 85);
+//             }
+//             else {
+//               result->set(i, 92);
+//             }
+//           }
+//           output = result;
+//         }
+//     }
 
-    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-        return {exec::FunctionSignatureBuilder()
-                     .returnType("BIGINT")
-                     .argumentType("BIGINT")
-                     .argumentType("BIGINT")
-                     .build()};
+//     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+//         return {exec::FunctionSignatureBuilder()
+//                      .returnType("BIGINT")
+//                      .argumentType("BIGINT")
+//                      .argumentType("BIGINT")
+//                      .build()};
 
-    }
+//     }
 
-    int getSize() const override {
-      return 0;
-    }
-    static exec::VectorFunctionMetadata metadata() {
-    return {true /* supportsFlattening */};
-  }
+//     int getSize() const override {
+//       return 0;
+//     }
+//     static exec::VectorFunctionMetadata metadata() {
+//     return {true /* supportsFlattening */};
+//   }
 
-};
+// };
 
-class Flat: public exec::VectorFunction {
-public:
-    Flat() {
-    }
+// class Flat: public exec::VectorFunction {
+// public:
+//     Flat() {
+//     }
 
      
-    FlatVectorPtr<int64_t> vec_1;
-    FlatVectorPtr<int64_t> vec_2;
+//     FlatVectorPtr<int64_t> vec_1;
+//     FlatVectorPtr<int64_t> vec_2;
 
 
-    void apply(
-        const SelectivityVector& rows,
-        std::vector<VectorPtr>& args,
-        const TypePtr& type,
-        exec::EvalCtx& context,
-        VectorPtr& output) const override {
+//     void apply(
+//         const SelectivityVector& rows,
+//         std::vector<VectorPtr>& args,
+//         const TypePtr& type,
+//         exec::EvalCtx& context,
+//         VectorPtr& output) const override {
 
-        auto input_elements = args[0]->as<ArrayVector>()->elements();
-        float* input_values = input_elements->values()->asMutable<float>();
-        int size = input_elements->size();
-        auto result = BaseVector::create<FlatVector<float>>(type, size, context.pool());
+//         auto input_elements = args[0]->as<ArrayVector>()->elements();
+//         float* input_values = input_elements->values()->asMutable<float>();
+//         int size = input_elements->size();
+//         auto result = BaseVector::create<FlatVector<float>>(type, size, context.pool());
         
         
-          for (auto i = 0; i < size; ++i) {
-              result->set(i, input_values[i]);
-          }
-          output = result;
+//           for (auto i = 0; i < size; ++i) {
+//               result->set(i, input_values[i]);
+//           }
+//           output = result;
         
-    }
+//     }
 
-    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-        return {exec::FunctionSignatureBuilder()
-                     .returnType("REAL")
-                     .argumentType("array(REAL)")
-                     .build()};
+//     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+//         return {exec::FunctionSignatureBuilder()
+//                      .returnType("REAL")
+//                      .argumentType("array(REAL)")
+//                      .build()};
 
-    }
+//     }
 
-    int getSize() const override {
-      return 0;
-    }
-    static exec::VectorFunctionMetadata metadata() {
-    return {true /* supportsFlattening */};
-  }
+//     int getSize() const override {
+//       return 0;
+//     }
+//     static exec::VectorFunctionMetadata metadata() {
+//     return {true /* supportsFlattening */};
+//   }
 
-};
+// };
 
 class ADP: public exec::VectorFunction {
 public:
@@ -1004,18 +1005,53 @@ int main(int argc, char** argv) {
     std::make_unique<Relu>()
   );
 
-
-
-  auto myDensePlan = exec::test::PlanBuilder(pool_.get())
+  auto planbuilder = exec::test::PlanBuilder(pool_.get())
                   .values({inputRowVector_dense})
                   .project({"relu(mat_add(mat_mul(x)))"})
-		              .planNode();
+		              .planBuild();
+
+  auto myDensePlan = planbuilder.planNode();
 
   auto results_dense = exec::test::AssertQueryBuilder(myDensePlan).copyResults(pool_.get());
   std::cout << "Dense Results:" << results_dense->toString() << std::endl;
   std::cout << results_dense->toString(0, results_dense->size()) << std::endl;
 
   auto newplan = Optest(myDensePlan, inputRowVector_dense_flat, output_size, size, weights);
+  
+  auto nodeid = myDensePlan->id();
+  auto str = planbuilder.findExprStrings(nodeid);
+
+  auto myDensePlanF = exec::test::PlanBuilder(pool_.get())
+                  .values({inputRowVector_dense})
+                  .project({"relu(mat_add(mat_mul(x)))"})
+		              .planFragment();
+
+  Optimizer op(queryCtx_);
+  auto ops = op.traverse(myDensePlanF);
+  for (const auto& op : ops) {
+  // TODO: Add more logic to determine if the operator should be insert to candidates.
+  // Here only check the type of an operator.
+  auto fp = dynamic_cast<exec::FilterProject*>(op);
+  if (fp) {
+    std::cout << "The planNodeId is: " << op->planNodeId() << std::endl;
+    std::cout << "The operatorType is: " << op->operatorType() << std::endl;
+    std::cout << "\n" << std::endl;
+    std::cout << "The expression tree: " << std::endl;
+    const std::unique_ptr<exec::ExprSet>& exprs = fp->getExprs();
+    auto call = std::dynamic_pointer_cast<MLFunction>(exprs->exprs()[0]->vectorFunction());//inputs_ contains mat_add
+    std::cout << exprs->toString(false /*compact*/) << std::endl;
+
+    // Use exprs as needed.
+  } else {
+    std::cout << "The planNodeId is: " << op->planNodeId() << std::endl;
+    std::cout << "The operatorType is: " << op->operatorType() << std::endl;
+    std::cout << "\n" << std::endl;
+  }
+}
+
+
+
+
 
   auto results_dense_rep = exec::test::AssertQueryBuilder(newplan).copyResults(pool_.get());
   std::cout << "Rep Dense Results:" << results_dense_rep->toString() << std::endl;
@@ -1042,50 +1078,50 @@ int main(int argc, char** argv) {
   // std::cout << "flat Dense Results:" << results_flat ->toString() << std::endl;
   // std::cout << results_flat ->toString(0, results_flat ->size()) << std::endl;
 
-    exec::registerVectorFunction(
-    "adaptive",
-    ADP::signatures(),
-    std::make_unique<ADP>()
-  );
+//     exec::registerVectorFunction(
+//     "adaptive",
+//     ADP::signatures(),
+//     std::make_unique<ADP>()
+//   );
 
-  optimizerBuilder opBuilder;
-  auto plan_1 = opBuilder.values_O({inputRowVector_dense_flat}, false, 1);
+//   optimizerBuilder opBuilder;
+//   auto plan_1 = opBuilder.values_O({inputRowVector_dense_flat}, false, 1);
 
-  auto plan_2 = opBuilder.project_O({"x_col", "x_row","x"}, plan_1);
+//   auto plan_2 = opBuilder.project_O({"x_col", "x_row","x"}, plan_1);
 
-  std::vector<int> weighsrowVector;
-  std::vector<int> weighscolVector;
-  for (int i=0; i < size; i++) {
-    int rowIndex = i / output_size;
-    int colIndex = i % output_size;
-    weighsrowVector.push_back(rowIndex);
-    weighscolVector.push_back(colIndex);
-  }
+//   std::vector<int> weighsrowVector;
+//   std::vector<int> weighscolVector;
+//   for (int i=0; i < size; i++) {
+//     int rowIndex = i / output_size;
+//     int colIndex = i % output_size;
+//     weighsrowVector.push_back(rowIndex);
+//     weighscolVector.push_back(colIndex);
+//   }
 
-  // auto weighsrowVectors = maker.arrayVector<float>(weighsrowVector, REAL());
-  // auto weighscolVectors = maker.arrayVector<float>(weighscolVector, REAL());
-  auto weighsrowVectors = maker.flatVector(weighsrowVector);
-  auto weighscolVectors = maker.flatVector(weighscolVector);
-  auto inputRowVector_dense_weighs = maker.rowVector({"w", "w_row", "w_col"}, {weights, weighsrowVectors, weighscolVectors});
+//   // auto weighsrowVectors = maker.arrayVector<float>(weighsrowVector, REAL());
+//   // auto weighscolVectors = maker.arrayVector<float>(weighscolVector, REAL());
+//   auto weighsrowVectors = maker.flatVector(weighsrowVector);
+//   auto weighscolVectors = maker.flatVector(weighscolVector);
+//   auto inputRowVector_dense_weighs = maker.rowVector({"w", "w_row", "w_col"}, {weights, weighsrowVectors, weighscolVectors});
 
-  auto plan_3 = opBuilder.values_O({inputRowVector_dense_weighs}, false, 1);
-  auto plan_4 = opBuilder.project_O({"w", "w_row", "w_col"}, plan_3);
+//   auto plan_3 = opBuilder.values_O({inputRowVector_dense_weighs}, false, 1);
+//   auto plan_4 = opBuilder.project_O({"w", "w_row", "w_col"}, plan_3);
 
-  auto plan_5 = opBuilder.hashjoin_O({"x_col"}, {"w_row"}, plan_4, "", {"x_row","w_col", 
-"x", "w"}, plan_2, core::JoinType::kInner, false);
+//   auto plan_5 = opBuilder.hashjoin_O({"x_col"}, {"w_row"}, plan_4, "", {"x_row","w_col", 
+// "x", "w"}, plan_2, core::JoinType::kInner, false);
 
-  auto plan_6 = opBuilder.project_O({"x_row", "w_col", "x * w AS mp"}, plan_5);
-  auto plan_7 = opBuilder.aggregation_O({"w_col","x_row"}, {}, {"sum(mp) AS result"}, 
-{}, core::AggregationNode::Step::kSingle, false, plan_6, {});
+//   auto plan_6 = opBuilder.project_O({"x_row", "w_col", "x * w AS mp"}, plan_5);
+//   auto plan_7 = opBuilder.aggregation_O({"w_col","x_row"}, {}, {"sum(mp) AS result"}, 
+// {}, core::AggregationNode::Step::kSingle, false, plan_6, {});
   
-  auto plan_8 = opBuilder.project_O({"adaptive(w_col, x_row, result) AS res"}, plan_7);
-  // auto plan_9 = opBuilder.filter_O({"res IS NOT NULL"}, plan_8);
-  // auto plan_10 = opBuilder.project_O({"res"}, plan_9);
-  auto plan_9 = opBuilder.project_O({"relu(mat_add(res))"}, plan_8);
+//   auto plan_8 = opBuilder.project_O({"adaptive(w_col, x_row, result) AS res"}, plan_7);
+//   // auto plan_9 = opBuilder.filter_O({"res IS NOT NULL"}, plan_8);
+//   // auto plan_10 = opBuilder.project_O({"res"}, plan_9);
+//   auto plan_9 = opBuilder.project_O({"relu(mat_add(res))"}, plan_8);
   
-  // auto results_dense_rep = exec::test::AssertQueryBuilder(plan_9).copyResults(pool_.get());
-  // std::cout << "Rep Dense Results:" << results_dense_rep->toString() << std::endl;
-  // std::cout << results_dense_rep->toString(0, results_dense_rep->size()) << std::endl;
+//   // auto results_dense_rep = exec::test::AssertQueryBuilder(plan_9).copyResults(pool_.get());
+//   // std::cout << "Rep Dense Results:" << results_dense_rep->toString() << std::endl;
+//   // std::cout << results_dense_rep->toString(0, results_dense_rep->size()) << std::endl;
 
 
 }
