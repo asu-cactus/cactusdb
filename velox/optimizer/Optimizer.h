@@ -9,12 +9,14 @@
 
 namespace facebook::velox::optimizer {
 
+
+
 class Optimizer {
 public:
   Optimizer(std::shared_ptr<core::QueryCtx> queryCtx);
   std::vector<exec::Operator*> traverse(const core::PlanFragment& planFragment);
   // RowVectorPtr op(const core::PlanFragment& planFragment);
-  // void getCandidates(std::vector<exec::Operator*> operators);
+  void getCandidates(std::vector<exec::Operator*> operators);
   // core::PlanNodePtr& applyRules(const core::PlanFragment& planFragment);
   // core::PlanNodePtr& op(const core::PlanFragment& planFragment);
   ~Optimizer();

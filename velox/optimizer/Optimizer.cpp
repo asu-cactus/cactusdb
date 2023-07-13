@@ -5,24 +5,8 @@
 
 using namespace facebook::velox::exec;
 using namespace facebook::velox::optimizer;
+using namespace facebook::velox;
 
-// class OptimizerCandidate {
-// public:
-//   OptimizerCandidate(int operatorIndex, const std::unique_ptr<exec::ExprSet>& exprs)
-//     : operatorIndex_(operatorIndex), exprs_(exprs) {}
-
-//   int getOperatorIndex() const {
-//     return operatorIndex_;
-//   }
-
-//   const std::unique_ptr<exec::ExprSet>& getExprs() const {
-//     return exprs_;
-//   }
-
-// private:
-//   int operatorIndex_;
-//   std::unique_ptr<exec::ExprSet> exprs_;
-// };
 
 Optimizer::Optimizer(std::shared_ptr<core::QueryCtx> queryCtx) : queryCtx_(queryCtx) {
 
@@ -45,21 +29,21 @@ std::vector<Operator*> Optimizer::traverse(const core::PlanFragment& planFragmen
 //         // Store the operator index and its related ExprSet in the candidates vector
 //         candidates.emplace_back(op->planNodeId(), fp->getExprs());
 //       }
-//     // if (fp) {
-//     //   std::cout << "The planNodeId is: " << op->planNodeId() << std::endl;
-//     //   std::cout << "The operatorType is: " << op->operatorType() << std::endl;
-//     //   std::cout << "\n" << std::endl;
-//     //   std::cout << "The expression tree: " << std::endl;
-//     //   const std::unique_ptr<exec::ExprSet>& exprs = fp->getExprs();
+//     if (fp) {
+//       std::cout << "The planNodeId is: " << op->planNodeId() << std::endl;
+//       std::cout << "The operatorType is: " << op->operatorType() << std::endl;
+//       std::cout << "\n" << std::endl;
+//       std::cout << "The expression tree: " << std::endl;
+//       const std::unique_ptr<exec::ExprSet>& exprs = fp->getExprs();
 
-//     //   std::cout << exprs->toString(false /*compact*/) << std::endl;
-//     //   candidates.emplace_back(op->planNodeId(), fp->getExprs());
-//     //   // Use exprs as needed.
-//     // } else {
-//     //   std::cout << "The planNodeId is: " << op->planNodeId() << std::endl;
-//     //   std::cout << "The operatorType is: " << op->operatorType() << std::endl;
-//     //   std::cout << "\n" << std::endl;
-//     // }
+//       std::cout << exprs->toString(false /*compact*/) << std::endl;
+//       candidates.emplace_back(op->planNodeId(), fp->getExprs());
+//       // Use exprs as needed.
+//     } else {
+//       std::cout << "The planNodeId is: " << op->planNodeId() << std::endl;
+//       std::cout << "The operatorType is: " << op->operatorType() << std::endl;
+//       std::cout << "\n" << std::endl;
+//     }
 //   }
 // }
 

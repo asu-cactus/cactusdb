@@ -713,9 +713,10 @@ std::shared_ptr<folly::Executor> executor_{
 std::shared_ptr<core::QueryCtx> queryCtx_{
       std::make_shared<core::QueryCtx>(executor_.get())};
 
-core::PlanNodePtr& Optest(core::PlanNodePtr source, RowVectorPtr data, int output_size, int size, FlatVectorPtr<float> weights){
+core::PlanNodePtr& Optest(core::PlanNodePtr source, RowVectorPtr data, FlatVectorPtr<float> weights, 
+int output_size, int size, std::vector<std::string> str){
    exec::registerVectorFunction(
-    "adaptive",
+    "adapter",
     ADP::signatures(),
     std::make_unique<ADP>()
   );
@@ -736,13 +737,46 @@ core::PlanNodePtr& Optest(core::PlanNodePtr source, RowVectorPtr data, int outpu
     weighsrowVector.push_back(rowIndex);
     weighscolVector.push_back(colIndex);
   }
+int input_size = size / output_size;
+std::vector<std::vector<float>> weightsArray;
 
+for (int i = 0; i < input_size; i++) {
+    std::vector<float> weightsArrayrow;
+    for (int j = 0; j < output_size; j++) {
+        int index = i * output_size + j;
+        if (index < size) {
+            weightsArrayrow.push_back(weights->valueAt(index));
+        }
+    }
+    weightsArray.push_back(weightsArrayrow);
+}
+  auto weightsArrayVector = maker.arrayVector<float>(weightsArray, REAL());
+
+  std::vector<std::vector<int>> weighsrowVectors;
+  for (int i = 0; i < input_size; i++) {
+    std::vector<int> weighsrow;
+    for (int j = 0; j < output_size; j++) {
+        weighsrow.push_back(i / output_size);
+    }
+    weighsrowVectors.push_back(weighsrow);
+}
+  auto weighsrowArrayVector = maker.arrayVector<int32_t>(weighsrowVectors, INTEGER());
+  std::vector<std::vector<int>> weighscolVectors;
+  for (int i = 0; i < input_size; i++) {
+    std::vector<int> weighscol;
+    for (int j = 0; j < output_size; j++) {
+        weighscol.push_back(i % output_size);
+    }
+    weighscolVectors.push_back(weighscol);
+}
+  auto weighscolArrayVector = maker.arrayVector<int32_t>(weighscolVectors, INTEGER()); 
   // auto weighsrowVectors = maker.arrayVector<float>(weighsrowVector, REAL());
   // auto weighscolVectors = maker.arrayVector<float>(weighscolVector, REAL());
-  auto weighsrowVectors = maker.flatVector(weighsrowVector);
-  auto weighscolVectors = maker.flatVector(weighscolVector);
-  auto inputRowVector_dense_weighs = maker.rowVector({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, {weights, weighsrowVectors, weighscolVectors});
-
+  auto weighsrowVectors_f = maker.flatVector(weighsrowVector);
+  auto weighscolVectors_f = maker.flatVector(weighscolVector);
+  auto inputRowVector_dense_weighs = maker.rowVector({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, {weights, weighsrowVectors_f, weighscolVectors_f});
+  // auto inputRowVector_dense_weighs_a = maker.rowVector({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, {weightsArrayVector, weighsrowArrayVector, weighscolArrayVector});
+  
   auto plan_3 = opBuilder.values_O({inputRowVector_dense_weighs}, false, 1);
   auto plan_4 = opBuilder.project_O({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, plan_3);
 
@@ -753,14 +787,39 @@ fmt::format("{}", x_var), fmt::format("{}", w_var)}, plan_2, core::JoinType::kIn
   auto plan_7 = opBuilder.aggregation_O({fmt::format("{}_col", w_var),fmt::format("{}_row", x_var)}, {}, {"sum(mp) AS result"}, 
 {}, core::AggregationNode::Step::kSingle, false, plan_6, {});
   
-  auto plan_8 = opBuilder.project_O({fmt::format("adaptive({}_col, {}_row, result) AS res", w_var, x_var)}, plan_7);
+  auto plan_8 = opBuilder.project_O({fmt::format("adapter({}_col, {}_row, result) AS res", w_var, x_var)}, plan_7);
   // auto plan_9 = opBuilder.filter_O({"res IS NOT NULL"}, plan_8);
   // auto plan_10 = opBuilder.project_O({"res"}, plan_9);
-  static core::PlanNodePtr plan_9 = opBuilder.project_O({"relu(mat_add(res))"}, plan_8); // TODO: get the rest expression
+
+  std::string searchString = fmt::format("mat_mul({})", x_var);
+  std::string replaceString = "res";
+
+  std::size_t found = str[0].find(searchString);
+  while (found != std::string::npos) {
+      str[0].replace(found, searchString.length(), replaceString);
+      found = str[0].find(searchString, found + replaceString.length());
+  }
+  
+  static core::PlanNodePtr plan_9 = opBuilder.project_O({str[0]}, plan_8); // TODO: get the rest expression
 
 
   return plan_9;
 };
+
+const std::shared_ptr<exec::VectorFunction> findName(const std::shared_ptr<exec::Expr>& expr) {
+    if (expr->name() == "mat_mul") {
+        return expr->vectorFunction();
+    }
+
+    for (const auto& input : expr->inputs()) {
+        const auto result = findName(input);
+        if (result) {
+            return result;
+        }
+    }
+
+    return nullptr;
+}
 
 int main(int argc, char** argv) {
     
@@ -971,12 +1030,31 @@ int main(int argc, char** argv) {
     rowVector.push_back(rowIndex);
     colVector.push_back(colIndex);
   }
+  std::vector<std::vector<int>> rowVectors;
+  for (int i = 0; i < num_features; i++) {
+    std::vector<int> row;
+    for (int j = 0; j < input_size; j++) {
+        row.push_back(i / input_size);
+    }
+    rowVectors.push_back(row);
+}
+  auto rowArrayVector = maker.arrayVector<int32_t>(rowVectors, INTEGER());
+  std::vector<std::vector<int>> colVectors;
+  for (int i = 0; i < num_features; i++) {
+    std::vector<int> col;
+    for (int j = 0; j < input_size; j++) {
+        col.push_back(i % input_size);
+    }
+    colVectors.push_back(col);
+}
+  auto colArrayVector = maker.arrayVector<int32_t>(colVectors, INTEGER()); 
 
-  auto rowVectors = maker.flatVector(rowVector);
-  auto colVectors = maker.flatVector(colVector);
+  auto rowVectors_f = maker.flatVector(rowVector);
+  auto colVectors_f = maker.flatVector(colVector);
   // auto rowVectors = maker.arrayVector<int_32_t>({rowVector}, INTEGER());
   // auto colVectors = maker.arrayVector<int_32_t>({colVector}, INTEGER());
-  auto inputRowVector_dense = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVector, rowVectors, colVectors});
+  auto inputRowVector_dense = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVector, rowVectors_f, colVectors_f});
+  // auto inputRowVector_dense_a = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVector, rowArrayVector, colArrayVector});
 
   std::vector<float> flattenedVector;
   for (const auto& featureVector : featureVectors) {
@@ -984,7 +1062,7 @@ int main(int argc, char** argv) {
   }
 
   auto featureArrayVectorFlat = maker.flatVector(flattenedVector);
-  auto inputRowVector_dense_flat = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVectorFlat, rowVectors, colVectors});
+  auto inputRowVector_dense_flat = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVectorFlat, rowVectors_f, colVectors_f});
 
 
   exec::registerVectorFunction(
@@ -1016,18 +1094,16 @@ int main(int argc, char** argv) {
   std::cout << "Dense Results:" << results_dense->toString() << std::endl;
   std::cout << results_dense->toString(0, results_dense->size()) << std::endl;
 
-  auto newplan = Optest(myDensePlan, inputRowVector_dense_flat, output_size, size, weights);
+  // auto newplan = Optest(myDensePlan, inputRowVector_dense_flat, output_size, size, weights);
   
   auto nodeid = myDensePlan->id();
   auto str = planbuilder.findExprStrings(nodeid);
 
-  auto myDensePlanF = exec::test::PlanBuilder(pool_.get())
-                  .values({inputRowVector_dense})
-                  .project({"relu(mat_add(mat_mul(x)))"})
-		              .planFragment();
-
+  auto myDensePlanF = planbuilder.planFragment();
+  core::PlanNodePtr newplan = nullptr;
   Optimizer op(queryCtx_);
   auto ops = op.traverse(myDensePlanF);
+
   for (const auto& op : ops) {
   // TODO: Add more logic to determine if the operator should be insert to candidates.
   // Here only check the type of an operator.
@@ -1038,7 +1114,25 @@ int main(int argc, char** argv) {
     std::cout << "\n" << std::endl;
     std::cout << "The expression tree: " << std::endl;
     const std::unique_ptr<exec::ExprSet>& exprs = fp->getExprs();
-    auto call = std::dynamic_pointer_cast<MLFunction>(exprs->exprs()[0]->vectorFunction());//inputs_ contains mat_add
+
+    std::shared_ptr<exec::VectorFunction> result = nullptr;
+    for (const auto& expr : exprs->exprs()) {
+        result = findName(expr);
+        if (result) {
+            break;
+        }
+    }
+
+    if (result) {
+        auto call = std::dynamic_pointer_cast<MatrixMultiply>(result);
+        newplan = Optest(myDensePlan, inputRowVector_dense_flat, weights, 
+        call->getDims()[1], call->getDims()[0]*call->getDims()[1], str);
+    } else {
+        std::cout << "No layer with the desired name found." << std::endl;
+    }
+
+    // auto call = std::dynamic_pointer_cast<MLFunction>(exprs->exprs()[0]->vectorFunction());//inputs_ contains mat_add
+    
     std::cout << exprs->toString(false /*compact*/) << std::endl;
 
     // Use exprs as needed.

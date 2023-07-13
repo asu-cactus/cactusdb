@@ -700,6 +700,19 @@ class PlanBuilder {
     return core::PlanFragment{planNode_};
   }
 
+  PlanBuilder& planBuild() {
+    return *this;
+  }
+
+  std::vector<std::string> findExprStrings(core::PlanNodeId& nodeId) const {
+    auto it = exprStringsMap_.find(nodeId);
+    if (it != exprStringsMap_.end()) {
+      return it->second;
+    }
+    return {}; // Return an empty vector if the nodeId is not found
+  }
+
+
   /// Add a user-defined PlanNode as the root of the plan. 'func' takes
   /// the current root of the plan and returns the new root.
   PlanBuilder& addNode(
@@ -780,5 +793,6 @@ class PlanBuilder {
  private:
   std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator_;
   memory::MemoryPool* pool_;
+  std::unordered_map<core::PlanNodeId, std::vector<std::string>> exprStringsMap_;
 };
 } // namespace facebook::velox::exec::test
