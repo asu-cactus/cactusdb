@@ -28,7 +28,7 @@ using namespace facebook::velox::exec::test;
 
 
 
-class DNNBuilder {
+class NNBuilder {
  public:
 
   enum Activation {
@@ -36,19 +36,18 @@ class DNNBuilder {
     SOFTMAX   
   };
 
-  DNNBuilder() {
+  NNBuilder() {
     function_count = 0;
     compute_string = "{}";
-
   }
 
-  ~DNNBuilder() {}
+  ~NNBuilder() {}
 
   std::string build(){
     return compute_string;
   }
 
-  DNNBuilder& denseLayer(int units, int input_size, float* weights, float* bias, Activation ac){
+  NNBuilder& denseLayer(int units, int input_size, float* weights, float* bias, Activation ac){
 
     std::string mat_mul_name = MatrixMultiply::getName() + std::to_string(function_count++);
     std::string mat_add_name = MatrixAddition::getName() + std::to_string(function_count++);
@@ -87,7 +86,59 @@ class DNNBuilder {
     return *this;
   }
 
+  NNBuilder& convLayer(int num_filters, int* dims, float* weights, float* bias, Activation ac){
+
+    std::string conv_name = Convolute::getName() + std::to_string(function_count++);
+    std::string scal_add_name = VectorScalarAddition::getName() + std::to_string(function_count++);
+    std::string act_name = "";
+
+    exec::registerVectorFunction(
+        conv_name,
+        Convolute::signatures(),
+        std::make_unique<Convolute>(weights, dims)
+    );
+
+
+    exec::registerVectorFunction(
+        scal_add_name,
+        VectorScalarAddition::signatures(),
+        std::make_unique<VectorScalarAddition>(bias, num_filters)
+    );
+
+    if(ac == RELU){
+      act_name = Relu::getName() + std::to_string(function_count++);
+      exec::registerVectorFunction(
+        act_name,
+        Relu::signatures(),
+        std::make_unique<Relu>()
+     );
+    }
+    else{
+      act_name = Softmax::getName() + std::to_string(function_count++);
+      exec::registerVectorFunction(
+        act_name,
+        Softmax::signatures(),
+        std::make_unique<Softmax>()
+     );
+    }
+    compute_string = fmt::format("{}({}({}({})))", act_name, scal_add_name, conv_name, compute_string);
+    return *this;
+  }
+
+  NNBuilder& maxPoolLayer(int side, int height, int width) {
+    std::string max_pool_name = MaxPool::getName() + std::to_string(function_count++);
+    exec::registerVectorFunction(
+        max_pool_name,
+        MaxPool::signatures(),
+        std::make_unique<MaxPool>(side, height, width)
+    );
+    compute_string = fmt::format("{}({})", max_pool_name, compute_string);
+    return *this;
+  }
+
   private:
     int function_count;
     std::string compute_string;
 };
+
+
