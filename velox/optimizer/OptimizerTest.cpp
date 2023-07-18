@@ -715,11 +715,19 @@ std::shared_ptr<core::QueryCtx> queryCtx_{
 
 core::PlanNodePtr& Optest(core::PlanNodePtr source, RowVectorPtr data, FlatVectorPtr<float> weights, 
 int output_size, int size, std::vector<std::string> str){
+  int input_size = size / output_size;
    exec::registerVectorFunction(
     "adapter",
     ADP::signatures(),
     std::make_unique<ADP>()
   );
+
+    exec::registerVectorFunction(
+    "mat_mul_s",
+    MatrixMultiply_s::signatures(),
+    std::make_unique<MatrixMultiply_s>(2, 5)
+  );
+
   VectorMaker maker{pool_.get()};
 
   optimizerBuilder opBuilder;
@@ -729,6 +737,11 @@ int output_size, int size, std::vector<std::string> str){
 
   auto plan_2 = opBuilder.project_O({fmt::format("{}_col", x_var), fmt::format("{}_row", x_var),fmt::format("{}", x_var)}, plan_1);
 
+  auto results_2 = exec::test::AssertQueryBuilder(plan_2).copyResults(pool_.get());
+  std::cout << "2 Results:" << results_2->toString() << std::endl;
+  std::cout << results_2->toString(0, results_2->size()) << std::endl;
+
+
   std::vector<int> weighsrowVector;
   std::vector<int> weighscolVector;
   for (int i=0; i < size; i++) {
@@ -737,7 +750,7 @@ int output_size, int size, std::vector<std::string> str){
     weighsrowVector.push_back(rowIndex);
     weighscolVector.push_back(colIndex);
   }
-int input_size = size / output_size;
+
 std::vector<std::vector<float>> weightsArray;
 
 for (int i = 0; i < input_size; i++) {
@@ -752,11 +765,40 @@ for (int i = 0; i < input_size; i++) {
 }
   auto weightsArrayVector = maker.arrayVector<float>(weightsArray, REAL());
 
+std::vector<std::vector<float>> weightsArray_3;
+
+for (int i = 0; i < output_size; i++) {
+    std::vector<float> weightsArrayrow_3;
+    for (int j = 0; j < input_size; j++) {
+        int index = i + output_size * j;
+        if (index < size) {
+            weightsArrayrow_3.push_back(weights->valueAt(index));
+        }
+    }
+    weightsArray_3.push_back(weightsArrayrow_3);
+}
+  auto weightsArrayVector_3 = maker.arrayVector<float>(weightsArray_3, REAL());
+
+  std::vector<float> w0 = {0, 10, 20, 30, 40, 50, 60, 70, 80, 90};
+  std::vector<float> w1 = {100, 110, 120, 130, 140, 150, 160, 170, 180, 190};
+  std::vector<float> w2 = {200, 210, 220, 230, 240, 250, 260, 270, 280, 290};
+  std::vector<float> w3 = {300, 310, 320, 330, 340, 350, 360, 370, 380, 390};
+  std::vector<float> w4 = {400, 410, 420, 430, 440, 450, 460, 470, 480, 490};
+
+  std::vector<std::vector<float>> weightsArray_4;
+  weightsArray_4.push_back(w0);
+  weightsArray_4.push_back(w1);
+  weightsArray_4.push_back(w2);
+  weightsArray_4.push_back(w3);
+  weightsArray_4.push_back(w4);
+
+auto weightsArrayVector_4 = maker.arrayVector<float>(weightsArray_4, REAL());
+
   std::vector<std::vector<int>> weighsrowVectors;
   for (int i = 0; i < input_size; i++) {
     std::vector<int> weighsrow;
     for (int j = 0; j < output_size; j++) {
-        weighsrow.push_back(i / output_size);
+        weighsrow.push_back(i);
     }
     weighsrowVectors.push_back(weighsrow);
 }
@@ -765,31 +807,63 @@ for (int i = 0; i < input_size; i++) {
   for (int i = 0; i < input_size; i++) {
     std::vector<int> weighscol;
     for (int j = 0; j < output_size; j++) {
-        weighscol.push_back(i % output_size);
+        weighscol.push_back(j);
     }
     weighscolVectors.push_back(weighscol);
 }
   auto weighscolArrayVector = maker.arrayVector<int32_t>(weighscolVectors, INTEGER()); 
   // auto weighsrowVectors = maker.arrayVector<float>(weighsrowVector, REAL());
   // auto weighscolVectors = maker.arrayVector<float>(weighscolVector, REAL());
+  auto w_row_3 = maker.flatVector({0, 0, 0, 0, 0});
+  auto w_col_3 = maker.flatVector({0, 1, 2, 3, 4});
+
+  auto w_col_4 = maker.flatVector({0, 0, 0, 0, 0});
+  auto w_row_4 = maker.flatVector({0, 1, 2, 3, 4});
+
+
   auto weighsrowVectors_f = maker.flatVector(weighsrowVector);
   auto weighscolVectors_f = maker.flatVector(weighscolVector);
   auto inputRowVector_dense_weighs = maker.rowVector({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, {weights, weighsrowVectors_f, weighscolVectors_f});
-  // auto inputRowVector_dense_weighs_a = maker.rowVector({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, {weightsArrayVector, weighsrowArrayVector, weighscolArrayVector});
-  
-  auto plan_3 = opBuilder.values_O({inputRowVector_dense_weighs}, false, 1);
+  auto inputRowVector_dense_weighs_a = maker.rowVector({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, {weightsArrayVector, weighsrowArrayVector, weighscolArrayVector});
+  auto inputRowVector_dense_weighs_3 = maker.rowVector({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, {weightsArrayVector_3, w_row_3, w_col_3});
+  auto inputRowVector_dense_weighs_4 = maker.rowVector({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, {weightsArrayVector_4, w_row_4, w_col_4});
+
+  auto plan_3 = opBuilder.values_O({inputRowVector_dense_weighs_4}, false, 1);
   auto plan_4 = opBuilder.project_O({fmt::format("{}", w_var), fmt::format("{}_row", w_var), fmt::format("{}_col", w_var)}, plan_3);
 
-  auto plan_5 = opBuilder.hashjoin_O({fmt::format("{}_col", x_var)}, {fmt::format("{}_row", w_var)}, plan_4, "", {fmt::format("{}_row", x_var),fmt::format("{}_col", w_var), 
-fmt::format("{}", x_var), fmt::format("{}", w_var)}, plan_2, core::JoinType::kInner, false);
+  auto results_4 = exec::test::AssertQueryBuilder(plan_4).copyResults(pool_.get());
+  std::cout << "4 Results:" << results_4->toString() << std::endl;
+  std::cout << results_4->toString(0, results_4->size()) << std::endl;
 
-  auto plan_6 = opBuilder.project_O({fmt::format("{}_row", x_var), fmt::format("{}_col", w_var), fmt::format("{} * {} AS mp", x_var, w_var)}, plan_5);
+
+  auto plan_5 = opBuilder.hashjoin_O({fmt::format("{}_col", x_var)}, {fmt::format("{}_row", w_var)}, plan_4, "", {fmt::format("{}_col", x_var), fmt::format("{}_row", x_var),fmt::format("{}_col", w_var), 
+fmt::format("{}", x_var), fmt::format("{}", w_var)}, plan_2, core::JoinType::kInner, false);
+  auto plan_61 = opBuilder.project_O({fmt::format("{}_row", x_var), fmt::format("{}_col", w_var), fmt::format("{}", x_var), fmt::format("{}", w_var)}, plan_5);
+  
+  auto results_5 = exec::test::AssertQueryBuilder(plan_61).copyResults(pool_.get());
+  std::cout << "5 Results:" << results_5->toString() << std::endl;
+  std::cout << results_5->toString(0, results_5->size()) << std::endl;
+
+  auto plan_6 = opBuilder.project_O({fmt::format("{}_row", x_var), fmt::format("{}_col", w_var), "mat_mul_s(x, w) AS mp"}, plan_61);
+  
+  auto results_6 = exec::test::AssertQueryBuilder(plan_6).copyResults(pool_.get());
+  std::cout << "6 Results:" << results_6->toString() << std::endl;
+  std::cout << results_6->toString(0, results_6->size()) << std::endl;
+  
   auto plan_7 = opBuilder.aggregation_O({fmt::format("{}_col", w_var),fmt::format("{}_row", x_var)}, {}, {"sum(mp) AS result"}, 
 {}, core::AggregationNode::Step::kSingle, false, plan_6, {});
   
+  auto results_7 = exec::test::AssertQueryBuilder(plan_7).copyResults(pool_.get());
+  std::cout << "7 Results:" << results_7->toString() << std::endl;
+  std::cout << results_7->toString(0, results_7->size()) << std::endl;
+
   auto plan_8 = opBuilder.project_O({fmt::format("adapter({}_col, {}_row, result) AS res", w_var, x_var)}, plan_7);
   // auto plan_9 = opBuilder.filter_O({"res IS NOT NULL"}, plan_8);
   // auto plan_10 = opBuilder.project_O({"res"}, plan_9);
+
+  auto results_8 = exec::test::AssertQueryBuilder(plan_8).copyResults(pool_.get());
+  std::cout << "8 Results:" << results_8->toString() << std::endl;
+  std::cout << results_8->toString(0, results_8->size()) << std::endl;
 
   std::string searchString = fmt::format("mat_mul({})", x_var);
   std::string replaceString = "res";
@@ -801,7 +875,7 @@ fmt::format("{}", x_var), fmt::format("{}", w_var)}, plan_2, core::JoinType::kIn
   }
   
   static core::PlanNodePtr plan_9 = opBuilder.project_O({str[0]}, plan_8); // TODO: get the rest expression
-
+  
 
   return plan_9;
 };
@@ -1034,7 +1108,7 @@ int main(int argc, char** argv) {
   for (int i = 0; i < num_features; i++) {
     std::vector<int> row;
     for (int j = 0; j < input_size; j++) {
-        row.push_back(i / input_size);
+        row.push_back(i);
     }
     rowVectors.push_back(row);
 }
@@ -1043,7 +1117,7 @@ int main(int argc, char** argv) {
   for (int i = 0; i < num_features; i++) {
     std::vector<int> col;
     for (int j = 0; j < input_size; j++) {
-        col.push_back(i % input_size);
+        col.push_back(j);
     }
     colVectors.push_back(col);
 }
@@ -1053,8 +1127,34 @@ int main(int argc, char** argv) {
   auto colVectors_f = maker.flatVector(colVector);
   // auto rowVectors = maker.arrayVector<int_32_t>({rowVector}, INTEGER());
   // auto colVectors = maker.arrayVector<int_32_t>({colVector}, INTEGER());
+  auto x_row_3 = maker.flatVector({0, 1, 2});
+  auto x_col_3= maker.flatVector({0, 0, 0});
+
+  auto x_row_4 = maker.flatVector({0, 0, 0, 0, 0});
+  auto x_col_4= maker.flatVector({0, 1, 2, 3, 4});
+
+
+  std::vector<float> v0 = {0, 0, 0, 1, 0, 2};
+  std::vector<float> v1 = {0, 0, 2, 3, 4, 6};
+  std::vector<float> v2 = {0, 0, 4, 5, 8, 10};
+  std::vector<float> v3 = {0, 0, 6, 7, 12, 14};
+  std::vector<float> v4 = {0, 0, 8, 9, 16, 18};
+
+  std::vector<std::vector<float>> featureArrayVector_4;
+  featureArrayVector_4.push_back(v0);
+  featureArrayVector_4.push_back(v1);
+  featureArrayVector_4.push_back(v2);
+  featureArrayVector_4.push_back(v3);
+  featureArrayVector_4.push_back(v4);
+
+
+auto featureArrayVectors_4 = maker.arrayVector<float>(featureArrayVector_4, REAL());
+
+
   auto inputRowVector_dense = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVector, rowVectors_f, colVectors_f});
-  // auto inputRowVector_dense_a = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVector, rowArrayVector, colArrayVector});
+  auto inputRowVector_dense_a = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVector, rowArrayVector, colArrayVector});
+  auto inputRowVector_dense_a_3 = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVector, x_row_3, x_col_3});
+  auto inputRowVector_dense_a_4 = maker.rowVector({"x", "x_row", "x_col"}, {featureArrayVectors_4, x_row_4, x_col_4});
 
   std::vector<float> flattenedVector;
   for (const auto& featureVector : featureVectors) {
@@ -1084,7 +1184,7 @@ int main(int argc, char** argv) {
   );
 
   auto planbuilder = exec::test::PlanBuilder(pool_.get())
-                  .values({inputRowVector_dense})
+                  .values({inputRowVector_dense_a_3})
                   .project({"relu(mat_add(mat_mul(x)))"})
 		              .planBuild();
 
@@ -1125,7 +1225,7 @@ int main(int argc, char** argv) {
 
     if (result) {
         auto call = std::dynamic_pointer_cast<MatrixMultiply>(result);
-        newplan = Optest(myDensePlan, inputRowVector_dense_flat, weights, 
+        newplan = Optest(myDensePlan, inputRowVector_dense_a_4, weights, 
         call->getDims()[1], call->getDims()[0]*call->getDims()[1], str);
     } else {
         std::cout << "No layer with the desired name found." << std::endl;

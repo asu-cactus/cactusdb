@@ -4,6 +4,8 @@
 #include <cblas.h>
 #include <chrono>
 #include "velox/exec/Task.h"
+#include "velox/vector/DictionaryVector.h"
+#include "velox/vector/SimpleVector.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -32,8 +34,8 @@ class MatrixMultiply: public MLFunction {
 public:
     MatrixMultiply(float* weights, int num_rows, int num_cols) {
         weights_ = weights; 
-        dims.push_back(num_rows);
-        dims.push_back(num_cols);
+        dims.push_back(num_rows);//10
+        dims.push_back(num_cols);//5
     }
 
     void apply(
@@ -47,7 +49,7 @@ public:
         
         auto input_elements = args[0]->as<ArrayVector>()->elements();
         float* input_values = input_elements->values()->asMutable<float>();
-        int input_size = input_elements->size();
+        int input_size = input_elements->size();//30
 
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
@@ -86,6 +88,92 @@ public:
 
     static std::string getName() {
         return "mat_mul";
+    };
+
+
+private:
+    float* weights_;
+    
+};
+
+class MatrixMultiply_s: public MLFunction {
+public:
+    MatrixMultiply_s(int num_rows, int num_cols) {
+        dims.push_back(num_rows);
+        dims.push_back(num_cols);
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+        
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+        VectorMaker maker{context.pool()};
+ 
+        auto input_elements_w = args[1]->as<ArrayVector>()->elements();
+        float* input_values_w = input_elements_w->values()->asMutable<float>();
+
+        auto input_elements_v = args[0];
+        auto ss = args[0]->as<DictionaryVector<ComplexType>>();
+        auto ss2 = ss->valueVector();
+//         auto varrayVector = std::make_shared<ArrayVector<float>>();
+
+//         for (int row = 0; row < ss->size(); ++row) {
+//             auto innerIndex = ss->wrappedIndex(row);
+//             varrayVector.append(ss2->valueAt(innerIndex));
+//   }
+        // std::cout << "ss Results:" << ss->toString(2) << std::endl;
+        // // auto ss_vec = ss->wrappedVector();
+        // auto ss_0 = ss->valueAtFast(0);
+        // auto ss_1 = ss->valueAtFast(1);
+
+        auto ss3 = ss2->as<ArrayVector>()->elements();
+        // auto ss3 = varrayVector->elements();
+        float* input_values_v = ss3->values()->asMutable<float>();
+        int input_size_v = ss3->size();
+
+
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, 3, dims[0]);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); 
+        
+        
+        std::cout << "Matrix shapes Matmul" << std::endl;
+        std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
+        std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
+
+        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        std::cout << "Time difference (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        //std::cout << m << std::endl;
+
+        std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
+        for (int i = 0; i < m.rows(); ++i) {
+            for (int j = 0; j < m.cols(); ++j) {
+                result[i][j] = m(i, j);
+            }
+        }
+
+        output = maker.arrayVector<float>(result, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    static std::string getName() {
+        return "mat_mul_s";
     };
 
 
