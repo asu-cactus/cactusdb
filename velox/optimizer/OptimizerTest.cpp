@@ -1134,11 +1134,11 @@ int main(int argc, char** argv) {
   auto x_col_4= maker.flatVector({0, 1, 2, 3, 4});
 
 
-  std::vector<float> v0 = {0, 0, 0, 1, 0, 2};
-  std::vector<float> v1 = {0, 0, 2, 3, 4, 6};
-  std::vector<float> v2 = {0, 0, 4, 5, 8, 10};
-  std::vector<float> v3 = {0, 0, 6, 7, 12, 14};
-  std::vector<float> v4 = {0, 0, 8, 9, 16, 18};
+  std::vector<float> v0 = {1, 0, 0, 1, 0, 2};
+  std::vector<float> v1 = {1, 0, 2, 3, 4, 6};
+  std::vector<float> v2 = {1, 0, 4, 5, 8, 10};
+  std::vector<float> v3 = {1, 0, 6, 7, 12, 14};
+  std::vector<float> v4 = {1, 0, 8, 9, 16, 18};
 
   std::vector<std::vector<float>> featureArrayVector_4;
   featureArrayVector_4.push_back(v0);

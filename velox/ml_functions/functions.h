@@ -119,43 +119,59 @@ public:
         auto input_elements_v = args[0];
         auto ss = args[0]->as<DictionaryVector<ComplexType>>();
         auto ss2 = ss->valueVector();
-//         auto varrayVector = std::make_shared<ArrayVector<float>>();
+        auto ss3 = ss2->as<ArrayVector>()->elements();
+        float* input_values_v = ss3->values()->asMutable<float>();
+        // auto varrayVector = std::make_shared<ArrayVector<float>>();
+        const int elements_v_per_row = 6;
+        const int elements_w_per_row = 10;
+        std::vector<std::vector<float>> result(5, std::vector<float>(15));
+        for (int row = 0; row < ss->size(); ++row) {
+            auto innerIndex = ss->wrappedIndex(row);
+            float* current_v_row_ptr = input_values_v + (innerIndex * elements_v_per_row);
+            float* current_w_row_ptr = input_values_w + (row * elements_w_per_row);
 
-//         for (int row = 0; row < ss->size(); ++row) {
-//             auto innerIndex = ss->wrappedIndex(row);
-//             varrayVector.append(ss2->valueAt(innerIndex));
-//   }
+            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(current_v_row_ptr, 3, dims[0]);//3*2
+            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(current_w_row_ptr, dims[0], dims[1]); //2*5
+            Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
+            for (int i = 0; i < m.rows(); ++i) {
+                for (int j = 0; j < m.cols(); ++j) {
+                    result[row][i * 5 + j] = m(i, j);
+            }
+        }
+            // auto varray = ss2->valueAt(innerIndex);
+//   }         auto velement = varray->as<ArrayVector>()->elements();
+        }
         // std::cout << "ss Results:" << ss->toString(2) << std::endl;
         // // auto ss_vec = ss->wrappedVector();
         // auto ss_0 = ss->valueAtFast(0);
         // auto ss_1 = ss->valueAtFast(1);
 
-        auto ss3 = ss2->as<ArrayVector>()->elements();
+        // auto ss3 = ss2->as<ArrayVector>()->elements();
         // auto ss3 = varrayVector->elements();
-        float* input_values_v = ss3->values()->asMutable<float>();
-        int input_size_v = ss3->size();
 
 
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, 3, dims[0]);
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); 
+
+
+        // Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, 3, dims[0]);
+        // Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); 
         
         
-        std::cout << "Matrix shapes Matmul" << std::endl;
-        std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
-        std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
+        // std::cout << "Matrix shapes Matmul" << std::endl;
+        // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
+        // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
-        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        std::cout << "Time difference (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
-        //std::cout << m << std::endl;
+        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+        // Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
+        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        // std::cout << "Time difference (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        // //std::cout << m << std::endl;
 
-        std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
-        for (int i = 0; i < m.rows(); ++i) {
-            for (int j = 0; j < m.cols(); ++j) {
-                result[i][j] = m(i, j);
-            }
-        }
+        // std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
+        // for (int i = 0; i < m.rows(); ++i) {
+        //     for (int j = 0; j < m.cols(); ++j) {
+        //         result[i][j] = m(i, j);
+        //     }
+        // }
 
         output = maker.arrayVector<float>(result, REAL());
     }
