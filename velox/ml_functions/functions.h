@@ -20,7 +20,9 @@ using namespace facebook::velox::memory;
     5. padding
     6. concatenate
     7. embedding
-    8. GRU
+    8. transformer -> exiting libraries, encoder, decoder, how to decompoose it into atomic linear algebra
+    // focus on weight 
+    9. GRU -> not interesting 
 
 */
 
@@ -39,6 +41,8 @@ class MLFunction : public exec::VectorFunction {
         virtual int getNumDims(){
             return dims.size();
         }
+
+       
 };
 
 class MatrixMultiply: public MLFunction {
@@ -48,6 +52,13 @@ public:
         dims.push_back(num_rows);
         dims.push_back(num_cols);
     }
+
+     MatrixMultiply(std::string weightsFile, int num_rows, int num_cols) {
+        weightsFile_ = weightsFile; 
+        dims.push_back(num_rows);
+        dims.push_back(num_cols);
+    }
+
 
     void apply(
         const SelectivityVector& rows,
@@ -100,9 +111,18 @@ public:
         return "mat_mul";
     };
 
+    std::string getWeightsFile() {
+        return weightsFile_;
+    }
+
+    void setWeights(float* weights){
+        weights_ = weights;
+    }
+
 
 private:
     float* weights_;
+    std::string weightsFile_;
     
 };
 
@@ -112,6 +132,11 @@ class MatrixAddition: public MLFunction {
 public:
     MatrixAddition(float* weights, int num_cols) {
         weights_ = weights;
+        dims.push_back(num_cols);
+    }
+
+    MatrixAddition(std::string weightsFile, int num_cols) {
+        weightsFile_ = weightsFile;
         dims.push_back(num_cols);
     }
 
@@ -162,7 +187,6 @@ public:
                      .build()};
     }
 
-
     float* getTensor() const override {
         return weights_;
     }
@@ -171,8 +195,17 @@ public:
         return "mat_add";
     };
 
+    std::string getWeightsFile() {
+        return weightsFile_;
+    }
+
+    void setWeights(float* weights){
+        weights_ = weights;
+    }
+
 private:
     float* weights_;
+    std::string weightsFile_;
 
 };
 

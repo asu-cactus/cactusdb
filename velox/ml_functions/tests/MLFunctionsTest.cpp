@@ -37,8 +37,12 @@
 #include "velox/ml_functions/NNBuilder.h"
 #include <fstream>
 #include <sstream>
+#include <string>
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
+#include "velox/exec/tests/utils/TempDirectoryPath.h"
+#include "velox/common/memory/MemoryArbitrator.h"
+#include "velox/vector/fuzzer/VectorFuzzer.h"
 
 
 
@@ -46,6 +50,7 @@ using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec;
 using namespace facebook::velox::exec::test;
+using namespace facebook::velox::core;
 
 constexpr int64_t KB = 1024L;
 constexpr int64_t MB = 1024L * KB;
@@ -84,7 +89,40 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   void test_multithreading_oom();
   void test_batching();
   void test_conv2d();
+  void test_spill();
+  void test_mnist_multithreading();
+  void test_torch_dense_layer_multithreading();
+  void mytest();
+  void test_mnist_oom_weights();
+
+  std::unique_ptr<MemoryManager> memoryManager_;
+  
+  uint64_t kMemoryCapacity = 512 * MB;
+  uint64_t kInitMemoryPoolCapacity = 16 * MB;
+  uint64_t kMinMemoryPoolCapacityTransferSize = 8 * MB;
+
+  std::shared_ptr<core::QueryCtx> newQueryCtx(
+      int64_t memoryCapacity) {
+    
+    std::unordered_map<std::string, std::shared_ptr<Config>> configs;
+    std::shared_ptr<MemoryPool> pool = memory::defaultMemoryManager().addRootPool(
+        "", memoryCapacity, MemoryReclaimer::create());
+   std::unordered_map<std::string, std::string> myMapWithValues = {{core::QueryConfig::kSpillEnabled, "true"}, 
+                                      {core::QueryConfig::kJoinSpillEnabled, "true"},  
+                                      {core::QueryConfig::kJoinSpillMemoryThreshold, "1"},
+                                       {core::QueryConfig::kSpillableReservationGrowthPct, "1"},
+                                       {core::QueryConfig::kSpillPartitionBits, "1"}
+                                      };
+    auto queryCtx = std::make_shared<core::QueryCtx>(
+        executor_.get(),
+        myMapWithValues,
+        configs,
+        memory::MemoryAllocator::getInstance(),
+        std::move(pool));
+    return queryCtx;
+  }
   FlatVectorPtr<float> get_tensor(std::ifstream& file, int size, int lines);
+  FlatVectorPtr<float> get_tensor(VectorMaker& m, std::ifstream& file, int size, int lines);
 
 
   void SetUp() {
@@ -317,9 +355,9 @@ void MLFunctionsTest::test_dense_layer() {
 void MLFunctionsTest::test_torch_dense_layer(){
  
   int input_size = 784; // num_features
-  int layer1_size = 20; // num units in hidden layer 1
+  int layer1_size = 1024; // num units in hidden layer 1
   int layer2_size = 10;
-  int num_samples = 20;
+  int num_samples = 60000;
   
   std::vector<int> dimensions;
   dimensions.push_back(input_size);
@@ -327,11 +365,13 @@ void MLFunctionsTest::test_torch_dense_layer(){
   dimensions.push_back(layer2_size);
   
   
-  std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
-  std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
-  std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
+  // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
+  // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
+  // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
  
-  
+  std::ifstream weights_file("/home/local/ASUAD/snola119/w1024.txt"); 
+  std::ifstream bias_file("/home/local/ASUAD/snola119/b1024.txt"); 
+  std::ifstream test_file("/home/local/ASUAD/snola119/x_test_large.txt"); 
 
   FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
   FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
@@ -378,16 +418,20 @@ void MLFunctionsTest::test_torch_dense_layer(){
 }
 
 void MLFunctionsTest::test_mnist() {
-    //Eigen::setNbThreads(12);
+    //Eigen::setNbThreads(1);
     std::cout << Eigen::nbThreads() << std::endl;
     int input_size = 784; // num_features
-    int layer1_size = 20; // num units in hidden layer 1
+    int layer1_size = 1024; // num units in hidden layer 1
     int layer2_size = 10;
-    int num_samples = 10;
+    int num_samples = 60000;
 
-    std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
-    std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
-   std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
+    // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
+    // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
+    // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
+    std::ifstream weights_file("/home/local/ASUAD/snola119/w1024.txt"); 
+    std::ifstream bias_file("/home/local/ASUAD/snola119/b1024.txt"); 
+    std::ifstream test_file("/home/local/ASUAD/snola119/x_test_large.txt"); 
+
 
     FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
     FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
@@ -443,7 +487,12 @@ void MLFunctionsTest::test_mnist() {
 }
 
 FlatVectorPtr<float> MLFunctionsTest::get_tensor(std::ifstream& file, int size, int lines){
-    FlatVectorPtr<float> tensor = maker.flatVector<float>(size);
+    return get_tensor(maker,file,size,lines);
+}
+
+FlatVectorPtr<float> MLFunctionsTest::get_tensor(VectorMaker& m, std::ifstream& file, int size, int lines){
+    std::cout << "Loading tensor of size " << size << std::endl;
+    FlatVectorPtr<float> tensor = m.flatVector<float>(size);
     int index = 0;
     std::string line;
     while (lines--) { // Read a line from the file
@@ -460,12 +509,13 @@ FlatVectorPtr<float> MLFunctionsTest::get_tensor(std::ifstream& file, int size, 
 }
 
 
+
 void MLFunctionsTest::test_multithreading() { 
 
-  int input_size = 1000;
+  int input_size = 100;
   int output_size = 500;
-  int num_samples = 6000;
-  // ( 600 * 1000 x 1000 * 500 )
+  int num_samples = 30000;
+  // ( 6000 * 1000 x 1000 * 500 )
   int size = output_size * input_size;
   
   auto weights = maker.flatVector<float>(size);
@@ -502,24 +552,32 @@ void MLFunctionsTest::test_multithreading() {
 		              .project({"mat_mul(x)"})
                   .planFragment();
 
-  // queryCtx_->testingOverrideConfigUnsafe(
-  //     {{core::QueryConfig::kPreferredOutputBatchRows, "400"}, {core::QueryConfig::kPreferredOutputBatchBytes, "2000000"},  {core::QueryConfig::kMaxOutputBatchRows, "300"}});
-  // Create task
+  
   std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 500 * MB)};
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
-  queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
-
   auto file = TempFilePath::create();
-  writeToFile(file->path, {inputRowVector});
+  auto config = std::make_shared<facebook::velox::dwrf::Config>();
+
+  // affects the number of splits
+  // number of bites in each stripe (collection of rows)
+  // strip size should be <= split size (total_size / total splits)
+  // to have the desired number of splits
+  uint64_t kSizeKB = 1024UL;
+
+  // used for indexing. 
+  // 2k rows will be processed in every call
+  // but doesn't effect number of splits
+  // if stripe size is a large value
+  uint32_t rows = 2000;
+
+  config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
+  config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
+  writeToFile(file->path, {inputRowVector}, config);
   
   std::vector<std::shared_ptr<TempFilePath>> paths;
-  int num_splits = 20;
-  for(int i=0; i < num_splits; i++)
-    paths.push_back(file);
-  auto hiveSplits = makeHiveConnectorSplits(paths);
- 
-  int concurrency = 4;
+  auto hiveSplits =  makeHiveConnectorSplits(file->path, 3, dwio::common::FileFormat::DWRF);
+  int concurrency = 3;
   boost::interprocess::interprocess_semaphore semaphore(concurrency);
 
   auto task = exec::Task::create("0", plan0 , 0, queryCtx_, 
@@ -532,7 +590,6 @@ void MLFunctionsTest::test_multithreading() {
           return exec::BlockingReason::kNotBlocked;
   });
 
-  // Create 2 hive splits and add them to task
   task->start(task, concurrency);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
@@ -542,7 +599,6 @@ void MLFunctionsTest::test_multithreading() {
   }
   task->noMoreSplits(p0);
   std::cout << std::endl;
-  // Start task with 2 as maximum drivers and wait for execution to finish
  
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   waitForFinishedDrivers(task);
@@ -550,6 +606,71 @@ void MLFunctionsTest::test_multithreading() {
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 }
 
+void MLFunctionsTest::mytest() {
+  constexpr int32_t kNumRows = 2000; 
+  constexpr int64_t kMaxBytes = 1LL << 30; // 1GB
+  auto rowType = ROW({"c0", "c1", "c2"}, {INTEGER(), INTEGER(), INTEGER()}); 
+  VectorFuzzer fuzzer({}, pool_.get());
+  const int32_t numBatches = 5;
+  std::vector<RowVectorPtr> batches;
+  for (int32_t i = 0; i < numBatches; ++i) {
+    batches.push_back(fuzzer.fuzzRow(rowType));
+  }
+  struct {
+    uint64_t orderByMemLimit;
+    bool expectSpill;
+
+    std::string debugString() const {
+      return fmt::format(
+          "orderByMemLimit:{}, expectSpill:{}", orderByMemLimit, expectSpill);
+    }
+  } testSettings[] = {// Memory limit is disabled so spilling is not triggered.
+                      {0, false},
+                      // Memory limit is too small so always trigger spilling.
+                      {1, true},
+                      // Memory limit is too large so spilling is not triggered.
+                      {1'000'000'000, false}};
+
+  for (const auto& testData : testSettings) {
+    SCOPED_TRACE(testData.debugString());
+    auto tempDirectory = exec::test::TempDirectoryPath::create();
+    auto queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
+    queryCtx->testingOverrideMemoryPool(
+        memory::defaultMemoryManager().addRootPool(
+            queryCtx->queryId(), kMaxBytes));
+    auto results =
+        AssertQueryBuilder(
+            PlanBuilder()
+                .values(batches)
+                .orderBy({fmt::format("{} ASC NULLS LAST", "c0")}, false)
+                .planNode())
+            .queryCtx(queryCtx)
+            .copyResults(pool_.get());
+    auto task =
+        AssertQueryBuilder(
+            PlanBuilder()
+                .values(batches)
+                .orderBy({fmt::format("{} ASC NULLS LAST", "c0")}, false)
+                .planNode())
+            .queryCtx(queryCtx)
+            .spillDirectory(tempDirectory->path)
+            .config(core::QueryConfig::kSpillEnabled, "true")
+            .config(core::QueryConfig::kOrderBySpillEnabled, "true")
+            .config(
+                QueryConfig::kOrderBySpillMemoryThreshold,
+                std::to_string(testData.orderByMemLimit))
+            .assertResults(results);
+
+    auto stats = task->taskStats().pipelineStats;
+    for(auto stat : stats){
+    for(auto ops : stat.operatorStats){
+      std::cout << ops.spilledBytes << " ";
+    }
+    std::cout << std::endl;
+    }
+    ASSERT_EQ(testData.expectSpill, stats[0].operatorStats[1].spilledBytes > 0);
+  }
+}
 // out of memory and gets stuck //
 // exception is not handles yet
 // stop the program after it is stuck
@@ -727,6 +848,271 @@ void MLFunctionsTest::test_batching() {
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 }
 
+void MLFunctionsTest::test_spill(){
+
+  int lsize = 10000;
+  int rsize = 1000;
+
+  auto a = maker.flatVector<int>(lsize);
+  auto b = maker.flatVector<int>(lsize);
+
+  auto c = maker.flatVector<int>(rsize*rsize);
+  auto d = maker.flatVector<int>(rsize*rsize);
+
+
+  for(int i=0; i < lsize; i++){
+    a->set(i, i);
+    b->set(i, i*10);
+  } 
+
+  for(int i=0; i < rsize; i++) {
+    for(int j=0; j < rsize; j++){
+      c->set(i*rsize + j, j);
+      d->set(i*rsize + j, i*10);
+    }
+  } 
+
+  auto leftVectors = maker.rowVector({"l1","l2"}, {a, b});
+  auto rightVectors = maker.rowVector({"r1", "r2"}, {c, d});
+  const auto spillDirectory = exec::test::TempDirectoryPath::create();
+
+  auto qctx = newQueryCtx(27 * MB);
+  queryCtx_->testingOverrideMemoryPool(memory::defaultMemoryManager().addRootPool("root", 28 * MB));
+  queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}, 
+                                      {core::QueryConfig::kJoinSpillEnabled, "true"},  
+                                      {core::QueryConfig::kJoinSpillMemoryThreshold, std::to_string(27 * MB)},
+                                       {core::QueryConfig::kSpillableReservationGrowthPct, "0"},
+                                       {core::QueryConfig::kSpillPartitionBits, "1"}
+                                      });
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto buildSide = PlanBuilder(planNodeIdGenerator)
+                       .values({rightVectors})
+                       .project({"r1 AS u_r1", "r2 AS u_r2"})
+                       .planNode();
+
+  auto joinPlan = PlanBuilder(planNodeIdGenerator)
+                        .values({leftVectors})
+                        .project({"l1 AS u_l1", "l2 AS u_l2"})
+                        .hashJoin(
+                            {"u_l1"},
+                            {"u_r1"},
+                            buildSide,
+                            "",
+                            {"u_l1", "u_r1", "u_l2"},
+                            core::JoinType::kFull)
+                        .planFragment();
+
+  
+  
+  auto task = exec::Task::create("0", joinPlan , 0, std::move(qctx), 
+        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          return exec::BlockingReason::kNotBlocked;
+  });
+  task->setSpillDirectory(spillDirectory->path);
+  //auto task = exec::Task::create("0", joinPlan , 0, std::move(queryCtx_));
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  task->start(task, 1);
+  
+  waitForFinishedDrivers(task);
+  auto stats = task->taskStats().pipelineStats;
+  for(auto stat : stats){
+    for(auto ops : stat.operatorStats){
+      std::cout << ops.spilledBytes << " ";
+    }
+    std::cout << std::endl;
+  }
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Test (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+}
+
+void MLFunctionsTest::test_mnist_multithreading() {
+    //Eigen::setNbThreads(12);
+    std::cout << Eigen::nbThreads() << std::endl;
+    int input_size = 784; // num_features
+    int layer1_size = 1024; // num units in hidden layer 1
+    int layer2_size = 10;
+    int num_samples = 2;
+
+    // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
+    // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
+    // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
+    std::ifstream weights_file("/home/local/ASUAD/snola119/w1024.txt"); 
+    std::ifstream bias_file("/home/local/ASUAD/snola119/b1024.txt"); 
+    std::ifstream test_file("/home/local/ASUAD/snola119/x_test_large.txt"); 
+
+    FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
+    FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
+    FlatVectorPtr<float> weights_2 = get_tensor(weights_file, layer2_size * layer1_size, layer1_size);
+    FlatVectorPtr<float> bias_2 = get_tensor(bias_file, layer2_size, 1);
+    weights_file.close();
+    bias_file.close();
+
+    float* bias_1_values = bias_1->values()->asMutable<float>();
+    float* bias_2_values = bias_2->values()->asMutable<float>();
+
+    FlatVectorPtr<float> bias_1_mat = maker.flatVector<float>(num_samples * layer1_size);
+    for(int i=0; i < bias_1_mat->size(); i++)
+      bias_1_mat->set(i, bias_1_values[i%layer1_size]);
+    
+    FlatVectorPtr<float> bias_2_mat = maker.flatVector<float>(num_samples * layer2_size);
+    for(int i=0; i < bias_2_mat->size(); i++)
+      bias_2_mat->set(i, bias_2_values[i%layer2_size]);
+
+    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples);
+    float* data = input->values()->asMutable<float>();
+
+    std::vector<std::vector<float>> featureVectors;
+    for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
+      std::vector<float> featureVector(data + cursor, data + cursor + input_size);
+      featureVectors.push_back(featureVector);
+    }
+
+    auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+    auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+
+    std::string compute =  NNBuilder()
+                          .denseLayer(layer1_size ,input_size, weights_1->values()->asMutable<float>(), 
+                            bias_1_mat->values()->asMutable<float>(), NNBuilder::RELU)
+                          .denseLayer(layer2_size ,layer1_size, weights_2->values()->asMutable<float>(), 
+                            bias_2_mat->values()->asMutable<float>(), NNBuilder::SOFTMAX)
+                          .build();
+
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    core::PlanNodeId p0;
+  
+    std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+    auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(asRowType(inputRowVector->type()))
+                  .capturePlanNodeId(p0)
+                  .project({fmt::format(compute, "x")}) 
+		              .planFragment();
+    
+  
+  auto file = TempFilePath::create();
+  writeToFile(file->path, {inputRowVector});
+  
+  std::vector<std::shared_ptr<TempFilePath>> paths;
+  int num_splits = 20;
+  for(int i=0; i < num_splits; i++)
+    paths.push_back(file);
+  auto hiveSplits = makeHiveConnectorSplits(paths);
+ 
+  auto task = exec::Task::create("0", plan , 0, queryCtx_, 
+        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          if(result){
+            std::cout << result->toString(0, result->size()) << std::endl;
+          }
+          return exec::BlockingReason::kNotBlocked;
+  });
+
+  // Create 2 hive splits and add them to task
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    std::cout << split->toString() << std::endl;
+    task->addSplit(p0, exec::Split(std::move(split)));
+  }
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  task->start(task, num_splits);
+  task->noMoreSplits(p0);
+  // Start task with 2 as maximum drivers and wait for execution to finish
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+}
+
+void MLFunctionsTest::test_torch_dense_layer_multithreading(){
+ 
+  int input_size = 784; // num_features
+  int layer1_size = 1024; // num units in hidden layer 1
+  int layer2_size = 10;
+  int num_samples = 60000;
+  
+  std::vector<int> dimensions;
+  dimensions.push_back(input_size);
+  dimensions.push_back(layer1_size);
+  dimensions.push_back(layer2_size);
+  
+  
+  // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
+  // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
+  // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
+ 
+  std::ifstream weights_file("/home/local/ASUAD/snola119/w1024.txt"); 
+  std::ifstream bias_file("/home/local/ASUAD/snola119/b1024.txt"); 
+  std::ifstream test_file("/home/local/ASUAD/snola119/x_test_large.txt"); 
+
+  FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
+  FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
+  FlatVectorPtr<float> weights_2 = get_tensor(weights_file, layer2_size * layer1_size, layer1_size);
+  FlatVectorPtr<float> bias_2 = get_tensor(bias_file, layer2_size, 1);
+  weights_file.close();
+  bias_file.close();
+
+  FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples);
+  float* data = input->values()->asMutable<float>();
+
+  std::vector<std::vector<float>> featureVectors;
+  for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
+    std::vector<float> featureVector(data + cursor, data + cursor + input_size);
+    featureVectors.push_back(featureVector);
+  }
+
+
+  auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+  auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+ 
+  float* weights[2] = {weights_1->values()->asMutable<float>(), weights_2->values()->asMutable<float>()};
+  float* bias[2] = {bias_1->values()->asMutable<float>(), bias_2->values()->asMutable<float>()};
+
+  // step1: Register
+  exec::registerVectorFunction(
+    "torchDNN",
+    TorchDNN::signatures(),
+    std::make_unique<TorchDNN>(weights, bias, dimensions)
+  );
+
+                   
+
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    core::PlanNodeId p0;
+  
+  auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(asRowType(inputRowVector->type()))
+                  .capturePlanNodeId(p0)
+                  .project({"torchDNN(x)"})
+		              .planFragment();
+    
+  
+  auto file = TempFilePath::create();
+  writeToFile(file->path, {inputRowVector});
+  
+  std::vector<std::shared_ptr<TempFilePath>> paths;
+  int num_splits = 1;
+  for(int i=0; i < num_splits; i++)
+    paths.push_back(file);
+  auto hiveSplits = makeHiveConnectorSplits(paths);
+ 
+  auto task = exec::Task::create("0", plan , 0, queryCtx_, 
+        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          return exec::BlockingReason::kNotBlocked;
+  });
+
+  // Create 2 hive splits and add them to task
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    std::cout << split->toString() << std::endl;
+    task->addSplit(p0, exec::Split(std::move(split)));
+  }
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  task->start(task, num_splits);
+  task->noMoreSplits(p0);
+  // Start task with 2 as maximum drivers and wait for execution to finish
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  
+}
 
 void MLFunctionsTest::test_conv2d() {
     int cnn_layer1_filters = 64;
@@ -821,18 +1207,142 @@ void MLFunctionsTest::test_conv2d() {
 
 }
 
+void MLFunctionsTest::test_mnist_oom_weights() {
+    //Eigen::setNbThreads(12);
+    std::cout << Eigen::nbThreads() << std::endl;
+    int input_size = 784; // num_features
+    int layer1_size = 1024; // num units in hidden layer 1
+    int layer2_size = 10;
+    int num_samples = 2;
+
+    // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
+    // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
+    // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
+    std::string weights_file_name = "/home/local/ASUAD/snola119/w1024.txt";
+    std::string bias_file_name = "/home/local/ASUAD/snola119/b1024.txt";
+    std::string test_file_name = "/home/local/ASUAD/snola119/test_samples.txt";
+
+    
+    std::ifstream test_file(test_file_name); 
+
+    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples);
+    float* data = input->values()->asMutable<float>();
+
+    std::vector<std::vector<float>> featureVectors;
+    for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
+      std::vector<float> featureVector(data + cursor, data + cursor + input_size);
+      featureVectors.push_back(featureVector);
+    }
+
+    auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+    auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+
+    std::string compute =  NNBuilder(weights_file_name, bias_file_name)
+                          .denseLayer(layer1_size ,input_size, NNBuilder::RELU)
+                          .denseLayer(layer2_size ,layer1_size, NNBuilder::SOFTMAX)
+                          .build();
+    std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+    
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    core::PlanNodeId p0;
+
+    // total memory is 5MB
+    std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 4 * MB)};
+    auto childPool = rootPool->addLeafChild("leaf");
+    queryCtx_->testingOverrideMemoryPool(rootPool);
+
+
+    auto plan = exec::test::PlanBuilder(planNodeIdGenerator, childPool.get())
+                  .tableScan(asRowType(inputRowVector->type()))
+                  .capturePlanNodeId(p0)
+                  .project({fmt::format(compute, "x")}) 
+		              .planFragment();
+
+  // optimizer will init the weights
+  
+  auto mat_mul0 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul0", {ARRAY(REAL())}, {}));
+  auto mat_add1 = std::dynamic_pointer_cast<MatrixAddition>(exec::getVectorFunction("mat_add1", {ARRAY(REAL())}, {}));
+  auto mat_mul3 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul3", {ARRAY(REAL())}, {}));
+  auto mat_add4 = std::dynamic_pointer_cast<MatrixAddition>(exec::getVectorFunction("mat_add4", {ARRAY(REAL())}, {}));
+
+  std::ifstream weights_file(mat_mul0->getWeightsFile()); 
+  std::ifstream bias_file(mat_add1->getWeightsFile()); 
+
+  VectorMaker m{childPool.get()};
+
+  FlatVectorPtr<float> weights_1 = get_tensor(m, weights_file, layer1_size * input_size, input_size);
+  FlatVectorPtr<float> bias_1 = get_tensor(m, bias_file, layer1_size, 1);
+  FlatVectorPtr<float> weights_2 = get_tensor(m, weights_file, layer2_size * layer1_size, layer1_size);
+  FlatVectorPtr<float> bias_2 = get_tensor(m, bias_file, layer2_size, 1);
+  weights_file.close();
+  bias_file.close();
+
+  float* bias_1_values = bias_1->values()->asMutable<float>();
+  float* bias_2_values = bias_2->values()->asMutable<float>();
+
+  FlatVectorPtr<float> bias_1_mat = m.flatVector<float>(num_samples * layer1_size);
+  for(int i=0; i < bias_1_mat->size(); i++)
+    bias_1_mat->set(i, bias_1_values[i%layer1_size]);
+  
+  FlatVectorPtr<float> bias_2_mat = m.flatVector<float>(num_samples * layer2_size);
+  for(int i=0; i < bias_2_mat->size(); i++)
+    bias_2_mat->set(i, bias_2_values[i%layer2_size]);
+  
+  mat_mul0->setWeights(weights_1->values()->asMutable<float>());
+  mat_mul3->setWeights(weights_2->values()->asMutable<float>());
+  mat_add1->setWeights(bias_1_mat->values()->asMutable<float>());
+  mat_add4->setWeights(bias_2_mat->values()->asMutable<float>());
+
+  
+
+  auto file = TempFilePath::create();
+  writeToFile(file->path, {inputRowVector});
+  
+  std::vector<std::shared_ptr<TempFilePath>> paths;
+  int num_splits = 1;
+  for(int i=0; i < num_splits; i++)
+    paths.push_back(file);
+  auto hiveSplits = makeHiveConnectorSplits(paths);
+
+  
+ 
+  auto task = exec::Task::create("0", plan , 0, queryCtx_, 
+        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          if(result){
+            std::cout << result->toString(0, result->size()) << std::endl;
+          }
+          return exec::BlockingReason::kNotBlocked;
+  });
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    std::cout << split->toString() << std::endl;
+    task->addSplit(p0, exec::Split(std::move(split)));
+  }
+
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  task->start(task, num_splits);
+  task->noMoreSplits(p0);
+  // Start task with 2 as maximum drivers and wait for execution to finish
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+}
+
 void MLFunctionsTest::run() {
-  // test_mat_mul();
+  //  test_mat_mul();
   // test_mat_add();
   // test_relu();
   // test_dense_layer();
-  //   test_torch_dense_layer();
+  //   test_torch_dense_layer_multithreading();
   //   test_mnist();
-  //   test_multithreading();
+     test_multithreading();
   //  test_multithreading_oom();
-      test_batching();
+  //    test_batching();
   //  test_conv2d();
-   
+  //  test_spill();
+  //    mytest();
+  //  test_mnist_multithreading();
+  // test_mnist_oom_weights();
 
 }
 

@@ -30,6 +30,7 @@ target_link_libraries(
   velox_tpch_connector
   velox_memory
   velox_common_base 
+  velox_vector_fuzzer
   openblas
   ${TORCH_LIBRARIES}
 )
