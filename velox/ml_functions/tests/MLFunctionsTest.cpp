@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-//#define EIGEN_USE_BLAS
+#define EIGEN_USE_BLAS
 #include <folly/init/Init.h>
 #include "velox/connectors/tpch/TpchConnector.h"
 #include "velox/connectors/tpch/TpchConnectorSplit.h"
@@ -134,8 +134,9 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   }
 
   static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
+
     while (!task->isFinished()) {     
-      usleep(100'000); // 0.1 second.
+      usleep(10000); // 0.01 second.
     }
   }
 
@@ -508,8 +509,6 @@ FlatVectorPtr<float> MLFunctionsTest::get_tensor(VectorMaker& m, std::ifstream& 
     return tensor;
 }
 
-
-
 void MLFunctionsTest::test_multithreading() { 
 
   int input_size = 100;
@@ -567,7 +566,7 @@ void MLFunctionsTest::test_multithreading() {
 
   // used for indexing. 
   // 2k rows will be processed in every call
-  // but doesn't effect number of splits
+  // but doesn't effect number of splits ...
   // if stripe size is a large value
   uint32_t rows = 2000;
 
@@ -932,7 +931,14 @@ void MLFunctionsTest::test_mnist_multithreading() {
     int input_size = 784; // num_features
     int layer1_size = 1024; // num units in hidden layer 1
     int layer2_size = 10;
-    int num_samples = 2;
+    
+    std::ifstream conf_file("/home/local/ASUAD/snola119/samples.txt");
+    FlatVectorPtr<float> conf = get_tensor(conf_file, 2, 2);
+    float* confs = conf->values()->asMutable<float>();
+    conf_file.close();
+    std::cout << (int)confs[0] << (int)confs[1];
+    int num_samples = (int) confs[0];
+    int num_splits = (int) confs[1];
 
     // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
     // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
@@ -969,6 +975,7 @@ void MLFunctionsTest::test_mnist_multithreading() {
     }
 
     auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+
     auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
 
     std::string compute =  NNBuilder()
@@ -988,25 +995,34 @@ void MLFunctionsTest::test_mnist_multithreading() {
                   .project({fmt::format(compute, "x")}) 
 		              .planFragment();
     
-  
+   auto config = std::make_shared<facebook::velox::dwrf::Config>();
+
+  // affects the number of splits
+  // number of bites in each stripe (collection of rows)
+  // strip size should be <= split size (total_size / total splits)
+  // to have the desired number of splits
+  uint64_t kSizeKB = 1024UL;
+  // used for indexing. 
+  // 2k rows will be processed in every call
+  // but doesn't effect number of splits
+  // if stripe size is a large value
+  uint32_t rows = num_samples/num_splits;
+
+  config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
+  config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
   auto file = TempFilePath::create();
-  writeToFile(file->path, {inputRowVector});
+  writeToFile(file->path, {inputRowVector}, config);
   
-  std::vector<std::shared_ptr<TempFilePath>> paths;
-  int num_splits = 20;
-  for(int i=0; i < num_splits; i++)
-    paths.push_back(file);
-  auto hiveSplits = makeHiveConnectorSplits(paths);
+  auto hiveSplits =  makeHiveConnectorSplits(file->path, num_splits, dwio::common::FileFormat::DWRF);
  
   auto task = exec::Task::create("0", plan , 0, queryCtx_, 
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          if(result){
-            std::cout << result->toString(0, result->size()) << std::endl;
-          }
+          if(result)
+              std::cout << "Results:" << result->toString() << std::endl;
           return exec::BlockingReason::kNotBlocked;
   });
 
-  // Create 2 hive splits and add them to task
+  
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
     std::cout << split->toString() << std::endl;
@@ -1022,22 +1038,28 @@ void MLFunctionsTest::test_mnist_multithreading() {
 }
 
 void MLFunctionsTest::test_torch_dense_layer_multithreading(){
- 
+  torch::set_num_threads(1);
   int input_size = 784; // num_features
   int layer1_size = 1024; // num units in hidden layer 1
   int layer2_size = 10;
-  int num_samples = 60000;
-  
-  std::vector<int> dimensions;
-  dimensions.push_back(input_size);
-  dimensions.push_back(layer1_size);
-  dimensions.push_back(layer2_size);
-  
   
   // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
   // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
   // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
- 
+  std::ifstream conf_file("/home/local/ASUAD/snola119/samples.txt");
+  FlatVectorPtr<float> conf = get_tensor(conf_file, 2, 2);
+  float* confs = conf->values()->asMutable<float>();
+  conf_file.close();
+  std::cout << (int)confs[0] << (int)confs[1];
+
+  int num_samples = (int) confs[0];
+  int num_splits = (int) confs[1];
+
+  std::vector<int> dimensions;
+  dimensions.push_back(input_size);
+  dimensions.push_back(layer1_size);
+  dimensions.push_back(layer2_size);
+  //0.85 20 1
   std::ifstream weights_file("/home/local/ASUAD/snola119/w1024.txt"); 
   std::ifstream bias_file("/home/local/ASUAD/snola119/b1024.txt"); 
   std::ifstream test_file("/home/local/ASUAD/snola119/x_test_large.txt"); 
@@ -1082,19 +1104,33 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
                   .capturePlanNodeId(p0)
                   .project({"torchDNN(x)"})
 		              .planFragment();
-    
+   auto config = std::make_shared<facebook::velox::dwrf::Config>();
+
+  // affects the number of splits
+  // number of bites in each stripe (collection of rows)
+  // strip size should be <= split size (total_size / total splits)
+  // to have the desired number of splits
+  uint64_t kSizeKB = 1024UL;
+  // used for indexing. 
+  // 2k rows will be processed in every call
+  // but doesn't effect number of splits
+  // if stripe size is a large value
   
+
+  config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
+  config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, (uint32_t) (num_samples/num_splits));
   auto file = TempFilePath::create();
-  writeToFile(file->path, {inputRowVector});
+  writeToFile(file->path, {inputRowVector}, config);
   
-  std::vector<std::shared_ptr<TempFilePath>> paths;
-  int num_splits = 1;
-  for(int i=0; i < num_splits; i++)
-    paths.push_back(file);
-  auto hiveSplits = makeHiveConnectorSplits(paths);
- 
+  auto hiveSplits =  makeHiveConnectorSplits(file->path, num_splits, dwio::common::FileFormat::DWRF);
+  
+  
+  
   auto task = exec::Task::create("0", plan , 0, queryCtx_, 
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          if(result){
+            std::cout << "Results:" << result->toString() << std::endl;
+          }
           return exec::BlockingReason::kNotBlocked;
   });
 
@@ -1333,9 +1369,9 @@ void MLFunctionsTest::run() {
   // test_mat_add();
   // test_relu();
   // test_dense_layer();
-  //   test_torch_dense_layer_multithreading();
+    test_torch_dense_layer_multithreading();
   //   test_mnist();
-     test_multithreading();
+  //   test_multithreading();
   //  test_multithreading_oom();
   //    test_batching();
   //  test_conv2d();

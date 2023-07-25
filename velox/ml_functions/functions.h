@@ -77,14 +77,14 @@ public:
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
         
         
-        std::cout << "Matrix shapes Matmul" << std::endl;
-        std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
-        std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
+        // std::cout << "Matrix shapes Matmul" << std::endl;
+        // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
+        // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        //std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
         std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
         for (int i = 0; i < m.rows(); ++i) {
@@ -155,16 +155,16 @@ public:
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, rows.size(), dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, rows.size(), dims[0]);
         
-        std::cout << "Matrix shapes MatAdd" << std::endl;
-        std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
-        std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
+        // std::cout << "Matrix shapes MatAdd" << std::endl;
+        // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
+        // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
 
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 + m2;
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         
-        std::cout << "Time difference for Mat Add(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+       // std::cout << "Time difference for Mat Add(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         //std::cout << m << std::endl;
 
         int result_size = m.size();
@@ -236,8 +236,8 @@ public:
                 result[i][j] = std::max(0.0f, input_values[i*num_cols + j]);
             }
         }
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        std::cout << "Time difference for RELU(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        // std::cout << "Time difference for RELU(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
     }
@@ -287,7 +287,7 @@ public:
             exp.row(i) /= sum(i);
         }
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-         std::cout << "Time difference for Softmax(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+     //    std::cout << "Time difference for Softmax(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         std::vector<std::vector<float>> result(num_rows, std::vector<float>(num_cols));
         for (int i = 0; i < num_rows; ++i) {
             for (int j = 0; j < num_cols; ++j) {
@@ -330,7 +330,7 @@ public:
         const TypePtr& type,
         exec::EvalCtx& context,
         VectorPtr& output) const override {
-        // torch::set_num_threads(1);
+       
         torch::nn::Linear dense1(dims[0], dims[1]);
         torch::nn::Linear dense2(dims[1],dims[2]);
         torch::nn::ReLU relu;
@@ -348,6 +348,7 @@ public:
         auto input_elements = args[0]->as<ArrayVector>()->elements();
         float* input_values = input_elements->values()->asMutable<float>();
         int input_size = input_elements->size();
+        
         torch::Tensor input = torch::from_blob(input_values, {rows.size(), dims[0]});
 
         torch::Tensor layer1_output = dense1->forward(input);
