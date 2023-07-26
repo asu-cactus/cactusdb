@@ -136,7 +136,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
 
     while (!task->isFinished()) {     
-      usleep(10000); // 0.01 second.
+      usleep(1000); // 0.01 second.
     }
   }
 
@@ -1046,19 +1046,21 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
   // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
   std::ifstream conf_file("/home/ubuntu/samples.txt");
-  FlatVectorPtr<float> conf = get_tensor(conf_file, 2, 2);
+  FlatVectorPtr<float> conf = get_tensor(conf_file, 5, 5);
   float* confs = conf->values()->asMutable<float>();
   conf_file.close();
-  std::cout << (int)confs[0] << (int)confs[1];
+  
 
   int num_samples = (int) confs[0];
   int num_splits = (int) confs[1];
+  int concurrency = (int) confs[2];
+  std::cout << num_samples << num_splits << concurrency << std::endl;
 
   std::vector<int> dimensions;
   dimensions.push_back(input_size);
   dimensions.push_back(layer1_size);
   dimensions.push_back(layer2_size);
-  //0.85 20 1
+
   std::ifstream weights_file("/home/ubuntu/w1024.txt"); 
   std::ifstream bias_file("/home/ubuntu/b1024.txt"); 
   std::ifstream test_file("/home/ubuntu/x_test_large.txt"); 
@@ -1123,7 +1125,8 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   auto hiveSplits =  makeHiveConnectorSplits(file->path, num_splits, dwio::common::FileFormat::DWRF);
   
   
-  
+  queryCtx_->testingOverrideConfigUnsafe(
+      {{core::QueryConfig::kPreferredOutputBatchBytes, std::to_string((int)confs[3])}, {core::QueryConfig::kMaxOutputBatchRows, std::to_string((int)confs[4])}});
   auto task = exec::Task::create("0", plan , 0, queryCtx_, 
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
           // if(result){
@@ -1139,9 +1142,8 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
     task->addSplit(p0, exec::Split(std::move(split)));
   }
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(task, num_splits);
+  task->start(task, concurrency);
   task->noMoreSplits(p0);
-  // Start task with 2 as maximum drivers and wait for execution to finish
   waitForFinishedDrivers(task);
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
