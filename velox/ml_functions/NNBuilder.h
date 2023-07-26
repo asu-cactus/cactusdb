@@ -13,8 +13,6 @@
 #include "velox/tpch/gen/TpchGen.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 #include "velox/expression/VectorFunction.h"
-#include <Eigen/Dense>
-#include <cblas.h>
 #include <chrono>
 #include <torch/torch.h>
 #include "velox/exec/Task.h"

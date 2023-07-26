@@ -13,7 +13,7 @@
 # limitations under the License.
 
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
-set (CMAKE_PREFIX_PATH "$HOME/libtorch")
+set(CMAKE_PREFIX_PATH "$HOME/libtorch")
 find_package(Torch REQUIRED)
 
 

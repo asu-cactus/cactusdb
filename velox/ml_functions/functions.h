@@ -1,4 +1,3 @@
-//#define EIGEN_USE_BLAS
 #include "velox/expression/VectorFunction.h"
 #include <Eigen/Dense>
 #include <cblas.h>
@@ -155,16 +154,16 @@ public:
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, rows.size(), dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, rows.size(), dims[0]);
         
-        // std::cout << "Matrix shapes MatAdd" << std::endl;
-        // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
-        // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
+        std::cout << "Matrix shapes MatAdd" << std::endl;
+        std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
+        std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
 
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 + m2;
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         
-       // std::cout << "Time difference for Mat Add(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        std::cout << "Time difference for Mat Add(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         //std::cout << m << std::endl;
 
         int result_size = m.size();

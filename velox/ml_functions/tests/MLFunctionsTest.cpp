@@ -370,9 +370,9 @@ void MLFunctionsTest::test_torch_dense_layer(){
   // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
   // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
  
-  std::ifstream weights_file("/home/local/ASUAD/snola119/w1024.txt"); 
-  std::ifstream bias_file("/home/local/ASUAD/snola119/b1024.txt"); 
-  std::ifstream test_file("/home/local/ASUAD/snola119/x_test_large.txt"); 
+  std::ifstream weights_file("/home/ubuntu/w1024.txt"); 
+  std::ifstream bias_file("/home/ubuntu/b1024.txt"); 
+  std::ifstream test_file("/home/ubuntu/x_test_large.txt"); 
 
   FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
   FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
@@ -429,9 +429,9 @@ void MLFunctionsTest::test_mnist() {
     // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
     // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
     // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
-    std::ifstream weights_file("/home/local/ASUAD/snola119/w1024.txt"); 
-    std::ifstream bias_file("/home/local/ASUAD/snola119/b1024.txt"); 
-    std::ifstream test_file("/home/local/ASUAD/snola119/x_test_large.txt"); 
+    std::ifstream weights_file("/home/ubuntu/w1024.txt"); 
+    std::ifstream bias_file("/home/ubuntu/b1024.txt"); 
+    std::ifstream test_file("/home/ubuntu/x_test_large.txt"); 
 
 
     FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
@@ -926,26 +926,25 @@ void MLFunctionsTest::test_spill(){
 }
 
 void MLFunctionsTest::test_mnist_multithreading() {
-    //Eigen::setNbThreads(12);
-    std::cout << Eigen::nbThreads() << std::endl;
+    
     int input_size = 784; // num_features
     int layer1_size = 1024; // num units in hidden layer 1
     int layer2_size = 10;
     
-    std::ifstream conf_file("/home/local/ASUAD/snola119/samples.txt");
+    std::ifstream conf_file("/home/ubuntu/samples.txt");
     FlatVectorPtr<float> conf = get_tensor(conf_file, 2, 2);
     float* confs = conf->values()->asMutable<float>();
     conf_file.close();
     std::cout << (int)confs[0] << (int)confs[1];
     int num_samples = (int) confs[0];
     int num_splits = (int) confs[1];
-
+   
     // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
     // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
     // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
-    std::ifstream weights_file("/home/local/ASUAD/snola119/w1024.txt"); 
-    std::ifstream bias_file("/home/local/ASUAD/snola119/b1024.txt"); 
-    std::ifstream test_file("/home/local/ASUAD/snola119/x_test_large.txt"); 
+    std::ifstream weights_file("/home/ubuntu/w1024.txt"); 
+    std::ifstream bias_file("/home/ubuntu/b1024.txt"); 
+    std::ifstream test_file("/home/ubuntu/x_test_large.txt"); 
 
     FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
     FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
@@ -1014,11 +1013,11 @@ void MLFunctionsTest::test_mnist_multithreading() {
   writeToFile(file->path, {inputRowVector}, config);
   
   auto hiveSplits =  makeHiveConnectorSplits(file->path, num_splits, dwio::common::FileFormat::DWRF);
- 
+  
   auto task = exec::Task::create("0", plan , 0, queryCtx_, 
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          if(result)
-              std::cout << "Results:" << result->toString() << std::endl;
+           if(result)
+              std::cout << result->toString() << std::endl;
           return exec::BlockingReason::kNotBlocked;
   });
 
@@ -1038,7 +1037,7 @@ void MLFunctionsTest::test_mnist_multithreading() {
 }
 
 void MLFunctionsTest::test_torch_dense_layer_multithreading(){
-  torch::set_num_threads(1);
+  //torch::set_num_threads(1);
   int input_size = 784; // num_features
   int layer1_size = 1024; // num units in hidden layer 1
   int layer2_size = 10;
@@ -1046,7 +1045,7 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
   // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
   // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
-  std::ifstream conf_file("/home/local/ASUAD/snola119/samples.txt");
+  std::ifstream conf_file("/home/ubuntu/samples.txt");
   FlatVectorPtr<float> conf = get_tensor(conf_file, 2, 2);
   float* confs = conf->values()->asMutable<float>();
   conf_file.close();
@@ -1060,9 +1059,9 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   dimensions.push_back(layer1_size);
   dimensions.push_back(layer2_size);
   //0.85 20 1
-  std::ifstream weights_file("/home/local/ASUAD/snola119/w1024.txt"); 
-  std::ifstream bias_file("/home/local/ASUAD/snola119/b1024.txt"); 
-  std::ifstream test_file("/home/local/ASUAD/snola119/x_test_large.txt"); 
+  std::ifstream weights_file("/home/ubuntu/w1024.txt"); 
+  std::ifstream bias_file("/home/ubuntu/b1024.txt"); 
+  std::ifstream test_file("/home/ubuntu/x_test_large.txt"); 
 
   FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
   FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
@@ -1095,9 +1094,8 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   );
 
                    
-
-    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    core::PlanNodeId p0;
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  core::PlanNodeId p0;
   
   auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                   .tableScan(asRowType(inputRowVector->type()))
@@ -1128,9 +1126,9 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   
   auto task = exec::Task::create("0", plan , 0, queryCtx_, 
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          if(result){
-            std::cout << "Results:" << result->toString() << std::endl;
-          }
+          // if(result){
+          //   std::cout << result->toString(0, result->size()) << std::endl;
+          // }
           return exec::BlockingReason::kNotBlocked;
   });
 
@@ -1165,9 +1163,9 @@ void MLFunctionsTest::test_conv2d() {
 
     int dims1[] = {cnn_layer1_filters, cnn_layer1_filter_dims[0], cnn_layer1_filter_dims[1], cnn_layer1_filter_dims[2], input_dims[0], input_dims[1]};
     int dims2[] = {cnn_layer2_filters, cnn_layer2_filter_dims[0], cnn_layer2_filter_dims[1], cnn_layer2_filter_dims[2], input_dims[0] - cnn_layer1_filter_dims[0] + 1, input_dims[1] - cnn_layer1_filter_dims[1] + 1};
-    std::ifstream weights_file("/home/local/ASUAD/snola119/cnn_weights.txt"); 
-    std::ifstream bias_file("/home/local/ASUAD/snola119/cnn_bias.txt"); 
-    std::ifstream test_file("/home/local/ASUAD/snola119/test_file.txt"); 
+    std::ifstream weights_file("/home/ubuntu/cnn_weights.txt"); 
+    std::ifstream bias_file("/home/ubuntu/cnn_bias.txt"); 
+    std::ifstream test_file("/home/ubuntu/test_file.txt"); 
 
     FlatVectorPtr<float> weights_1 = get_tensor(weights_file, weights1_size, cnn_layer1_filters * cnn_layer1_filter_dims[2]);
     FlatVectorPtr<float> bias_1 = get_tensor(bias_file, cnn_layer1_filters, 1);
@@ -1254,9 +1252,9 @@ void MLFunctionsTest::test_mnist_oom_weights() {
     // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
     // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
     // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
-    std::string weights_file_name = "/home/local/ASUAD/snola119/w1024.txt";
-    std::string bias_file_name = "/home/local/ASUAD/snola119/b1024.txt";
-    std::string test_file_name = "/home/local/ASUAD/snola119/test_samples.txt";
+    std::string weights_file_name = "/home/ubuntu/w1024.txt";
+    std::string bias_file_name = "/home/ubuntu/b1024.txt";
+    std::string test_file_name = "/home/ubuntu/test_samples.txt";
 
     
     std::ifstream test_file(test_file_name); 
