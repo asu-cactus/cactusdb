@@ -38,7 +38,8 @@ add_library(
   ValueList.cpp
   VarianceAggregates.cpp
   MaxSizeForStatsAggregate.cpp
-  RegisterAggregateFunctions.cpp)
+  RegisterAggregateFunctions.cpp
+  SumArrayAggregate.cpp)
 
 target_link_libraries(
   velox_aggregates

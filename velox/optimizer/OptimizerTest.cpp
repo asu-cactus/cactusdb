@@ -850,7 +850,7 @@ fmt::format("{}", x_var), fmt::format("{}", w_var)}, plan_2, core::JoinType::kIn
   std::cout << "6 Results:" << results_6->toString() << std::endl;
   std::cout << results_6->toString(0, results_6->size()) << std::endl;
   
-  auto plan_7 = opBuilder.aggregation_O({fmt::format("{}_col", w_var),fmt::format("{}_row", x_var)}, {}, {"sum(mp) AS result"}, 
+  auto plan_7 = opBuilder.aggregation_O({fmt::format("{}_col", w_var),fmt::format("{}_row", x_var)}, {}, {"array_sum(mp) AS result"}, 
 {}, core::AggregationNode::Step::kSingle, false, plan_6, {});
   
   auto results_7 = exec::test::AssertQueryBuilder(plan_7).copyResults(pool_.get());

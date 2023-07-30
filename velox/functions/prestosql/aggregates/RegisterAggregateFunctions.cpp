@@ -38,6 +38,7 @@ extern void registerMinMaxAggregates(const std::string& prefix);
 extern void registerMinMaxByAggregates(const std::string& prefix);
 extern void registerSumAggregate(const std::string& prefix);
 extern void registerVarianceAggregates(const std::string& prefix);
+extern void registerSumArrayAggregate(const std::string& prefix);
 
 void registerAllAggregateFunctions(const std::string& prefix) {
   registerApproxDistinctAggregates(prefix);
@@ -61,6 +62,7 @@ void registerAllAggregateFunctions(const std::string& prefix) {
   registerMinMaxByAggregates(prefix);
   registerSumAggregate(prefix);
   registerVarianceAggregates(prefix);
+  registerSumArrayAggregate(prefix);
 }
 
 } // namespace facebook::velox::aggregate::prestosql
