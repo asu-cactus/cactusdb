@@ -54,7 +54,7 @@ class SumArrayAggregate : public exec::Aggregate {
     vector->resize(numGroups);
 
     auto elements = vector->elements()->as<FlatVector<float>>();
-    elements->resize(15);
+    elements->resize(1024000);
 
     uint64_t* rawNulls = getRawNulls(vector);
     vector_size_t offset = 0;
@@ -143,7 +143,7 @@ class SumArrayAggregate : public exec::Aggregate {
       auto rowOffset =  arrayVector->offsetAt(decodedRow);
       auto rowSize = arrayVector->sizeAt(decodedRow);
       auto& values = value<ArrayAccumulator>(group)->elements;
-      
+
       values.addValue(Valuesfloat, rowOffset, rowSize);
     });
   }

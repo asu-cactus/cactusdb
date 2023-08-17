@@ -18,7 +18,8 @@
 // #include <cblas.h>
 // #include <chrono>
 // #include <torch/torch.h>
-#include "velox/ml_functions/DNNBuilder.h"
+// #include "velox/ml_functions/DNNBuilder.h"
+#include "velox/ml_functions/NNBuilder.h"
 #include <fstream>
 #include <sstream>
 
@@ -881,7 +882,7 @@ fmt::format("{}", x_var), fmt::format("{}", w_var)}, plan_2, core::JoinType::kIn
 };
 
 const std::shared_ptr<exec::VectorFunction> findName(const std::shared_ptr<exec::Expr>& expr) {
-    if (expr->name() == "mat_mul") {
+    if (expr->name() == "mat_mul0") {
         return expr->vectorFunction();
     }
 
@@ -895,9 +896,8 @@ const std::shared_ptr<exec::VectorFunction> findName(const std::shared_ptr<exec:
     return nullptr;
 }
 
-int main(int argc, char** argv) {
-    
-    folly::init(&argc, &argv, false);
+void test_optimizer(int argc, char** argv) {
+  folly::init(&argc, &argv, false);
 
    functions::prestosql::registerAllScalarFunctions();
    aggregate::prestosql::registerAllAggregateFunctions();
@@ -905,172 +905,6 @@ int main(int argc, char** argv) {
    parse::registerTypeResolver();
 
    VectorMaker maker{pool_.get()};
-//    auto myVec = maker.flatVector<int64_t>({1, 10, 100, 1000, 10000});
-
-//     exec::registerVectorFunction(
-//         "vec_add_to_constant",
-//         AddVectorToConstant::signatures(),
-//         std::make_unique<AddVectorToConstant>(myVec, 5),
-//         AddVectorToConstant::metadata());
-
-//   exec::registerVectorFunction(
-//         "vec_plus",
-//         VectorMut::signatures(),
-//         std::make_unique<VectorMut>(),
-//         VectorMut::metadata());
-
-//   exec::registerVectorFunction(
-//       "vec_plus2",
-//       VectorPlus::signatures(),
-//       std::make_unique<VectorPlus>(),
-//       VectorPlus::metadata());
-
-//   exec::registerVectorFunction(
-//       "vec_plus3",
-//       VectorPlus::signatures(),
-//       std::make_unique<VectorPlus>(),
-//       VectorPlus::metadata());
-//   // auto col1 = maker.flatVector({0, 1, 2, 3, 4});
-//   // auto col2 = maker.flatVector({1, 2, 3, 4, 5});
-//   // auto inputRowVector = maker.rowVector({"col1", "col2"}, {col1, col2});
-
-//   auto row = maker.flatVector({0, 0, 1, 1});
-//   auto col = maker.flatVector({0, 1, 0, 1});
-//   auto va = maker.flatVector({1, 2, 3, 4});
-//   auto vb = maker.flatVector({11, 12, 13, 14});
-//   // {1,2 plus {11,12
-//   //  3,4}      13,14}
-//   auto inputRowVectorJoinA = maker.rowVector({"a_row", "a_col", "a_value"}, {row, col, va});
-//   auto inputRowVectorJoinB = maker.rowVector({"b_row", "b_col", "b_value"}, {row, col, vb});
-
-//   auto inputRowVectorJoin = maker.rowVector({"a_row", "a_col", "a_value", "b_row", "b_col", "b_value"}, {row, col, va, row, col, vb});
-//   auto JoinT = maker.rowVector({"table_a", "table_b"},{inputRowVectorJoinA, inputRowVectorJoinB});
-//   //two tables means nestjoin or other format of plan
-
-//   auto myPlan = exec::test::PlanBuilder()
-//                   .values({JoinT})
-//                   .project({"vec_plus(table_a.a_value, table_b.b_value) AS result"})
-// 		            .planFragment();
-
-//   // auto task1 = std::make_shared<exec::Task>("task1", myPlan, 0, queryCtx_);
-//   // // Execute the plan above
-//   // auto result1 = task1->next();
-//   // std::cout << "Results for Query 1:" << result1->toString() << std::endl;
-//   // std::cout << result1->toString(0, result1->size()) << std::endl;
-//   core::PlanNodeId Id;
-//   auto myPlan2 = exec::test::PlanBuilder()
-//                   .values({JoinT})
-//                   .project({"vec_plus3(vec_plus2(vec_plus(table_a.a_value, table_b.b_value), table_b.b_value), table_b.b_value)"})
-// 		            .planNode();
-
-//   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-//   core::PlanNodeId AId;
-//   core::PlanNodeId BId;
-//   auto planjoin = exec::test::PlanBuilder(planNodeIdGenerator)
-//             .values({JoinT})
-//             .project({"table_a.a_col", "table_a.a_row","table_a.a_value"})
-//             // .capturePlanNodeId(AId)
-//             .hashJoin(
-//                 {"a_col"},
-//                 {"b_row"},
-//                 exec::test::PlanBuilder(planNodeIdGenerator)
-//                     .values({JoinT})
-//                     .project({"table_b.b_col", "table_b.b_row","table_b.b_value"})
-//                     // .capturePlanNodeId(BId)
-//                     .planNode(),
-//                 "", // extra filter
-//                 {"a_row","b_col", "a_value", "b_value"})
-//             .project({"a_row", "b_col","a_value * b_value AS mp"})
-//             .singleAggregation({"a_row","b_col"}, {"sum(mp) AS result"})
-//             .project({"result"})
-//             .planNode();
-
-//   // auto taskj = std::make_shared<exec::Task>("taskj", planjoin, 0, queryCtx_);
-//   // auto res = taskj->next();
-//   // std::cout << "Results for Query 1:" << res->toString() << std::endl;
-//   // std::cout << res->toString(0, res->size()) << std::endl;
-
-
-//     auto myPlan3 = exec::test::PlanBuilder()
-//                   .values({JoinT})
-//                   .project({"vec_plus3(vec_plus2(vec_plus(table_a.a_value, table_b.b_value), table_b.b_value), table_b.b_value)"})
-// 		            .planNode();
-
-
-// auto oldplan = myPlan2->sources()[0];
-// int oldPlanId = std::stoi(oldplan->id());
-// auto generator = std::make_shared<core::PlanNodeIdGenerator>(oldPlanId + 1);
-// optimizerBuilder opbuilder;
-// opbuilder.setPlanNodeIdGenerator(generator);
-
-
-
-// // should add source()[1] to solve 
-
-// // optimizerBuilder opbuilder;
-// auto plana = opbuilder.project_O({"table_a.a_col", "table_a.a_row","table_a.a_value"}, oldplan);
-
-// auto plan_b1 = opbuilder.values_O({JoinT}, false, 1);
-// auto plan_b = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, plan_b1);
-
-// auto planb = opbuilder.hashjoin_O({"a_col"}, {"b_row"}, plan_b, "", {"a_row","b_col", 
-// "a_value", "b_value"}, plana, core::JoinType::kInner, false);
-
-// auto planc = opbuilder.project_O({"a_row", "b_col", "a_value * b_value AS mp"}, planb);
-// auto pland = opbuilder.aggregation_O({"b_col","a_row"}, {}, {"sum(mp) AS result"}, 
-// {}, core::AggregationNode::Step::kSingle, false, planc, {});
-
-// auto plan_d2 = opbuilder.project_O({"a_row","b_col", "result"}, pland);
-
-// auto plan_e1 = opbuilder.values_O({JoinT}, false, 1);
-// auto plan_e2 = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, plan_e1);
-// auto plan_e3 = opbuilder.hashjoin_O({"a_row","b_col"}, {"b_row","b_col"}, plan_e2, "", 
-// {"b_value", "result"}, plan_d2, core::JoinType::kInner, false);
-
-// auto plan_e = opbuilder.project_O({"b_value", "result"}, plan_e3);
-// auto plan_e4 = opbuilder.project_O({"vec_plus3(vec_plus2(result, b_value), b_value)"}, plan_e);
-
-// // auto plane = opbuilder.project_O({"vec_plus3(vec_plus2(result, b_value), b_value)"}, plan_e4);
-// // auto source = planjoin->sources()[0]->sources()[0]->sources()[0]->sources()[0]->sources()[0];
-// // source = oldplan;
-
-//   auto res2 = AssertQueryBuilder(myPlan2).copyResults(pool_.get());
-//   std::cout << "Results for Query 3:" << res2->toString() << std::endl;
-//   std::cout << res2->toString(0, res2->size()) << std::endl;
-
-//   auto res4 = AssertQueryBuilder(plan_e4).copyResults(pool_.get());
-//   std::cout << "Results for Query 4:" << res4->toString() << std::endl;
-//   std::cout << res4->toString(0, res4->size()) << std::endl;
-
-
-//   auto res = AssertQueryBuilder(planjoin).copyResults(pool_.get());
-//   std::cout << "Results for Query 2:" << res->toString() << std::endl;
-//   std::cout << res->toString(0, res->size()) << std::endl;
-
-  // auto newplan = std::shared_ptr<const PlanNode>;
-
-  // newplan->sources()[0] = myPlan2->sources()[0];
-
-  // planjoin->sources()[0]->sources()[0]->sources()[0]->sources()[0]->sources()[0] = const_cast<std::shared_ptr<const facebook::velox::core::PlanNode>&>(myPlan2->sources()[0]);
-  // auto newplan = planjoin;
-
-  // auto res = AssertQueryBuilder(planjoin).copyResults(pool_.get());
-  // std::cout << "Results for Query 2:" << res->toString() << std::endl;
-  // std::cout << res->toString(0, res->size()) << std::endl;
-  // myPlan2->sources()[0] = planjoin->sources()[0];
-
-  // facebook::velox::optimizer::Optimizer op(queryCtx_);
-  // auto optimizedPlan = op.op(myPlan);
-  // op.traverse(myPlan);
-
-  // auto res = AssertQueryBuilder(optimizedPlan).copyResults(pool_.get());
-  // std::cout << "Results for Query 3:" << res->toString() << std::endl;
-  // std::cout << res->toString(0, res->size()) << std::endl;
-
-
-
-  // std::cout << "Results for Query:" << results->toString() << std::endl;
-  // std::cout << results->toString(0, results->size()) << std::endl;
   int output_size = 5;
   int input_size = 10;
   int num_features = 3;
@@ -1250,6 +1084,471 @@ auto featureArrayVectors_4 = maker.arrayVector<float>(featureArrayVector_4, REAL
   auto results_dense_rep = exec::test::AssertQueryBuilder(newplan).copyResults(pool_.get());
   std::cout << "Rep Dense Results:" << results_dense_rep->toString() << std::endl;
   std::cout << results_dense_rep->toString(0, results_dense_rep->size()) << std::endl;
+}
+
+FlatVectorPtr<float> get_tensor(VectorMaker& m, std::ifstream& file, int size, int lines){
+  std::cout << "Loading tensor of size " << size << std::endl;
+  FlatVectorPtr<float> tensor = m.flatVector<float>(size);
+  int index = 0;
+  std::string line;
+  while (lines--) { // Read a line from the file
+      std::getline(file, line);
+      std::istringstream iss(line); // Create an input string stream from the line
+    
+      std::string numberStr;
+      while (std::getline(iss, numberStr, ',')) { // Read each number separated by comma
+          float number = std::stof(numberStr);    // Convert the string to float
+          tensor->set(index++, number);
+      }
+  }
+  return tensor;
+}
+//core::PlanNodePtr source,
+core::PlanNodePtr& getNewPlan(RowVectorPtr values, RowVectorPtr weights, std::vector<std::string> str){
+  optimizerBuilder opBuilder;
+     exec::registerVectorFunction(
+    "mat_mul_s",
+    MatrixMultiply_s::signatures(),
+    std::make_unique<MatrixMultiply_s>(196, 1024)
+  );
+
+  auto plan_a = opBuilder.values_O({values}, false, 1);
+  auto plan_a1 = opBuilder.project_O({"v", "v_row", "v_col"}, plan_a);
+
+  auto results_a1 = exec::test::AssertQueryBuilder(plan_a1).copyResults(pool_.get());
+  std::cout << "a1 values Results:" << results_a1->toString() << std::endl;
+  std::cout << results_a1->toString(0, results_a1->size()) << std::endl;
+
+  auto plan_b = opBuilder.values_O({weights}, false, 1);
+  auto plan_b1 = opBuilder.project_O({"w", "w_row", "w_col"}, plan_b);
+
+  auto results_b1 = exec::test::AssertQueryBuilder(plan_b1).copyResults(pool_.get());
+  std::cout << "b1 weights Results:" << results_b1->toString() << std::endl;
+  std::cout << results_b1->toString(0, results_b1->size()) << std::endl;
+
+  auto plan_c = opBuilder.hashjoin_O({"v_col"}, {"w_row"}, plan_b1, "", {"v_row", "w_col", "v", "w"}, plan_a1, core::JoinType::kInner, false);
+  
+  auto results_c = exec::test::AssertQueryBuilder(plan_c).copyResults(pool_.get());
+  std::cout << "hashjoin Results:" << results_c->toString() << std::endl;
+  std::cout << results_c->toString(0, results_c->size()) << std::endl;
+
+  auto plan_d = opBuilder.project_O({"v_row", "w_col", "mat_mul_s(v, w) AS mp"}, plan_c);
+  
+  auto results_d = exec::test::AssertQueryBuilder(plan_d).copyResults(pool_.get());
+  std::cout << "map Results:" << results_d->toString() << std::endl;
+  std::cout << results_d->toString(0, results_d->size()) << std::endl;
+  
+  auto plan_e = opBuilder.aggregation_O({"w_col","v_row"}, {}, {"array_sum(mp) AS result"}, 
+{}, core::AggregationNode::Step::kSingle, false, plan_d, {});
+  
+  auto results_e = exec::test::AssertQueryBuilder(plan_e).copyResults(pool_.get());
+  std::cout << "aggregate Results:" << results_e->toString() << std::endl;
+  std::cout << results_e->toString(0, results_e->size()) << std::endl;
+
+  // auto plan_8 = opBuilder.project_O({fmt::format("adapter({}_col, {}_row, result) AS res", w_var, x_var)}, plan_7);
+  // auto plan_9 = opBuilder.filter_O({"res IS NOT NULL"}, plan_8);
+  // auto plan_10 = opBuilder.project_O({"res"}, plan_9);
+
+  // auto results_8 = exec::test::AssertQueryBuilder(plan_8).copyResults(pool_.get());
+  // std::cout << "8 Results:" << results_8->toString() << std::endl;
+  // std::cout << results_8->toString(0, results_8->size()) << std::endl;
+
+  std::string searchString = "mat_mul0(x)";
+  std::string replaceString = "result";
+
+  std::size_t found = str[0].find(searchString);
+  while (found != std::string::npos) {
+      str[0].replace(found, searchString.length(), replaceString);
+      found = str[0].find(searchString, found + replaceString.length());
+  }
+  
+  // static core::PlanNodePtr plan_9 = opBuilder.project_O({str[0]}, plan_e); // TODO: get the rest expression
+  
+
+  return plan_e;
+}
+
+RowVectorPtr createBlock_w(int input_size, int output_size, FlatVectorPtr<float> weights){
+  int size = input_size*output_size;
+  VectorMaker maker{pool_.get()};
+
+  auto w_col = maker.flatVector({0, 0, 0, 0});//split to 4 parts
+  auto w_row = maker.flatVector({0, 1, 2, 3});
+  int weight_block_size = size / 4;
+  std::vector<std::vector<float>> weightsArray;
+
+  for (int i = 0; i < 4; i++) {
+      std::vector<float> weightsArraySingle;
+      for (int j = 0; j < weight_block_size; j++) {
+          int index = i * weight_block_size + j;
+          if (index < size) {
+              weightsArraySingle.push_back(weights->valueAt(index));
+          }
+      }
+      weightsArray.push_back(weightsArraySingle);
+  }
+  auto weightsArrayVector = maker.arrayVector<float>(weightsArray, REAL());
+
+
+  
+  return maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector, w_row, w_col});
+}
+
+RowVectorPtr createBlock_v(int input_size, int output_size, FlatVectorPtr<float> values){
+  int size = input_size*output_size;
+  VectorMaker maker{pool_.get()};
+
+  auto v_row = maker.flatVector({0, 0, 0, 0});//split to 4 parts
+  auto v_col = maker.flatVector({0, 1, 2, 3});
+  int values_block_size = size / 4;
+  std::vector<std::vector<float>> valuesArray;
+
+  for (int i = 0; i < 4; i++) {
+      std::vector<float> valuesArraySingle;
+      for (int j = 0; j < values_block_size; j++) {
+          int index = i * values_block_size + j;
+          if (index < size) {
+              valuesArraySingle.push_back(values->valueAt(index));
+          }
+      }
+      valuesArray.push_back(valuesArraySingle);
+  }
+  auto valuesArrayVector = maker.arrayVector<float>(valuesArray, REAL());
+
+
+  
+  return maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector, v_row, v_col});
+}
+
+
+core::PlanNodePtr optimizing(PlanBuilder& planbuilder, std::shared_ptr<core::QueryCtx> queryCtx_, FlatVectorPtr<float> weights, FlatVectorPtr<float> input){
+  auto nodeid = planbuilder.planNode()->id();
+  auto str = planbuilder.findExprStrings(nodeid);
+
+  auto myOptimizdPlanF = planbuilder.planFragment();
+  core::PlanNodePtr newplan = nullptr;
+  Optimizer op(queryCtx_);
+  auto ops = op.traverse(myOptimizdPlanF);
+
+  for (const auto& op : ops) {
+  // TODO: Add more logic to determine if the operator should be insert to candidates.
+  // Here only check the type of an operator.
+  auto fp = dynamic_cast<exec::FilterProject*>(op);
+  if (fp) {
+    std::cout << "The planNodeId is: " << op->planNodeId() << std::endl;
+    std::cout << "The operatorType is: " << op->operatorType() << std::endl;
+    std::cout << "\n" << std::endl;
+    std::cout << "The expression tree: " << std::endl;
+    const std::unique_ptr<exec::ExprSet>& exprs = fp->getExprs();
+
+    std::shared_ptr<exec::VectorFunction> result = nullptr;
+    for (const auto& expr : exprs->exprs()) {
+        result = findName(expr);
+        if (result) {
+            break;
+        }
+    }
+
+    if (result) {
+        auto call = std::dynamic_pointer_cast<MatrixMultiply>(result);
+        auto w_block = createBlock_w(call->getDims()[0], call->getDims()[1], weights);
+        auto v_block = createBlock_v(1000, 784, input);
+        newplan = getNewPlan(v_block, w_block, str);
+    } else {
+        std::cout << "No layer with the desired name found." << std::endl;
+    }
+
+    // auto call = std::dynamic_pointer_cast<MLFunction>(exprs->exprs()[0]->vectorFunction());//inputs_ contains mat_add
+    
+    std::cout << exprs->toString(false /*compact*/) << std::endl;
+
+    // Use exprs as needed.
+  } else {
+    std::cout << "The planNodeId is: " << op->planNodeId() << std::endl;
+    std::cout << "The operatorType is: " << op->operatorType() << std::endl;
+    std::cout << "\n" << std::endl;
+  }
+  
+}
+
+return newplan;
+}
+
+
+void test_mnist_optimizer(int argc, char** argv, int flag){
+  
+  folly::init(&argc, &argv, false);
+
+   functions::prestosql::registerAllScalarFunctions();
+   aggregate::prestosql::registerAllAggregateFunctions();
+
+   parse::registerTypeResolver();
+   VectorMaker maker{pool_.get()};
+    int input_size = 784; // num_features
+    int layer1_size = 1024; // num units in hidden layer 1
+    int layer2_size = 10;
+    int num_samples = 0;
+    if (flag == 1){
+      num_samples = 1000;}
+    else{
+      num_samples = 2000;}
+
+   
+    std::ifstream weights_file("/home/local/ASUAD/qlin36/w1024.txt"); 
+    std::ifstream bias_file("/home/local/ASUAD/qlin36/b1024.txt"); 
+    std::ifstream test_file("/home/local/ASUAD/qlin36/x_test_large.txt"); 
+
+
+    FlatVectorPtr<float> weights_1 = get_tensor(maker, weights_file, layer1_size * input_size, input_size);
+    FlatVectorPtr<float> bias_1 = get_tensor(maker, bias_file, layer1_size, 1);
+    FlatVectorPtr<float> weights_2 = get_tensor(maker, weights_file, layer2_size * layer1_size, layer1_size);
+    FlatVectorPtr<float> bias_2 = get_tensor(maker, bias_file, layer2_size, 1);
+    weights_file.close();
+    bias_file.close();
+
+    float* bias_1_values = bias_1->values()->asMutable<float>();
+    float* bias_2_values = bias_2->values()->asMutable<float>();
+
+    FlatVectorPtr<float> bias_1_mat = maker.flatVector<float>(num_samples * layer1_size);
+    for(int i=0; i < bias_1_mat->size(); i++)
+      bias_1_mat->set(i, bias_1_values[i%layer1_size]);
+    
+    FlatVectorPtr<float> bias_2_mat = maker.flatVector<float>(num_samples * layer2_size);
+    for(int i=0; i < bias_2_mat->size(); i++)
+      bias_2_mat->set(i, bias_2_values[i%layer2_size]);
+
+    FlatVectorPtr<float> input = get_tensor(maker, test_file, input_size * num_samples, num_samples);
+    float* data = input->values()->asMutable<float>();
+
+    std::vector<std::vector<float>> featureVectors;
+    for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
+      std::vector<float> featureVector(data + cursor, data + cursor + input_size);
+      featureVectors.push_back(featureVector);
+    }
+
+    auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+
+    auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+
+    std::string compute =  NNBuilder()
+                          .denseLayer(layer1_size ,input_size, weights_1->values()->asMutable<float>(), 
+                            bias_1_mat->values()->asMutable<float>(), NNBuilder::RELU)
+                          .denseLayer(layer2_size ,layer1_size, weights_2->values()->asMutable<float>(), 
+                            bias_2_mat->values()->asMutable<float>(), NNBuilder::SOFTMAX)
+                          .build();
+
+  
+    std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+
+    auto planbuilder = exec::test::PlanBuilder(pool_.get())
+                  .values({inputRowVector})
+                  .project({fmt::format(compute, "x")}) 
+		              .planBuild();
+
+  auto myDensePlan = planbuilder.planNode();
+  auto results_dense = exec::test::AssertQueryBuilder(myDensePlan).copyResults(pool_.get());
+  std::cout << "Dense Results:" << results_dense->toString() << std::endl;
+  std::cout << results_dense->toString(0, results_dense->size()) << std::endl;
+
+  auto myOptimizedPlan = optimizing(planbuilder, queryCtx_, weights_1, input);
+  auto results_Optimized = exec::test::AssertQueryBuilder(myOptimizedPlan).copyResults(pool_.get());
+  std::cout << "Optimized Results:" << results_Optimized->toString() << std::endl;
+  std::cout << results_Optimized->toString(0, results_Optimized->size()) << std::endl;
+
+}
+
+int main(int argc, char** argv) {
+    // test_optimizer(argc, argv);
+    test_mnist_optimizer(argc, argv, 1);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//    auto myVec = maker.flatVector<int64_t>({1, 10, 100, 1000, 10000});
+
+//     exec::registerVectorFunction(
+//         "vec_add_to_constant",
+//         AddVectorToConstant::signatures(),
+//         std::make_unique<AddVectorToConstant>(myVec, 5),
+//         AddVectorToConstant::metadata());
+
+//   exec::registerVectorFunction(
+//         "vec_plus",
+//         VectorMut::signatures(),
+//         std::make_unique<VectorMut>(),
+//         VectorMut::metadata());
+
+//   exec::registerVectorFunction(
+//       "vec_plus2",
+//       VectorPlus::signatures(),
+//       std::make_unique<VectorPlus>(),
+//       VectorPlus::metadata());
+
+//   exec::registerVectorFunction(
+//       "vec_plus3",
+//       VectorPlus::signatures(),
+//       std::make_unique<VectorPlus>(),
+//       VectorPlus::metadata());
+//   // auto col1 = maker.flatVector({0, 1, 2, 3, 4});
+//   // auto col2 = maker.flatVector({1, 2, 3, 4, 5});
+//   // auto inputRowVector = maker.rowVector({"col1", "col2"}, {col1, col2});
+
+//   auto row = maker.flatVector({0, 0, 1, 1});
+//   auto col = maker.flatVector({0, 1, 0, 1});
+//   auto va = maker.flatVector({1, 2, 3, 4});
+//   auto vb = maker.flatVector({11, 12, 13, 14});
+//   // {1,2 plus {11,12
+//   //  3,4}      13,14}
+//   auto inputRowVectorJoinA = maker.rowVector({"a_row", "a_col", "a_value"}, {row, col, va});
+//   auto inputRowVectorJoinB = maker.rowVector({"b_row", "b_col", "b_value"}, {row, col, vb});
+
+//   auto inputRowVectorJoin = maker.rowVector({"a_row", "a_col", "a_value", "b_row", "b_col", "b_value"}, {row, col, va, row, col, vb});
+//   auto JoinT = maker.rowVector({"table_a", "table_b"},{inputRowVectorJoinA, inputRowVectorJoinB});
+//   //two tables means nestjoin or other format of plan
+
+//   auto myPlan = exec::test::PlanBuilder()
+//                   .values({JoinT})
+//                   .project({"vec_plus(table_a.a_value, table_b.b_value) AS result"})
+// 		            .planFragment();
+
+//   // auto task1 = std::make_shared<exec::Task>("task1", myPlan, 0, queryCtx_);
+//   // // Execute the plan above
+//   // auto result1 = task1->next();
+//   // std::cout << "Results for Query 1:" << result1->toString() << std::endl;
+//   // std::cout << result1->toString(0, result1->size()) << std::endl;
+//   core::PlanNodeId Id;
+//   auto myPlan2 = exec::test::PlanBuilder()
+//                   .values({JoinT})
+//                   .project({"vec_plus3(vec_plus2(vec_plus(table_a.a_value, table_b.b_value), table_b.b_value), table_b.b_value)"})
+// 		            .planNode();
+
+//   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+//   core::PlanNodeId AId;
+//   core::PlanNodeId BId;
+//   auto planjoin = exec::test::PlanBuilder(planNodeIdGenerator)
+//             .values({JoinT})
+//             .project({"table_a.a_col", "table_a.a_row","table_a.a_value"})
+//             // .capturePlanNodeId(AId)
+//             .hashJoin(
+//                 {"a_col"},
+//                 {"b_row"},
+//                 exec::test::PlanBuilder(planNodeIdGenerator)
+//                     .values({JoinT})
+//                     .project({"table_b.b_col", "table_b.b_row","table_b.b_value"})
+//                     // .capturePlanNodeId(BId)
+//                     .planNode(),
+//                 "", // extra filter
+//                 {"a_row","b_col", "a_value", "b_value"})
+//             .project({"a_row", "b_col","a_value * b_value AS mp"})
+//             .singleAggregation({"a_row","b_col"}, {"sum(mp) AS result"})
+//             .project({"result"})
+//             .planNode();
+
+//   // auto taskj = std::make_shared<exec::Task>("taskj", planjoin, 0, queryCtx_);
+//   // auto res = taskj->next();
+//   // std::cout << "Results for Query 1:" << res->toString() << std::endl;
+//   // std::cout << res->toString(0, res->size()) << std::endl;
+
+
+//     auto myPlan3 = exec::test::PlanBuilder()
+//                   .values({JoinT})
+//                   .project({"vec_plus3(vec_plus2(vec_plus(table_a.a_value, table_b.b_value), table_b.b_value), table_b.b_value)"})
+// 		            .planNode();
+
+
+// auto oldplan = myPlan2->sources()[0];
+// int oldPlanId = std::stoi(oldplan->id());
+// auto generator = std::make_shared<core::PlanNodeIdGenerator>(oldPlanId + 1);
+// optimizerBuilder opbuilder;
+// opbuilder.setPlanNodeIdGenerator(generator);
+
+
+
+// // should add source()[1] to solve 
+
+// // optimizerBuilder opbuilder;
+// auto plana = opbuilder.project_O({"table_a.a_col", "table_a.a_row","table_a.a_value"}, oldplan);
+
+// auto plan_b1 = opbuilder.values_O({JoinT}, false, 1);
+// auto plan_b = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, plan_b1);
+
+// auto planb = opbuilder.hashjoin_O({"a_col"}, {"b_row"}, plan_b, "", {"a_row","b_col", 
+// "a_value", "b_value"}, plana, core::JoinType::kInner, false);
+
+// auto planc = opbuilder.project_O({"a_row", "b_col", "a_value * b_value AS mp"}, planb);
+// auto pland = opbuilder.aggregation_O({"b_col","a_row"}, {}, {"sum(mp) AS result"}, 
+// {}, core::AggregationNode::Step::kSingle, false, planc, {});
+
+// auto plan_d2 = opbuilder.project_O({"a_row","b_col", "result"}, pland);
+
+// auto plan_e1 = opbuilder.values_O({JoinT}, false, 1);
+// auto plan_e2 = opbuilder.project_O({"table_b.b_col", "table_b.b_row","table_b.b_value"}, plan_e1);
+// auto plan_e3 = opbuilder.hashjoin_O({"a_row","b_col"}, {"b_row","b_col"}, plan_e2, "", 
+// {"b_value", "result"}, plan_d2, core::JoinType::kInner, false);
+
+// auto plan_e = opbuilder.project_O({"b_value", "result"}, plan_e3);
+// auto plan_e4 = opbuilder.project_O({"vec_plus3(vec_plus2(result, b_value), b_value)"}, plan_e);
+
+// // auto plane = opbuilder.project_O({"vec_plus3(vec_plus2(result, b_value), b_value)"}, plan_e4);
+// // auto source = planjoin->sources()[0]->sources()[0]->sources()[0]->sources()[0]->sources()[0];
+// // source = oldplan;
+
+//   auto res2 = AssertQueryBuilder(myPlan2).copyResults(pool_.get());
+//   std::cout << "Results for Query 3:" << res2->toString() << std::endl;
+//   std::cout << res2->toString(0, res2->size()) << std::endl;
+
+//   auto res4 = AssertQueryBuilder(plan_e4).copyResults(pool_.get());
+//   std::cout << "Results for Query 4:" << res4->toString() << std::endl;
+//   std::cout << res4->toString(0, res4->size()) << std::endl;
+
+
+//   auto res = AssertQueryBuilder(planjoin).copyResults(pool_.get());
+//   std::cout << "Results for Query 2:" << res->toString() << std::endl;
+//   std::cout << res->toString(0, res->size()) << std::endl;
+
+  // auto newplan = std::shared_ptr<const PlanNode>;
+
+  // newplan->sources()[0] = myPlan2->sources()[0];
+
+  // planjoin->sources()[0]->sources()[0]->sources()[0]->sources()[0]->sources()[0] = const_cast<std::shared_ptr<const facebook::velox::core::PlanNode>&>(myPlan2->sources()[0]);
+  // auto newplan = planjoin;
+
+  // auto res = AssertQueryBuilder(planjoin).copyResults(pool_.get());
+  // std::cout << "Results for Query 2:" << res->toString() << std::endl;
+  // std::cout << res->toString(0, res->size()) << std::endl;
+  // myPlan2->sources()[0] = planjoin->sources()[0];
+
+  // facebook::velox::optimizer::Optimizer op(queryCtx_);
+  // auto optimizedPlan = op.op(myPlan);
+  // op.traverse(myPlan);
+
+  // auto res = AssertQueryBuilder(optimizedPlan).copyResults(pool_.get());
+  // std::cout << "Results for Query 3:" << res->toString() << std::endl;
+  // std::cout << res->toString(0, res->size()) << std::endl;
+
+
+
+  // std::cout << "Results for Query:" << results->toString() << std::endl;
+  // std::cout << results->toString(0, results->size()) << std::endl;
+  
 
   // exec::registerVectorFunction(
   //   "flat",
