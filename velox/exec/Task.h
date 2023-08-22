@@ -48,7 +48,7 @@ class Task : public std::enable_shared_from_this<Task> {
   /// thread are passed on to a separate consumer.
   /// @param onError Optional callback to receive an exception if task
   /// execution fails.
-  Task(
+  static std::shared_ptr<Task> create(
       const std::string& taskId,
       core::PlanFragment planFragment,
       int destination,
@@ -56,7 +56,7 @@ class Task : public std::enable_shared_from_this<Task> {
       Consumer consumer = nullptr,
       std::function<void(std::exception_ptr)> onError = nullptr);
 
-  Task(
+  static std::shared_ptr<Task> create(
       const std::string& taskId,
       core::PlanFragment planFragment,
       int destination,
@@ -465,13 +465,18 @@ class Task : public std::enable_shared_from_this<Task> {
   StopReason enterForTerminateLocked(ThreadState& state);
 
   /// Marks that the Driver is not on thread. If no more Drivers in the
-  /// CancelPool are on thread, this realizes
-  /// threadFinishFutures_. These allow syncing with pause or
-  /// termination. The Driver may go off thread because of
+  /// CancelPool are on thread, this realizes threadFinishFutures_. These allow
+  /// syncing with pause or termination. The Driver may go off thread because of
   /// hasBlockingFuture or pause requested or terminate requested. The
   /// return value indicates the reason. If kTerminate is returned, the
-  /// isTerminated flag is set.
-  StopReason leave(ThreadState& state);
+  /// isTerminated flag is set. 'driverCb' is called to close the driver before
+  /// it goes off thread if the task has been terminated. It ensures that the
+  /// driver close operation is always executed on driver thread. This helps to
+  /// avoid the race condition between driver close and operator abort
+  /// operations.
+  void leave(
+      ThreadState& state,
+      const std::function<void(StopReason)>& driverCb);
 
   /// Enters a suspended section where the caller stays on thread but
   /// is not accounted as being on the thread.  Returns kNone if no
@@ -569,6 +574,14 @@ class Task : public std::enable_shared_from_this<Task> {
   void testingVisitDrivers(const std::function<void(Driver*)>& callback);
 
  private:
+  Task(
+      const std::string& taskId,
+      core::PlanFragment planFragment,
+      int destination,
+      std::shared_ptr<core::QueryCtx> queryCtx,
+      ConsumerSupplier consumerSupplier,
+      std::function<void(std::exception_ptr)> onError = nullptr);
+
   // Returns time (ms) since the task execution started or zero, if not started.
   uint64_t timeSinceStartMsLocked() const;
 
@@ -587,9 +600,26 @@ class Task : public std::enable_shared_from_this<Task> {
   // spilling.
   void removeSpillDirectoryIfExists();
 
+  // Invoked to initialize the memory pool for this task on creation.
+  void initTaskPool();
+
   // Creates new instance of MemoryPool for a plan node, stores it in the task
   // to ensure lifetime and returns a raw pointer.
-  memory::MemoryPool* getOrAddNodePool(const core::PlanNodeId& planNodeId);
+  memory::MemoryPool* getOrAddNodePool(
+      const core::PlanNodeId& planNodeId,
+      bool isHashJoinNode = false);
+
+  // Creates a memory reclaimer instance for a plan node if the task memory
+  // pool has set memory reclaimer. If 'isHashJoinNode' is true, it creates a
+  // customized instance for hash join plan node, otherwise creates a default
+  // memory reclaimer.
+  std::unique_ptr<memory::MemoryReclaimer> createNodeReclaimer(
+      bool isHashJoinNode) const;
+
+  // Creates a memory reclaimer instance for this task. If the query memory
+  // pool doesn't set memory reclaimer, then the function simply returns null.
+  // Otherwise, it creates a customized memory reclaimer for this task.
+  std::unique_ptr<memory::MemoryReclaimer> createTaskReclaimer();
 
   // Creates new instance of MemoryPool for the exchange client of an
   // ExchangeNode in a pipeline, stores it in the task to ensure lifetime and
@@ -601,6 +631,31 @@ class Task : public std::enable_shared_from_this<Task> {
   /// Returns task execution error message or empty string if not error
   /// occurred. This should only be called inside mutex_ protection.
   std::string errorMessageLocked() const;
+
+  class MemoryReclaimer : public memory::MemoryReclaimer {
+   public:
+    static std::unique_ptr<memory::MemoryReclaimer> create(
+        const std::shared_ptr<Task>& task);
+
+    uint64_t reclaim(memory::MemoryPool* pool, uint64_t targetBytes) override;
+
+    void abort(memory::MemoryPool* pool) override;
+
+   private:
+    explicit MemoryReclaimer(const std::shared_ptr<Task>& task) : task_(task) {
+      VELOX_CHECK_NOT_NULL(task);
+    }
+
+    // Gets the shared pointer to the driver to ensure its liveness during the
+    // memory reclaim operation.
+    //
+    // NOTE: a task's memory pool might outlive the task itself.
+    std::shared_ptr<Task> ensureTask() const {
+      return task_.lock();
+    }
+
+    std::weak_ptr<Task> task_;
+  };
 
   // Counts the number of created tasks which is incremented on each task
   // creation.
