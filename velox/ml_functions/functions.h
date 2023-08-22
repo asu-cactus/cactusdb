@@ -253,9 +253,10 @@ public:
 
         auto input_elements = args[0]->as<ArrayVector>()->elements();
         float* input_values = input_elements->values()->asMutable<float>();
+        int input_size = input_elements->size();
 
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, rows.size(), dims[0]);
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, rows.size(), dims[0]);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, input_size/dims[0], dims[0]);
         
         std::cout << "Matrix shapes MatAdd" << std::endl;
         std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
@@ -272,8 +273,8 @@ public:
         int result_size = m.size();
         float* data = m.data();
         
-        std::vector<std::vector<float>> result(rows.size(), std::vector<float>(dims[0]));
-        for (int i = 0; i < rows.size(); ++i) {
+        std::vector<std::vector<float>> result(input_size/dims[0], std::vector<float>(dims[0]));
+        for (int i = 0; i < input_size/dims[0]; ++i) {
             for (int j = 0; j < dims[0]; ++j) {
                 result[i][j] = m(i,j);
             }

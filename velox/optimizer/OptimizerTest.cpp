@@ -13,6 +13,11 @@
 #include "velox/vector/tests/utils/VectorMaker.h"
 #include "velox/optimizer/Optimizer.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
+#include "velox/exec/tests/utils/HiveConnectorTestBase.h"
+#include <boost/interprocess/sync/interprocess_semaphore.hpp>
+#include "velox/exec/tests/utils/TempDirectoryPath.h"
+#include "velox/common/memory/MemoryArbitrator.h"
+#include "velox/vector/fuzzer/VectorFuzzer.h"
 
 // #include <Eigen/Dense>
 // #include <cblas.h>
@@ -29,6 +34,10 @@ using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 using namespace facebook::velox::optimizer;
+
+constexpr int64_t KB = 1024L;
+constexpr int64_t MB = 1024L * KB;
+constexpr int64_t GB = 1024L * MB;
 
 // class AddVectorToConstant: public exec::VectorFunction {
 // public:
@@ -1115,6 +1124,7 @@ core::PlanNodePtr& getNewPlan(RowVectorPtr values, RowVectorPtr weights, std::ve
   auto plan_a = opBuilder.values_O({values}, false, 1);
   auto plan_a1 = opBuilder.project_O({"v", "v_row", "v_col"}, plan_a);
 
+
   auto results_a1 = exec::test::AssertQueryBuilder(plan_a1).copyResults(pool_.get());
   std::cout << "a1 values Results:" << results_a1->toString() << std::endl;
   std::cout << results_a1->toString(0, results_a1->size()) << std::endl;
@@ -1162,10 +1172,14 @@ core::PlanNodePtr& getNewPlan(RowVectorPtr values, RowVectorPtr weights, std::ve
       found = str[0].find(searchString, found + replaceString.length());
   }
   
-  // static core::PlanNodePtr plan_9 = opBuilder.project_O({str[0]}, plan_e); // TODO: get the rest expression
+  auto plan_f = opBuilder.project_O({str[0]}, plan_e); // TODO: get the rest expression
+
+  auto results_f = exec::test::AssertQueryBuilder(plan_f).copyResults(pool_.get());
+  std::cout << "f Results:" << results_f->toString() << std::endl;
+  std::cout << results_f->toString(0, results_f->size()) << std::endl;
   
 
-  return plan_e;
+  return plan_f;
 }
 
 RowVectorPtr createBlock_w(int input_size, int output_size, FlatVectorPtr<float> weights){
@@ -1189,6 +1203,9 @@ RowVectorPtr createBlock_w(int input_size, int output_size, FlatVectorPtr<float>
   }
   auto weightsArrayVector = maker.arrayVector<float>(weightsArray, REAL());
 
+    // FlatVectorPtr<float> w_index = maker.flatVector<float>(784);
+    // for(int i=0; i < 784; i++)
+    //   w_index->set(i, i*1.0);
 
   
   return maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector, w_row, w_col});
@@ -1215,6 +1232,9 @@ RowVectorPtr createBlock_v(int input_size, int output_size, FlatVectorPtr<float>
   }
   auto valuesArrayVector = maker.arrayVector<float>(valuesArray, REAL());
 
+  // FlatVectorPtr<float> v_index = maker.flatVector<float>(1000);
+  //   for(int i=0; i < 1000; i++)
+  //     v_index->set(i, i*1.0);
 
   
   return maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector, v_row, v_col});
@@ -1357,9 +1377,14 @@ void test_mnist_optimizer(int argc, char** argv, int flag){
 
 }
 
+void test_mnist_oom_error(int argc, char** argv){
+  
+}
+
 int main(int argc, char** argv) {
     // test_optimizer(argc, argv);
     test_mnist_optimizer(argc, argv, 1);
+    // test_mnist_oom_error(argc, argv);
 
 
 
