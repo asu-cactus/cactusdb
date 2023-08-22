@@ -33,9 +33,9 @@ using namespace facebook::velox::exec;
 using namespace facebook::velox::dwrf;
 
 DEFINE_int32(
-    file_handle_cache_mb,
-    16,
-    "Amount of space for the file handle cache in mb.");
+    num_file_handle_cache,
+    20'000,
+    "Max number of file handles to cache.");
 
 namespace facebook::velox::connector::hive {
 namespace {
@@ -254,7 +254,7 @@ HiveDataSource::HiveDataSource(
         std::shared_ptr<connector::ColumnHandle>>& columnHandles,
     FileHandleFactory* fileHandleFactory,
     velox::memory::MemoryPool* pool,
-    ExpressionEvaluator* expressionEvaluator,
+    core::ExpressionEvaluator* expressionEvaluator,
     memory::MemoryAllocator* allocator,
     const std::string& scanId,
     folly::Executor* executor)
@@ -314,8 +314,8 @@ HiveDataSource::HiveDataSource(
 
   const auto& remainingFilter = hiveTableHandle->remainingFilter();
   if (remainingFilter) {
-    metadataFilter_ =
-        std::make_shared<common::MetadataFilter>(*scanSpec_, *remainingFilter);
+    metadataFilter_ = std::make_shared<common::MetadataFilter>(
+        *scanSpec_, *remainingFilter, expressionEvaluator_);
     remainingFilterExprSet_ = expressionEvaluator_->compile(remainingFilter);
 
     // Remaining filter may reference columns that are not used otherwise,
@@ -503,7 +503,7 @@ void HiveDataSource::addSplit(std::shared_ptr<ConnectorSplit> split) {
 
   VLOG(1) << "Adding split " << split_->toString();
 
-  fileHandle_ = fileHandleFactory_->generate(split_->filePath);
+  fileHandle_ = fileHandleFactory_->generate(split_->filePath).second;
   auto input = createBufferedInput(*fileHandle_, readerOpts_);
 
   if (readerOpts_.getFileFormat() != dwio::common::FileFormat::UNKNOWN) {
@@ -592,8 +592,8 @@ void HiveDataSource::addSplit(std::shared_ptr<ConnectorSplit> split) {
 }
 
 void HiveDataSource::setFromDataSource(
-    std::shared_ptr<DataSource> sourceShared) {
-  auto source = dynamic_cast<HiveDataSource*>(sourceShared.get());
+    std::unique_ptr<DataSource> sourceUnique) {
+  auto source = dynamic_cast<HiveDataSource*>(sourceUnique.get());
   VELOX_CHECK(source, "Bad DataSource type");
   emptySplit_ = source->emptySplit_;
   split_ = std::move(source->split_);
@@ -690,7 +690,7 @@ vector_size_t HiveDataSource::evaluateRemainingFilter(RowVectorPtr& rowVector) {
   filterRows_.resize(output_->size());
 
   expressionEvaluator_->evaluate(
-      remainingFilterExprSet_.get(), filterRows_, rowVector, &filterResult_);
+      remainingFilterExprSet_.get(), filterRows_, *rowVector, filterResult_);
   return exec::processFilterResults(
       filterResult_, filterRows_, filterEvalCtx_, pool_);
 }
@@ -771,8 +771,9 @@ HiveConnector::HiveConnector(
     folly::Executor* FOLLY_NULLABLE executor)
     : Connector(id, properties),
       fileHandleFactory_(
-          std::make_unique<SimpleLRUCache<std::string, FileHandle>>(
-              FLAGS_file_handle_cache_mb << 20),
+          std::make_unique<
+              SimpleLRUCache<std::string, std::shared_ptr<FileHandle>>>(
+              FLAGS_num_file_handle_cache),
           std::make_unique<FileHandleGenerator>(std::move(properties))),
       executor_(executor) {}
 
@@ -783,21 +784,21 @@ std::unique_ptr<core::PartitionFunction> HivePartitionFunctionSpec::create(
 }
 
 std::string HivePartitionFunctionSpec::toString() const {
-  std::vector<std::string> constValueStrs;
-  constValueStrs.reserve(constValues_.size());
-  for (const auto& value : constValues_) {
-    constValueStrs.emplace_back(value->toString());
+  std::ostringstream keys;
+  size_t constIndex = 0;
+  for (auto i = 0; i < channels_.size(); ++i) {
+    if (i > 0) {
+      keys << ", ";
+    }
+    auto channel = channels_[i];
+    if (channel == kConstantChannel) {
+      keys << "\"" << constValues_[constIndex++]->toString(0) << "\"";
+    } else {
+      keys << channel;
+    }
   }
-  return constValueStrs.empty()
-      ? fmt::format(
-            "HIVE(num of buckets:{}, channels:{})",
-            numBuckets_,
-            folly::join(", ", channels_))
-      : fmt::format(
-            "HIVE(num of buckets:{}, channels:{}, constValues:{})",
-            numBuckets_,
-            folly::join(", ", channels_),
-            folly::join(", ", constValueStrs));
+
+  return fmt::format("HIVE(({}) buckets: {})", keys.str(), numBuckets_);
 }
 
 folly::dynamic HivePartitionFunctionSpec::serialize() const {

@@ -38,22 +38,6 @@ using facebook::velox::common::testutil::TestValue;
 
 namespace facebook::velox::exec {
 
-std::string taskStateString(TaskState state) {
-  switch (state) {
-    case TaskState::kRunning:
-      return "Running";
-    case TaskState::kFinished:
-      return "Finished";
-    case TaskState::kCanceled:
-      return "Canceled";
-    case TaskState::kAborted:
-      return "Aborted";
-    case TaskState::kFailed:
-      return "Failed";
-  }
-  return "<Unknown>";
-}
-
 namespace {
 
 folly::Synchronized<std::vector<std::shared_ptr<TaskListener>>>& listeners() {
@@ -88,7 +72,69 @@ void addRunningTimeOperatorMetrics(exec::OperatorStats& op) {
       RuntimeMetric(op.finishTiming.wallNanos, RuntimeCounter::Unit::kNanos);
 }
 
+void buildSplitStates(
+    const core::PlanNode* planNode,
+    std::unordered_set<core::PlanNodeId>& allIds,
+    std::unordered_map<core::PlanNodeId, SplitsState>& splitStateMap) {
+  bool ok = allIds.insert(planNode->id()).second;
+  VELOX_USER_CHECK(
+      ok,
+      "Plan node IDs must be unique. Found duplicate ID: {}.",
+      planNode->id());
+
+  // Check if planNode is a leaf node in the plan tree. If so, it is a source
+  // node and may use splits for processing.
+  if (planNode->sources().empty()) {
+    // Not all leaf nodes require splits. ValuesNode doesn't. Check if this plan
+    // node requires splits.
+    if (planNode->requiresSplits()) {
+      splitStateMap[planNode->id()];
+    }
+    return;
+  }
+
+  for (const auto& child : planNode->sources()) {
+    buildSplitStates(child.get(), allIds, splitStateMap);
+  }
+}
+
+// Returns a map of ids of source (leaf) plan nodes expecting splits.
+// SplitsState structures are initialized to blank states. Also, checks that
+// plan node IDs are unique and throws if encounters duplicates.
+std::unordered_map<core::PlanNodeId, SplitsState> buildSplitStates(
+    const std::shared_ptr<const core::PlanNode>& planNode) {
+  std::unordered_set<core::PlanNodeId> allIds;
+  std::unordered_map<core::PlanNodeId, SplitsState> splitStateMap;
+  buildSplitStates(planNode.get(), allIds, splitStateMap);
+  return splitStateMap;
+}
+
+std::string makeUuid() {
+  return boost::lexical_cast<std::string>(boost::uuids::random_generator()());
+}
+
+// Returns true if an operator is a hash join operator given 'operatorType'.
+bool isHashJoinOperator(const std::string& operatorType) {
+  return (operatorType == "HashBuild") || (operatorType == "HashProbe");
+}
 } // namespace
+
+std::string taskStateString(TaskState state) {
+  switch (state) {
+    case TaskState::kRunning:
+      return "Running";
+    case TaskState::kFinished:
+      return "Finished";
+    case TaskState::kCanceled:
+      return "Canceled";
+    case TaskState::kAborted:
+      return "Aborted";
+    case TaskState::kFailed:
+      return "Failed";
+    default:
+      return fmt::format("UNKNOWN[{}]", static_cast<int>(state));
+  }
+}
 
 std::atomic<uint64_t> Task::numCreatedTasks_ = 0;
 std::atomic<uint64_t> Task::numDeletedTasks_ = 0;
@@ -120,67 +166,41 @@ bool unregisterTaskListener(const std::shared_ptr<TaskListener>& listener) {
   });
 }
 
-namespace {
-void buildSplitStates(
-    const core::PlanNode* planNode,
-    std::unordered_set<core::PlanNodeId>& allIds,
-    std::unordered_map<core::PlanNodeId, SplitsState>& splitStateMap) {
-  bool ok = allIds.insert(planNode->id()).second;
-  VELOX_USER_CHECK(
-      ok,
-      "Plan node IDs must be unique. Found duplicate ID: {}.",
-      planNode->id());
-
-  // Check if planNode is a leaf node in the plan tree. If so, it is a source
-  // node and may use splits for processing.
-  if (planNode->sources().empty()) {
-    // Not all leaf nodes require splits. ValuesNode doesn't. Check if this plan
-    // node requires splits.
-    if (planNode->requiresSplits()) {
-      splitStateMap[planNode->id()];
-    }
-    return;
-  }
-
-  for (const auto& child : planNode->sources()) {
-    buildSplitStates(child.get(), allIds, splitStateMap);
-  }
-}
-
-/// Returns a map of ids of source (leaf) plan nodes expecting splits.
-/// SplitsState structures are initialized to blank states. Also, checks that
-/// plan node IDs are unique and throws if encounters duplicates.
-std::unordered_map<core::PlanNodeId, SplitsState> buildSplitStates(
-    const std::shared_ptr<const core::PlanNode>& planNode) {
-  std::unordered_set<core::PlanNodeId> allIds;
-  std::unordered_map<core::PlanNodeId, SplitsState> splitStateMap;
-  buildSplitStates(planNode.get(), allIds, splitStateMap);
-  return splitStateMap;
-}
-
-} // namespace
-
-Task::Task(
+// static.
+std::shared_ptr<Task> Task::create(
     const std::string& taskId,
     core::PlanFragment planFragment,
     int destination,
     std::shared_ptr<core::QueryCtx> queryCtx,
     Consumer consumer,
-    std::function<void(std::exception_ptr)> onError)
-    : Task{
-          taskId,
-          std::move(planFragment),
-          destination,
-          std::move(queryCtx),
-          (consumer ? [c = std::move(consumer)]() { return c; }
-                    : ConsumerSupplier{}),
-          std::move(onError)} {}
-
-namespace {
-std::string makeUuid() {
-  return boost::lexical_cast<std::string>(boost::uuids::random_generator()());
+    std::function<void(std::exception_ptr)> onError) {
+  return Task::create(
+      taskId,
+      std::move(planFragment),
+      destination,
+      std::move(queryCtx),
+      (consumer ? [c = std::move(consumer)]() { return c; }
+                : ConsumerSupplier{}),
+      std::move(onError));
 }
-} // namespace
+
+std::shared_ptr<Task> Task::create(
+    const std::string& taskId,
+    core::PlanFragment planFragment,
+    int destination,
+    std::shared_ptr<core::QueryCtx> queryCtx,
+    ConsumerSupplier consumerSupplier,
+    std::function<void(std::exception_ptr)> onError) {
+  auto task = std::shared_ptr<Task>(new Task(
+      taskId,
+      std::move(planFragment),
+      destination,
+      std::move(queryCtx),
+      std::move(consumerSupplier),
+      std::move(onError)));
+  task->initTaskPool();
+  return task;
+}
 
 Task::Task(
     const std::string& taskId,
@@ -194,8 +214,6 @@ Task::Task(
       planFragment_(std::move(planFragment)),
       destination_(destination),
       queryCtx_(std::move(queryCtx)),
-      pool_(queryCtx_->pool()->addAggregateChild(
-          fmt::format("task.{}", taskId_.c_str()))),
       consumerSupplier_(std::move(consumerSupplier)),
       onError_(onError),
       splitsStates_(buildSplitStates(planFragment_.planNode)),
@@ -257,17 +275,44 @@ void Task::removeSpillDirectoryIfExists() {
   }
 }
 
-velox::memory::MemoryPool* FOLLY_NONNULL
-Task::getOrAddNodePool(const core::PlanNodeId& planNodeId) {
+void Task::initTaskPool() {
+  VELOX_CHECK_NULL(pool_);
+  pool_ = queryCtx_->pool()->addAggregateChild(
+      fmt::format("task.{}", taskId_.c_str()), createTaskReclaimer());
+}
+
+velox::memory::MemoryPool* Task::getOrAddNodePool(
+    const core::PlanNodeId& planNodeId,
+    bool isHashJoinNode) {
   if (nodePools_.count(planNodeId) == 1) {
     return nodePools_[planNodeId];
   }
-
-  childPools_.push_back(
-      pool_->addAggregateChild(fmt::format("node.{}", planNodeId)));
+  childPools_.push_back(pool_->addAggregateChild(
+      fmt::format("node.{}", planNodeId), createNodeReclaimer(isHashJoinNode)));
   auto* nodePool = childPools_.back().get();
   nodePools_[planNodeId] = nodePool;
   return nodePool;
+}
+
+std::unique_ptr<memory::MemoryReclaimer> Task::createNodeReclaimer(
+    bool isHashJoinNode) const {
+  if (pool()->reclaimer() == nullptr) {
+    return nullptr;
+  }
+  // Sets memory reclaimer for the parent node memory pool on the first child
+  // operator construction which has set memory reclaimer.
+  return isHashJoinNode ? HashJoinMemoryReclaimer::create()
+                        : memory::MemoryReclaimer::create();
+}
+
+std::unique_ptr<memory::MemoryReclaimer> Task::createTaskReclaimer() {
+  // We shall only create the task memory reclaimer once on task memory pool
+  // creation.
+  VELOX_CHECK_NULL(pool_);
+  if (queryCtx_->pool()->reclaimer() == nullptr) {
+    return nullptr;
+  }
+  return Task::MemoryReclaimer::create(shared_from_this());
 }
 
 velox::memory::MemoryPool* Task::addOperatorPool(
@@ -275,7 +320,8 @@ velox::memory::MemoryPool* Task::addOperatorPool(
     int pipelineId,
     uint32_t driverId,
     const std::string& operatorType) {
-  auto* nodePool = getOrAddNodePool(planNodeId);
+  auto* nodePool =
+      getOrAddNodePool(planNodeId, isHashJoinOperator(operatorType));
   childPools_.push_back(nodePool->addLeafChild(fmt::format(
       "op.{}.{}.{}.{}", planNodeId, pipelineId, driverId, operatorType)));
   return childPools_.back().get();
@@ -1676,7 +1722,7 @@ ContinueFuture Task::terminate(TaskState terminalState) {
   return makeFinishFuture("Task::terminate");
 }
 
-ContinueFuture Task::makeFinishFutureLocked(const char* FOLLY_NONNULL comment) {
+ContinueFuture Task::makeFinishFutureLocked(const char* comment) {
   auto [promise, future] = makeVeloxContinuePromiseContract(comment);
 
   if (numThreads_ == 0) {
@@ -1995,26 +2041,46 @@ StopReason Task::enterForTerminateLocked(ThreadState& state) {
   return StopReason::kTerminate;
 }
 
-StopReason Task::leave(ThreadState& state) {
+void Task::leave(
+    ThreadState& state,
+    const std::function<void(StopReason)>& driverCb) {
   std::vector<ContinuePromise> threadFinishPromises;
   auto guard = folly::makeGuard([&]() {
     for (auto& promise : threadFinishPromises) {
       promise.setValue();
     }
   });
+  StopReason reason;
+  {
+    std::lock_guard<std::mutex> l(mutex_);
+    if (!state.isTerminated) {
+      reason = shouldStopLocked();
+      if (reason == StopReason::kTerminate) {
+        state.isTerminated = true;
+      }
+    } else {
+      reason = StopReason::kTerminate;
+    }
+    if ((reason != StopReason::kTerminate) || (driverCb == nullptr)) {
+      if (--numThreads_ == 0) {
+        threadFinishPromises = allThreadsFinishedLocked();
+      }
+      state.clearThread();
+      return;
+    }
+  }
+
+  VELOX_CHECK_EQ(reason, StopReason::kTerminate);
+  VELOX_CHECK_NOT_NULL(driverCb);
+  // Call 'driverCb' before goes off the driver thread. 'driverCb' will close
+  // the driver and remove it from the task.
+  driverCb(reason);
+
   std::lock_guard<std::mutex> l(mutex_);
   if (--numThreads_ == 0) {
     threadFinishPromises = allThreadsFinishedLocked();
   }
   state.clearThread();
-  if (state.isTerminated) {
-    return StopReason::kTerminate;
-  }
-  const auto reason = shouldStopLocked();
-  if (reason == StopReason::kTerminate) {
-    state.isTerminated = true;
-  }
-  return reason;
 }
 
 StopReason Task::enterSuspended(ThreadState& state) {
@@ -2038,7 +2104,11 @@ StopReason Task::enterSuspended(ThreadState& state) {
   }
   // A pause will not stop entering the suspended section. It will just ack that
   // the thread is no longer inside the driver executor pool.
-  VELOX_CHECK(reason == StopReason::kNone || reason == StopReason::kPause);
+  VELOX_CHECK(
+      reason == StopReason::kNone || reason == StopReason::kPause ||
+          reason == StopReason::kYield,
+      "Unexpected stop reason on suspension: {}",
+      reason);
   state.isSuspended = true;
   if (--numThreads_ == 0) {
     threadFinishPromises = allThreadsFinishedLocked();
@@ -2117,7 +2187,7 @@ StopReason Task::shouldStopLocked() {
   if (pauseRequested_) {
     return StopReason::kPause;
   }
-  if (toYield_) {
+  if (toYield_ > 0) {
     --toYield_;
     return StopReason::kYield;
   }
@@ -2126,6 +2196,7 @@ StopReason Task::shouldStopLocked() {
 
 ContinueFuture Task::requestPause() {
   std::lock_guard<std::mutex> l(mutex_);
+  TestValue::adjust("facebook::velox::exec::Task::requestPauseLocked", this);
   pauseRequested_ = true;
   return makeFinishFutureLocked("Task::requestPause");
 }
@@ -2237,6 +2308,46 @@ void Task::testingVisitDrivers(const std::function<void(Driver*)>& callback) {
       callback(drivers_[i].get());
     }
   }
+}
+
+std::unique_ptr<memory::MemoryReclaimer> Task::MemoryReclaimer::create(
+    const std::shared_ptr<Task>& task) {
+  return std::unique_ptr<memory::MemoryReclaimer>(
+      new Task::MemoryReclaimer(task));
+}
+
+uint64_t Task::MemoryReclaimer::reclaim(
+    memory::MemoryPool* pool,
+    uint64_t targetBytes) {
+  auto task = ensureTask();
+  if (FOLLY_UNLIKELY(task == nullptr)) {
+    return 0;
+  }
+  VELOX_CHECK_EQ(task->pool()->name(), pool->name());
+  task->requestPause().wait();
+  auto guard = folly::makeGuard([&]() {
+    try {
+      Task::resume(task);
+    } catch (const VeloxRuntimeError& exception) {
+      LOG(WARNING) << "Failed to resume task " << task->taskId_
+                   << " after memory reclamation: " << exception.message();
+    }
+  });
+  // Don't reclaim from a cancelled task as it will terminate soon.
+  if (task->isCancelled()) {
+    return 0;
+  }
+  return memory::MemoryReclaimer::reclaim(pool, targetBytes);
+}
+
+void Task::MemoryReclaimer::abort(memory::MemoryPool* pool) {
+  auto task = ensureTask();
+  if (FOLLY_UNLIKELY(task == nullptr)) {
+    return;
+  }
+  VELOX_CHECK_EQ(task->pool()->name(), pool->name());
+  task->requestAbort().wait();
+  memory::MemoryReclaimer::abort(pool);
 }
 
 } // namespace facebook::velox::exec
