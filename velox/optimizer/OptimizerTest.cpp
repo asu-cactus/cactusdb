@@ -29,11 +29,15 @@
 #include <sstream>
 
 #include "velox/exec/FilterProject.h"
+#include "velox/common/file/FileSystems.h"
+#include "velox/dwio/dwrf/reader/DwrfReader.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 using namespace facebook::velox::optimizer;
+
+using exec::test::HiveConnectorTestBase;
 
 constexpr int64_t KB = 1024L;
 constexpr int64_t MB = 1024L * KB;
@@ -348,18 +352,18 @@ std::string toString(
   return signature.str();
 }
 
-std::string toString(
-    const std::vector<std::shared_ptr<facebook::velox::exec::AggregateFunctionSignature>>&
-        signatures) {
-  std::stringstream out;
-  for (auto i = 0; i < signatures.size(); ++i) {
-    if (i > 0) {
-      out << ", ";
-    }
-    out << signatures[i]->toString();
-  }
-  return out.str();
-}
+// std::string toString(
+//     const std::vector<std::shared_ptr<facebook::velox::exec::AggregateFunctionSignature>>&
+//         signatures) {
+//   std::stringstream out;
+//   for (auto i = 0; i < signatures.size(); ++i) {
+//     if (i > 0) {
+//       out << ", ";
+//     }
+//     out << signatures[i]->toString();
+//   }
+//   return out.str();
+// }
 
 std::string throwAggregateFunctionSignatureNotSupported(
     const std::string& name,
@@ -464,7 +468,13 @@ class optimizerBuilder : public exec::test::PlanBuilder {
 public:
   memory::MemoryPool* pool_;
 
-
+  core::PlanFragment planFragment(std::shared_ptr<const core::PlanNode> planNode_) const {
+  return core::PlanFragment{planNode_};
+}
+ void capturePlanNodeId(core::PlanNodeId& id) {
+    VELOX_CHECK_NOT_NULL(planNode_);
+    id = planNode_->id();
+  }
   core::TypedExprPtr inferTypes(
     const std::shared_ptr<const core::IExpr>& untypedExpr,
     core::PlanNodePtr source) {
@@ -722,6 +732,27 @@ std::shared_ptr<folly::Executor> executor_{
           std::thread::hardware_concurrency())};
 std::shared_ptr<core::QueryCtx> queryCtx_{
       std::make_shared<core::QueryCtx>(executor_.get())};
+
+  std::shared_ptr<core::QueryCtx> newQueryCtx(
+      int64_t memoryCapacity) {
+    
+    std::unordered_map<std::string, std::shared_ptr<Config>> configs;
+    std::shared_ptr<MemoryPool> pool = memory::defaultMemoryManager().addRootPool(
+        "", memoryCapacity, MemoryReclaimer::create());
+   std::unordered_map<std::string, std::string> myMapWithValues = {{core::QueryConfig::kSpillEnabled, "true"}, 
+                                      {core::QueryConfig::kJoinSpillEnabled, "true"},  
+                                      {core::QueryConfig::kJoinSpillMemoryThreshold, "1"},
+                                       {core::QueryConfig::kSpillableReservationGrowthPct, "1"},
+                                       {core::QueryConfig::kSpillPartitionBits, "1"}
+                                      };
+    auto queryCtx = std::make_shared<core::QueryCtx>(
+        executor_.get(),
+        myMapWithValues,
+        configs,
+        memory::MemoryAllocator::getInstance(),
+        std::move(pool));
+    return queryCtx;
+  }
 
 core::PlanNodePtr& Optest(core::PlanNodePtr source, RowVectorPtr data, FlatVectorPtr<float> weights, 
 int output_size, int size, std::vector<std::string> str){
@@ -1211,6 +1242,34 @@ RowVectorPtr createBlock_w(int input_size, int output_size, FlatVectorPtr<float>
   return maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector, w_row, w_col});
 }
 
+RowVectorPtr createBlock_w_oom(int input_size, int output_size, FlatVectorPtr<float> weights, VectorMaker& maker){
+  int size = input_size*output_size;
+
+  auto w_col = maker.flatVector({0, 0, 0, 0});//split to 4 parts
+  auto w_row = maker.flatVector({0, 1, 2, 3});
+  int weight_block_size = size / 4;
+  std::vector<std::vector<float>> weightsArray;
+
+  for (int i = 0; i < 4; i++) {
+      std::vector<float> weightsArraySingle;
+      for (int j = 0; j < weight_block_size; j++) {
+          int index = i * weight_block_size + j;
+          if (index < size) {
+              weightsArraySingle.push_back(weights->valueAt(index));
+          }
+      }
+      weightsArray.push_back(weightsArraySingle);
+  }
+  auto weightsArrayVector = maker.arrayVector<float>(weightsArray, REAL());
+
+    // FlatVectorPtr<float> w_index = maker.flatVector<float>(784);
+    // for(int i=0; i < 784; i++)
+    //   w_index->set(i, i*1.0);
+
+  
+  return maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector, w_row, w_col});
+}
+
 RowVectorPtr createBlock_v(int input_size, int output_size, FlatVectorPtr<float> values){
   int size = input_size*output_size;
   VectorMaker maker{pool_.get()};
@@ -1238,6 +1297,41 @@ RowVectorPtr createBlock_v(int input_size, int output_size, FlatVectorPtr<float>
 
   
   return maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector, v_row, v_col});
+}
+
+std::vector<RowVectorPtr> createBlock_v_oom(int input_size, int output_size, FlatVectorPtr<float> values, VectorMaker& maker){
+  int size = input_size*output_size;
+
+
+  auto v_row = maker.flatVector({0, 0, 0, 0});//split to 4 parts
+  auto v_col = maker.flatVector({0, 1, 2, 3});
+  int values_block_size = size / 4;
+  std::vector<std::vector<float>> valuesArray;
+  std::vector<RowVectorPtr> ve;
+  for (int i = 0; i < 4; i++) {
+      std::vector<float> valuesArraySingle;
+      for (int j = 0; j < values_block_size; j++) {
+          int index = i * values_block_size + j;
+          if (index < size) {
+              valuesArraySingle.push_back(values->valueAt(index));
+          }
+      }
+      valuesArray.push_back(valuesArraySingle);
+  }
+  for (auto singleblock : valuesArray){
+      auto valuevector = maker.flatVector<float>(singleblock, REAL());
+      
+      ve.push_back(maker.rowVector({"v", "v_row", "v_col"}, {valuevector, v_row, v_col}));
+  }
+  
+  auto valuesArrayVector = maker.arrayVector<float>(valuesArray, REAL());
+
+  // FlatVectorPtr<float> v_index = maker.flatVector<float>(1000);
+  //   for(int i=0; i < 1000; i++)
+  //     v_index->set(i, i*1.0);
+
+  
+  return ve;
 }
 
 
@@ -1376,15 +1470,577 @@ void test_mnist_optimizer(int argc, char** argv, int flag){
   std::cout << results_Optimized->toString(0, results_Optimized->size()) << std::endl;
 
 }
+static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
+
+  while (!task->isFinished()) {     
+    usleep(1000); // 0.01 second.
+  }
+}
+
+// void writeToFile(
+//     const std::string& filePath,
+//     const std::vector<RowVectorPtr>& vectors,
+//     std::shared_ptr<dwrf::Config> config) {
+//   facebook::velox::dwrf::WriterOptions options;
+//   options.config = config;
+//   options.schema = vectors[0]->type();
+//   auto sink =
+//       std::make_unique<facebook::velox::dwio::common::LocalFileSink>(filePath);
+//   auto childPool = rootPool_->addAggregateChild("HiveConnectorTestBase.Writer");
+//   facebook::velox::dwrf::Writer writer{options, std::move(sink), *childPool};
+//   for (size_t i = 0; i < vectors.size(); ++i) {
+//     writer.write(vectors[i]);
+//   }
+//   writer.close();
+// }
+class MyFileTest : public HiveConnectorTestBase {
+  public:
+  MyFileTest(){
+    SetUp();
+  }
+  ~MyFileTest() {
+  }
+
+  void SetUp() {
+    HiveConnectorTestBase::SetUp();
+  }
+
+  void TestBody() override {}
+
+};
+
+core::PlanFragment test_oom_optimizer(PlanBuilder& planbuilder, std::shared_ptr<memory::MemoryPool> pool, core::PlanNodeId& id){
+  auto mat_mul = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul", {ARRAY(REAL())}, {}));
+  std::ifstream weights_file(mat_mul->getWeightsFile()); 
+  VectorMaker m{pool.get()};
+  FlatVectorPtr<float> weight = get_tensor(m, weights_file, 500000, 1000);
+  auto weights = createBlock_w_oom(1000, 500, weight, m);
+
+  std::ifstream test_file("/home/local/ASUAD/qlin36/x_test_large.txt"); 
+  FlatVectorPtr<float> inputs = get_tensor(m, test_file, 6000000, 6000);
+  auto input = createBlock_v_oom(6000, 1000, inputs, m);
+
+  optimizerBuilder opBuilder;
+     exec::registerVectorFunction(
+    "mat_mul_s",
+    MatrixMultiply_s::signatures(),
+    std::make_unique<MatrixMultiply_s>(250, 500)
+  );
+
+  auto plan_a = opBuilder.values_O({input}, false, 1);
+  opBuilder.capturePlanNodeId(id);
+
+  auto plan_a1 = opBuilder.project_O({"v", "v_row", "v_col"}, plan_a);
+
+  auto plan_b = opBuilder.values_O({weights}, false, 1);
+  auto plan_b1 = opBuilder.project_O({"w", "w_row", "w_col"}, plan_b);
+
+  auto plan_c = opBuilder.hashjoin_O({"v_col"}, {"w_row"}, plan_b1, "", {"v_row", "w_col", "v", "w"}, plan_a1, core::JoinType::kInner, false);
+
+
+  auto plan_d = opBuilder.project_O({"v_row", "w_col", "mat_mul_s(v, w) AS mp"}, plan_c);
+  
+  
+  auto plan_e = opBuilder.aggregation_O({"w_col","v_row"}, {}, {"array_sum(mp) AS result"}, 
+{}, core::AggregationNode::Step::kSingle, false, plan_d, {});
+
+  auto planf = opBuilder.planFragment(plan_e);
+
+  auto file = TempFilePath::create();
+  MyFileTest myfile;
+  myfile.writeToFile(file->path, {input});
+  
+  std::vector<std::shared_ptr<TempFilePath>> paths;
+  int num_splits = 20;
+  for(int i=0; i < num_splits; i++)
+    paths.push_back(file);
+  auto hiveSplits = myfile.makeHiveConnectorSplits(paths);
+ 
+  int concurrency = 48;
+  boost::interprocess::interprocess_semaphore semaphore(concurrency);
+
+  auto task = exec::Task::create("1", planf, 0, queryCtx_, 
+        [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          if(result){
+            semaphore.post();
+          }
+          return exec::BlockingReason::kNotBlocked;
+  });
+
+  // Create 2 hive splits and add them to task
+  task->start(task, concurrency);
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    semaphore.wait();
+    std::cout << split->toString() << std::endl;
+    task->addSplit(id, exec::Split(std::move(split)));
+  }
+  task->noMoreSplits(id);
+  std::cout << std::endl;
+  // Start task with 2 as maximum drivers and wait for execution to finish
+ 
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+
+  return planf;
+}
 
 void test_mnist_oom_error(int argc, char** argv){
   
+  folly::init(&argc, &argv, false);
+
+   functions::prestosql::registerAllScalarFunctions();
+   aggregate::prestosql::registerAllAggregateFunctions();
+
+   parse::registerTypeResolver();
+   VectorMaker maker{pool_.get()};
+
+  int input_size = 1000;
+  int output_size = 500;
+  int num_samples = 6000;
+  // ( 600 * 1000 x 1000 * 500 )
+  int size = output_size * input_size;
+  
+  auto weights = maker.flatVector<float>(size);
+
+  for(int i=0; i < size; i++){
+    weights->set(i, i*2);
+  } 
+  // register Vector Function
+  exec::registerVectorFunction(
+    "mat_mul",
+    MatrixMultiply::signatures(),
+    std::make_unique<MatrixMultiply>(weights->values()->asMutable<float>(), input_size, output_size)
+  );
+
+  // Create input
+  std::vector<std::vector<float>> featureVectors;
+  for(int i=0; i < num_samples; i++){ 
+    std::vector<float> featureVector;
+    for(int j=0; j < input_size; j++){
+      featureVector.push_back(i*j);
+    }
+    featureVectors.push_back(featureVector);
+  }
+  
+  auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+  auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+  
+  // Create Plan
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  core::PlanNodeId p0;
+  auto planOOM = exec::test::PlanBuilder(planNodeIdGenerator)
+                  .tableScan(asRowType(inputRowVector->type()))
+                  .capturePlanNodeId(p0)
+		              .project({"mat_mul(x)"})
+                  .planBuild();
+
+  auto plan0 = planOOM.planFragment();
+  // queryCtx_->testingOverrideConfigUnsafe(
+  //     {{core::QueryConfig::kPreferredOutputBatchRows, "400"}, {core::QueryConfig::kPreferredOutputBatchBytes, "2000000"},  {core::QueryConfig::kMaxOutputBatchRows, "300"}});
+  // Create task
+  
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 40 * MB)};
+  auto childPool = rootPool->addLeafChild("leaf");
+  queryCtx_->testingOverrideMemoryPool(rootPool);
+  
+  queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
+  
+  auto file = TempFilePath::create();
+  MyFileTest myfile;
+  myfile.writeToFile(file->path, {inputRowVector});
+  
+  std::vector<std::shared_ptr<TempFilePath>> paths;
+  int num_splits = 1;
+  for(int i=0; i < num_splits; i++)
+    paths.push_back(file);
+  auto hiveSplits = myfile.makeHiveConnectorSplits(paths);
+ 
+  int concurrency = 1;
+  boost::interprocess::interprocess_semaphore semaphore(concurrency);
+
+  auto task = exec::Task::create("0", plan0, 0, queryCtx_, 
+        [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          if(result){
+            semaphore.post();
+          }
+          return exec::BlockingReason::kNotBlocked;
+  });
+
+  // Create 2 hive splits and add them to task
+  task->start(task, concurrency);
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    semaphore.wait();
+    std::cout << split->toString() << std::endl;
+    task->addSplit(p0, exec::Split(std::move(split)));
+  }
+  task->noMoreSplits(p0);
+  std::cout << std::endl;
+  // Start task with 2 as maximum drivers and wait for execution to finish
+ 
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 }
+
+void test_oom_success(int argc, char** argv){
+  
+  folly::init(&argc, &argv, false);
+
+   functions::prestosql::registerAllScalarFunctions();
+   aggregate::prestosql::registerAllAggregateFunctions();
+
+   parse::registerTypeResolver();
+   VectorMaker maker{pool_.get()};
+
+  int input_size = 1000;
+  int output_size = 500;
+  int num_samples = 6000;
+  // ( 6000 * 1000 x 1000 * 500 )
+  int size = output_size * input_size;
+  
+  // auto weights = maker.flatVector<float>(size);
+
+  // for(int i=0; i < size; i++){
+  //   weights->set(i, i*2);
+  // } 
+  // // register Vector Function
+  // exec::registerVectorFunction(
+  //   "mat_mul",
+  //   MatrixMultiply::signatures(),
+  //   std::make_unique<MatrixMultiply>(weights->values()->asMutable<float>(), input_size, output_size)
+  // );
+
+  // // Create input
+  // std::vector<std::vector<float>> featureVectors;
+  // for(int i=0; i < num_samples; i++){ 
+  //   std::vector<float> featureVector;
+  //   for(int j=0; j < input_size; j++){
+  //     featureVector.push_back(i*j);
+  //   }
+  //   featureVectors.push_back(featureVector);
+  // }
+  
+  // auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+  // auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+  
+  // // Create Plan
+  // auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  // core::PlanNodeId p0;
+  // auto planOOM = exec::test::PlanBuilder(planNodeIdGenerator)
+  //                 .tableScan(asRowType(inputRowVector->type()))
+  //                 .capturePlanNodeId(p0)
+	// 	              .project({"mat_mul(x)"})
+  //                 .planBuild();
+
+  // auto plan0 = planOOM.planFragment();
+  // queryCtx_->testingOverrideConfigUnsafe(
+  //     {{core::QueryConfig::kPreferredOutputBatchRows, "400"}, {core::QueryConfig::kPreferredOutputBatchBytes, "2000000"},  {core::QueryConfig::kMaxOutputBatchRows, "300"}});
+  // Create task
+  
+
+
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 100 * MB)}; // 280 pass for 4 threads, 
+  auto childPool = rootPool->addLeafChild("leaf");
+  queryCtx_->testingOverrideMemoryPool(rootPool);
+  
+  // queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
+  
+  // VectorMaker m{childPool.get()};
+  // auto weight = createBlock_w_oom(1000, 500, weights, m);
+
+  // auto inputs = maker.flatVector<float>(6000000);
+
+  // for(int i=0; i < 6000000; i++){
+  //   inputs->set(i, i*2);
+  // } 
+  // auto input = createBlock_v_oom(6000, 1000, inputs, m);
+
+  auto v_row = maker.flatVector({0, 0, 0, 0});//split to 4 parts
+  auto v_col = maker.flatVector({0, 1, 2, 3});
+  int values_block_size = 6000000 / 4;
+  std::vector<std::vector<float>> valuesArray;
+
+  for (int i = 0; i < 4; i++) {
+      std::vector<float> valuesArraySingle;
+      for (int j = 0; j < values_block_size; j++) {
+          // int index = i * values_block_size + j;
+          // if (index < 6000000) {
+              valuesArraySingle.push_back(i*j);
+          // }
+      }
+      valuesArray.push_back(valuesArraySingle);
+  }
+
+  auto valuesArrayVector = maker.arrayVector<float>(valuesArray, REAL());
+  auto input = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector, v_row, v_col});
+  auto valuesArrayVector1 = maker.arrayVector<float>({valuesArray[0]}, REAL());
+  auto valuesArrayVector2 = maker.arrayVector<float>({valuesArray[1]}, REAL());
+  auto valuesArrayVector3 = maker.arrayVector<float>({valuesArray[2]}, REAL());
+  auto valuesArrayVector4 = maker.arrayVector<float>({valuesArray[3]}, REAL());
+
+  // auto input = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector, v_row, v_col});
+  auto input1 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector1, v_row, v_col});
+  auto input2 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector2, v_row, v_col});
+  auto input3 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector3, v_row, v_col});
+  auto input4 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector4, v_row, v_col});
+
+  auto w_col = maker.flatVector({0, 0, 0, 0});//split to 4 parts
+  auto w_row = maker.flatVector({0, 1, 2, 3});
+  int weight_block_size = 500000 / 4;
+  std::vector<std::vector<float>> weightsArray;
+
+  for (int i = 0; i < 4; i++) {
+      std::vector<float> weightsArraySingle;
+      for (int j = 0; j < weight_block_size; j++) {
+          // int index = i * weight_block_size + j;
+          // if (index < 500000) {
+              weightsArraySingle.push_back(j*2);
+          
+      }
+      weightsArray.push_back(weightsArraySingle);
+  }
+  auto weightsArrayVector = maker.arrayVector<float>(weightsArray, REAL());
+  auto weightsArrayVector1 = maker.arrayVector<float>({weightsArray[0]}, REAL());
+  auto weightsArrayVector2 = maker.arrayVector<float>({weightsArray[1]}, REAL());
+  auto weightsArrayVector3 = maker.arrayVector<float>({weightsArray[2]}, REAL());
+  auto weightsArrayVector4 = maker.arrayVector<float>({weightsArray[3]}, REAL());
+  
+  auto weightb = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector, w_row, w_col});
+  auto weightb1 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector1, w_row, w_col});
+  auto weightb2 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector2, w_row, w_col});
+  auto weightb3 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector3, w_row, w_col});
+  auto weightb4 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector4, w_row, w_col});
+
+  exec::registerVectorFunction(
+    "mat_mul_b",
+    MatrixMultiply_b::signatures(),
+    std::make_unique<MatrixMultiply_b>(250, 500)
+  );
+
+  auto planNodeIdGenerator2 = std::make_shared<core::PlanNodeIdGenerator>();
+  core::PlanNodeId p2;
+  core::PlanNodeId p3;
+  auto planOpt = exec::test::PlanBuilder(planNodeIdGenerator2)
+                  .tableScan(asRowType(input->type()))
+                  // .values({input})
+                  .capturePlanNodeId(p2)
+                  .hashJoin(
+                      {"v_col"},
+                      {"w_row"},
+                    exec::test::PlanBuilder(planNodeIdGenerator2)
+                   .tableScan(asRowType(weightb->type()))
+                  // .values({weightb})
+                   .capturePlanNodeId(p3)
+                   .planNode(),
+                    "", // extra filter
+                    {"v_row", "w_col", "v", "w"})
+                  .project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+                  .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
+                  .planBuild();
+
+  auto plant = planOpt.planNode();
+  auto plan2 = planOpt.planFragment();
+
+  MyFileTest myfile;
+  auto file1 = TempFilePath::create();
+  myfile.writeToFile(file1->path, {input1});
+    auto file2 = TempFilePath::create();
+  myfile.writeToFile(file2->path, {input2});
+    auto file3 = TempFilePath::create();
+  myfile.writeToFile(file3->path, {input3});
+    auto file4 = TempFilePath::create();
+  myfile.writeToFile(file4->path, {input4});
+
+  auto file0 = TempFilePath::create();
+  myfile.writeToFile(file0->path, {input});
+
+
+  auto file5 = TempFilePath::create();
+  myfile.writeToFile(file5->path, {weightb1});
+    auto file6 = TempFilePath::create();
+  myfile.writeToFile(file6->path, {weightb2});
+    auto file7 = TempFilePath::create();
+  myfile.writeToFile(file7->path, {weightb3});
+    auto file8 = TempFilePath::create();
+  myfile.writeToFile(file8->path, {weightb4});
+
+  auto file9 = TempFilePath::create();
+  myfile.writeToFile(file9->path, {weightb});
+
+  // auto file1 = TempFilePath::create();
+  // myfile.writeToFile(file1->path, {input});
+  // auto file2 = TempFilePath::create();
+  // myfile.writeToFile(file2->path, {weightb});
+
+
+  std::vector<std::shared_ptr<TempFilePath>> paths;
+  std::vector<std::shared_ptr<TempFilePath>> paths2;
+  std::vector<std::shared_ptr<TempFilePath>> paths3;
+
+  paths3.push_back(file1);
+
+    paths.push_back(file1);
+    paths.push_back(file2);
+    paths.push_back(file3);
+    paths.push_back(file4);
+
+    paths2.push_back(file5);
+    paths2.push_back(file6);
+    paths2.push_back(file7);
+    paths2.push_back(file8);
+
+
+
+  // auto hiveSplits0 =  myfile.makeHiveConnectorSplits(file0->path, 4, dwio::common::FileFormat::DWRF);
+  auto hiveSplits = myfile.makeHiveConnectorSplits(paths);
+  // auto hiveSplits = myfile.makeHiveConnectorSplits(paths3);
+  auto hiveSplits2 = myfile.makeHiveConnectorSplits(paths2);
+
+  // boost::interprocess::interprocess_semaphore semaphore(1);
+  // auto task1 = exec::Task::create("0", plan2, 0, queryCtx_, 
+  //     [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
+  //       if(result){
+  //         semaphore.post();
+  //       }
+  //       return exec::BlockingReason::kNotBlocked;
+  // });
+  // task1->setSpillDirectory(spillDirectory->path);
+  // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  // task1->start(task1, 1);
+
+  // for(auto& split : hiveSplits) {
+  //   semaphore.wait();
+  //   std::cout << split->toString() << std::endl;
+  //   task1->addSplit(p2, exec::Split(std::move(split)));
+  // }
+  // for(auto& split : hiveSplits2) {
+  //   semaphore.wait();
+  //   std::cout << split->toString() << std::endl;
+  //   task1->addSplit(p3, exec::Split(std::move(split)));
+  // }
+  // task1->noMoreSplits(p2);
+  // task1->noMoreSplits(p3);
+  
+  // waitForFinishedDrivers(task1);
+
+  //   auto stats = task1->taskStats().pipelineStats;
+  // for(auto stat : stats){
+  //   for(auto ops : stat.operatorStats){
+  //     std::cout << ops.spilledBytes << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
+  // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  // std::cout << "Time for Test (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+
+
+  boost::interprocess::interprocess_semaphore semaphore(48);
+  auto task = exec::Task::create("0", plan2, 0, queryCtx_, 
+      [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
+        if(result){
+          semaphore.post();
+        }
+        return exec::BlockingReason::kNotBlocked;
+  });
+
+  task->start(task, 1);
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    semaphore.wait();
+    std::cout << split->toString() << std::endl;
+    task->addSplit(p2, exec::Split(std::move(split)));
+  }
+  for(auto& split : hiveSplits2) {
+    semaphore.wait();
+    std::cout << split->toString() << std::endl;
+    task->addSplit(p3, exec::Split(std::move(split)));
+  }
+  task->noMoreSplits(p2);
+  task->noMoreSplits(p3);
+
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+
+  // Used AssertQueryBuilder
+  // DuckDbQueryRunner duckDbQueryRunner_;
+  // auto results_a1 = exec::test::AssertQueryBuilder(plant, duckDbQueryRunner_)
+  // // exec::test::AssertQueryBuilder(plant, duckDbQueryRunner_)
+  // .split(p2, myfile.makeHiveConnectorSplit(file1->path))
+  // .split(p3, myfile.makeHiveConnectorSplit(file2->path))
+  // .copyResults(pool_.get());
+  // std::cout << "a1 values Results:" << results_a1->toString() << std::endl;
+  // std::cout << results_a1->toString(0, results_a1->size()) << std::endl;
+
+  // auto plan2 = planOpt.planFragment();
+  // MyFileTest myfile;
+  // auto file = TempFilePath::create();
+  // myfile.writeToFile(file->path, {input});
+  // std::vector<std::shared_ptr<TempFilePath>> paths;
+  // for(int i=0; i < 20; i++)
+  //   paths.push_back(file);
+  // // for (auto single:input){
+  // //   auto file = TempFilePath::create();
+  // //   myfile.writeToFile(file->path, {single});
+  // //   paths.push_back(file);
+  // // }
+  // // auto file2 = TempFilePath::create();
+  // // myfile.writeToFile(file2->path, {weight});
+  
+  // // std::vector<std::shared_ptr<TempFilePath>> paths2;
+  // auto hiveSplits = myfile.makeHiveConnectorSplits(paths);
+  // // for(int i=0; i < num_splits; i++)
+  // //   paths2.push_back(file2);
+  // // auto hiveSplits2 = myfile.makeHiveConnectorSplits(paths2);
+
+ 
+  // int concurrency = 48;
+  // boost::interprocess::interprocess_semaphore semaphore(concurrency);
+
+  // auto task = exec::Task::create("0", plan2, 0, queryCtx_, 
+  //       [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
+  //         if(result){
+  //           semaphore.post();
+  //         }
+  //         return exec::BlockingReason::kNotBlocked;
+  // });
+
+  // // Create 2 hive splits and add them to task
+  // task->start(task, concurrency);
+  // std::cout << "Hive splits:" << std::endl;
+  // for(auto& split : hiveSplits) {
+  //   semaphore.wait();
+  //   std::cout << split->toString() << std::endl;
+  //   task->addSplit(p2, exec::Split(std::move(split)));
+  // }
+  // task->noMoreSplits(p2);
+  // std::cout << std::endl;
+  // // Start task with 2 as maximum drivers and wait for execution to finish
+  // //  while (auto result = task->next()) {
+  // //   LOG(INFO) << "Vector available after processing (scan + sort):";
+  // //   for (vector_size_t i = 0; i < result->size(); ++i) {
+  // //     LOG(INFO) << result->toString(i);
+  // //   }
+  // // }
+  // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  // waitForFinishedDrivers(task);
+  // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  // std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  
+}
+
 
 int main(int argc, char** argv) {
     // test_optimizer(argc, argv);
-    test_mnist_optimizer(argc, argv, 1);
-    // test_mnist_oom_error(argc, argv);
+    // test_mnist_optimizer(argc, argv, 1);
+    test_mnist_oom_error(argc, argv);
+    // test_oom_success(argc, argv);
 
 
 

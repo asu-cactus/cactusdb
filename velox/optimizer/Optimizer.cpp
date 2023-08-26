@@ -13,7 +13,8 @@ Optimizer::Optimizer(std::shared_ptr<core::QueryCtx> queryCtx) : queryCtx_(query
 }
 
 std::vector<Operator*> Optimizer::traverse(const core::PlanFragment& planFragment) {
-  auto task_op = std::make_shared<exec::Task>("task_op", planFragment, 0, queryCtx_);
+  auto task_op = exec::Task::create("task_op", planFragment, 0, queryCtx_);
+  // auto task_op = std::make_shared<exec::Task>("task_op", planFragment, 0, queryCtx_);
   auto drivers = task_op->op();
   auto operators = drivers[0]->operators();
 
