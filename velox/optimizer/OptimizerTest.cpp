@@ -1600,7 +1600,7 @@ void test_mnist_oom_error(int argc, char** argv){
   int input_size = 1000;
   int output_size = 500;
   int num_samples = 6000;
-  // ( 600 * 1000 x 1000 * 500 )
+  // ( 6000 * 1000 x 1000 * 500 )
   int size = output_size * input_size;
   
   auto weights = maker.flatVector<float>(size);
@@ -1642,7 +1642,7 @@ void test_mnist_oom_error(int argc, char** argv){
   //     {{core::QueryConfig::kPreferredOutputBatchRows, "400"}, {core::QueryConfig::kPreferredOutputBatchBytes, "2000000"},  {core::QueryConfig::kMaxOutputBatchRows, "300"}});
   // Create task
   
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 40 * MB)};
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 39 * MB)};
   auto childPool = rootPool->addLeafChild("leaf");
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
@@ -1744,7 +1744,7 @@ void test_oom_success(int argc, char** argv){
   
 
 
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 100 * MB)}; // 280 pass for 4 threads, 
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 82 * MB)}; // 280 pass for 4 threads, 
   auto childPool = rootPool->addLeafChild("leaf");
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
@@ -1939,7 +1939,7 @@ void test_oom_success(int argc, char** argv){
   // std::cout << "Time for Test (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
 
-  boost::interprocess::interprocess_semaphore semaphore(48);
+  boost::interprocess::interprocess_semaphore semaphore(8);
   auto task = exec::Task::create("0", plan2, 0, queryCtx_, 
       [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
         if(result){
@@ -2039,8 +2039,8 @@ void test_oom_success(int argc, char** argv){
 int main(int argc, char** argv) {
     // test_optimizer(argc, argv);
     // test_mnist_optimizer(argc, argv, 1);
-    test_mnist_oom_error(argc, argv);
-    // test_oom_success(argc, argv);
+    // test_mnist_oom_error(argc, argv);
+    test_oom_success(argc, argv);
 
 
 
