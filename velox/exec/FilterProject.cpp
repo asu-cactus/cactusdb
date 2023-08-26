@@ -156,9 +156,9 @@ RowVectorPtr FilterProject::getOutput() {
           return nullptr;
         }
       }
-      if (outCol && outCol->size() > 4){
-        size = outCol->size();
-      }
+      // if (outCol && outCol->size() > 0){
+      //   size = outCol->size();
+      // }
     }
 
     return fillOutput(size, nullptr);
