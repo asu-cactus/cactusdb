@@ -1595,7 +1595,10 @@ void test_mnist_oom_error(int argc, char** argv){
    aggregate::prestosql::registerAllAggregateFunctions();
 
    parse::registerTypeResolver();
+   std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 38 * MB)};
+  //  auto childPool = rootPool->addLeafChild("leaf");
    VectorMaker maker{pool_.get()};
+  // VectorMaker maker{childPool.get()};
 
   int input_size = 1000;
   int output_size = 500;
@@ -1642,8 +1645,8 @@ void test_mnist_oom_error(int argc, char** argv){
   //     {{core::QueryConfig::kPreferredOutputBatchRows, "400"}, {core::QueryConfig::kPreferredOutputBatchBytes, "2000000"},  {core::QueryConfig::kMaxOutputBatchRows, "300"}});
   // Create task
   
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 39 * MB)};
-  auto childPool = rootPool->addLeafChild("leaf");
+  // std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 39 * MB)};
+  // auto childPool = rootPool->addLeafChild("leaf");
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
   queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
@@ -1657,8 +1660,9 @@ void test_mnist_oom_error(int argc, char** argv){
   for(int i=0; i < num_splits; i++)
     paths.push_back(file);
   auto hiveSplits = myfile.makeHiveConnectorSplits(paths);
+  // auto hiveSplits =  myfile.makeHiveConnectorSplits(file->path, 4, dwio::common::FileFormat::DWRF);
  
-  int concurrency = 1;
+  int concurrency = 8;
   boost::interprocess::interprocess_semaphore semaphore(concurrency);
 
   auto task = exec::Task::create("0", plan0, 0, queryCtx_, 
@@ -1744,7 +1748,7 @@ void test_oom_success(int argc, char** argv){
   
 
 
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 82 * MB)}; // 280 pass for 4 threads, 
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 102 * MB)}; // 280 pass for 4 threads, 40 for 1 thread
   auto childPool = rootPool->addLeafChild("leaf");
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
@@ -1770,7 +1774,7 @@ void test_oom_success(int argc, char** argv){
       for (int j = 0; j < values_block_size; j++) {
           // int index = i * values_block_size + j;
           // if (index < 6000000) {
-              valuesArraySingle.push_back(i*j);
+              valuesArraySingle.push_back(i*values_block_size+j);
           // }
       }
       valuesArray.push_back(valuesArraySingle);
@@ -1784,10 +1788,15 @@ void test_oom_success(int argc, char** argv){
   auto valuesArrayVector4 = maker.arrayVector<float>({valuesArray[3]}, REAL());
 
   // auto input = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector, v_row, v_col});
-  auto input1 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector1, v_row, v_col});
-  auto input2 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector2, v_row, v_col});
-  auto input3 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector3, v_row, v_col});
-  auto input4 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector4, v_row, v_col});
+  // auto input1 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector1, v_row, v_col});
+  // auto input2 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector2, v_row, v_col});
+  // auto input3 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector3, v_row, v_col});
+  // auto input4 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector4, v_row, v_col});
+
+  auto input1 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector1, maker.flatVector({0}), maker.flatVector({0})});
+  auto input2 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector2, maker.flatVector({0}), maker.flatVector({1})});
+  auto input3 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector3, maker.flatVector({0}), maker.flatVector({2})});
+  auto input4 = maker.rowVector({"v", "v_row", "v_col"}, {valuesArrayVector4, maker.flatVector({0}), maker.flatVector({3})});
 
   auto w_col = maker.flatVector({0, 0, 0, 0});//split to 4 parts
   auto w_row = maker.flatVector({0, 1, 2, 3});
@@ -1799,7 +1808,7 @@ void test_oom_success(int argc, char** argv){
       for (int j = 0; j < weight_block_size; j++) {
           // int index = i * weight_block_size + j;
           // if (index < 500000) {
-              weightsArraySingle.push_back(j*2);
+              weightsArraySingle.push_back(i*weight_block_size+j);
           
       }
       weightsArray.push_back(weightsArraySingle);
@@ -1811,15 +1820,21 @@ void test_oom_success(int argc, char** argv){
   auto weightsArrayVector4 = maker.arrayVector<float>({weightsArray[3]}, REAL());
   
   auto weightb = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector, w_row, w_col});
-  auto weightb1 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector1, w_row, w_col});
-  auto weightb2 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector2, w_row, w_col});
-  auto weightb3 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector3, w_row, w_col});
-  auto weightb4 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector4, w_row, w_col});
+  auto weightb1 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector1, maker.flatVector({0}), maker.flatVector({0})});
+  auto weightb2 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector2, maker.flatVector({1}), maker.flatVector({0})});
+  auto weightb3 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector3, maker.flatVector({2}), maker.flatVector({0})});
+  auto weightb4 = maker.rowVector({"w", "w_row", "w_col"}, {weightsArrayVector4, maker.flatVector({3}), maker.flatVector({0})});
+
+  auto weight_block = maker.flatVector<float>(size);
+
+  for(int i=0; i < size; i++){
+    weight_block->set(i, i*2);
+  } 
 
   exec::registerVectorFunction(
     "mat_mul_b",
     MatrixMultiply_b::signatures(),
-    std::make_unique<MatrixMultiply_b>(250, 500)
+    std::make_unique<MatrixMultiply_b>(250, 500, weight_block->values()->asMutable<float>())
   );
 
   auto planNodeIdGenerator2 = std::make_shared<core::PlanNodeIdGenerator>();
@@ -1842,6 +1857,13 @@ void test_oom_success(int argc, char** argv){
                   .project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
                   .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
                   .planBuild();
+
+  //  core::PlanNodeId p4;
+  // auto plantest = exec::test::PlanBuilder(planNodeIdGenerator2)
+  //                 .tableScan(asRowType(input->type()))
+  //                 .capturePlanNodeId(p4)
+  //                 .project({"v", "v_row", "v_col"})
+  //                 .planNode();
 
   auto plant = planOpt.planNode();
   auto plan2 = planOpt.planFragment();
@@ -1898,7 +1920,7 @@ void test_oom_success(int argc, char** argv){
 
   // auto hiveSplits0 =  myfile.makeHiveConnectorSplits(file0->path, 4, dwio::common::FileFormat::DWRF);
   auto hiveSplits = myfile.makeHiveConnectorSplits(paths);
-  // auto hiveSplits = myfile.makeHiveConnectorSplits(paths3);
+  // auto hiveSplits1 = myfile.makeHiveConnectorSplits(paths3);
   auto hiveSplits2 = myfile.makeHiveConnectorSplits(paths2);
 
   // boost::interprocess::interprocess_semaphore semaphore(1);
@@ -1948,7 +1970,7 @@ void test_oom_success(int argc, char** argv){
         return exec::BlockingReason::kNotBlocked;
   });
 
-  task->start(task, 1);
+  task->start(task, 4);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
     semaphore.wait();
@@ -1972,10 +1994,18 @@ void test_oom_success(int argc, char** argv){
   // DuckDbQueryRunner duckDbQueryRunner_;
   // auto results_a1 = exec::test::AssertQueryBuilder(plant, duckDbQueryRunner_)
   // // exec::test::AssertQueryBuilder(plant, duckDbQueryRunner_)
-  // .split(p2, myfile.makeHiveConnectorSplit(file1->path))
-  // .split(p3, myfile.makeHiveConnectorSplit(file2->path))
+  // .splits(p2, myfile.makeHiveConnectorSplits(paths))
+  // .splits(p3, myfile.makeHiveConnectorSplits(paths2))
   // .copyResults(pool_.get());
   // std::cout << "a1 values Results:" << results_a1->toString() << std::endl;
+  // std::cout << results_a1->toString(0, results_a1->size()) << std::endl;
+
+  // DuckDbQueryRunner duckDbQueryRunner_;
+  // auto results_a1 = exec::test::AssertQueryBuilder(plantest, duckDbQueryRunner_)
+  // // exec::test::AssertQueryBuilder(plant, duckDbQueryRunner_)
+  // .splits(p4, myfile.makeHiveConnectorSplits(paths))
+  // .copyResults(pool_.get());
+  // std::cout << "test values Results:" << results_a1->toString() << std::endl;
   // std::cout << results_a1->toString(0, results_a1->size()) << std::endl;
 
   // auto plan2 = planOpt.planFragment();
