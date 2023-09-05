@@ -54,7 +54,7 @@ class SumArrayAggregate : public exec::Aggregate {
     vector->resize(numGroups);
 
     auto elements = vector->elements()->as<FlatVector<float>>();
-    elements->resize(3000000);
+    elements->resize(1024000);
 
     uint64_t* rawNulls = getRawNulls(vector);
     vector_size_t offset = 0;
