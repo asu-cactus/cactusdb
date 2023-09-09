@@ -54,10 +54,10 @@ std::vector<std::vector<float>> create_weight_block(int total_size, float* value
 std::vector<std::vector<float>> create_block_index(int parts, int flag);
 FileStructure block_to_files(std::vector<std::vector<float>> valuesArray, int parts, int flag);
 DataFrame data_generate(int features, int samples, int first_layer, int second_layer);
-PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, int second_layer);
+PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, int second_layer, int memoryLimit, std::vector<std::vector<float>> feature, int splitsNum, int threadsNum);
 void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector<std::vector<float>> features, int splitsNum, int threadsNum);
 DynamicMetaData decision_maker(PlanBuilder& planBuilder);
-PlanBuilderExec build_plan_op(float* weight, int row, int col, RowTypePtr inputs, RowTypePtr weights, std::vector<std::string> str, std::vector<std::string> targetString);
+PlanBuilderExec build_plan_op(float* weight, int row, int col, int samples, RowTypePtr inputs, RowTypePtr weights, std::vector<std::string> str, std::vector<std::string> targetString);
 OptOutput optiming_plan(PlanBuilder& planBuilder, DataFrame data, int num_samples, int features_size, int first_layer_size, int second_layer_size);
 void exec_plan_relational(PlanBuilderExec planBuilderOpt, int memoryLimit, std::vector<std::shared_ptr<TempFilePath>> inputPaths, 
 std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum);
@@ -89,6 +89,7 @@ std::shared_ptr<core::QueryCtx> newQueryCtx(
         std::move(pool));
     return queryCtx;
   }
+
 VectorMaker maker{pool_.get()};
 
 struct FileStructure {
@@ -112,9 +113,9 @@ struct DynamicMetaData {
 };
 
 struct PlanBuilderExec{
-  PlanBuilder& planBuilder;
+  std::shared_ptr<PlanBuilder> planBuilder;
   std::vector<core::PlanNodeId> p;
-  PlanBuilderExec(PlanBuilder& builder, std::vector<core::PlanNodeId> ids):planBuilder(builder), p(ids){}
+  PlanBuilderExec(std::shared_ptr<PlanBuilder> builder, std::vector<core::PlanNodeId> ids):planBuilder(builder), p(ids){}
 };
 
 struct OptOutput {
@@ -129,7 +130,7 @@ struct OptOutput {
 class MyFileTest : public HiveConnectorTestBase {
   public:
   MyFileTest(){
-    SetUp();
+    // SetUp();
   }
   ~MyFileTest() {
   }
@@ -263,7 +264,8 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
   for (int i = 0; i < num_samples; i++) {
         std::vector<float> featureVector;
         for (int j = 0; j < input_features_size; j++) {
-                featureVector.push_back(i*input_features_size+j);
+                // featureVector.push_back(i*input_features_size+j);
+                featureVector.push_back(0.01);
         }
         featureVectors.push_back(featureVector);
     }
@@ -271,11 +273,11 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
   //generate weight
   float* weight_layer1 = new float[weight_layer1_size];
   for (int i = 0; i < weight_layer1_size; ++i) {
-      weight_layer1[i] = i; 
+      weight_layer1[i] = 0.1; 
   }
   float* weight_layer2 = new float[weight_layer2_size];
   for (int i = 0; i < weight_layer2_size; ++i) {
-      weight_layer2[i] = i; 
+      weight_layer2[i] = 0.1; 
   }
   std::vector<float*> weights;
   weights.push_back(weight_layer1);
@@ -284,11 +286,11 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
   //generate bias
   float* bias_layer1 = new float[bias_layer1_size];
   for (int i = 0; i < bias_layer1_size; ++i) {
-      bias_layer1[i] = i; 
+      bias_layer1[i] = 0.1; 
   }
   float* bias_layer2 = new float[bias_layer2_size];
-  for (int i = 0; i < weight_layer2_size; ++i) {
-      bias_layer2[i] = i; 
+  for (int i = 0; i < bias_layer2_size; ++i) {
+      bias_layer2[i] = 0.1; 
   }
   std::vector<float*> bias;
   bias.push_back(bias_layer1);
@@ -319,16 +321,17 @@ PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, in
                 .capturePlanNodeId(p0)
                 .project({fmt::format(compute, "v")}) 
                 .planBuild();
-  PlanBuilderExec planBuilderExec(planBuilder, {p0});
+  std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
+  PlanBuilderExec planBuilderExec(planBuilderShared, {p0});
   exec_plan_udf(planBuilderExec, memoryLimit, feature, splitsNum, threadsNum);
   return planBuilderExec;
 }
 
 void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector<std::vector<float>> features, int splitsNum, int threadsNum){
   std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", memoryLimit * MB)};
-  auto planFragment = planBuilderExec.planBuilder.planFragment();
+  auto planFragment = planBuilderExec.planBuilder->planFragment();
   queryCtx_->testingOverrideMemoryPool(rootPool);
-  queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
+  queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});//may be this is the key factor (latency)
   auto featureArrayVector = maker.arrayVector<float>(features, REAL());
   auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
   auto file = TempFilePath::create();
@@ -363,13 +366,13 @@ void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
   // another execute method
-  auto planAssert = planBuilderExec.planBuilder.planNode();
+  auto planAssert = planBuilderExec.planBuilder->planNode();
   DuckDbQueryRunner duckDbQueryRunner_;
   auto results = exec::test::AssertQueryBuilder(planAssert, duckDbQueryRunner_)
   .split(planBuilderExec.p[0], myFile.makeHiveConnectorSplit(file->path))
   .copyResults(pool_.get());
   std::cout << "test udf Results:" << results->toString() << std::endl;
-  std::cout << results->toString(0, results->size()) << std::endl;
+  std::cout << results->toString(0, 100) << std::endl;
 }
 
 DynamicMetaData decision_maker(PlanBuilder& planBuilder){
@@ -377,20 +380,20 @@ DynamicMetaData decision_maker(PlanBuilder& planBuilder){
     DynamicMetaData decisions;
     decisions.replaceFlag = true;
     decisions.blocksNum = 4;
-    decisions.planIdShot = {0, 1, 0, 0, 1};
+    decisions.planIdShot = {0, 1, 0, 0, 1};//not used, Todo
     decisions.leftBlockSize.push_back(1000);
-    decisions.leftBlockSize.push_back(149385);
+    decisions.leftBlockSize.push_back(149385);//597540/4
     decisions.rightBlockSize.push_back(149385);
     decisions.rightBlockSize.push_back(1024);
-    decisions.targetStr.push_back("mat_mul0(v)");
+    decisions.targetStr.push_back("mat_mul0(v)");// only test first layer, not auto determined
     return decisions;
 }
 
-PlanBuilderExec build_plan_op(float* weight, int row, int col, RowTypePtr inputs, RowTypePtr weights, std::vector<std::string> str, std::vector<std::string> targetString){
+PlanBuilderExec build_plan_op(float* weight, int row, int col, int samples, RowTypePtr inputs, RowTypePtr weights, std::vector<std::string> str, std::vector<std::string> targetString){
   exec::registerVectorFunction(
     "mat_mul_b",
     MatrixMultiply_b::signatures(),
-    std::make_unique<MatrixMultiply_b>(row, col, weight)
+    std::make_unique<MatrixMultiply_b>(row, col, samples, weight)
   );
   
   std::string searchString = targetString[0];
@@ -423,7 +426,8 @@ PlanBuilderExec build_plan_op(float* weight, int row, int col, RowTypePtr inputs
                   .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
                   .project({str[0]})
                   .planBuild();
-  PlanBuilderExec planOptBuilderExec(planOpt, {p2, p3});
+  std::shared_ptr<PlanBuilder> planBuilderOptShared = std::make_shared<PlanBuilder>(planOpt);
+  PlanBuilderExec planOptBuilderExec(planBuilderOptShared, {p2, p3});
   return planOptBuilderExec;
 }
 
@@ -437,12 +441,13 @@ OptOutput optiming_plan(PlanBuilder& planBuilder, DataFrame data, int num_sample
     auto weights = block_to_files(weightBlocks, dyDecision.blocksNum, 1);
     auto nodeid = planBuilder.planNode()->id();
     auto str = planBuilder.findExprStrings(nodeid);
-    auto planBuilderOpt = build_plan_op(data.weights[0], dyDecision.rightBlockSize[0], dyDecision.rightBlockSize[1], inputs.schema, weights.schema, str, dyDecision.targetStr);
+    auto planBuilderOpt = build_plan_op(data.weights[0], dyDecision.rightBlockSize[0], dyDecision.rightBlockSize[1], dyDecision.leftBlockSize[0], inputs.schema, weights.schema, str, dyDecision.targetStr);
     OptOutput optOutput(true, inputs.paths, weights.paths, planBuilderOpt);
     return optOutput;
   }
   else {
-    PlanBuilderExec planNoOptExec(planBuilder, {});
+    std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
+    PlanBuilderExec planNoOptExec(planBuilderShared, {});
     OptOutput optOutput(false, {}, {}, planNoOptExec);
     return optOutput;
   }
@@ -450,9 +455,9 @@ OptOutput optiming_plan(PlanBuilder& planBuilder, DataFrame data, int num_sample
 
 void exec_plan_relational(PlanBuilderExec planBuilderOpt, int memoryLimit, std::vector<std::shared_ptr<TempFilePath>> inputPaths, 
 std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", memoryLimit * MB)}; // 280 pass for 4 threads, 40 for 1 thread
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root_relational", memoryLimit * MB)}; // 280 pass for 4 threads, 40 for 1 thread
   queryCtx_->testingOverrideMemoryPool(rootPool);
-  auto planFragmentOpt = planBuilderOpt.planBuilder.planFragment();
+  auto planFragmentOpt = planBuilderOpt.planBuilder->planFragment();
   MyFileTest myFile;
   auto inputHiveSplits = myFile.makeHiveConnectorSplits(inputPaths);
   auto weightHiveSplits = myFile.makeHiveConnectorSplits(weightPaths);
@@ -487,14 +492,14 @@ std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
   //anthor execute method
-  auto planOptAssert = planBuilderOpt.planBuilder.planNode();
+  auto planOptAssert = planBuilderOpt.planBuilder->planNode();
   DuckDbQueryRunner duckDbQueryRunner_;
   auto results = exec::test::AssertQueryBuilder(planOptAssert, duckDbQueryRunner_)
-  .splits(planBuilderOpt.p[0], inputHiveSplits)
-  .splits(planBuilderOpt.p[1], weightHiveSplits)
+  .splits(planBuilderOpt.p[0], myFile.makeHiveConnectorSplits(inputPaths))
+  .splits(planBuilderOpt.p[1], myFile.makeHiveConnectorSplits(weightPaths))
   .copyResults(pool_.get());
-  std::cout << "a1 values Results:" << results->toString() << std::endl;
-  std::cout << results->toString(0, results->size()) << std::endl;
+  std::cout << "relational Results:" << results->toString() << std::endl;
+  std::cout << results->toString(0, 100) << std::endl;
 
 }
 
@@ -504,19 +509,27 @@ void test_optimizer_demo(int argc, char** argv){
   functions::prestosql::registerAllScalarFunctions();
   aggregate::prestosql::registerAllAggregateFunctions();
   parse::registerTypeResolver();
-  
+  const std::string kHiveConnectorId = "test-hive";
+  auto hiveConnector =
+      connector::getConnectorFactory(
+          connector::hive::HiveConnectorFactory::kHiveConnectorName)
+          ->newConnector(kHiveConnectorId, nullptr);
+  connector::registerConnector(hiveConnector);
+
+  filesystems::registerLocalFileSystem();
+  dwrf::registerDwrfReaderFactory();
   // int input_features_size = 597540;
-  int input_features_size = 100;
+  int input_features_size = 597540;
   int num_samples = 1000;
 
   int first_layer_output_size = 1024;
   int second_layer_output_size = 14588;
 
-  int memory_limit_udf = 1000;//mb
+  int memory_limit_udf = 10000;//mb
   int splits_num_udf = 1;
   int threads_num_udf = 4;
 
-  int memory_limit_rela = 102;//mb
+  int memory_limit_rela = 10000;//mb
   int splits_num_rela = 4;
   int threads_num_rela = 4;
   
@@ -524,7 +537,7 @@ void test_optimizer_demo(int argc, char** argv){
   auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
   // exec_plan_udf(udf_plan_builder, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
   
-  auto relational_plan = optiming_plan(udf_plan_builder.planBuilder, data, num_samples, input_features_size, first_layer_output_size, second_layer_output_size);
+  auto relational_plan = optiming_plan(*(udf_plan_builder.planBuilder), data, num_samples, input_features_size, first_layer_output_size, second_layer_output_size);
 
   if (relational_plan.flag){
     exec_plan_relational(relational_plan.planBuilderExec, memory_limit_rela, relational_plan.inputsPaths, relational_plan.weightPaths, threads_num_rela);
