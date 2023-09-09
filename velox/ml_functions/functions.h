@@ -229,9 +229,10 @@ private:
 
 class MatrixMultiply_b: public MLFunction {
 public:
-    MatrixMultiply_b(int num_rows, int num_cols, float* weights) {
+    MatrixMultiply_b(int num_rows, int num_cols, int num_samples, float* weights) {
         dims.push_back(num_rows);
         dims.push_back(num_cols);
+        dims.push_back(num_samples);
         weights_ = weights;
     }
 
@@ -258,65 +259,17 @@ public:
         auto ss3 = ss2->as<ArrayVector>()->elements();
         float* input_values_v = ss3->values()->asMutable<float>();
         // auto varrayVector = std::make_shared<ArrayVector<float>>();
-        const int elements_v_per_row = 1500000; //6000*250
-        const int elements_w_per_row = 125000; // 250*500
-        std::vector<std::vector<float>> result(1, std::vector<float>(3000000)); //6000*500
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, 6000, dims[0]);//3*2
+        // const int elements_v_per_row = 1500000; //6000*250
+        // const int elements_w_per_row = 125000; // 250*500
+        std::vector<std::vector<float>> result(1, std::vector<float>(dims[1]*dims[2])); //6000*500
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, dims[2], dims[0]);//3*2
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); //2*5
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
         for (int i = 0; i < m.rows(); ++i) {
                 for (int j = 0; j < m.cols(); ++j) {
-                    result[0][i * 500 + j] = m(i, j);
+                    result[0][i * dims[1] + j] = m(i, j);
             }
         }
-//         for (int row = 0; row < ss->size(); ++row) {
-//             auto innerIndex = ss->wrappedIndex(row);
-//             float* current_v_row_ptr = input_values_v + (innerIndex * elements_v_per_row);
-//             float* current_w_row_ptr = input_values_w + (row * elements_w_per_row);
-
-//             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(current_v_row_ptr, 6000, dims[0]);//3*2
-//             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(current_w_row_ptr, dims[0], dims[1]); //2*5
-//             Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
-//             for (int i = 0; i < m.rows(); ++i) {
-//                 for (int j = 0; j < m.cols(); ++j) {
-//                     result[row][i * 500 + j] = m(i, j);
-//             }
-//         }
-//             // auto varray = ss2->valueAt(innerIndex);
-// //   }         auto velement = varray->as<ArrayVector>()->elements();
-//         }
-        // std::cout << "ss Results:" << ss->toString(2) << std::endl;
-        // // auto ss_vec = ss->wrappedVector();
-        // auto ss_0 = ss->valueAtFast(0);
-        // auto ss_1 = ss->valueAtFast(1);
-
-        // auto ss3 = ss2->as<ArrayVector>()->elements();
-        // auto ss3 = varrayVector->elements();
-
-
-
-
-        // Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, 3, dims[0]);
-        // Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); 
-        
-        
-        // std::cout << "Matrix shapes Matmul" << std::endl;
-        // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
-        // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
-
-        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        // Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
-        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        // std::cout << "Time difference (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
-        // //std::cout << m << std::endl;
-
-        // std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
-        // for (int i = 0; i < m.rows(); ++i) {
-        //     for (int j = 0; j < m.cols(); ++j) {
-        //         result[i][j] = m(i, j);
-        //     }
-        // }
-
         output = maker.arrayVector<float>(result, REAL());
     }
 
@@ -372,16 +325,16 @@ public:
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, input_size/dims[0], dims[0]);
         
-        std::cout << "Matrix shapes MatAdd" << std::endl;
-        std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
-        std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
+        // std::cout << "Matrix shapes MatAdd" << std::endl;
+        // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
+        // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
 
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 + m2;
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         
-        std::cout << "Time difference for Mat Add(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        // std::cout << "Time difference for Mat Add(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         //std::cout << m << std::endl;
 
         int result_size = m.size();
@@ -497,12 +450,16 @@ public:
         int num_cols = input_size / num_rows;
         
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
+        // std::cout << m(1, 2) << " "<< std::endl;
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::ArrayXXf exp = m.array().exp();
+        // std::cout << exp(1, 2) << " "<< std::endl;
         Eigen::ArrayXXf sum = exp.rowwise().sum();
+        // std::cout << sum(1) << " "<< std::endl;
         for (int i = 0; i < exp.rows(); i++) {
             exp.row(i) /= sum(i);
         }
+
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
      //    std::cout << "Time difference for Softmax(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         std::vector<std::vector<float>> result(num_rows, std::vector<float>(num_cols));
