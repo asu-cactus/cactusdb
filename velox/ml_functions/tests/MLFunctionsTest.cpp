@@ -89,10 +89,13 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   void test_multithreading_oom();
   void test_batching();
   void test_conv2d();
+  void test_deep_bench_conv1();
   void test_spill();
   void test_mnist_multithreading();
   void test_torch_dense_layer_multithreading();
   void mytest();
+  void test_land_cover_conv3();
+
   void test_mnist_oom_weights();
 
   std::unique_ptr<MemoryManager> memoryManager_;
@@ -1147,101 +1150,8 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   waitForFinishedDrivers(task);
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
-  
 }
 
-void MLFunctionsTest::test_conv2d() {
-    int cnn_layer1_filters = 64;
-    int cnn_layer1_filter_dims[] = {3,3,1}; // height * width * channels
-    int weights1_size = cnn_layer1_filter_dims[0] * cnn_layer1_filter_dims[1] * cnn_layer1_filter_dims[2] * cnn_layer1_filters;
-
-    int cnn_layer2_filters = 64;
-    int cnn_layer2_filter_dims[] = {3,3,64};
-    int weights2_size = cnn_layer2_filter_dims[0] * cnn_layer2_filter_dims[1] * cnn_layer2_filter_dims[2] * cnn_layer2_filters;
-
-    int input_dims[] = {28,28,1}; 
-    int input_size = input_dims[0] * input_dims[1] * input_dims[2];
-    int num_samples = 1;
-
-    int dims1[] = {cnn_layer1_filters, cnn_layer1_filter_dims[0], cnn_layer1_filter_dims[1], cnn_layer1_filter_dims[2], input_dims[0], input_dims[1]};
-    int dims2[] = {cnn_layer2_filters, cnn_layer2_filter_dims[0], cnn_layer2_filter_dims[1], cnn_layer2_filter_dims[2], input_dims[0] - cnn_layer1_filter_dims[0] + 1, input_dims[1] - cnn_layer1_filter_dims[1] + 1};
-    std::ifstream weights_file("/home/ubuntu/cnn_weights.txt"); 
-    std::ifstream bias_file("/home/ubuntu/cnn_bias.txt"); 
-    std::ifstream test_file("/home/ubuntu/test_file.txt"); 
-
-    FlatVectorPtr<float> weights_1 = get_tensor(weights_file, weights1_size, cnn_layer1_filters * cnn_layer1_filter_dims[2]);
-    FlatVectorPtr<float> bias_1 = get_tensor(bias_file, cnn_layer1_filters, 1);
-
-    FlatVectorPtr<float> weights_2 = get_tensor(weights_file, weights2_size, cnn_layer2_filters * cnn_layer2_filter_dims[2]); 
-    FlatVectorPtr<float> bias_2 = get_tensor(bias_file, cnn_layer2_filters, 1);
-
-    int input3_size = 9216; // num_features
-    int layer3_size = 512; // num units in hidden layer 1
-    int layer4_size = 10;
-
-
-    FlatVectorPtr<float> weights_3 = get_tensor(weights_file, layer3_size * input3_size, input3_size);
-    FlatVectorPtr<float> bias_3 = get_tensor(bias_file, layer3_size, 1);
-    FlatVectorPtr<float> weights_4 = get_tensor(weights_file, layer4_size * layer3_size, layer3_size);
-    FlatVectorPtr<float> bias_4 = get_tensor(bias_file, layer4_size, 1);
-
-    float* w3 =  weights_3->values()->asMutable<float>();
-    float* w4 =  weights_4->values()->asMutable<float>();
-
-
-    weights_file.close();
-    bias_file.close();
-
-    float* bias_1_values = bias_1->values()->asMutable<float>();
-    float* bias_2_values = bias_2->values()->asMutable<float>();
-    float* bias_3_values = bias_3->values()->asMutable<float>();
-    float* bias_4_values = bias_4->values()->asMutable<float>();
-    
-
-    FlatVectorPtr<float> bias_3_mat = maker.flatVector<float>(num_samples * layer3_size);
-    for(int i=0; i < bias_3_mat->size(); i++)
-      bias_3_mat->set(i, bias_3_values[i%layer3_size]);
-    
-    FlatVectorPtr<float> bias_4_mat = maker.flatVector<float>(num_samples * layer4_size);
-    for(int i=0; i < bias_4_mat->size(); i++)
-      bias_4_mat->set(i, bias_4_values[i%layer4_size]);
-
-
-    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples * input_dims[2]);
-    float* data = input->values()->asMutable<float>();
-
-    std::vector<std::vector<float>> featureVectors;
-    for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
-      std::vector<float> featureVector(data + cursor, data + cursor + input_size);
-      featureVectors.push_back(featureVector);
-    }
-
-    auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
-    auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
-    
-    std::string compute =  NNBuilder()
-                          .convLayer(cnn_layer1_filters, dims1, weights_1->values()->asMutable<float>(), 
-                            bias_1->values()->asMutable<float>(), NNBuilder::RELU)
-                          .convLayer(cnn_layer2_filters, dims2, weights_2->values()->asMutable<float>(), 
-                            bias_2->values()->asMutable<float>(), NNBuilder::RELU)
-                          .maxPoolLayer(2, dims2[4] - cnn_layer2_filter_dims[0] + 1, dims2[5] - cnn_layer2_filter_dims[1] + 1)
-                          .denseLayer(layer3_size ,input3_size, weights_3->values()->asMutable<float>(), 
-                            bias_3_mat->values()->asMutable<float>(), NNBuilder::RELU)
-                          .denseLayer(layer4_size ,layer3_size, weights_4->values()->asMutable<float>(), 
-                            bias_4_mat->values()->asMutable<float>(), NNBuilder::SOFTMAX)
-                          .build();
-
-    std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
-    auto plan = exec::test::PlanBuilder(pool_.get())
-                  .values({inputRowVector})
-                  .project({fmt::format(compute, "x")}) 
-		              .planNode();
-    auto results = exec::test::AssertQueryBuilder(plan).copyResults(pool_.get());
-    
-   std::cout << "Results:" << results->toString() << std::endl;
-   std::cout << results->toString(0, results->size()) << std::endl;
-
-}
 
 void MLFunctionsTest::test_mnist_oom_weights() {
     //Eigen::setNbThreads(12);
@@ -1364,21 +1274,344 @@ void MLFunctionsTest::test_mnist_oom_weights() {
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 }
 
+
+void MLFunctionsTest::test_conv2d() {
+    int cnn_layer1_filters = 64;
+    int cnn_layer1_filter_dims[] = {3,3,1}; // height * width * channels
+    int weights1_size = cnn_layer1_filter_dims[0] * cnn_layer1_filter_dims[1] * cnn_layer1_filter_dims[2] * cnn_layer1_filters;
+
+    int cnn_layer2_filters = 64;
+    int cnn_layer2_filter_dims[] = {3,3,64};
+    int weights2_size = cnn_layer2_filter_dims[0] * cnn_layer2_filter_dims[1] * cnn_layer2_filter_dims[2] * cnn_layer2_filters;
+
+    int input_dims[] = {28,28,1}; 
+    int input_size = input_dims[0] * input_dims[1] * input_dims[2];
+    int num_samples = 1;
+
+    int dims1[] = {cnn_layer1_filters, cnn_layer1_filter_dims[0], cnn_layer1_filter_dims[1], cnn_layer1_filter_dims[2], input_dims[0], input_dims[1]};
+    int dims2[] = {cnn_layer2_filters, cnn_layer2_filter_dims[0], cnn_layer2_filter_dims[1], cnn_layer2_filter_dims[2], input_dims[0] - cnn_layer1_filter_dims[0] + 1, input_dims[1] - cnn_layer1_filter_dims[1] + 1};
+    std::ifstream weights_file("/home/ubuntu/cnn_weights.txt"); 
+    std::ifstream bias_file("/home/ubuntu/cnn_bias.txt"); 
+    std::ifstream test_file("/home/ubuntu/test_file.txt"); 
+
+    FlatVectorPtr<float> weights_1 = get_tensor(weights_file, weights1_size, cnn_layer1_filters * cnn_layer1_filter_dims[2]);
+    FlatVectorPtr<float> bias_1 = get_tensor(bias_file, cnn_layer1_filters, 1);
+
+    FlatVectorPtr<float> weights_2 = get_tensor(weights_file, weights2_size, cnn_layer2_filters * cnn_layer2_filter_dims[2]); 
+    FlatVectorPtr<float> bias_2 = get_tensor(bias_file, cnn_layer2_filters, 1);
+
+    int input3_size = 9216; // num_features
+    int layer3_size = 512; // num units in hidden layer 1
+    int layer4_size = 10;
+
+
+    FlatVectorPtr<float> weights_3 = get_tensor(weights_file, layer3_size * input3_size, input3_size);
+    FlatVectorPtr<float> bias_3 = get_tensor(bias_file, layer3_size, 1);
+    FlatVectorPtr<float> weights_4 = get_tensor(weights_file, layer4_size * layer3_size, layer3_size);
+    FlatVectorPtr<float> bias_4 = get_tensor(bias_file, layer4_size, 1);
+
+    float* w3 =  weights_3->values()->asMutable<float>();
+    float* w4 =  weights_4->values()->asMutable<float>();
+
+
+    weights_file.close();
+    bias_file.close();
+
+    float* bias_1_values = bias_1->values()->asMutable<float>();
+    float* bias_2_values = bias_2->values()->asMutable<float>();
+    float* bias_3_values = bias_3->values()->asMutable<float>();
+    float* bias_4_values = bias_4->values()->asMutable<float>();
+    
+
+    FlatVectorPtr<float> bias_3_mat = maker.flatVector<float>(num_samples * layer3_size);
+    for(int i=0; i < bias_3_mat->size(); i++)
+      bias_3_mat->set(i, bias_3_values[i%layer3_size]);
+    
+    FlatVectorPtr<float> bias_4_mat = maker.flatVector<float>(num_samples * layer4_size);
+    for(int i=0; i < bias_4_mat->size(); i++)
+      bias_4_mat->set(i, bias_4_values[i%layer4_size]);
+
+
+    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples * input_dims[2]);
+    float* data = input->values()->asMutable<float>();
+
+    std::vector<std::vector<float>> featureVectors;
+    for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
+      std::vector<float> featureVector(data + cursor, data + cursor + input_size);
+      featureVectors.push_back(featureVector);
+    }
+
+    auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+    auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+    
+    std::string compute =  NNBuilder()
+                          .convLayer(cnn_layer1_filters, dims1, weights_1->values()->asMutable<float>(), 
+                            bias_1->values()->asMutable<float>(), NNBuilder::RELU)
+                          .convLayer(cnn_layer2_filters, dims2, weights_2->values()->asMutable<float>(), 
+                            bias_2->values()->asMutable<float>(), NNBuilder::RELU)
+                          .maxPoolLayer(2, dims2[4] - cnn_layer2_filter_dims[0] + 1, dims2[5] - cnn_layer2_filter_dims[1] + 1)
+                          .denseLayer(layer3_size ,input3_size, weights_3->values()->asMutable<float>(), 
+                            bias_3_mat->values()->asMutable<float>(), NNBuilder::RELU)
+                          .denseLayer(layer4_size ,layer3_size, weights_4->values()->asMutable<float>(), 
+                            bias_4_mat->values()->asMutable<float>(), NNBuilder::SOFTMAX)
+                          .build();
+
+    std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+    auto plan = exec::test::PlanBuilder(pool_.get())
+                  .values({inputRowVector})
+                  .project({fmt::format(compute, "x")}) 
+		              .planNode();
+    auto results = exec::test::AssertQueryBuilder(plan).copyResults(pool_.get());
+    
+   std::cout << "Results:" << results->toString() << std::endl;
+   std::cout << results->toString(0, results->size()) << std::endl;
+
+}
+
+void MLFunctionsTest::test_deep_bench_conv1() {
+    int cnn_filters = 64;
+    int cnn_filter_dims[] = {1,1,64}; // height * width * channels
+    int weights_size = cnn_filter_dims[0] * cnn_filter_dims[1] * cnn_filter_dims[2] * cnn_filters;
+
+    int input_dims[] = {112,112,64}; 
+    int input_size = input_dims[0] * input_dims[1] * input_dims[2];
+
+    std::ifstream conf_file("/home/ubuntu/db_conv1_samples.txt");
+    FlatVectorPtr<float> conf = get_tensor(conf_file, 6, 6);
+    float* confs = conf->values()->asMutable<float>();
+    conf_file.close();
+    torch::set_num_threads(confs[5]);
+
+    int num_samples = (int) confs[0];
+    int num_splits = (int) confs[1];
+    std::cout << num_samples << " " << num_splits;
+
+    int dims[] = {cnn_filters, cnn_filter_dims[0], cnn_filter_dims[1], cnn_filter_dims[2], input_dims[0], input_dims[1]};
+
+    std::ifstream weights_file("/home/ubuntu/db_conv1_weights.txt"); 
+    std::ifstream bias_file("/home/ubuntu/db_conv1_bias.txt"); 
+    std::ifstream test_file("/home/ubuntu/db_conv1_input.txt"); 
+
+    FlatVectorPtr<float> weights = get_tensor(weights_file, weights_size, cnn_filters * cnn_filter_dims[2]);
+    FlatVectorPtr<float> bias = get_tensor(bias_file, cnn_filters, 1);
+
+    weights_file.close();
+    bias_file.close();
+
+    float* bias_values = bias->values()->asMutable<float>();
+   
+    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples * input_dims[2]);
+    float* data = input->values()->asMutable<float>();
+
+    std::vector<std::vector<float>> featureVectors;
+    for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
+      std::vector<float> featureVector(data + cursor, data + cursor + input_size);
+      featureVectors.push_back(featureVector);
+    }
+
+    auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+    auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+    
+    // std::string compute =  NNBuilder()
+    //                       .convLayer(cnn_filters, dims, weights->values()->asMutable<float>(), 
+    //                         bias->values()->asMutable<float>(), NNBuilder::NONE)
+    //                       .build();
+
+    // std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+
+     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    core::PlanNodeId p0;
+  
+    //std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+
+    exec::registerVectorFunction(
+    "torchConvolute",
+    TorchDNN::signatures(),
+    std::make_unique<TorchConvolute>(weights->values()->asMutable<float>(), dims)
+    );
+
+    auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(asRowType(inputRowVector->type()))
+                  .capturePlanNodeId(p0)
+                  //.project({fmt::format(compute, "x")}) 
+                  .project({"torchConvolute(x)"}) 
+		              .planFragment();
+    
+   auto config = std::make_shared<facebook::velox::dwrf::Config>();
+
+  // affects the number of splits
+  // number of bites in each stripe (collection of rows)
+  // strip size should be <= split size (total_size / total splits)
+  // to have the desired number of splits
+  uint64_t kSizeKB = 1024UL;
+  // used for indexing. 
+  // 2k rows will be processed in every call
+  // but doesn't effect number of splits
+  // if stripe size is a large value
+  uint32_t rows = num_samples/num_splits;
+  config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
+  config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
+  auto file = TempFilePath::create();
+  writeToFile(file->path, {inputRowVector}, config);
+  
+  auto hiveSplits =  makeHiveConnectorSplits(file->path, num_splits, dwio::common::FileFormat::DWRF);
+
+  queryCtx_->testingOverrideConfigUnsafe(
+      {{core::QueryConfig::kPreferredOutputBatchBytes, std::to_string((int)confs[3])}, {core::QueryConfig::kMaxOutputBatchRows, std::to_string((int)confs[4])}});
+  auto task = exec::Task::create("0", plan , 0, queryCtx_, 
+        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+           if(result)
+              std::cout << result->toString() << std::endl;
+          return exec::BlockingReason::kNotBlocked;
+  });
+
+  
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    std::cout << split->toString() << std::endl;
+    task->addSplit(p0, exec::Split(std::move(split)));
+  }
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  task->start(task, confs[2]);
+  task->noMoreSplits(p0);
+  // Start task with 2 as maximum drivers and wait for execution to finish
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+}
+
+
+void MLFunctionsTest::test_land_cover_conv3() {
+    int cnn_filters = 2048;
+    int cnn_filter_dims[] = {1,1,3}; // height * width * channels
+    int weights_size = cnn_filter_dims[0] * cnn_filter_dims[1] * cnn_filter_dims[2] * cnn_filters;
+
+    int input_dims[] = {2500,2500,3}; 
+    int input_size = input_dims[0] * input_dims[1] * input_dims[2];
+
+    std::ifstream conf_file("/home/ubuntu/db_conv1_samples.txt");
+    FlatVectorPtr<float> conf = get_tensor(conf_file, 6, 6);
+    float* confs = conf->values()->asMutable<float>();
+    conf_file.close();
+    torch::set_num_threads(confs[5]);
+
+    int num_samples = (int) confs[0];
+    int num_splits = (int) confs[1];
+    std::cout << num_samples << " " << num_splits;
+
+    int dims[] = {cnn_filters, cnn_filter_dims[0], cnn_filter_dims[1], cnn_filter_dims[2], input_dims[0], input_dims[1]};
+
+    std::ifstream weights_file("/home/ubuntu/lc_conv3_weights.txt"); 
+    std::ifstream bias_file("/home/ubuntu/lc_conv3_bias.txt"); 
+    std::ifstream test_file("/home/ubuntu/lc_conv3_input.txt"); 
+
+    FlatVectorPtr<float> weights = get_tensor(weights_file, weights_size, cnn_filters * cnn_filter_dims[2]);
+    FlatVectorPtr<float> bias = get_tensor(bias_file, cnn_filters, 1);
+
+    weights_file.close();
+    bias_file.close();
+
+    float* bias_values = bias->values()->asMutable<float>();
+   
+    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples * input_dims[2]);
+    float* data = input->values()->asMutable<float>();
+
+    std::vector<std::vector<float>> featureVectors;
+    for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
+      std::vector<float> featureVector(data + cursor, data + cursor + input_size);
+      featureVectors.push_back(featureVector);
+    }
+
+    auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+    auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+    
+    // std::string compute =  NNBuilder()
+    //                       .convLayer(cnn_filters, dims, weights->values()->asMutable<float>(), 
+    //                         bias->values()->asMutable<float>(), NNBuilder::NONE)
+    //                       .build();
+
+    // std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+
+     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    core::PlanNodeId p0;
+  
+    //std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+
+    exec::registerVectorFunction(
+    "torchConvolute",
+    TorchDNN::signatures(),
+    std::make_unique<TorchConvolute>(weights->values()->asMutable<float>(), dims)
+    );
+
+    auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(asRowType(inputRowVector->type()))
+                  .capturePlanNodeId(p0)
+                  //.project({fmt::format(compute, "x")}) 
+                  .project({"torchConvolute(x)"}) 
+		              .planFragment();
+    
+   auto config = std::make_shared<facebook::velox::dwrf::Config>();
+
+  // affects the number of splits
+  // number of bites in each stripe (collection of rows)
+  // strip size should be <= split size (total_size / total splits)
+  // to have the desired number of splits
+  uint64_t kSizeKB = 1024UL;
+  // used for indexing. 
+  // 2k rows will be processed in every call
+  // but doesn't effect number of splits
+  // if stripe size is a large value
+  uint32_t rows = num_samples/num_splits;
+  config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
+  config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
+  auto file = TempFilePath::create();
+  writeToFile(file->path, {inputRowVector}, config);
+  
+  auto hiveSplits =  makeHiveConnectorSplits(file->path, num_splits, dwio::common::FileFormat::DWRF);
+  
+  queryCtx_->testingOverrideConfigUnsafe(
+      {{core::QueryConfig::kPreferredOutputBatchBytes, std::to_string((int)confs[3])}, {core::QueryConfig::kMaxOutputBatchRows, std::to_string((int)confs[4])}});
+  auto task = exec::Task::create("0", plan , 0, queryCtx_, 
+        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+           if(result)
+              std::cout << result->toString() << std::endl;
+          return exec::BlockingReason::kNotBlocked;
+  });
+
+  
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    std::cout << split->toString() << std::endl;   
+    task->addSplit(p0, exec::Split(std::move(split)));
+
+  }
+  
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  task->start(task, confs[2]);
+  task->noMoreSplits(p0);
+  // Start task with 2 as maximum drivers and wait for execution to finish
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+}
+
 void MLFunctionsTest::run() {
   //  test_mat_mul();
-  // test_mat_add();
-  // test_relu();
-  // test_dense_layer();
-    test_torch_dense_layer_multithreading();
-  //   test_mnist();
-  //   test_multithreading();
+  //  test_mat_add();
+  //  test_relu();
+  //  test_dense_layer();
+  //  test_torch_dense_layer_multithreading();
+  //  test_mnist();
+  //  test_multithreading();
   //  test_multithreading_oom();
-  //    test_batching();
+  //  test_batching();
   //  test_conv2d();
+  //    test_deep_bench_conv1();
+  //  test_land_cover_conv3();
   //  test_spill();
-  //    mytest();
-  //  test_mnist_multithreading();
-  // test_mnist_oom_weights();
+  //  mytest();
+  //    test_mnist_multithreading();
+  //  test_mnist_oom_weights();
 
 }
 

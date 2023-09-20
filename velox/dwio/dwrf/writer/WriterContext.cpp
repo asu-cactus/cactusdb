@@ -18,7 +18,7 @@
 
 namespace facebook::velox::dwrf {
 
-constexpr uint32_t MIN_INDEX_STRIDE = 1000;
+constexpr uint32_t MIN_INDEX_STRIDE = 1;
 
 void WriterContext::validateConfigs() const {
   // the writer is implemented with strong assumption that index is enabled.

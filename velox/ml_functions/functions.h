@@ -235,8 +235,8 @@ public:
                 result[i][j] = std::max(0.0f, input_values[i*num_cols + j]);
             }
         }
-        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        // std::cout << "Time difference for RELU(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        std::cout << "Time difference for RELU(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
     }
@@ -433,10 +433,12 @@ public:
                 Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> input(input_values + s * input_size + c * input_channel_size, input_height, input_width);
                 // for every filter 
                 for(int f=0; f < dims[0]; f++){
+                    int filter_offset = f * output_height * output_width;
                     Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> kernel(weights_ + f * filter_size + c * filter_channel_size, dims[1], dims[2]);
                     for (int i = 0; i < output_height; ++i){
+                        int offset = filter_offset + i*output_width;
                         for (int j = 0; j < output_width; ++j) {
-                            results[s][f*output_height*output_width + i*output_width + j] += (input.block(i, j, dims[1], dims[2]).cwiseProduct(kernel)).sum();
+                            results[s][offset + j] += (input.block(i, j, dims[1], dims[2]).cwiseProduct(kernel)).sum();
                         }
                     }
                 }   
@@ -470,6 +472,86 @@ private:
     float* weights_;
     
 };
+
+class TorchConvolute: public MLFunction {
+public:
+    TorchConvolute(float* weights, int* dims_) {
+        weights_ = weights; 
+        for(int i=0; i < 6; i++)
+            dims.push_back(dims_[i]);
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();     
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+        
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+       
+        int input_height =  dims[4];
+        int input_width = dims[5];
+
+        int output_height = input_height - dims[1] + 1;
+        int output_width = input_width - dims[2] + 1;
+        
+        std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
+       
+        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}));
+        // torch::Tensor conv_weights = torch::tensor(weights_).view({dims[3], dims[0], dims[1], dims[2]});
+
+        // conv_layer->weight = torch::nn::parameter::Parameter (conv_weights);
+        torch::Tensor input_data = torch::from_blob(input_values, {rows.size(), dims[3], input_height, input_width});
+
+       
+        torch::Tensor output_data = conv_layer(input_data);
+        
+        float* data = output_data.data_ptr<float>();
+        
+        int row_size = output_height * output_width * dims[0];
+       
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result;
+            for (int j = 0; j < row_size; ++j) {
+                result.push_back(data[i*row_size + j]);
+            }
+            results.push_back(result);
+        }
+
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        std::cout << "Time for conv2d (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    static std::string getName() {
+        return "torchconv2d";
+    };
+
+
+private:
+    float* weights_;
+    
+};
+
+
+
 
 class VectorScalarAddition: public MLFunction {
 
@@ -568,20 +650,21 @@ public:
             }
         }
 
-        for(int i=0; i < 64; i++){
+        // for(int i=0; i < 64; i++){
 
-            for(int j=0; j < 144; j++){
-                if(j % 12 == 0)
-                    std::cout << std::endl;
-                std::cout << results[0][i*144 + j];
-            }
-            std::cout << std::endl << "Next-----";
-        }
+        //     for(int j=0; j < 144; j++){
+        //         if(j % 12 == 0)
+        //             std::cout << std::endl;
+        //         std::cout << results[0][i*144 + j];
+        //     }
+            
+        // }
 
 
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(results, REAL());
     }
+
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
         return {exec::FunctionSignatureBuilder()

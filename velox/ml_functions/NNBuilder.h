@@ -31,7 +31,8 @@ class NNBuilder {
 
   enum Activation {
     RELU,    
-    SOFTMAX   
+    SOFTMAX,
+    NONE   
   };
 
   NNBuilder() {
@@ -157,16 +158,19 @@ class NNBuilder {
         Relu::signatures(),
         std::make_unique<Relu>()
      );
-    }
-    else{
+    } else if (ac == SOFTMAX){
       act_name = Softmax::getName() + std::to_string(function_count++);
       exec::registerVectorFunction(
         act_name,
         Softmax::signatures(),
         std::make_unique<Softmax>()
      );
-    }
-    compute_string = fmt::format("{}({}({}({})))", act_name, scal_add_name, conv_name, compute_string);
+    } 
+    if(act_name == "")
+      compute_string = fmt::format("{}({}({}))", scal_add_name, conv_name, compute_string);
+    else
+      compute_string = fmt::format("{}({}({}({})))", act_name, scal_add_name, conv_name, compute_string);
+
     return *this;
   }
 
