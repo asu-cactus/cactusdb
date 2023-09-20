@@ -22,10 +22,13 @@
 #include "velox/ml_functions/NNBuilder.h"
 #include <fstream>
 #include <sstream>
+#include <random>
 
 #include "velox/exec/FilterProject.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
+
+// #define EIGEN_USE_BLAS
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
@@ -55,12 +58,14 @@ std::vector<std::vector<float>> create_block_index(int parts, int flag);
 FileStructure block_to_files(std::vector<std::vector<float>> valuesArray, int parts, int flag);
 DataFrame data_generate(int features, int samples, int first_layer, int second_layer);
 PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, int second_layer, int memoryLimit, std::vector<std::vector<float>> feature, int splitsNum, int threadsNum);
+PlanBuilderExec build_plan_udf_torch(DataFrame data, int features, int first_layer, int second_layer, int memoryLimit, std::vector<std::vector<float>> feature, int splitsNum, int threadsNum);
 void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector<std::vector<float>> features, int splitsNum, int threadsNum);
 DynamicMetaData decision_maker(PlanBuilder& planBuilder);
 PlanBuilderExec build_plan_op(float* weight, int row, int col, int samples, RowTypePtr inputs, RowTypePtr weights, std::vector<std::string> str, std::vector<std::string> targetString);
 OptOutput optiming_plan(PlanBuilder& planBuilder, DataFrame data, int num_samples, int features_size, int first_layer_size, int second_layer_size);
 void exec_plan_relational(PlanBuilderExec planBuilderOpt, int memoryLimit, std::vector<std::shared_ptr<TempFilePath>> inputPaths, 
 std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum);
+void exec_pure_torch(int num_samples, int input_size, int layer1_size, int layer2_size,float* w1,float* w2,float* b1,float* b2,float* input_values);
 void test_optimizer_demo(int argc, char** argv);
 
 auto pool_ = memory::addDefaultLeafMemoryPool();
@@ -101,6 +106,7 @@ struct DataFrame {
     std::vector<std::vector<float>> features;
     std::vector<float*> weights;
     std::vector<float*> bias;
+    float* featuresFloat;
 };
 
 struct DynamicMetaData {
@@ -259,25 +265,41 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
   int bias_layer1_size = num_samples * first_layer_output_size;
   int bias_layer2_size = num_samples * second_layer_output_size;
 
+  std::random_device rd;  // Seed the random number generator
+  std::mt19937 gen(rd()); // Initialize the Mersenne Twister engine
+  // std::uniform_real_distribution<float> distribution(0.00000009, 0.00000011); // Define the range
+  std::uniform_real_distribution<float> distribution(0.0009, 0.0011);
+
   //generate input
   std::vector<std::vector<float>> featureVectors;
   for (int i = 0; i < num_samples; i++) {
         std::vector<float> featureVector;
         for (int j = 0; j < input_features_size; j++) {
-                // featureVector.push_back(i*input_features_size+j);
-                featureVector.push_back(0.01);
+                featureVector.push_back(i*input_features_size+j);
+                // float random_value = distribution(gen);
+                // featureVector.push_back(0.0000001);
+                // featureVector.push_back(random_value);
         }
         featureVectors.push_back(featureVector);
     }
 
+  float* floatArray = new float[num_samples * input_features_size];
+  int index = 0;
+
+  for (const auto& row : featureVectors) {
+      for (const float& value : row) {
+          floatArray[index++] = value;
+      }
+  }
+
   //generate weight
   float* weight_layer1 = new float[weight_layer1_size];
   for (int i = 0; i < weight_layer1_size; ++i) {
-      weight_layer1[i] = 0.1; 
+      weight_layer1[i] = 0.000001; 
   }
   float* weight_layer2 = new float[weight_layer2_size];
   for (int i = 0; i < weight_layer2_size; ++i) {
-      weight_layer2[i] = 0.1; 
+      weight_layer2[i] = 0.000001; 
   }
   std::vector<float*> weights;
   weights.push_back(weight_layer1);
@@ -286,11 +308,11 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
   //generate bias
   float* bias_layer1 = new float[bias_layer1_size];
   for (int i = 0; i < bias_layer1_size; ++i) {
-      bias_layer1[i] = 0.1; 
+      bias_layer1[i] = 0.00001; 
   }
   float* bias_layer2 = new float[bias_layer2_size];
   for (int i = 0; i < bias_layer2_size; ++i) {
-      bias_layer2[i] = 0.1; 
+      bias_layer2[i] = 0.00001; 
   }
   std::vector<float*> bias;
   bias.push_back(bias_layer1);
@@ -300,6 +322,7 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
   data.features = featureVectors;
   data.weights = weights;
   data.bias = bias;
+  data.featuresFloat = floatArray;
 
   return data;
 }
@@ -323,6 +346,41 @@ PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, in
                 .planBuild();
   std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
   PlanBuilderExec planBuilderExec(planBuilderShared, {p0});
+  // exec_plan_udf(planBuilderExec, memoryLimit, feature, splitsNum, threadsNum);
+  return planBuilderExec;
+}
+
+
+PlanBuilderExec build_plan_udf_torch(DataFrame data, int features, int first_layer, int second_layer, int memoryLimit, std::vector<std::vector<float>> feature, int splitsNum, int threadsNum){
+  auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+  auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+  core::PlanNodeId p0;
+
+  std::vector<int> dimensions;
+  dimensions.push_back(features);
+  dimensions.push_back(first_layer);
+  dimensions.push_back(second_layer);
+
+  float* weights[2] = {data.weights[0], data.weights[1]};
+  float* bias[2] = {data.bias[0], data.bias[1]};
+  // torch::set_num_threads(8);
+  // std::cout << torch::get_num_threads() << std::endl;
+  // std::cout << "line 354" << std::endl;
+  exec::registerVectorFunction(
+    "torchDNN",
+    TorchDNN::signatures(),
+    std::make_unique<TorchDNN>(weights, bias, dimensions)
+  );
+
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
+                .tableScan(asRowType(inputRowVector->type()))
+                .capturePlanNodeId(p0)
+                .project({"torchDNN(v)"})
+                .planBuild();
+  std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
+  PlanBuilderExec planBuilderExec(planBuilderShared, {p0});
   exec_plan_udf(planBuilderExec, memoryLimit, feature, splitsNum, threadsNum);
   return planBuilderExec;
 }
@@ -332,16 +390,59 @@ void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector
   auto planFragment = planBuilderExec.planBuilder->planFragment();
   queryCtx_->testingOverrideMemoryPool(rootPool);
   queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});//may be this is the key factor (latency)
+  //normal one data file
   auto featureArrayVector = maker.arrayVector<float>(features, REAL());
   auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
   auto file = TempFilePath::create();
   MyFileTest myFile;
-  myFile.writeToFile(file->path, {inputRowVector});
+
+  auto config = std::make_shared<facebook::velox::dwrf::Config>();
+  uint64_t kSizeKB = 1024UL;
+  uint32_t rows = 2000;
+
+  config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
+  config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
+
+  myFile.writeToFile(file->path, {inputRowVector}, config);
 
   auto hiveSplits =  myFile.makeHiveConnectorSplits(file->path, splitsNum, dwio::common::FileFormat::DWRF);
 
-  boost::interprocess::interprocess_semaphore semaphore(threadsNum);
+  // more data files
 
+  // MyFileTest myFile;
+  // std::vector<std::shared_ptr<TempFilePath>> paths;
+
+  // int rowsPerPart = features.size() / 8;
+
+  //   // Create four sub-vectors
+  // std::vector<std::vector<std::vector<float>>> parts;
+
+  // for (int i = 0; i < 8; i++) {
+  //     int startRow = i * rowsPerPart;
+  //     int endRow = (i + 1) * rowsPerPart;
+
+  //     // Create a sub-vector by copying rows from the original vector
+  //     std::vector<std::vector<float>> part(features.begin() + startRow, features.begin() + endRow);
+
+  //     // Add the sub-vector to the parts vector
+  //     parts.push_back(part);
+  // }
+
+  // for (int i = 0; i < 8; i++){
+  //     auto featureArrayVector = maker.arrayVector<float>(parts[i], REAL());
+  //     auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+  //     auto file = TempFilePath::create();
+  //     myFile.writeToFile(file->path, {inputRowVector});
+  //     paths.push_back(file);
+  // }
+  // auto hiveSplits = myFile.makeHiveConnectorSplits(paths);
+
+  boost::interprocess::interprocess_semaphore semaphore(threadsNum);
+  // torch::set_num_threads(8);
+  // Eigen::setNbThreads(1);
+  // std::cout << Eigen::nbThreads() << " main"<< std::endl;
+  // std::cout << torch::get_num_threads() << std::endl;
+  // std::cout << "line 428" << std::endl;
   auto task = exec::Task::create("0", planFragment, 0, queryCtx_, 
         [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
           if(result){
@@ -366,13 +467,14 @@ void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
   // another execute method
-  auto planAssert = planBuilderExec.planBuilder->planNode();
-  DuckDbQueryRunner duckDbQueryRunner_;
-  auto results = exec::test::AssertQueryBuilder(planAssert, duckDbQueryRunner_)
-  .split(planBuilderExec.p[0], myFile.makeHiveConnectorSplit(file->path))
-  .copyResults(pool_.get());
-  std::cout << "test udf Results:" << results->toString() << std::endl;
-  std::cout << results->toString(0, 100) << std::endl;
+  // auto planAssert = planBuilderExec.planBuilder->planNode();
+  // DuckDbQueryRunner duckDbQueryRunner_;
+  // auto results = exec::test::AssertQueryBuilder(planAssert, duckDbQueryRunner_)
+  // .split(planBuilderExec.p[0], myFile.makeHiveConnectorSplit(file->path))
+  // // .splits(planBuilderExec.p[0], myFile.makeHiveConnectorSplits(paths))
+  // .copyResults(pool_.get());
+  // std::cout << "test udf Results:" << results->toString() << std::endl;
+  // std::cout << results->toString(0, 100) << std::endl;
 }
 
 DynamicMetaData decision_maker(PlanBuilder& planBuilder){
@@ -382,7 +484,7 @@ DynamicMetaData decision_maker(PlanBuilder& planBuilder){
     decisions.blocksNum = 4;
     decisions.planIdShot = {0, 1, 0, 0, 1};//not used, Todo
     decisions.leftBlockSize.push_back(1000);
-    decisions.leftBlockSize.push_back(149385);//597540/4
+    decisions.leftBlockSize.push_back(149385);//597540/4 = 149385
     decisions.rightBlockSize.push_back(149385);
     decisions.rightBlockSize.push_back(1024);
     decisions.targetStr.push_back("mat_mul0(v)");// only test first layer, not auto determined
@@ -457,12 +559,13 @@ void exec_plan_relational(PlanBuilderExec planBuilderOpt, int memoryLimit, std::
 std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
   std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root_relational", memoryLimit * MB)}; // 280 pass for 4 threads, 40 for 1 thread
   queryCtx_->testingOverrideMemoryPool(rootPool);
+  queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}});
   auto planFragmentOpt = planBuilderOpt.planBuilder->planFragment();
   MyFileTest myFile;
   auto inputHiveSplits = myFile.makeHiveConnectorSplits(inputPaths);
   auto weightHiveSplits = myFile.makeHiveConnectorSplits(weightPaths);
 
-  boost::interprocess::interprocess_semaphore semaphore(threadsNum*2);
+  boost::interprocess::interprocess_semaphore semaphore(threadsNum*8);
   auto task = exec::Task::create("0", planFragmentOpt, 0, queryCtx_, 
       [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
         if(result){
@@ -492,14 +595,50 @@ std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
   //anthor execute method
-  auto planOptAssert = planBuilderOpt.planBuilder->planNode();
-  DuckDbQueryRunner duckDbQueryRunner_;
-  auto results = exec::test::AssertQueryBuilder(planOptAssert, duckDbQueryRunner_)
-  .splits(planBuilderOpt.p[0], myFile.makeHiveConnectorSplits(inputPaths))
-  .splits(planBuilderOpt.p[1], myFile.makeHiveConnectorSplits(weightPaths))
-  .copyResults(pool_.get());
-  std::cout << "relational Results:" << results->toString() << std::endl;
-  std::cout << results->toString(0, 100) << std::endl;
+  // auto planOptAssert = planBuilderOpt.planBuilder->planNode();
+  // DuckDbQueryRunner duckDbQueryRunner_;
+  // auto results = exec::test::AssertQueryBuilder(planOptAssert, duckDbQueryRunner_)
+  // .splits(planBuilderOpt.p[0], myFile.makeHiveConnectorSplits(inputPaths))
+  // .splits(planBuilderOpt.p[1], myFile.makeHiveConnectorSplits(weightPaths))
+  // .copyResults(pool_.get());
+  // std::cout << "relational Results:" << results->toString() << std::endl;
+  // std::cout << results->toString(0, 100) << std::endl;
+
+}
+
+void exec_pure_torch(int num_samples, int input_size, int layer1_size, int layer2_size,float* w1,float* w2,float* b1,float* b2,float* input_values){
+    torch::nn::Linear dense1(input_size, layer1_size);  
+    torch::nn::Linear dense2(layer1_size,layer2_size);
+    torch::nn::ReLU relu;
+    
+    torch::Tensor weightTensor1 = torch::from_blob(w1, {input_size, layer1_size}).t();
+    torch::Tensor weightTensor2 = torch::from_blob(w2, {layer1_size, layer2_size}).t();
+    torch::Tensor bias1 = torch::from_blob(b1, {layer1_size});
+    torch::Tensor bias2 = torch::from_blob(b2, {layer2_size});
+
+    dense1->weight.set_data(weightTensor1);
+    dense2->weight.set_data(weightTensor2);
+    dense1->bias.set_data(bias1);
+    dense2->bias.set_data(bias2);
+
+    int batch_size = 100;  // Adjust as needed
+    int batch_count = 0;
+    int c = 1000/batch_size;
+    torch::Tensor input = torch::from_blob(input_values, {num_samples,  input_size});
+    torch::data::datasets::TensorDataset dataset(input);
+    auto data_loader = torch::data::make_data_loader<torch::data::samplers::RandomSampler>(
+        std::move(dataset), batch_size);
+
+    for (auto& batch : *data_loader) {
+        torch::Tensor x = input;
+        torch::Tensor layer1_output = dense1->forward(x.reshape({x.size(0), input_size}));
+        torch::Tensor reluOutput = relu->forward(layer1_output);
+        torch::Tensor layer2_output = dense2->forward(reluOutput);
+        torch::Tensor softmax_output = torch::nn::functional::softmax(layer2_output, 1);
+        float* result = softmax_output.data_ptr<float>();
+        if(--c == 0)
+            break;   
+    }
 
 }
 
@@ -525,23 +664,51 @@ void test_optimizer_demo(int argc, char** argv){
   int first_layer_output_size = 1024;
   int second_layer_output_size = 14588;
 
-  int memory_limit_udf = 10000;//mb
-  int splits_num_udf = 1;
+  int memory_limit_udf = 1000;//mb
+  int splits_num_udf = 4;
   int threads_num_udf = 4;
 
   int memory_limit_rela = 10000;//mb
   int splits_num_rela = 4;
   int threads_num_rela = 4;
   
+  int flag = 3;
   auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
-  auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
-  // exec_plan_udf(udf_plan_builder, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
-  
-  auto relational_plan = optiming_plan(*(udf_plan_builder.planBuilder), data, num_samples, input_features_size, first_layer_output_size, second_layer_output_size);
-
-  if (relational_plan.flag){
+  if (flag == 0){
+    auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
+    exec_plan_udf(udf_plan_builder, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
+  }
+  else if(flag == 1){
+    auto udf_plan_torch_builder = build_plan_udf_torch(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
+  }
+  else if(flag == 2){
+    auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
+    auto relational_plan = optiming_plan(*(udf_plan_builder.planBuilder), data, num_samples, input_features_size, first_layer_output_size, second_layer_output_size);
     exec_plan_relational(relational_plan.planBuilderExec, memory_limit_rela, relational_plan.inputsPaths, relational_plan.weightPaths, threads_num_rela);
   }
+  else {
+    const int numThreads = 1;
+    std::vector<std::thread> threads;
+   
+    for (int i = 0; i < numThreads; ++i) {
+        threads.emplace_back(exec_pure_torch, num_samples, input_features_size, first_layer_output_size, second_layer_output_size, 
+        data.weights[0],data.weights[1], data.bias[0], data.bias[1], data.featuresFloat);
+    }
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    
+    for (std::thread& thread : threads) {
+        thread.join();
+    }
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    std::cout << "Time for Test (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  }
+  // auto udf_plan_torch_builder = build_plan_udf_torch(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
+  // auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
+  // exec_plan_udf(udf_plan_builder, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
+  // auto relational_plan = optiming_plan(*(udf_plan_builder.planBuilder), data, num_samples, input_features_size, first_layer_output_size, second_layer_output_size);
+
+  // exec_plan_relational(relational_plan.planBuilderExec, memory_limit_rela, relational_plan.inputsPaths, relational_plan.weightPaths, threads_num_rela);
+
     
 }
 
