@@ -3,12 +3,13 @@
 #include <cblas.h>
 #include <chrono>
 #include "velox/exec/Task.h"
+// #define EIGEN_USE_BLAS
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
-
+// #define EIGEN_USE_BLAS
 
 /*
     TODO
@@ -72,6 +73,8 @@ public:
         float* input_values = input_elements->values()->asMutable<float>();
         int input_size = input_elements->size();
 
+        // Eigen::setNbThreads(1);
+        // std::cout << Eigen::nbThreads() << " mul"<< std::endl;
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
         
@@ -321,7 +324,8 @@ public:
         auto input_elements = args[0]->as<ArrayVector>()->elements();
         float* input_values = input_elements->values()->asMutable<float>();
         int input_size = input_elements->size();
-
+        // Eigen::setNbThreads(1);
+        // std::cout << Eigen::nbThreads() << " add"<< std::endl;
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, input_size/dims[0], dims[0]);
         
@@ -448,7 +452,10 @@ public:
 
         int num_rows = args[0]->size();
         int num_cols = input_size / num_rows;
-        
+        // auto n = Eigen::nbThreads( );
+        // std::cout << Eigen::nbThreads() << " "<< std::endl;
+        // Eigen::setNbThreads(1);
+        // std::cout << Eigen::nbThreads() << " sof"<< std::endl;
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
         // std::cout << m(1, 2) << " "<< std::endl;
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
@@ -504,7 +511,10 @@ public:
         const TypePtr& type,
         exec::EvalCtx& context,
         VectorPtr& output) const override {
-        std::cout << rows.size() << std::endl;
+        // std::cout << rows.size() << std::endl;
+        // torch::set_num_threads(30);
+        torch::set_num_threads(8);
+        // std::cout << torch::get_num_threads() << std::endl;
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         torch::nn::Linear dense1(dims[0], dims[1]);
         torch::nn::Linear dense2(dims[1],dims[2]);
@@ -543,11 +553,11 @@ public:
         }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(results, REAL());
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        auto b = std::chrono::time_point_cast<std::chrono::microseconds>(begin).time_since_epoch().count() / 1000000.0;
-        auto e = std::chrono::time_point_cast<std::chrono::microseconds>(end).time_since_epoch().count() / 1000000.0;
-        std::cout << "Begin-end" << b << " " << e << std::endl;
-        std::cout << "Time difference = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        // auto b = std::chrono::time_point_cast<std::chrono::microseconds>(begin).time_since_epoch().count() / 1000000.0;
+        // auto e = std::chrono::time_point_cast<std::chrono::microseconds>(end).time_since_epoch().count() / 1000000.0;
+        // std::cout << "Begin-end" << b << " " << e << std::endl;
+        // std::cout << "Time difference = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

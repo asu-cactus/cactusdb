@@ -30,8 +30,10 @@ target_link_libraries(
   velox_tpch_connector
   velox_memory
   velox_common_base 
-  openblas
+  # openblas
   ${TORCH_LIBRARIES}
 )
-
+# set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -march=corei7-avx")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=corei7-avx")
