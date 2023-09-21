@@ -31,6 +31,8 @@ target_link_libraries(
   velox_exec_test_lib
   velox_memory
   velox_vector_test_lib
-  openblas
+  pthread
+  # openblas
   ${TORCH_LIBRARIES}
 )
+# set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")
