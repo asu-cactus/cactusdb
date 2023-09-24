@@ -329,7 +329,7 @@ public:
         const TypePtr& type,
         exec::EvalCtx& context,
         VectorPtr& output) const override {
-        std::cout << rows.size() << std::endl;
+
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         torch::nn::Linear dense1(dims[0], dims[1]);
         torch::nn::Linear dense2(dims[1],dims[2]);
@@ -356,7 +356,6 @@ public:
         torch::Tensor layer2_output = dense2->forward(reluOutput);
         torch::Tensor softmax_output = torch::nn::functional::softmax(layer2_output, 1);
         float* data = softmax_output.data_ptr<float>();
-        
 
         std::vector<std::vector<float>> results;
         for (int i = 0; i < rows.size(); ++i) {
@@ -368,11 +367,6 @@ public:
         }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(results, REAL());
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        auto b = std::chrono::time_point_cast<std::chrono::microseconds>(begin).time_since_epoch().count() / 1000000.0;
-        auto e = std::chrono::time_point_cast<std::chrono::microseconds>(end).time_since_epoch().count() / 1000000.0;
-        std::cout << "Begin-end" << b << " " << e << std::endl;
-        std::cout << "Time difference = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -526,7 +520,7 @@ public:
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(results, REAL());
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        std::cout << "Time for conv2d (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        //std::cout << "Time for conv2d (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

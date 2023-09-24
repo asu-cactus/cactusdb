@@ -358,24 +358,29 @@ void MLFunctionsTest::test_dense_layer() {
 
 void MLFunctionsTest::test_torch_dense_layer(){
  
-  int input_size = 784; // num_features
-  int layer1_size = 1024; // num units in hidden layer 1
-  int layer2_size = 10;
-  int num_samples = 60000;
+  int input_size = 768; // num_features
+  int layer1_size = 3072; // num units in hidden layer 1
+  int layer2_size = 768;
   
   std::vector<int> dimensions;
   dimensions.push_back(input_size);
   dimensions.push_back(layer1_size);
   dimensions.push_back(layer2_size);
   
+
+  int num_samples = std::atoi(std::getenv("samples"));
+  int num_splits = std::atoi(std::getenv("splits"));
+  int velox_threads = std::atoi(std::getenv("vthreads"));
+  int torch_threads = std::atoi(std::getenv("tthreads"));
+  torch::set_num_threads(torch_threads);
   
   // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
   // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
   // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
  
-  std::ifstream weights_file("/home/ubuntu/w1024.txt"); 
-  std::ifstream bias_file("/home/ubuntu/b1024.txt"); 
-  std::ifstream test_file("/home/ubuntu/x_test_large.txt"); 
+  std::ifstream weights_file("/home/ubuntu/bert_weights.txt"); 
+  std::ifstream bias_file("/home/ubuntu/bert_bias.txt"); 
+  std::ifstream test_file("/home/ubuntu/bert_input.txt"); 
 
   FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
   FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
@@ -393,7 +398,6 @@ void MLFunctionsTest::test_torch_dense_layer(){
     featureVectors.push_back(featureVector);
   }
 
-
   auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
   auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
  
@@ -406,19 +410,60 @@ void MLFunctionsTest::test_torch_dense_layer(){
     TorchDNN::signatures(),
     std::make_unique<TorchDNN>(weights, bias, dimensions)
   );
-
-  auto myPlan = exec::test::PlanBuilder(pool_.get())
-                  .values({inputRowVector})
-                  .project({"torchDNN(x)"})
-		              .planNode();
-
-  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();     
-  auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
-  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Time for Test (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
-  std::cout << "Results:" << results->toString() << std::endl;
- // std::cout << results->toString(0, results->size()) << std::endl;
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  core::PlanNodeId p0;
   
+
+  auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(asRowType(inputRowVector->type()))
+                .capturePlanNodeId(p0)
+                //.project({fmt::format(compute, "x")}) 
+                .project({"torchDNN(x)"}) 
+                .planFragment();
+
+  auto config = std::make_shared<facebook::velox::dwrf::Config>();
+
+  // affects the number of splits
+  // number of bites in each stripe (collection of rows)
+  // strip size should be <= split size (total_size / total splits)
+  // to have the desired number of splits
+  uint64_t kSizeKB = 1024UL;
+  // used for indexing. 
+  // 2k rows will be processed in every call
+  // but doesn't effect number of splits
+  // if stripe size is a large value
+  uint32_t rows = num_samples/num_splits;
+  config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
+  config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
+  auto file = TempFilePath::create();
+  writeToFile(file->path, {inputRowVector}, config);
+  
+  auto hiveSplits =  makeHiveConnectorSplits(file->path, num_splits, dwio::common::FileFormat::DWRF);
+
+  queryCtx_->testingOverrideConfigUnsafe(
+      {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"}, {core::QueryConfig::kMaxOutputBatchRows, "100000"}});
+  auto task = exec::Task::create("0", plan , 0, queryCtx_, 
+        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          //  if(result)
+          //     std::cout << result->toString() << std::endl;
+          return exec::BlockingReason::kNotBlocked;
+  });
+
+  
+  //std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+   // std::cout << split->toString() << std::endl;
+    task->addSplit(p0, exec::Split(std::move(split)));
+  }
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  task->start(task, velox_threads);
+  task->noMoreSplits(p0);
+  // Start task with 2 as maximum drivers and wait for execution to finish
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::stringstream ss;
+  ss << num_samples << "," << num_splits << "," << velox_threads << "," << torch_threads << ",";
+  std::cout << ss.str() << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 }
 
 void MLFunctionsTest::test_mnist() {
@@ -495,7 +540,7 @@ FlatVectorPtr<float> MLFunctionsTest::get_tensor(std::ifstream& file, int size, 
 }
 
 FlatVectorPtr<float> MLFunctionsTest::get_tensor(VectorMaker& m, std::ifstream& file, int size, int lines){
-    std::cout << "Loading tensor of size " << size << std::endl;
+    //std::cout << "Loading tensor of size " << size << std::endl;
     FlatVectorPtr<float> tensor = m.flatVector<float>(size);
     int index = 0;
     std::string line;
@@ -1376,15 +1421,17 @@ void MLFunctionsTest::test_deep_bench_conv1() {
     int input_dims[] = {112,112,64}; 
     int input_size = input_dims[0] * input_dims[1] * input_dims[2];
 
-    std::ifstream conf_file("/home/ubuntu/db_conv1_samples.txt");
-    FlatVectorPtr<float> conf = get_tensor(conf_file, 6, 6);
-    float* confs = conf->values()->asMutable<float>();
-    conf_file.close();
-    torch::set_num_threads(confs[5]);
+    // std::ifstream conf_file("/home/ubuntu/db_conv1_samples.txt");
+    // FlatVectorPtr<float> conf = get_tensor(conf_file, 6, 6);
+    // float* confs = conf->values()->asMutable<float>();
+    // conf_file.close();
+    
 
-    int num_samples = (int) confs[0];
-    int num_splits = (int) confs[1];
-    std::cout << num_samples << " " << num_splits;
+    int num_samples = std::atoi(std::getenv("samples"));
+    int num_splits = std::atoi(std::getenv("splits"));
+    int velox_threads = std::atoi(std::getenv("vthreads"));
+    int torch_threads = std::atoi(std::getenv("tthreads"));
+    torch::set_num_threads(torch_threads);
 
     int dims[] = {cnn_filters, cnn_filter_dims[0], cnn_filter_dims[1], cnn_filter_dims[2], input_dims[0], input_dims[1]};
 
@@ -1457,27 +1504,29 @@ void MLFunctionsTest::test_deep_bench_conv1() {
   auto hiveSplits =  makeHiveConnectorSplits(file->path, num_splits, dwio::common::FileFormat::DWRF);
 
   queryCtx_->testingOverrideConfigUnsafe(
-      {{core::QueryConfig::kPreferredOutputBatchBytes, std::to_string((int)confs[3])}, {core::QueryConfig::kMaxOutputBatchRows, std::to_string((int)confs[4])}});
+      {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"}, {core::QueryConfig::kMaxOutputBatchRows, "100000"}});
   auto task = exec::Task::create("0", plan , 0, queryCtx_, 
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-           if(result)
-              std::cout << result->toString() << std::endl;
+          //  if(result)
+          //     std::cout << result->toString() << std::endl;
           return exec::BlockingReason::kNotBlocked;
   });
 
   
-  std::cout << "Hive splits:" << std::endl;
+  //std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
-    std::cout << split->toString() << std::endl;
+   // std::cout << split->toString() << std::endl;
     task->addSplit(p0, exec::Split(std::move(split)));
   }
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(task, confs[2]);
+  task->start(task, velox_threads);
   task->noMoreSplits(p0);
   // Start task with 2 as maximum drivers and wait for execution to finish
   waitForFinishedDrivers(task);
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::stringstream ss;
+  ss << num_samples << "," << num_splits << "," << velox_threads << "," << torch_threads << ",";
+  std::cout << ss.str() << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 }
 
 
@@ -1599,19 +1648,20 @@ void MLFunctionsTest::run() {
   //  test_mat_mul();
   //  test_mat_add();
   //  test_relu();
-  //  test_dense_layer();
+  //    test_dense_layer();
   //  test_torch_dense_layer_multithreading();
   //  test_mnist();
   //  test_multithreading();
   //  test_multithreading_oom();
   //  test_batching();
   //  test_conv2d();
-  //    test_deep_bench_conv1();
+      test_deep_bench_conv1();
   //  test_land_cover_conv3();
   //  test_spill();
   //  mytest();
   //    test_mnist_multithreading();
   //  test_mnist_oom_weights();
+  // test_torch_dense_layer();
 
 }
 
