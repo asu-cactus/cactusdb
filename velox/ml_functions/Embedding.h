@@ -1,3 +1,4 @@
+#pragma once
 #include <iostream>
 #include "functions.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
@@ -38,9 +39,6 @@ class Embedding : public MLFunction {
     int* indicesValues = indicesVector->values()->asMutable<int>();
     int numIndices = indicesVector->size();
 
-    std::cout << "[DEBUG] rows size: " << rows.size() << " dims[0]: " << dims[0]
-              << " indices size: " << indicesVector->size() << " " << std::endl;
-
     std::vector<std::vector<float>> result(
         numIndices, std::vector<float>(dims[1]));
 
@@ -53,7 +51,6 @@ class Embedding : public MLFunction {
     }
 
     VectorMaker maker{context.pool()};
-    std::cout << "[DEBUG] Finish at here 2" << std::endl;
     output = maker.arrayVector<float>(result, REAL());
   }
 

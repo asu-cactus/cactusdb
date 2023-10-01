@@ -1,3 +1,4 @@
+#pragma once
 #include <iostream>
 #include "functions.h"
 #include <Eigen/Dense>

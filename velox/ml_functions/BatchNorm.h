@@ -1,3 +1,4 @@
+#pragma once
 #include <iostream>
 #include <cmath>
 #include <Eigen/Dense>
@@ -23,6 +24,7 @@ class BatchNorm1D : public MLFunction {
     dims.push_back(numDims);
   }
 
+  // TODO: add support of loading from disk file
   // BatchNorm1D(std::string weightsFile, int numEmbeddings, int embeddingDims) {
   //   weightsFile_ = weightsFile;
   //   dims.push_back(numEmbeddings);
@@ -52,7 +54,7 @@ class BatchNorm1D : public MLFunction {
       result.col(i) = (colData.array() - colMean) / sqrt(colVariance + eps_) * weights_[i] + bias_[i];
     }
 
-    std::vector<std::vector<float>> resultVector(
+    std::vector<std::vector<float>> resultVector(f
         result.data(), result.data() + result.rows() * result.cols()
     );
 

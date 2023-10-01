@@ -8,6 +8,7 @@
 #include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/Dropout.h"
 #include "velox/ml_functions/BatchNorm.h"
+#include "velox/ml_functions/Concat.h"
 #include "velox/parse/TypeResolver.h"
 
 using namespace facebook::velox;
@@ -69,6 +70,7 @@ class EmbeddingTest : public HiveConnectorTestBase {
   void testEmbedding();
   void testBatchNorm1D();
   void testDropout();
+  void testConcat();
 
   void TestBody() override {}
 
@@ -141,8 +143,8 @@ void EmbeddingTest::testEmbedding() {
   auto results =
       exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
 
-  std::cout << "[INFO] Results:" << results->toString() << std::endl;
-  std::cout << "[INFO] Results:" << results->toString(0, results->size())
+  std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
+  std::cout << "[INFO] Results: \n" << results->toString(0, results->size())
             << std::endl;
 };
 
@@ -198,8 +200,8 @@ void EmbeddingTest::testBatchNorm1D() {
   auto results =
       exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
 
-  std::cout << "[INFO] Results:" << results->toString() << std::endl;
-  std::cout << "[INFO] Results:" << results->toString(0, results->size())
+  std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
+  std::cout << "[INFO] Results: \n" << results->toString(0, results->size())
             << std::endl;
 };
 
@@ -240,15 +242,83 @@ void EmbeddingTest::testDropout() {
   auto results =
       exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
 
-  std::cout << "[INFO] Results:" << results->toString() << std::endl;
-  std::cout << "[INFO] Results:" << results->toString(0, results->size())
+  std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
+  std::cout << "[INFO] Results: \n" << results->toString(0, results->size())
             << std::endl;
 };
+
+// Test Dropout Layer
+void EmbeddingTest::testConcat() {
+  int numSamples = 2;
+  int numDims1 = 5;
+  int numDims2 = 3;
+  int featureSize1 = numSamples * numDims1;
+  int featureSize2 = numSamples * numDims2;
+
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+
+  // Initialize the input1 feature vector
+  std::vector<std::vector<float>> inputVectors1;
+  for (int i = 0; i < numSamples; i++) {
+    std::vector<float> inputVector;
+    for (int j = 0; j < numDims1; j++) {
+      inputVector.push_back(randomGenerator.genRandomFloatValue());
+    }
+    inputVectors1.push_back(inputVector);
+  }
+
+  auto indicesArrayVector1 = maker.arrayVector<float>(inputVectors1, REAL());
+  auto inputRowVector1 = maker.rowVector({"x1"}, {indicesArrayVector1});
+
+
+  // Initialize the input1 feature vector
+  std::vector<std::vector<float>> inputVectors2;
+  for (int i = 0; i < numSamples; i++) {
+    std::vector<float> inputVector;
+    for (int j = 0; j < numDims2; j++) {
+      inputVector.push_back(randomGenerator.genRandomFloatValue());
+    }
+    inputVectors2.push_back(inputVector);
+  }
+
+  
+
+
+
+  auto indicesArrayVector2 = maker.arrayVector<float>(inputVectors2, REAL());
+  auto inputRowVector2 = maker.rowVector({"x2"}, {indicesArrayVector2});
+
+  auto inputRowVector = maker.rowVector({"x1", "x2"}, {indicesArrayVector1, indicesArrayVector2});
+
+  // std::cout << "[INFO] Generated Indices:"
+  //           << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
+
+  // Print input 
+  std::cout << "[INFO] input1: \n" << inputRowVector1->toString(0, inputRowVector1->size()) << std::endl;
+  std::cout << "[INFO] input2: \n" << inputRowVector2->toString(0, inputRowVector2->size()) << std::endl;
+
+  exec::registerVectorFunction(
+      "concat", Concat::signatures(), std::make_unique<Concat>(numDims1, numDims2));
+
+  auto myPlan = exec::test::PlanBuilder(pool_.get())
+                    .values({inputRowVector})
+                    .project({"concat(x1, x2)"})
+                    .planNode();
+
+  auto results =
+      exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
+
+  std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
+  std::cout << "[INFO] Results: \n" << results->toString(0, results->size())
+            << std::endl;
+};
+
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   EmbeddingTest demo;
   // demo.testEmbedding();
   // demo.testBatchNorm1D();
-  demo.testDropout();
+  // demo.testDropout();
+  demo.testConcat();
 }

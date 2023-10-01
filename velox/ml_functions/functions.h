@@ -1,5 +1,4 @@
-#ifndef FUNCTIONS_H
-#define FUNCTIONS_H
+#pragma once
 #include "velox/expression/VectorFunction.h"
 #include <Eigen/Dense>
 #include <cblas.h>
@@ -678,4 +677,3 @@ public:
         return "max_pool";
     };
 };
-#endif // FUNCTIONS_H
