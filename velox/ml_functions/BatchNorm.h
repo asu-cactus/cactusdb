@@ -25,7 +25,8 @@ class BatchNorm1D : public MLFunction {
   }
 
   // TODO: add support of loading from disk file
-  // BatchNorm1D(std::string weightsFile, int numEmbeddings, int embeddingDims) {
+  // BatchNorm1D(std::string weightsFile, int numEmbeddings, int embeddingDims)
+  // {
   //   weightsFile_ = weightsFile;
   //   dims.push_back(numEmbeddings);
   //   dims.push_back(embeddingDims);
@@ -49,14 +50,16 @@ class BatchNorm1D : public MLFunction {
     for (int i = 0; i < dims[0]; i++) {
       Eigen::VectorXf colData = inputMatrix.col(i);
       float colMean = colData.mean();
-      float colVariance = (colData.array() - colMean).square().sum() / (numInput - 1);
+      float colVariance =
+          (colData.array() - colMean).square().sum() / (numInput - 1);
 
-      result.col(i) = (colData.array() - colMean) / sqrt(colVariance + eps_) * weights_[i] + bias_[i];
+      result.col(i) =
+          (colData.array() - colMean) / sqrt(colVariance + eps_) * weights_[i] +
+          bias_[i];
     }
 
-    std::vector<std::vector<float>> resultVector(f
-        result.data(), result.data() + result.rows() * result.cols()
-    );
+    std::vector<std::vector<float>> resultVector(
+        result.data(), result.data() + result.rows() * result.cols());
 
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(resultVector, REAL());

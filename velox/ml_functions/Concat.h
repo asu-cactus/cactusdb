@@ -48,16 +48,10 @@ class Concat : public exec::VectorFunction {
           input2Values + i * input2Dims_,
           input2Dims_ * sizeof(float));
       results.push_back(concatenatedVector);
-
-      for (float val: concatenatedVector) {
-        std::cout << val << " ";
-      }
-      std::cout << std::endl;
     }
 
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(results, REAL());
-
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

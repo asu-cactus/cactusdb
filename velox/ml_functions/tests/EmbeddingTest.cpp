@@ -43,6 +43,20 @@ class RandomGenerator {
     return distI_(gen_);
   }
 
+  std::vector<std::vector<float>> genFloat2dVector(int numRow, int numCol) {
+    // Initialize the input1 feature vector
+    std::vector<std::vector<float>> float2dVector;
+
+    for (int i = 0; i < numRow; i++) {
+      std::vector<float> floatVector;
+      for (int j = 0; j < numCol; j++) {
+        floatVector.push_back(genRandomFloatValue());
+      }
+      float2dVector.push_back(floatVector);
+    }
+    return float2dVector;
+  }
+
  private:
   std::mt19937 gen_;
   std::uniform_real_distribution<float> distR_;
@@ -70,7 +84,9 @@ class EmbeddingTest : public HiveConnectorTestBase {
   void testEmbedding();
   void testBatchNorm1D();
   void testDropout();
-  void testConcat();
+  void testConcat1();
+  void testConcat2();
+  void testConcat3();
 
   void TestBody() override {}
 
@@ -101,10 +117,10 @@ class EmbeddingTest : public HiveConnectorTestBase {
 
 // Test Embedding Layer
 void EmbeddingTest::testEmbedding() {
-  int numEmbeddings = 6000;
-  int embeddingDims = 128;
+  int numEmbeddings = 2000;
+  int embeddingDims = 12;
   int embeddingSize = numEmbeddings * embeddingDims;
-  int numSamples = 120;
+  int numSamples = 5;
 
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
   randomGenerator.setIntRange(0, numEmbeddings);
@@ -115,7 +131,7 @@ void EmbeddingTest::testEmbedding() {
     weights->set(i, randomGenerator.genRandomFloatValue());
   }
 
-  // Initialize the feature vector
+  // Initialize the indices vector
   std::vector<std::vector<int>> indicesVectors;
   for (int i = 0; i < numSamples; i++) {
     std::vector<int> inputVector;
@@ -144,8 +160,8 @@ void EmbeddingTest::testEmbedding() {
       exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
 
   std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
-  std::cout << "[INFO] Results: \n" << results->toString(0, results->size())
-            << std::endl;
+  std::cout << "[INFO] Results: \n"
+            << results->toString(0, results->size()) << std::endl;
 };
 
 // Test BatchNorm1D Layer
@@ -201,8 +217,8 @@ void EmbeddingTest::testBatchNorm1D() {
       exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
 
   std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
-  std::cout << "[INFO] Results: \n" << results->toString(0, results->size())
-            << std::endl;
+  std::cout << "[INFO] Results: \n"
+            << results->toString(0, results->size()) << std::endl;
 };
 
 // Test Dropout Layer
@@ -243,62 +259,45 @@ void EmbeddingTest::testDropout() {
       exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
 
   std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
-  std::cout << "[INFO] Results: \n" << results->toString(0, results->size())
-            << std::endl;
+  std::cout << "[INFO] Results: \n"
+            << results->toString(0, results->size()) << std::endl;
 };
 
 // Test Dropout Layer
-void EmbeddingTest::testConcat() {
+void EmbeddingTest::testConcat1() {
   int numSamples = 2;
   int numDims1 = 5;
   int numDims2 = 3;
   int featureSize1 = numSamples * numDims1;
   int featureSize2 = numSamples * numDims2;
 
-  RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1);
 
   // Initialize the input1 feature vector
-  std::vector<std::vector<float>> inputVectors1;
-  for (int i = 0; i < numSamples; i++) {
-    std::vector<float> inputVector;
-    for (int j = 0; j < numDims1; j++) {
-      inputVector.push_back(randomGenerator.genRandomFloatValue());
-    }
-    inputVectors1.push_back(inputVector);
-  }
+  std::vector<std::vector<float>> inputVectors1 = randomGenerator.genFloat2dVector(numSamples, numDims1);
+  std::vector<std::vector<float>> inputVectors2 = randomGenerator.genFloat2dVector(numSamples, numDims2);
 
   auto indicesArrayVector1 = maker.arrayVector<float>(inputVectors1, REAL());
   auto inputRowVector1 = maker.rowVector({"x1"}, {indicesArrayVector1});
 
-
-  // Initialize the input1 feature vector
-  std::vector<std::vector<float>> inputVectors2;
-  for (int i = 0; i < numSamples; i++) {
-    std::vector<float> inputVector;
-    for (int j = 0; j < numDims2; j++) {
-      inputVector.push_back(randomGenerator.genRandomFloatValue());
-    }
-    inputVectors2.push_back(inputVector);
-  }
-
-  
-
-
-
   auto indicesArrayVector2 = maker.arrayVector<float>(inputVectors2, REAL());
   auto inputRowVector2 = maker.rowVector({"x2"}, {indicesArrayVector2});
 
-  auto inputRowVector = maker.rowVector({"x1", "x2"}, {indicesArrayVector1, indicesArrayVector2});
+  auto inputRowVector =
+      maker.rowVector({"x1", "x2"}, {indicesArrayVector1, indicesArrayVector2});
 
-  // std::cout << "[INFO] Generated Indices:"
-  //           << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
-
-  // Print input 
-  std::cout << "[INFO] input1: \n" << inputRowVector1->toString(0, inputRowVector1->size()) << std::endl;
-  std::cout << "[INFO] input2: \n" << inputRowVector2->toString(0, inputRowVector2->size()) << std::endl;
+  // Print input
+  std::cout << "[INFO] input1: \n"
+            << inputRowVector1->toString(0, inputRowVector1->size())
+            << std::endl;
+  std::cout << "[INFO] input2: \n"
+            << inputRowVector2->toString(0, inputRowVector2->size())
+            << std::endl;
 
   exec::registerVectorFunction(
-      "concat", Concat::signatures(), std::make_unique<Concat>(numDims1, numDims2));
+      "concat",
+      Concat::signatures(),
+      std::make_unique<Concat>(numDims1, numDims2));
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                     .values({inputRowVector})
@@ -309,16 +308,106 @@ void EmbeddingTest::testConcat() {
       exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
 
   std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
-  std::cout << "[INFO] Results: \n" << results->toString(0, results->size())
-            << std::endl;
+  std::cout << "[INFO] Results: \n"
+            << results->toString(0, results->size()) << std::endl;
 };
 
+void EmbeddingTest::testConcat2() {
+  int numSamples = 2;
+  int input1Dims = 5;
+  int input2Dims = 4;
+
+  int input1NN = 3;
+  int input2NN = 2;
+
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1);
+
+  // Initialize the input1 feature vector
+  std::vector<std::vector<float>> inputVectors1 = randomGenerator.genFloat2dVector(numSamples, input1Dims);
+  std::vector<std::vector<float>> inputVectors2 = randomGenerator.genFloat2dVector(numSamples, input2Dims);
+
+  auto indicesArrayVector1 = maker.arrayVector<float>(inputVectors1, REAL());
+  auto inputRowVector1 = maker.rowVector({"in1"}, {indicesArrayVector1});
+  auto indicesArrayVector2 = maker.arrayVector<float>(inputVectors2, REAL());
+  auto inputRowVector2 = maker.rowVector({"in2"}, {indicesArrayVector2});
+
+  auto weights1 = maker.flatVector<float>(input1Dims*input1NN);
+  for(int i=0; i < input1Dims*input1NN; i++){
+	  weights1->set(i, randomGenerator.genRandomFloatValue());
+  } 
+
+  auto weights2 = maker.flatVector<float>(input2Dims*input2NN);
+  for(int i=0; i < input2Dims*input2NN; i++){
+	  weights2->set(i, randomGenerator.genRandomFloatValue());
+  } 
+
+
+  // Print input
+  std::cout << "[INFO] input1: \n"
+            << inputRowVector1->toString(0, inputRowVector1->size())
+            << std::endl;
+  std::cout << "[INFO] input2: \n"
+            << inputRowVector2->toString(0, inputRowVector2->size())
+            << std::endl;
+
+  exec::registerVectorFunction(
+      "mat_mul1",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(weights1->values()->asMutable<float>(), input1Dims, input1NN));
+  
+  exec::registerVectorFunction(
+      "mat_mul2",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(weights2->values()->asMutable<float>(), input2Dims, input2NN));
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+
+  auto myPlan1 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({inputRowVector1})
+                    .project({"mat_mul1(in1) as o1"})
+                    .planNode();
+  
+  auto myPlan2 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({inputRowVector2})
+                    .project({"mat_mul2(in2) as o2"})
+                    .planNode();
+
+  auto results1 =
+      exec::test::AssertQueryBuilder(myPlan1).copyResults(pool_.get());
+  
+  auto results2 =
+      exec::test::AssertQueryBuilder(myPlan2).copyResults(pool_.get());
+  
+  auto t3 = maker.rowVector({"o1", "o2"},
+                          {results1->childAt(0),
+                          results2->childAt(0)});
+
+  std::cout << "[INFO] t3: \n"
+            << t3->toString(0, t3->size())
+            << std::endl;
+
+  exec::registerVectorFunction(
+      "concat",
+      Concat::signatures(),
+      std::make_unique<Concat>(input1NN, input2NN));
+
+  auto myPlan3 = exec::test::PlanBuilder(pool_.get())
+                    .values({t3})
+                    .project({"concat(o1, o2)"})
+                    .planNode();
+  auto results3 =
+      exec::test::AssertQueryBuilder(myPlan3).copyResults(pool_.get());
+  std::cout << "[INFO] Results3: \n"
+            << results3->toString(0, results3->size()) << std::endl;
+
+};
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   EmbeddingTest demo;
-  // demo.testEmbedding();
+  demo.testEmbedding();
   // demo.testBatchNorm1D();
   // demo.testDropout();
-  demo.testConcat();
+  // demo.testConcat1();
+  // demo.testConcat2();
 }
