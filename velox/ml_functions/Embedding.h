@@ -37,17 +37,35 @@ class Embedding : public MLFunction {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
     auto indicesVector = args[0]->as<ArrayVector>()->elements();
     int* indicesValues = indicesVector->values()->asMutable<int>();
-    int numIndices = indicesVector->size();
+    int numInputs = indicesVector->size();
 
-    std::vector<std::vector<float>> result(
-        numIndices, std::vector<float>(dims[1]));
+    auto indicesRowVector = args[0];
+    std::cout << "[INFO] converted to row vector:  size: "
+              << indicesRowVector->size() << "\n"
+              << indicesRowVector->toString(0, indicesRowVector->size())
+              << std::endl;
 
-    for (int i = 0; i < numIndices; i++) {
-      int embedIndex = indicesValues[i];
+    auto arrayVector = args[0]->as<ArrayVector>();
 
-      for (int j = 0; j < dims[1]; j++) {
-        result[i][j] = weights_[embedIndex * dims[1] + j];
+    for (int i = 0; i < 5; i++) {
+      std::cout << "[DEBUG2] offsets: " << i << " " << arrayVector->offsetAt(i)
+                << " sizes: " << arrayVector->sizeAt(i) << std::endl;
+    }
+    // You can also use sizeof(*arrayVector->rawSizes()) to compute the size of
+    // a single entry in BufferPtr
+    std::vector<std::vector<float>> result;
+    for (int i = 0; i < numInputs; i++) {
+      int numSubIndices = arrayVector->sizeAt(i);
+      int indicesOffset = arrayVector->offsetAt(i);
+      std::vector<float> retrievedEmbedding;
+      for (int j = 0; j < numSubIndices; j++) {
+        // Support of variadic indexes
+        int embedIndex = indicesValues[indicesOffset + j];
+        for (int k = 0; k < dims[1]; k++) {
+          retrievedEmbedding.push_back(weights_[embedIndex * dims[1] + k]);
+        }
       }
+      result.push_back(retrievedEmbedding);
     }
 
     VectorMaker maker{context.pool()};

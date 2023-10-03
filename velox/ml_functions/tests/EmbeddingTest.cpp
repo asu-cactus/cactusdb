@@ -117,39 +117,46 @@ class EmbeddingTest : public HiveConnectorTestBase {
 
 // Test Embedding Layer
 void EmbeddingTest::testEmbedding() {
-  int numEmbeddings = 2000;
-  int embeddingDims = 12;
+  std::cout << "[INFO] Test of Embedding." << std::endl; 
+  int numEmbeddings = 5;
+  int embeddingDims = 2;
   int embeddingSize = numEmbeddings * embeddingDims;
   int numSamples = 5;
 
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
-  randomGenerator.setIntRange(0, numEmbeddings);
+  randomGenerator.setIntRange(0, numEmbeddings-1);
 
-  // Initialize the weight matrix
-  auto weights = maker.flatVector<float>(embeddingSize);
-  for (int i = 0; i < embeddingSize; i++) {
-    weights->set(i, randomGenerator.genRandomFloatValue());
-  }
+  std::vector<std::vector<float>> weights= randomGenerator.genFloat2dVector(numEmbeddings, embeddingDims);
+  auto weightsVector = maker.arrayVector<float>(weights, REAL());
 
   // Initialize the indices vector
   std::vector<std::vector<int>> indicesVectors;
   for (int i = 0; i < numSamples; i++) {
     std::vector<int> inputVector;
-    inputVector.push_back(randomGenerator.genRandomIntValue());
+    int numI = i % 3;
+    if (numI == 0) {
+      numI = 1;
+    }
+    for (int j = 0; j < numI; j++) {
+      inputVector.push_back(randomGenerator.genRandomIntValue());
+    }
     indicesVectors.push_back(inputVector);
   }
 
   auto indicesArrayVector = maker.arrayVector<int>(indicesVectors, INTEGER());
   auto inputRowVector = maker.rowVector({"x"}, {indicesArrayVector});
 
-  std::cout << "[INFO] Generated Indices:"
+  std::cout << "[INFO] Generated Embedding:\n"
+            << weightsVector->toString(0, weightsVector->size()) << std::endl;
+
+  std::cout << "[INFO] Generated Indices:\n"
             << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
 
   exec::registerVectorFunction(
       "embedding",
       Embedding::signatures(),
       std::make_unique<Embedding>(
-          weights->values()->asMutable<float>(), numEmbeddings, embeddingDims));
+          weightsVector->elements()->values()->asMutable<float>(), numEmbeddings, embeddingDims));
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                     .values({inputRowVector})
@@ -166,6 +173,7 @@ void EmbeddingTest::testEmbedding() {
 
 // Test BatchNorm1D Layer
 void EmbeddingTest::testBatchNorm1D() {
+  std::cout << "[INFO] Test of BatchNorm1D." << std::endl;
   int numSamples = 2;
   int numDims = 5;
   int featureSize = numSamples * numDims;
@@ -223,6 +231,7 @@ void EmbeddingTest::testBatchNorm1D() {
 
 // Test Dropout Layer
 void EmbeddingTest::testDropout() {
+  std::cout << "[INFO] Test of Dropout." << std::endl;
   int numSamples = 2;
   int numDims = 5;
   int featureSize = numSamples * numDims;
@@ -265,6 +274,7 @@ void EmbeddingTest::testDropout() {
 
 // Test Dropout Layer
 void EmbeddingTest::testConcat1() {
+  std::cout << "[INFO] Test of Concat1." << std::endl;
   int numSamples = 2;
   int numDims1 = 5;
   int numDims2 = 3;
@@ -313,6 +323,7 @@ void EmbeddingTest::testConcat1() {
 };
 
 void EmbeddingTest::testConcat2() {
+  std::cout << "[INFO] Test of Concat2." << std::endl;
   int numSamples = 2;
   int input1Dims = 5;
   int input2Dims = 4;
@@ -406,8 +417,8 @@ int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   EmbeddingTest demo;
   demo.testEmbedding();
-  // demo.testBatchNorm1D();
-  // demo.testDropout();
-  // demo.testConcat1();
-  // demo.testConcat2();
+  demo.testBatchNorm1D();
+  demo.testDropout();
+  demo.testConcat1();
+  demo.testConcat2();
 }
