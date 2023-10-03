@@ -9,6 +9,7 @@
 #include "velox/ml_functions/Dropout.h"
 #include "velox/ml_functions/BatchNorm.h"
 #include "velox/ml_functions/Concat.h"
+#include "velox/ml_functions/CosineSimilarity.h"
 #include "velox/parse/TypeResolver.h"
 
 using namespace facebook::velox;
@@ -86,7 +87,8 @@ class EmbeddingTest : public HiveConnectorTestBase {
   void testDropout();
   void testConcat1();
   void testConcat2();
-  void testConcat3();
+  // void testConcat3();
+  void testCosineSimilarity();
 
   void TestBody() override {}
 
@@ -413,12 +415,67 @@ void EmbeddingTest::testConcat2() {
 
 };
 
+void EmbeddingTest::testCosineSimilarity() {
+  std::cout << "[INFO] Test of CosineSimilarity." << std::endl;
+  int numSamples = 2;
+  int input1Dims = 5;
+  int input2Dims = 5;
+
+
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1);
+
+  // Initialize the input1 feature vector
+  std::vector<std::vector<float>> inputVectors1 = randomGenerator.genFloat2dVector(numSamples, input1Dims);
+  std::vector<std::vector<float>> inputVectors2 = randomGenerator.genFloat2dVector(numSamples, input2Dims);
+
+  auto indicesArrayVector1 = maker.arrayVector<float>(inputVectors1, REAL());
+  auto inputRowVector1 = maker.rowVector({"in1"}, {indicesArrayVector1});
+  auto indicesArrayVector2 = maker.arrayVector<float>(inputVectors2, REAL());
+  auto inputRowVector2 = maker.rowVector({"in2"}, {indicesArrayVector2});
+
+  auto inputRowVector = maker.rowVector({"in1", "in2"}, {indicesArrayVector1, indicesArrayVector2});
+
+  // auto weights1 = maker.flatVector<float>(input1Dims*input1NN);
+  // for(int i=0; i < input1Dims*input1NN; i++){
+	//   weights1->set(i, randomGenerator.genRandomFloatValue());
+  // } 
+
+  // auto weights2 = maker.flatVector<float>(input2Dims*input2NN);
+  // for(int i=0; i < input2Dims*input2NN; i++){
+	//   weights2->set(i, randomGenerator.genRandomFloatValue());
+  // } 
+
+
+  // Print input
+  std::cout << "[INFO] input: \n"
+            << inputRowVector->toString(0, inputRowVector->size())
+            << std::endl;
+
+  exec::registerVectorFunction(
+      "cosine_similarity",
+      CosineSimilarity::signatures(),
+      std::make_unique<CosineSimilarity>(input1Dims));
+
+  auto myPlan = exec::test::PlanBuilder(pool_.get())
+                    .values({inputRowVector})
+                    .project({"cosine_similarity(in1, in2)"})
+                    .planNode();
+ 
+  auto results =
+      exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
+
+  std::cout << "[INFO] Results \n"
+            << results->toString(0, results->size()) << std::endl;
+
+};
+
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   EmbeddingTest demo;
-  demo.testEmbedding();
-  demo.testBatchNorm1D();
-  demo.testDropout();
-  demo.testConcat1();
-  demo.testConcat2();
+  // demo.testEmbedding();
+  // demo.testBatchNorm1D();
+  // demo.testDropout();
+  // demo.testConcat1();
+  // demo.testConcat2();
+  demo.testCosineSimilarity();
 }

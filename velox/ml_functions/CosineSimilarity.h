@@ -1,0 +1,104 @@
+#pragma once
+#include <iostream>
+#include <cmath>
+#include <Eigen/Dense>
+#include "velox/exec/tests/utils/AssertQueryBuilder.h"
+#include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/exec/tests/utils/TempDirectoryPath.h"
+#include "velox/vector/tests/utils/VectorTestBase.h"
+
+using namespace facebook::velox;
+using namespace facebook::velox::test;
+using namespace facebook::velox::exec::test;
+using namespace facebook::velox::memory;
+
+// Implementation of embedding layer where the embedding is stored as a 2-D
+// array: numEmbedding*embeddingDims, lookup takes a int vector as indices
+
+class CosineSimilarity : public exec::VectorFunction {
+ public:
+  CosineSimilarity(int dim) {
+    dims.push_back(dim);
+  }
+
+  // TODO: add support of loading from disk file
+  // BatchNorm1D(std::string weightsFile, int numEmbeddings, int embeddingDims)
+  // {
+  //   weightsFile_ = weightsFile;
+  //   dims.push_back(numEmbeddings);
+  //   dims.push_back(embeddingDims);
+  // }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+    auto input1Features = args[0]->as<ArrayVector>()->elements();
+    float* input1Values = input1Features->values()->asMutable<float>();
+
+    auto input2Features = args[1]->as<ArrayVector>()->elements();
+    float* input2Values = input2Features->values()->asMutable<float>();
+
+    int numInput = rows.size();
+
+    std::cout << "[DEBUG] row size: " << numInput << std::endl;
+    Eigen::Map<Eigen::MatrixXf> input1Matrix(input1Values, numInput, dims[0]);
+    Eigen::Map<Eigen::MatrixXf> input2Matrix(input2Values, numInput, dims[0]);
+    std::cout << input1Matrix.rows() << " " << input1Matrix.cols() << std::endl;
+    std::cout << input2Matrix.rows() << " " << input2Matrix.cols() << std::endl;
+
+    std::vector<std::vector<float>> results;
+
+    //TODO more efficient way?
+    for (int i = 0; i < numInput; i++) {
+      std::vector<float> r;
+      float dotProduct = input1Matrix.row(i).dot(input2Matrix.row(i));
+      float norm1 = input1Matrix.row(i).norm();
+      float norm2 = input2Matrix.row(i).norm();
+      float cs = dotProduct / (norm1*norm2 + 1e-8);
+      r.push_back(cs);
+      results.push_back(r);
+    }
+
+    VectorMaker maker{context.pool()};
+    output = maker.arrayVector<float>(results, REAL());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {exec::FunctionSignatureBuilder()
+                .argumentType("array(REAL)")
+                .argumentType("array(REAL)")
+                .returnType("array(REAL)")
+                .build()};
+  }
+
+  // TODO: add get and set for bias or we have a better way to store the two
+  // parameters in a single file
+  // float* getTensor() const override {
+  //   return weights_;
+  // }
+
+  static std::string getName() {
+    return "cosine_similarity";
+  };
+
+  // std::string getWeightsFile() {
+  //   return weightsFile_;
+  // }
+
+  // void setWeights(float* weights) {
+  //   weights_ = weights;
+  // }
+
+ private:
+  std::vector<int> dims;
+  // float* weights_;
+  // float* bias_;
+  // float eps_;
+  // std::string weightsFile_;
+  // std::string biasFile_;
+};
