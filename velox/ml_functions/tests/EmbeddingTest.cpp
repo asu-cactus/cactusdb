@@ -10,6 +10,7 @@
 #include "velox/ml_functions/Concat.h"
 #include "velox/ml_functions/CosineSimilarity.h"
 #include "velox/ml_functions/Dropout.h"
+#include "velox/ml_functions/SequencePooling.h"
 #include "velox/parse/TypeResolver.h"
 
 using namespace facebook::velox;
@@ -89,6 +90,7 @@ class EmbeddingTest : public HiveConnectorTestBase {
   void testConcat2();
   // void testConcat3();
   void testCosineSimilarity();
+  void testSequencePooling();
 
   void TestBody() override {}
 
@@ -122,7 +124,6 @@ void EmbeddingTest::testEmbedding() {
   std::cout << "[INFO] Test of Embedding." << std::endl;
   int numEmbeddings = 5;
   int embeddingDims = 2;
-  int embeddingSize = numEmbeddings * embeddingDims;
   int numSamples = 5;
 
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
@@ -210,7 +211,7 @@ void EmbeddingTest::testBatchNorm1D() {
   auto indicesArrayVector = maker.arrayVector<float>(inputVectors, REAL());
   auto inputRowVector = maker.rowVector({"x"}, {indicesArrayVector});
 
-  std::cout << "[INFO] Generated Indices:"
+  std::cout << "[INFO] Generated Input: \n"
             << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
 
   exec::registerVectorFunction(
@@ -462,13 +463,88 @@ void EmbeddingTest::testCosineSimilarity() {
             << results->toString(0, results->size()) << std::endl;
 };
 
+// Test Embedding Layer
+void EmbeddingTest::testSequencePooling() {
+  std::cout << "[INFO] Test of SequencePooling." << std::endl;
+  int numEmbeddings = 5;
+  int embeddingDims = 2;
+  int numSamples = 5;
+
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+  randomGenerator.setIntRange(0, numEmbeddings - 1);
+
+  std::vector<std::vector<float>> weights =
+      randomGenerator.genFloat2dVector(numEmbeddings, embeddingDims);
+  auto weightsVector = maker.arrayVector<float>(weights, REAL());
+
+  // Initialize the indices vector
+  std::vector<std::vector<int>> indicesVectors;
+  for (int i = 0; i < numSamples; i++) {
+    std::vector<int> inputVector;
+    int numI = i % 3;
+    if (numI == 0) {
+      numI = 1;
+    }
+    for (int j = 0; j < numI; j++) {
+      inputVector.push_back(randomGenerator.genRandomIntValue());
+    }
+    indicesVectors.push_back(inputVector);
+  }
+
+  auto indicesArrayVector = maker.arrayVector<int>(indicesVectors, INTEGER());
+  auto inputRowVector = maker.rowVector({"x"}, {indicesArrayVector});
+
+  std::cout << "[INFO] Generated Embedding:\n"
+            << weightsVector->toString(0, weightsVector->size()) << std::endl;
+
+  std::cout << "[INFO] Generated Indices:\n"
+            << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
+
+  exec::registerVectorFunction(
+      "embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          weightsVector->elements()->values()->asMutable<float>(),
+          numEmbeddings,
+          embeddingDims));
+
+  auto myPlan1 = exec::test::PlanBuilder(pool_.get())
+                    .values({inputRowVector})
+                    .project({"embedding(x) as o1"})
+                    .planNode();
+
+  auto result1 =
+      exec::test::AssertQueryBuilder(myPlan1).copyResults(pool_.get());
+
+  std::cout << "[INFO] Result1: \n"
+            << result1->toString(0, result1->size()) << std::endl;
+
+
+  exec::registerVectorFunction(
+      "sequence_pooling",
+      SequencePooling::signatures(),
+      std::make_unique<SequencePooling>(std::string("MEAN"), embeddingDims));
+
+  auto myPlan2 = exec::test::PlanBuilder(pool_.get())
+                    .values({result1})
+                    .project({"sequence_pooling(o1)"})
+                    .planNode();
+  
+  auto result2 =
+      exec::test::AssertQueryBuilder(myPlan2).copyResults(pool_.get());
+
+  std::cout << "[INFO] Result2: \n"
+            << result2->toString(0, result2->size()) << std::endl;
+};
+
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   EmbeddingTest demo;
-  demo.testEmbedding();
-  demo.testBatchNorm1D();
-  demo.testDropout();
-  demo.testConcat1();
-  demo.testConcat2();
-  demo.testCosineSimilarity();
+  // demo.testEmbedding();
+  // demo.testBatchNorm1D();
+  // demo.testDropout();
+  // demo.testConcat1();
+  // demo.testConcat2();
+  // demo.testCosineSimilarity();
+  demo.testSequencePooling();
 }

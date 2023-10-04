@@ -42,7 +42,9 @@ class BatchNorm1D : public MLFunction {
 
     auto inputFeatures = args[0]->as<ArrayVector>()->elements();
     float* inputValues = inputFeatures->values()->asMutable<float>();
-    int numInput = inputFeatures->size();
+    int numInput = rows.size();
+
+    std::cout<<"[DEBUG] numInputs " << numInput << std::endl;
 
     Eigen::Map<Eigen::MatrixXf> inputMatrix(inputValues, numInput, dims[0]);
     Eigen::MatrixXf result(numInput, dims[0]);
@@ -58,9 +60,13 @@ class BatchNorm1D : public MLFunction {
           bias_[i];
     }
 
-    std::vector<std::vector<float>> resultVector(
-        result.data(), result.data() + result.rows() * result.cols());
-
+    // Convert from Eigen::Matrix to std::vector<std::vector<>>
+    std::vector<std::vector<float>> resultVector;
+    for (int rowIndex = 0; rowIndex < result.rows(); rowIndex++) {
+      std::vector<float> row(result.row(rowIndex).data(), result.row(rowIndex).data() + result.cols());
+      resultVector.push_back(row);
+    }
+    
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(resultVector, REAL());
   }
