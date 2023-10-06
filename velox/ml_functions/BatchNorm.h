@@ -6,6 +6,7 @@
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
+#include "velox/ml_functions/functions.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;

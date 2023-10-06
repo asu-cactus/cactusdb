@@ -509,9 +509,9 @@ void EmbeddingTest::testSequencePooling() {
           embeddingDims));
 
   auto myPlan1 = exec::test::PlanBuilder(pool_.get())
-                    .values({inputRowVector})
-                    .project({"embedding(x) as o1"})
-                    .planNode();
+                     .values({inputRowVector})
+                     .project({"embedding(x) as o1"})
+                     .planNode();
 
   auto result1 =
       exec::test::AssertQueryBuilder(myPlan1).copyResults(pool_.get());
@@ -519,17 +519,16 @@ void EmbeddingTest::testSequencePooling() {
   std::cout << "[INFO] Result1: \n"
             << result1->toString(0, result1->size()) << std::endl;
 
-
   exec::registerVectorFunction(
       "sequence_pooling",
       SequencePooling::signatures(),
       std::make_unique<SequencePooling>(std::string("MEAN"), embeddingDims));
 
   auto myPlan2 = exec::test::PlanBuilder(pool_.get())
-                    .values({result1})
-                    .project({"sequence_pooling(o1)"})
-                    .planNode();
-  
+                     .values({result1})
+                     .project({"sequence_pooling(o1)"})
+                     .planNode();
+
   auto result2 =
       exec::test::AssertQueryBuilder(myPlan2).copyResults(pool_.get());
 
