@@ -45,11 +45,8 @@ class CosineSimilarity : public exec::VectorFunction {
 
     int numInput = rows.size();
 
-    std::cout << "[DEBUG] row size: " << numInput << std::endl;
     Eigen::Map<Eigen::MatrixXf> input1Matrix(input1Values, numInput, dims[0]);
     Eigen::Map<Eigen::MatrixXf> input2Matrix(input2Values, numInput, dims[0]);
-    std::cout << input1Matrix.rows() << " " << input1Matrix.cols() << std::endl;
-    std::cout << input2Matrix.rows() << " " << input2Matrix.cols() << std::endl;
 
     std::vector<std::vector<float>> results;
 

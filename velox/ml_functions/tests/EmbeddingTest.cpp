@@ -1,17 +1,17 @@
 // TODO: Resolve dependencies
 #include <folly/init/Init.h>
 #include <torch/torch.h>
-#include <random>
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/BatchNorm.h"
 #include "velox/ml_functions/Concat.h"
 #include "velox/ml_functions/CosineSimilarity.h"
 #include "velox/ml_functions/Dropout.h"
+#include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/SequencePooling.h"
 #include "velox/parse/TypeResolver.h"
+#include "velox/ml_functions/tests/MLTestUtility.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -21,49 +21,7 @@ using namespace facebook::velox::core;
 
 // Utility function to generate random float/int values
 
-class RandomGenerator {
- public:
-  RandomGenerator(float lb, float ub, int randomSeed = 0) {
-    gen_ = std::mt19937(randomSeed);
-    distR_ = std::uniform_real_distribution<float>(lb, ub);
-    distI_ = std::uniform_int_distribution<int>((int)lb, (int)ub);
-  }
 
-  void setFloatRange(float lb, float ub) {
-    distR_ = std::uniform_real_distribution<float>(lb, ub);
-  }
-
-  void setIntRange(int lb, int ub) {
-    distI_ = std::uniform_int_distribution<int>(lb, ub);
-  }
-
-  float genRandomFloatValue() {
-    return distR_(gen_);
-  }
-
-  int genRandomIntValue() {
-    return distI_(gen_);
-  }
-
-  std::vector<std::vector<float>> genFloat2dVector(int numRow, int numCol) {
-    // Initialize the input1 feature vector
-    std::vector<std::vector<float>> float2dVector;
-
-    for (int i = 0; i < numRow; i++) {
-      std::vector<float> floatVector;
-      for (int j = 0; j < numCol; j++) {
-        floatVector.push_back(genRandomFloatValue());
-      }
-      float2dVector.push_back(floatVector);
-    }
-    return float2dVector;
-  }
-
- private:
-  std::mt19937 gen_;
-  std::uniform_real_distribution<float> distR_;
-  std::uniform_int_distribution<int> distI_;
-};
 
 class EmbeddingTest : public HiveConnectorTestBase {
  public:

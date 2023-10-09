@@ -49,8 +49,6 @@ class SequencePooling : public exec::VectorFunction {
     float* inputValues = inputFeatures->values()->asMutable<float>();
     int numInput = rows.size();
 
-    std::cout << "[DEBUG] numInputs " << numInput << std::endl;
-
     auto arrayVector = args[0]->as<ArrayVector>();
     std::vector<std::vector<float>> result;
 

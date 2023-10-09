@@ -40,17 +40,9 @@ class Embedding : public MLFunction {
     int numInputs = indicesVector->size();
 
     auto indicesRowVector = args[0];
-    std::cout << "[INFO] converted to row vector:  size: "
-              << indicesRowVector->size() << "\n"
-              << indicesRowVector->toString(0, indicesRowVector->size())
-              << std::endl;
 
     auto arrayVector = args[0]->as<ArrayVector>();
 
-    for (int i = 0; i < 5; i++) {
-      std::cout << "[DEBUG2] offsets: " << i << " " << arrayVector->offsetAt(i)
-                << " sizes: " << arrayVector->sizeAt(i) << std::endl;
-    }
     // You can also use sizeof(*arrayVector->rawSizes()) to compute the size of
     // a single entry in BufferPtr
     std::vector<std::vector<float>> result;

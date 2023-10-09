@@ -45,8 +45,6 @@ class BatchNorm1D : public MLFunction {
     float* inputValues = inputFeatures->values()->asMutable<float>();
     int numInput = rows.size();
 
-    std::cout<<"[DEBUG] numInputs " << numInput << std::endl;
-
     Eigen::Map<Eigen::MatrixXf> inputMatrix(inputValues, numInput, dims[0]);
     Eigen::MatrixXf result(numInput, dims[0]);
 
