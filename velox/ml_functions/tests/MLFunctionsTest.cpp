@@ -82,6 +82,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   void test_mat_mul();
   void test_mat_add();
   void test_relu();
+  void test_softmax();
   void test_dense_layer();
   void test_torch_dense_layer();
   void test_mnist();
@@ -193,6 +194,7 @@ void MLFunctionsTest::test_mat_mul() {
                   .project({"mat_mul(x)"})
 		              .planNode();
 
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto results = exec::test::AssertQueryBuilder(myPlan)
                   .maxDrivers(4)
                   .config("max_output_batch_rows", std::to_string(10))
@@ -200,8 +202,10 @@ void MLFunctionsTest::test_mat_mul() {
                   .config("preferred_output_batch_bytes", std::to_string(1000))
                   .copyResults(pool_.get());
 
-  std::cout << "Results:" << results->toString() << std::endl;
-  //std::cout << results->toString(0, results->size()) << std::endl;
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  // std::cout << "Results:" << results->toString() << std::endl;
+  // std::cout << results->toString(0, results->size()) << std::endl;
 
 }
 
@@ -241,12 +245,50 @@ void MLFunctionsTest::test_mat_add() {
                   .project({"mat_add(x)"})
 		              .planNode();
 
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
-  std::cout << "Results:" << results->toString() << std::endl;
-  std::cout << results->toString(0, results->size()) << std::endl;
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Matrix Addition (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  // std::cout << "Results:" << results->toString() << std::endl;
+  // std::cout << results->toString(0, results->size()) << std::endl;
 }
 
 void MLFunctionsTest::test_relu(){
+ 
+  int num_rows = 1000;
+  int num_cols = 5000; 
+
+  std::vector<std::vector<float>> inputVectors;
+  for(int i=0; i < num_rows; i++){
+    std::vector<float> inputVector;
+    for(int j=0; j < num_cols; j++){
+      inputVector.push_back(i*j);
+    }
+    inputVectors.push_back(inputVector);
+  }
+
+  auto inputArrayVector = maker.arrayVector<float>(inputVectors, REAL());
+  auto inputRowVector = maker.rowVector({"x"}, {inputArrayVector});
+  
+  // step1: Register
+  exec::registerVectorFunction(
+  "relu",
+  Relu::signatures(),
+  std::make_unique<Relu>());
+
+  auto myPlan = exec::test::PlanBuilder(pool_.get())
+                  .values({inputRowVector})
+                  .project({"relu(x)"})
+		              .planNode();
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Relu (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  // std::cout << "Results:" << results->toString() << std::endl;
+  // std::cout << results->toString(0, results->size()) << std::endl;
+}
+
+void MLFunctionsTest::test_softmax(){
  
   int num_rows = 10;
   int num_cols = 3; 
@@ -265,22 +307,18 @@ void MLFunctionsTest::test_relu(){
   
   // step1: Register
   exec::registerVectorFunction(
-  "relu",
+  "softmax",
   Relu::signatures(),
   std::make_unique<Softmax>());
 
-  
-  // exec::registerVectorFunction(
-  // "relu",
-  // Relu::signatures(),
-  // std::make_unique<Relu>());
-
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                   .values({inputRowVector})
-                  .project({"relu(x)"})
+                  .project({"softmax(x)"})
 		              .planNode();
-
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Softmax (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
   std::cout << "Results:" << results->toString() << std::endl;
   std::cout << results->toString(0, results->size()) << std::endl;
   
@@ -1645,21 +1683,22 @@ void MLFunctionsTest::test_land_cover_conv3() {
 }
 
 void MLFunctionsTest::run() {
-  //  test_mat_mul();
+   test_mat_mul();
   //  test_mat_add();
   //  test_relu();
-  //    test_dense_layer();
+  //  test_softmax()
+  //  test_dense_layer();
   //  test_torch_dense_layer_multithreading();
   //  test_mnist();
   //  test_multithreading();
   //  test_multithreading_oom();
   //  test_batching();
   //  test_conv2d();
-      test_deep_bench_conv1();
+  //  test_deep_bench_conv1();
   //  test_land_cover_conv3();
   //  test_spill();
   //  mytest();
-  //    test_mnist_multithreading();
+  //  test_mnist_multithreading();
   //  test_mnist_oom_weights();
   // test_torch_dense_layer();
 

@@ -81,10 +81,10 @@ public:
         // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
         // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
-        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        //std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        // std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
         std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
         for (int i = 0; i < m.rows(); ++i) {
@@ -92,6 +92,13 @@ public:
                 result[i][j] = m(i, j);
             }
         }
+        // std::vector<std::vector<float>> result;
+        // for (int i = 0; i < m.rows(); i++) {
+        //     std::vector<float> row(
+        //     m.row(i).data(),
+        //     m.row(i).data() + m.cols());
+        //     result.push_back(row);
+        // }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
     }
@@ -160,21 +167,28 @@ public:
         std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
 
-        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 + m2;
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         
-        std::cout << "Time difference for Mat Add(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        // std::cout << "Time difference for Mat Add(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         //std::cout << m << std::endl;
 
         int result_size = m.size();
         float* data = m.data();
         
-        std::vector<std::vector<float>> result(rows.size(), std::vector<float>(dims[0]));
-        for (int i = 0; i < rows.size(); ++i) {
-            for (int j = 0; j < dims[0]; ++j) {
-                result[i][j] = m(i,j);
-            }
+        // std::vector<std::vector<float>> result(rows.size(), std::vector<float>(dims[0]));
+        // for (int i = 0; i < rows.size(); ++i) {
+        //     for (int j = 0; j < dims[0]; ++j) {
+        //         result[i][j] = m(i,j);
+        //     }
+        // }
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < m.rows(); i++) {
+            std::vector<float> row(
+            m.row(i).data(),
+            m.row(i).data() + m.cols());
+            result.push_back(row);
         }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
@@ -213,6 +227,10 @@ class Relu: public MLFunction {
 public:
     Relu() {}
 
+    float static relu_function(float x) {
+        return (x > 0.0f) ? x : 0.0f;
+    }
+
     void apply(
         const SelectivityVector& rows,
         std::vector<VectorPtr>& args,
@@ -228,16 +246,24 @@ public:
         // considering all arrays have same size
         int num_rows = args[0]->size();
         int num_cols = input_size / num_rows;
-
-        std::vector<std::vector<float>> result(num_rows, std::vector<float>(num_cols));
-        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        for (int i = 0; i < num_rows; ++i) {
-            for (int j = 0; j < num_cols; ++j) {
-                result[i][j] = std::max(0.0f, input_values[i*num_cols + j]);
-            }
+        
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < num_rows; i++) {
+            std::vector<float> rowResult(num_cols);
+            std::transform(input_values + i*num_cols, input_values + (i+1)*num_cols,
+            rowResult.data(), relu_function);
+            result.push_back(rowResult);
         }
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        std::cout << "Time difference for RELU(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+
+        // std::vector<std::vector<float>> result(num_rows, std::vector<float>(num_cols));
+        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+        // for (int i = 0; i < num_rows; ++i) {
+        //     for (int j = 0; j < num_cols; ++j) {
+        //         result[i][j] = std::max(0.0f, input_values[i*num_cols + j]);
+        //     }
+        // }
+        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        // std::cout << "Time difference for RELU(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
     }
