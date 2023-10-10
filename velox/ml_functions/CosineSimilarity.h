@@ -1,7 +1,7 @@
 #pragma once
-#include <iostream>
-#include <cmath>
 #include <Eigen/Dense>
+#include <cmath>
+#include <iostream>
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
@@ -45,18 +45,22 @@ class CosineSimilarity : public exec::VectorFunction {
 
     int numInput = rows.size();
 
-    Eigen::Map<Eigen::MatrixXf> input1Matrix(input1Values, numInput, dims[0]);
-    Eigen::Map<Eigen::MatrixXf> input2Matrix(input2Values, numInput, dims[0]);
+    Eigen::Map<
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        input1Matrix(input1Values, numInput, dims[0]);
+    Eigen::Map<
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        input2Matrix(input2Values, numInput, dims[0]);
 
     std::vector<std::vector<float>> results;
 
-    //TODO more efficient way?
+    // TODO more efficient way?
     for (int i = 0; i < numInput; i++) {
       std::vector<float> r;
       float dotProduct = input1Matrix.row(i).dot(input2Matrix.row(i));
       float norm1 = input1Matrix.row(i).norm();
       float norm2 = input2Matrix.row(i).norm();
-      float cs = dotProduct / (norm1*norm2 + 1e-8);
+      float cs = dotProduct / (norm1 * norm2 + 1e-8);
       r.push_back(cs);
       results.push_back(r);
     }

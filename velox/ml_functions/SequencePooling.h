@@ -65,8 +65,13 @@ class SequencePooling : public exec::VectorFunction {
             embeddingDims_ * sizeof(float));
       } else {
         // variadic case, combine the values base on mode
-        Eigen::Map<Eigen::MatrixXf> varaidicEmbedding(
-            inputValues + valueOffset, numEmbeddingToCombie, embeddingDims_);
+        Eigen::Map<
+            Eigen::
+                Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+            varaidicEmbedding(
+                inputValues + valueOffset,
+                numEmbeddingToCombie,
+                embeddingDims_);
 
         Eigen::VectorXf mergedValues;
         if (mode_ == "MIN") {

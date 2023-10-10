@@ -1,12 +1,12 @@
 #pragma once
-#include <iostream>
-#include <cmath>
 #include <Eigen/Dense>
+#include <cmath>
+#include <iostream>
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/vector/tests/utils/VectorTestBase.h"
 #include "velox/ml_functions/functions.h"
+#include "velox/vector/tests/utils/VectorTestBase.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -45,8 +45,12 @@ class BatchNorm1D : public MLFunction {
     float* inputValues = inputFeatures->values()->asMutable<float>();
     int numInput = rows.size();
 
-    Eigen::Map<Eigen::MatrixXf> inputMatrix(inputValues, numInput, dims[0]);
-    Eigen::MatrixXf result(numInput, dims[0]);
+    Eigen::Map<
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+        inputMatrix(inputValues, numInput, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        result(numInput, dims[0]);
+
 
     for (int i = 0; i < dims[0]; i++) {
       Eigen::VectorXf colData = inputMatrix.col(i);
@@ -62,10 +66,12 @@ class BatchNorm1D : public MLFunction {
     // Convert from Eigen::Matrix to std::vector<std::vector<>>
     std::vector<std::vector<float>> resultVector;
     for (int rowIndex = 0; rowIndex < result.rows(); rowIndex++) {
-      std::vector<float> row(result.row(rowIndex).data(), result.row(rowIndex).data() + result.cols());
+      std::vector<float> row(
+          result.row(rowIndex).data(),
+          result.row(rowIndex).data() + result.cols());
       resultVector.push_back(row);
     }
-    
+
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(resultVector, REAL());
   }

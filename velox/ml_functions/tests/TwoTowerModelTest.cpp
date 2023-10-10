@@ -645,7 +645,7 @@ void TowTowerModelTest::testTwoTowerModel() {
           .planNode();
   auto itemNNOut =
       exec::test::AssertQueryBuilder(itemNNPlan).copyResults(pool_.get());
-  std::cout << "[INFO] item NN output:: \n"
+  std::cout << "[INFO] item NN output: \n"
             << itemNNOut->toString(0, itemNNOut->size()) << std::endl;
 
   exec::registerVectorFunction(
