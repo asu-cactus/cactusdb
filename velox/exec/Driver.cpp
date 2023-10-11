@@ -14,10 +14,12 @@
  * limitations under the License.
  */
 
+#include "Driver.h"
 #include <folly/ScopeGuard.h>
 #include <folly/executors/QueuedImmediateExecutor.h>
 #include <folly/executors/thread_factory/InitThreadFactory.h>
 #include <gflags/gflags.h>
+#include "velox/common/process/TraceContext.h"
 #include "velox/common/testutil/TestValue.h"
 #include "velox/common/time/Timer.h"
 #include "velox/exec/Operator.h"
@@ -27,6 +29,75 @@
 using facebook::velox::common::testutil::TestValue;
 
 namespace facebook::velox::exec {
+namespace {
+
+// Ensures that the thread is removed from its Task's thread count on exit.
+class CancelGuard {
+ public:
+  CancelGuard(
+      Task* task,
+      ThreadState* state,
+      std::function<void(StopReason)> onTerminate)
+      : task_(task), state_(state), onTerminate_(std::move(onTerminate)) {}
+
+  void notThrown() {
+    isThrow_ = false;
+  }
+
+  ~CancelGuard() {
+    bool onTerminateCalled = false;
+    if (isThrow_) {
+      // Runtime error. Driver is on thread, hence safe.
+      state_->isTerminated = true;
+      onTerminate_(StopReason::kNone);
+      onTerminateCalled = true;
+    }
+    task_->leave(*state_, onTerminateCalled ? nullptr : onTerminate_);
+  }
+
+ private:
+  Task* task_;
+  ThreadState* state_;
+  std::function<void(StopReason reason)> onTerminate_;
+  bool isThrow_ = true;
+};
+
+// Checks if output channel is produced using identity projection and returns
+// input channel if so.
+std::optional<column_index_t> getIdentityProjection(
+    const std::vector<IdentityProjection>& projections,
+    column_index_t outputChannel) {
+  for (const auto& projection : projections) {
+    if (projection.outputChannel == outputChannel) {
+      return projection.inputChannel;
+    }
+  }
+  return std::nullopt;
+}
+
+void validateOperatorResult(RowVectorPtr& result, Operator& op) {
+  try {
+    result->validate({});
+  } catch (const std::exception& e) {
+    VELOX_FAIL(
+        "Output validation failed for [operator: {}, plan node ID: {}]: {}",
+        op.operatorType(),
+        op.planNodeId(),
+        e.what());
+  }
+}
+
+thread_local DriverThreadContext* driverThreadCtx{nullptr};
+
+void recordSilentThrows(Operator& op) {
+  auto numThrow = threadNumVeloxThrow();
+  if (numThrow > 0) {
+    op.stats().wlock()->addRuntimeStat(
+        "numSilentThrow", RuntimeCounter(numThrow));
+  }
+}
+
+} // namespace
 
 DriverCtx::DriverCtx(
     std::shared_ptr<Task> _task,
@@ -38,7 +109,8 @@ DriverCtx::DriverCtx(
       pipelineId(_pipelineId),
       splitGroupId(_splitGroupId),
       partitionId(_partitionId),
-      task(_task) {}
+      task(_task),
+      threadDebugInfo({task->queryCtx()->queryId(), task->taskId(), nullptr}) {}
 
 const core::QueryConfig& DriverCtx::queryConfig() const {
   return task->queryCtx()->queryConfig();
@@ -50,7 +122,7 @@ velox::memory::MemoryPool* DriverCtx::addOperatorPool(
   return task->addOperatorPool(planNodeId, pipelineId, driverId, operatorType);
 }
 
-std::optional<Spiller::Config> DriverCtx::makeSpillConfig(
+std::optional<common::SpillConfig> DriverCtx::makeSpillConfig(
     int32_t operatorId) const {
   const auto& queryConfig = task->queryCtx()->queryConfig();
   if (!queryConfig.spillEnabled()) {
@@ -59,19 +131,22 @@ std::optional<Spiller::Config> DriverCtx::makeSpillConfig(
   if (task->spillDirectory().empty()) {
     return std::nullopt;
   }
-  return Spiller::Config(
+  return common::SpillConfig(
       makeOperatorSpillPath(
           task->spillDirectory(), pipelineId, driverId, operatorId),
       queryConfig.maxSpillFileSize(),
+      queryConfig.spillWriteBufferSize(),
       queryConfig.minSpillRunSize(),
       task->queryCtx()->spillExecutor(),
+      queryConfig.minSpillableReservationPct(),
       queryConfig.spillableReservationGrowthPct(),
-      HashBitRange(
-          queryConfig.spillStartPartitionBit(),
-          queryConfig.spillStartPartitionBit() +
-              queryConfig.spillPartitionBits()),
+      queryConfig.spillStartPartitionBit(),
+      queryConfig.joinSpillPartitionBits(),
+      queryConfig.aggregationSpillPartitionBits(),
+      queryConfig.aggregationSpillAll(),
       queryConfig.maxSpillLevel(),
-      queryConfig.testingSpillPct());
+      queryConfig.testingSpillPct(),
+      queryConfig.spillCompressionKind());
 }
 
 std::atomic_uint64_t BlockingState::numBlockedDrivers_{0};
@@ -120,46 +195,16 @@ void BlockingState::setResume(std::shared_ptr<BlockingState> state) {
       })
       .thenError(
           folly::tag_t<std::exception>{}, [state](std::exception const& e) {
-            LOG(ERROR) << "A ContinueFuture for task "
-                       << state->driver_->task()->taskId()
-                       << " should not be realized with an error: " << e.what();
-            state->driver_->setError(std::make_exception_ptr(e));
+            try {
+              VELOX_FAIL(
+                  "A ContinueFuture for task {} was realized with error: {}",
+                  state->driver_->task()->taskId(),
+                  e.what())
+            } catch (const VeloxException& eNew) {
+              state->driver_->task()->setError(std::current_exception());
+            }
           });
 }
-
-namespace {
-
-// Ensures that the thread is removed from its Task's thread count on exit.
-class CancelGuard {
- public:
-  CancelGuard(
-      Task* task,
-      ThreadState* state,
-      std::function<void(StopReason)> onTerminate)
-      : task_(task), state_(state), onTerminate_(onTerminate) {}
-
-  void notThrown() {
-    isThrow_ = false;
-  }
-
-  ~CancelGuard() {
-    bool onTerminateCalled = false;
-    if (isThrow_) {
-      // Runtime error. Driver is on thread, hence safe.
-      state_->isTerminated = true;
-      onTerminate_(StopReason::kNone);
-      onTerminateCalled = true;
-    }
-    task_->leave(*state_, onTerminateCalled ? nullptr : onTerminate_);
-  }
-
- private:
-  Task* task_;
-  ThreadState* state_;
-  std::function<void(StopReason reason)> onTerminate_;
-  bool isThrow_ = true;
-};
-} // namespace
 
 std::string stopReasonString(StopReason reason) {
   switch (reason) {
@@ -210,20 +255,15 @@ void Driver::init(
   trackOperatorCpuUsage_ = ctx_->queryConfig().operatorTrackCpuUsage();
 }
 
-namespace {
-// Checks if output channel is produced using identity projection and returns
-// input channel if so.
-std::optional<column_index_t> getIdentityProjection(
-    const std::vector<IdentityProjection>& projections,
-    column_index_t outputChannel) {
-  for (const auto& projection : projections) {
-    if (projection.outputChannel == outputChannel) {
-      return projection.inputChannel;
-    }
+void Driver::initializeOperators() {
+  if (operatorsInitialized_) {
+    return;
   }
-  return std::nullopt;
+  operatorsInitialized_ = true;
+  for (auto& op : operators_) {
+    op->initialize();
+  }
 }
-} // namespace
 
 void Driver::pushdownFilters(int operatorIndex) {
   auto op = operators_[operatorIndex].get();
@@ -274,8 +314,10 @@ void Driver::pushdownFilters(int operatorIndex) {
 
 RowVectorPtr Driver::next(std::shared_ptr<BlockingState>& blockingState) {
   enqueueInternal();
-
   auto self = shared_from_this();
+  facebook::velox::process::ScopedThreadDebugInfo scopedInfo(
+      self->driverCtx()->threadDebugInfo);
+  ScopedDriverThreadContext scopedDriverThreadContext(*self->driverCtx());
   RowVectorPtr result;
   auto stop = runInternal(self, blockingState, result);
 
@@ -294,6 +336,70 @@ void Driver::enqueueInternal() {
   state_.isEnqueued = true;
   // When enqueuing, starting timing the queue time.
   queueTimeStartMicros_ = getCurrentTimeMicro();
+}
+
+// Call an Oprator method. record silenced throws, but not a query
+// terminating throw. Annotate exceptions with Operator info.
+#define CALL_OPERATOR(call, operator, methodName)                       \
+  try {                                                                 \
+    threadNumVeloxThrow() = 0;                                          \
+    call;                                                               \
+    recordSilentThrows(*operator);                                      \
+  } catch (const VeloxException& e) {                                   \
+    throw;                                                              \
+  } catch (const std::exception& e) {                                   \
+    VELOX_FAIL(                                                         \
+        "Operator::{} failed for [operator: {}, plan node ID: {}]: {}", \
+        methodName,                                                     \
+        operator->operatorType(),                                       \
+        operator->planNodeId(),                                         \
+        e.what());                                                      \
+  }
+
+CpuWallTiming Driver::processLazyTiming(
+    Operator& op,
+    const CpuWallTiming& timing) {
+  if (&op == operators_[0].get()) {
+    return timing;
+  }
+  auto lockStats = op.stats().wlock();
+  uint64_t cpuDelta = 0;
+  uint64_t wallDelta = 0;
+  auto it = lockStats->runtimeStats.find(LazyVector::kCpuNanos);
+  if (it != lockStats->runtimeStats.end()) {
+    auto cpu = it->second.sum;
+    cpuDelta = cpu >= lockStats->lastLazyCpuNanos
+        ? cpu - lockStats->lastLazyCpuNanos
+        : 0;
+    if (cpuDelta == 0) {
+      // return early if no change. Checking one counter is enough. If
+      // this did not change and the other did, the change would be
+      // insignificant and tracking would catch up when this counter next
+      // changed.
+      return timing;
+    }
+    lockStats->lastLazyCpuNanos = cpu;
+  } else {
+    // Return early if no lazy activity. Lazy CPU and wall times are recorded
+    // together, checking one is enough.
+    return timing;
+  }
+  it = lockStats->runtimeStats.find(LazyVector::kWallNanos);
+  if (it != lockStats->runtimeStats.end()) {
+    auto wall = it->second.sum;
+    wallDelta = wall >= lockStats->lastLazyWallNanos
+        ? wall - lockStats->lastLazyWallNanos
+        : 0;
+    if (wallDelta > 0) {
+      lockStats->lastLazyWallNanos = wall;
+    }
+  }
+  operators_[0]->stats().wlock()->getOutputTiming.add(
+      CpuWallTiming{1, wallDelta, cpuDelta});
+  return CpuWallTiming{
+      1,
+      timing.wallNanos >= wallDelta ? timing.wallNanos - wallDelta : 0,
+      timing.cpuNanos >= cpuDelta ? timing.cpuNanos - cpuDelta : 0};
 }
 
 StopReason Driver::runInternal(
@@ -348,7 +454,10 @@ StopReason Driver::runInternal(
   });
 
   try {
-    int32_t numOperators = operators_.size();
+    // Invoked to initialize the operators once before driver starts execution.
+    self->initializeOperators();
+
+    const int32_t numOperators = operators_.size();
     ContinueFuture future;
 
     for (;;) {
@@ -360,12 +469,15 @@ StopReason Driver::runInternal(
         }
 
         auto op = operators_[i].get();
+        VELOX_CHECK(op->isInitialized());
+
         // In case we are blocked, this index will point to the operator, whose
         // queuedTime we should update.
         curOpIndex_ = i;
         RuntimeStatWriterScopeGuard statsWriterGuard(op);
 
-        blockingReason_ = op->isBlocked(&future);
+        CALL_OPERATOR(
+            blockingReason_ = op->isBlocked(&future), op, "isBlocked");
         if (blockingReason_ != BlockingReason::kNotBlocked) {
           blockingState = std::make_shared<BlockingState>(
               self, std::move(future), op, blockingReason_);
@@ -376,51 +488,71 @@ StopReason Driver::runInternal(
         if (i < operators_.size() - 1) {
           nextOp = operators_[i + 1].get();
           RuntimeStatWriterScopeGuard statsWriterGuard(nextOp);
-          blockingReason_ = nextOp->isBlocked(&future);
+          CALL_OPERATOR(
+              blockingReason_ = nextOp->isBlocked(&future),
+              nextOp,
+              "isBlocked");
           if (blockingReason_ != BlockingReason::kNotBlocked) {
             blockingState = std::make_shared<BlockingState>(
                 self, std::move(future), nextOp, blockingReason_);
             guard.notThrown();
             return StopReason::kBlock;
           }
-          if (nextOp->needsInput()) {
+
+          bool needsInput;
+          CALL_OPERATOR(
+              needsInput = nextOp->needsInput(), nextOp, "needsInput");
+          if (needsInput) {
             uint64_t resultBytes = 0;
-            RowVectorPtr result;
+            RowVectorPtr intermediateResult;
             {
               auto timer = createDeltaCpuWallTimer(
-                  [op](const CpuWallTiming& deltaTiming) {
+                  [op, this](const CpuWallTiming& deltaTiming) {
+                    processLazyTiming(*op, deltaTiming);
                     op->stats().wlock()->getOutputTiming.add(deltaTiming);
                   });
               RuntimeStatWriterScopeGuard statsWriterGuard(op);
-              result = op->getOutput();
-              if (result) {
+              TestValue::adjust(
+                  "facebook::velox::exec::Driver::runInternal::getOutput", op);
+              CALL_OPERATOR(
+                  intermediateResult = op->getOutput(), op, "getOutput");
+              if (intermediateResult) {
                 VELOX_CHECK(
-                    result->size() > 0,
+                    intermediateResult->size() > 0,
                     "Operator::getOutput() must return nullptr or "
                     "a non-empty vector: {}",
                     op->operatorType());
-                resultBytes = result->estimateFlatSize();
+                if (ctx_->queryConfig().validateOutputFromOperators()) {
+                  validateOperatorResult(intermediateResult, *op);
+                }
+                resultBytes = intermediateResult->estimateFlatSize();
                 {
                   auto lockedStats = op->stats().wlock();
-                  lockedStats->addOutputVector(resultBytes, result->size());
+                  lockedStats->addOutputVector(
+                      resultBytes, intermediateResult->size());
                 }
               }
             }
             pushdownFilters(i);
-            if (result) {
+            if (intermediateResult) {
               auto timer = createDeltaCpuWallTimer(
-                  [nextOp](const CpuWallTiming& timing) {
-                    nextOp->stats().wlock()->addInputTiming.add(timing);
+                  [nextOp, this](const CpuWallTiming& timing) {
+                    auto selfDelta = processLazyTiming(*nextOp, timing);
+                    nextOp->stats().wlock()->addInputTiming.add(selfDelta);
                   });
               {
                 auto lockedStats = nextOp->stats().wlock();
-                lockedStats->addInputVector(resultBytes, result->size());
+                lockedStats->addInputVector(
+                    resultBytes, intermediateResult->size());
               }
               RuntimeStatWriterScopeGuard statsWriterGuard(nextOp);
               TestValue::adjust(
                   "facebook::velox::exec::Driver::runInternal::addInput",
                   nextOp);
-              nextOp->addInput(result);
+
+              CALL_OPERATOR(
+                  nextOp->addInput(intermediateResult), nextOp, "addInput");
+
               // The next iteration will see if operators_[i + 1] has
               // output now that it got input.
               i += 2;
@@ -437,7 +569,8 @@ StopReason Driver::runInternal(
               // is not blocked and empty, this is finished. If this is
               // not the source, just try to get output from the one
               // before.
-              blockingReason_ = op->isBlocked(&future);
+              CALL_OPERATOR(
+                  blockingReason_ = op->isBlocked(&future), op, "isBlocked");
               if (blockingReason_ != BlockingReason::kNotBlocked) {
                 blockingState = std::make_shared<BlockingState>(
                     self, std::move(future), op, blockingReason_);
@@ -446,15 +579,16 @@ StopReason Driver::runInternal(
               }
               RuntimeStatWriterScopeGuard statsWriterGuard(op);
               if (op->isFinished()) {
-                auto timer =
-                    createDeltaCpuWallTimer([op](const CpuWallTiming& timing) {
+                auto timer = createDeltaCpuWallTimer(
+                    [op, this](const CpuWallTiming& timing) {
+                      processLazyTiming(*op, timing);
                       op->stats().wlock()->finishTiming.add(timing);
                     });
                 RuntimeStatWriterScopeGuard statsWriterGuard(nextOp);
                 TestValue::adjust(
                     "facebook::velox::exec::Driver::runInternal::noMoreInput",
                     nextOp);
-                nextOp->noMoreInput();
+                CALL_OPERATOR(nextOp->noMoreInput(), nextOp, "noMoreInput");
                 break;
               }
             }
@@ -465,17 +599,21 @@ StopReason Driver::runInternal(
           // this will be detected when trying to add input, and we
           // will come back here after this is again on thread.
           {
-            auto timer =
-                createDeltaCpuWallTimer([op](const CpuWallTiming& timing) {
-                  op->stats().wlock()->getOutputTiming.add(timing);
+            auto timer = createDeltaCpuWallTimer(
+                [op, this](const CpuWallTiming& timing) {
+                  auto selfDelta = processLazyTiming(*op, timing);
+                  op->stats().wlock()->getOutputTiming.add(selfDelta);
                 });
-            result = op->getOutput();
+            CALL_OPERATOR(result = op->getOutput(), op, "getOutput");
             if (result) {
               VELOX_CHECK(
                   result->size() > 0,
                   "Operator::getOutput() must return nullptr or "
                   "a non-empty vector: {}",
                   op->operatorType());
+              if (ctx_->queryConfig().validateOutputFromOperators()) {
+                validateOperatorResult(result, *op);
+              }
               {
                 auto lockedStats = op->stats().wlock();
                 lockedStats->addOutputVector(
@@ -509,8 +647,14 @@ StopReason Driver::runInternal(
   }
 }
 
+#undef CALL_OPERATOR
+
 // static
 void Driver::run(std::shared_ptr<Driver> self) {
+  process::TraceContext trace("Driver::run");
+  facebook::velox::process::ScopedThreadDebugInfo scopedInfo(
+      self->driverCtx()->threadDebugInfo);
+  ScopedDriverThreadContext scopedDriverThreadContext(*self->driverCtx());
   std::shared_ptr<BlockingState> blockingState;
   RowVectorPtr nullResult;
   auto reason = self->runInternal(self, blockingState, nullResult);
@@ -563,12 +707,18 @@ void Driver::initializeOperatorStats(std::vector<OperatorStats>& stats) {
   // not always the index into the stats.
   for (auto& op : operators_) {
     auto id = op->operatorId();
-    assert(id < stats.size());
+    VELOX_DCHECK_LT(id, stats.size());
     stats[id] = op->stats(false);
   }
 }
 
-void Driver::addStatsToTask() {
+void Driver::closeOperators() {
+  // Close operators.
+  for (auto& op : operators_) {
+    op->close();
+  }
+
+  // Add operator stats to the task.
   for (auto& op : operators_) {
     auto stats = op->stats(true);
     stats.memoryStats.update(op->pool());
@@ -585,20 +735,15 @@ void Driver::close() {
   if (!isOnThread() && !isTerminated()) {
     LOG(FATAL) << "Driver::close is only allowed from the Driver's thread";
   }
-  addStatsToTask();
-  for (auto& op : operators_) {
-    op->close();
-  }
+  closeOperators();
   closed_ = true;
   Task::removeDriver(ctx_->task, this);
 }
 
 void Driver::closeByTask() {
+  VELOX_CHECK(isOnThread());
   VELOX_CHECK(isTerminated());
-  addStatsToTask();
-  for (auto& op : operators_) {
-    op->close();
-  }
+  closeOperators();
   closed_ = true;
 }
 
@@ -689,11 +834,7 @@ std::vector<Operator*> Driver::operators() const {
   return operators;
 }
 
-void Driver::setError(std::exception_ptr exception) {
-  task()->setError(exception);
-}
-
-std::string Driver::toString() {
+std::string Driver::toString() const {
   std::stringstream out;
   out << "{Driver: ";
   if (state_.isOnThread()) {
@@ -706,6 +847,24 @@ std::string Driver::toString() {
   }
   out << "}";
   return out.str();
+}
+
+std::string Driver::toJsonString() const {
+  folly::dynamic obj = folly::dynamic::object;
+  obj["blockingReason"] = blockingReasonToString(blockingReason_);
+  obj["state"] = state_.toJsonString();
+  obj["closed"] = closed_.load();
+  obj["queueTimeStartMicros"] = queueTimeStartMicros_;
+  obj["curOpIndex"] = curOpIndex_;
+
+  folly::dynamic operatorsObj = folly::dynamic::object;
+  int index = 0;
+  for (auto& op : operators_) {
+    operatorsObj[std::to_string(index++)] = op->toString();
+  }
+  obj["operatorsObj"] = operatorsObj;
+
+  return folly::toPrettyJson(obj);
 }
 
 SuspendedSection::SuspendedSection(Driver* driver) : driver_(driver) {
@@ -749,6 +908,20 @@ std::string blockingReasonToString(BlockingReason reason) {
   }
   VELOX_UNREACHABLE();
   return "";
-};
+}
+
+DriverThreadContext* driverThreadContext() {
+  return driverThreadCtx;
+}
+
+ScopedDriverThreadContext::ScopedDriverThreadContext(const DriverCtx& driverCtx)
+    : savedDriverThreadCtx_(driverThreadCtx),
+      currentDriverThreadCtx_{.driverCtx = driverCtx} {
+  driverThreadCtx = &currentDriverThreadCtx_;
+}
+
+ScopedDriverThreadContext::~ScopedDriverThreadContext() {
+  driverThreadCtx = savedDriverThreadCtx_;
+}
 
 } // namespace facebook::velox::exec

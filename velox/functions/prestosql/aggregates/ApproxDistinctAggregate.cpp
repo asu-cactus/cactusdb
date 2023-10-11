@@ -191,17 +191,17 @@ class ApproxDistinctAggregate : public exec::Aggregate {
             accumulator->serialize(buffer.data());
             serialized = StringView::makeInline(buffer);
           } else {
-            Buffer* buffer = flatResult->getBufferWithSpace(size);
-            char* ptr = buffer->asMutable<char>() + buffer->size();
-            accumulator->serialize(ptr);
-            buffer->setSize(buffer->size() + size);
-            serialized = StringView(ptr, size);
+            char* rawBuffer = flatResult->getRawStringBufferWithSpace(size);
+            accumulator->serialize(rawBuffer);
+            serialized = StringView(rawBuffer, size);
           }
           result->setNoCopy(index, serialized);
         });
   }
 
-  void destroy(folly::Range<char**> /*groups*/) override {}
+  void destroy(folly::Range<char**> groups) override {
+    destroyAccumulators<HllAccumulator>(groups);
+  }
 
   void addRawInput(
       char** groups,
@@ -316,7 +316,7 @@ class ApproxDistinctAggregate : public exec::Aggregate {
 
     uint64_t* rawNulls = nullptr;
     if (result->mayHaveNulls()) {
-      BufferPtr nulls = result->mutableNulls(result->size());
+      BufferPtr& nulls = result->mutableNulls(result->size());
       rawNulls = nulls->asMutable<uint64_t>();
     }
 
@@ -401,7 +401,7 @@ std::unique_ptr<exec::Aggregate> createApproxDistinct(
       resultType, hllAsFinalResult, hllAsRawInput);
 }
 
-bool registerApproxDistinct(
+exec::AggregateRegistrationResult registerApproxDistinct(
     const std::string& name,
     bool hllAsFinalResult,
     bool hllAsRawInput) {
@@ -441,13 +441,15 @@ bool registerApproxDistinct(
     }
   }
 
-  exec::registerAggregateFunction(
+  return exec::registerAggregateFunction(
       name,
       std::move(signatures),
       [name, hllAsFinalResult, hllAsRawInput](
           core::AggregationNode::Step /*step*/,
           const std::vector<TypePtr>& argTypes,
-          const TypePtr& resultType) -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr& resultType,
+          const core::QueryConfig& /*config*/)
+          -> std::unique_ptr<exec::Aggregate> {
         TypePtr type = argTypes[0]->isVarbinary() ? BIGINT() : argTypes[0];
         return VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(
             createApproxDistinct,
@@ -457,7 +459,6 @@ bool registerApproxDistinct(
             hllAsRawInput);
       },
       /*registerCompanionFunctions*/ true);
-  return true;
 }
 
 } // namespace
