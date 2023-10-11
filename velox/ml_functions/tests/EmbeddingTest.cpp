@@ -435,7 +435,6 @@ void EmbeddingTest::testConcat3() {
   auto myPlan1 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                      .values({inputRowVector1})
                      .project({"mat_mul1(in1) as o1"})
-                    //  .rowNumber({}, "id", false)  rowNumber operator is not in the current version of velox
                      .planNode();
 
   auto myPlan2 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
