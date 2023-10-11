@@ -19,7 +19,6 @@
 #include "velox/core/QueryConfig.h"
 #include "velox/external/date/tz.h"
 #include "velox/functions/Macros.h"
-#include "velox/type/Date.h"
 
 namespace facebook::velox::functions {
 namespace {
@@ -52,21 +51,20 @@ FOLLY_ALWAYS_INLINE
 std::tm getDateTime(Timestamp timestamp, const date::time_zone* timeZone) {
   int64_t seconds = getSeconds(timestamp, timeZone);
   std::tm dateTime;
-  VELOX_USER_CHECK_NOT_NULL(
-      gmtime_r((const time_t*)&seconds, &dateTime),
+  VELOX_USER_CHECK(
+      epochToUtc(seconds, dateTime),
       "Timestamp is too large: {} seconds since epoch",
       seconds);
   return dateTime;
 }
 
+// days is the number of days since Epoch.
 FOLLY_ALWAYS_INLINE
-std::tm getDateTime(Date date) {
-  int64_t seconds = date.days() * kSecondsInDay;
+std::tm getDateTime(int32_t days) {
+  int64_t seconds = days * kSecondsInDay;
   std::tm dateTime;
-  VELOX_USER_CHECK_NOT_NULL(
-      gmtime_r((const time_t*)&seconds, &dateTime),
-      "Date is too large: {} days",
-      date.days());
+  VELOX_USER_CHECK(
+      epochToUtc(seconds, dateTime), "Date is too large: {} days", days);
   return dateTime;
 }
 

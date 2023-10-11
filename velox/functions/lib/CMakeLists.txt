@@ -26,15 +26,17 @@ add_library(
   DateTimeFormatter.cpp
   DateTimeFormatterBuilder.cpp
   KllSketch.cpp
-  LambdaFunctionUtil.cpp
   MapConcat.cpp
   Re2Functions.cpp
-  StringEncodingUtils.cpp)
+  StringEncodingUtils.cpp
+  SubscriptUtil.cpp)
 
-target_link_libraries(velox_functions_lib velox_vector re2::re2 Folly::folly)
+target_link_libraries(velox_functions_lib velox_functions_util velox_vector
+                      re2::re2 Folly::folly)
 
 add_subdirectory(aggregates)
 add_subdirectory(string)
+add_subdirectory(window)
 if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)
 endif()

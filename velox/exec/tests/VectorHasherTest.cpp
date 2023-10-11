@@ -265,6 +265,35 @@ TEST_F(VectorHasherTest, nullConstant) {
   }
 }
 
+TEST_F(VectorHasherTest, unknown) {
+  auto hasher = exec::VectorHasher::create(UNKNOWN(), 1);
+  auto vector = vectorMaker_->allNullFlatVector<UnknownValue>(100);
+
+  // Test hashing without mixing.
+  raw_vector<uint64_t> hashes(100);
+  std::fill(hashes.begin(), hashes.end(), 0);
+  hasher->decode(*vector, oddRows_);
+  hasher->hash(oddRows_, false, hashes);
+  for (int32_t i = 0; i < 100; i++) {
+    EXPECT_EQ(hashes[i], (i % 2 == 0) ? 0 : exec::VectorHasher::kNullHash)
+        << "at " << i;
+  }
+
+  hasher->decode(*vector, allRows_);
+  hasher->hash(allRows_, false, hashes);
+  for (int32_t i = 0; i < 100; i++) {
+    EXPECT_EQ(hashes[i], exec::VectorHasher::kNullHash) << "at " << i;
+  }
+
+  // Test mixing.
+  std::iota(hashes.begin(), hashes.end(), 0);
+  hasher->hash(allRows_, true, hashes);
+  for (int32_t i = 0; i < 100; i++) {
+    auto expected = bits::hashMix(i, exec::VectorHasher::kNullHash);
+    EXPECT_EQ(hashes[i], expected) << "at " << i;
+  }
+}
+
 TEST_F(VectorHasherTest, dictionary) {
   auto hasher = exec::VectorHasher::create(BIGINT(), 1);
 
@@ -384,6 +413,47 @@ TEST_F(VectorHasherTest, stringIds) {
   EXPECT_EQ(numInRange, rows.countSelected());
 }
 
+// Tests distinct overflow, but starting with a small string
+TEST_F(VectorHasherTest, stringDistinctOverflow) {
+  auto hasher = exec::VectorHasher::create(VARCHAR(), 1);
+
+  constexpr uint32_t numRows{10000};
+
+  // 7 vectors, 10000 rows each.
+  // The 1st row of every batch has a small string.
+  std::vector<FlatVectorPtr<StringView>> batches;
+  std::vector<std::vector<std::string>> strings;
+  strings.resize(7);
+  for (auto i = 0; i < 7; ++i) {
+    auto& stringVec = strings[i];
+    stringVec.resize(numRows);
+    batches.emplace_back(vectorMaker_->flatVector<StringView>(
+        numRows, [&i, &stringVec, numRows](vector_size_t row) {
+          const auto num = numRows * i + row;
+          stringVec[row] = (row != 0)
+              ? fmt::format("abcdefghijabcdefghij{}", num)
+              : fmt::format("s{}", num);
+          return StringView(stringVec[row]);
+        }));
+  }
+
+  SelectivityVector rows(numRows, true);
+  raw_vector<uint64_t> hashes{numRows};
+  for (auto i = 0; i < 7; ++i) {
+    if (i < 5) {
+      ASSERT_TRUE(hasher->mayUseValueIds());
+      ASSERT_EQ(i * numRows, hasher->numUniqueValues());
+    } else {
+      ASSERT_FALSE(hasher->mayUseValueIds());
+      ASSERT_EQ(0, hasher->numUniqueValues());
+    }
+    if (hasher->mayUseValueIds()) {
+      hasher->decode(*batches[i], rows);
+      hasher->computeValueIds(rows, hashes);
+    }
+  }
+}
+
 TEST_F(VectorHasherTest, integerIds) {
   auto vector = BaseVector::create(BIGINT(), 100, pool_.get());
   auto ints = vector->as<FlatVector<int64_t>>();
@@ -450,11 +520,11 @@ TEST_F(VectorHasherTest, integerIds) {
 
 TEST_F(VectorHasherTest, dateIds) {
   auto vector = BaseVector::create(DATE(), 100, pool_.get());
-  auto* dates = vector->as<FlatVector<Date>>();
+  auto* dates = vector->as<FlatVector<int32_t>>();
   static constexpr int32_t kMin = std::numeric_limits<int32_t>::min();
   dates->setNull(0, true);
   for (auto i = 0; i < 99; ++i) {
-    dates->set(i + 1, Date(kMin + i * 10));
+    dates->set(i + 1, kMin + i * 10);
   }
   auto hasher = exec::VectorHasher::create(DATE(), 1);
   raw_vector<uint64_t> hashes(dates->size());
@@ -492,7 +562,7 @@ TEST_F(VectorHasherTest, dateIds) {
   for (auto count = 0; count < 1000; ++count) {
     vector_size_t index = 0;
     for (int64_t value = count * 100; value < count * 100 + 100; ++value) {
-      dates->set(index++, Date(value));
+      dates->set(index++, value);
     }
     hasher->decode(*vector, rows);
     hasher->computeValueIds(rows, hashes);

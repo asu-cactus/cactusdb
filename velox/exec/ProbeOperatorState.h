@@ -36,17 +36,17 @@ enum class ProbeOperatorState {
   kWaitForBuild = 0,
   /// The running state that join the probe input with the build table.
   kRunning = 1,
-  /// Wait for all the peer probe operators to finish processing inputs.
-  /// This state has different meaning in hash / nested loop join probe.
-  /// For hash probe: This state only applies when disk spilling is enabled. The
-  /// last finished operator will notify the build operators to build the next
-  /// hash table from the spilled data. Then all the peer probe operators will
-  /// wait for the next hash table to build.
-  /// For nested loop join probe: When doing right/full join, wait for all the
-  /// peer probe operators to finish processing inputs. When all the operators
-  /// get noMoreInput() call and finished processing its current input, the last
-  /// finished operator will gather build side match state from all peers and
-  /// emit mismatched build side output.
+  /// This state has different handlings for hash and nested loop join probe.
+  /// For hash probe, wait for all the peer probe operators to finish processing
+  /// inputs.
+  /// This state only applies when disk spilling is enabled. The last finished
+  /// operator will notify the build operators to build the next hash table
+  /// from the spilled data. Then all the peer probe operators will wait for
+  /// the next hash table to build.
+  /// For nested loop join probe, when doing right/full join, after the
+  /// completion of emitting matching and probe-side mismatching data, non-last
+  /// operators wait for the last probe operator to take over build-side
+  /// mismatching data.
   kWaitForPeers = 2,
   /// The finishing state.
   kFinish = 3,

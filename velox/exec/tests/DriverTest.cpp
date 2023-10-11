@@ -77,6 +77,7 @@ class DriverTest : public OperatorTestBase {
 
   void SetUp() override {
     OperatorTestBase::SetUp();
+    Operator::unregisterAllOperators();
     rowType_ =
         ROW({"key", "m1", "m2", "m3", "m4", "m5", "m6", "m7"},
             {BIGINT(),
@@ -171,7 +172,8 @@ class DriverTest : public OperatorTestBase {
       // To be realized either after 1s wall time or when the corresponding Task
       // is no longer running.
       auto& executor = folly::QueuedImmediateExecutor::instance();
-      auto future = tasks_.back()->stateChangeFuture(1'000'000).via(&executor);
+      auto future =
+          tasks_.back()->taskCompletionFuture(1'000'000).via(&executor);
       stateFutures_.emplace(threadId, std::move(future));
 
       EXPECT_FALSE(stateFutures_.at(threadId).isReady());
@@ -446,7 +448,7 @@ TEST_F(DriverTest, error) {
   EXPECT_EQ(numRead, 0);
   EXPECT_TRUE(stateFutures_.at(0).isReady());
   // Realized immediately since task not running.
-  EXPECT_TRUE(tasks_[0]->stateChangeFuture(1'000'000).isReady());
+  EXPECT_TRUE(tasks_[0]->taskCompletionFuture(1'000'000).isReady());
   EXPECT_EQ(tasks_[0]->state(), TaskState::kFailed);
 }
 
@@ -468,7 +470,7 @@ TEST_F(DriverTest, cancel) {
   }
   EXPECT_GE(numRead, 1'000'000);
   auto& executor = folly::QueuedImmediateExecutor::instance();
-  auto future = tasks_[0]->stateChangeFuture(1'000'000).via(&executor);
+  auto future = tasks_[0]->taskCompletionFuture(1'000'000).via(&executor);
   future.wait();
   EXPECT_TRUE(stateFutures_.at(0).isReady());
 
@@ -521,7 +523,7 @@ TEST_F(DriverTest, slow) {
   // are updated some tens of instructions after this. Determinism
   // requires a barrier.
   auto& executor = folly::QueuedImmediateExecutor::instance();
-  auto future = tasks_[0]->stateChangeFuture(1'000'000).via(&executor);
+  auto future = tasks_[0]->taskCompletionFuture(1'000'000).via(&executor);
   future.wait();
   // Note that the driver count drops after the last thread stops and
   // realizes the future.
@@ -551,13 +553,13 @@ TEST_F(DriverTest, pause) {
   // Make sure CPU usage tracking is enabled.
   std::unordered_map<std::string, std::string> queryConfig{
       {core::QueryConfig::kOperatorTrackCpuUsage, "true"}};
-  params.queryCtx =
-      std::make_shared<core::QueryCtx>(executor_.get(), std::move(queryConfig));
+  params.queryCtx = std::make_shared<core::QueryCtx>(
+      executor_.get(), core::QueryConfig(std::move(queryConfig)));
   int32_t numRead = 0;
   readResults(params, ResultOperation::kPause, 370'000'000, &numRead);
   // Each thread will fully read the 1M rows in values.
   EXPECT_EQ(numRead, 10 * hits);
-  auto stateFuture = tasks_[0]->stateChangeFuture(100'000'000);
+  auto stateFuture = tasks_[0]->taskCompletionFuture(100'000'000);
   auto& executor = folly::QueuedImmediateExecutor::instance();
   auto state = std::move(stateFuture).via(&executor);
   state.wait();
@@ -811,11 +813,26 @@ namespace {
 // Custom node for the custom factory.
 class ThrowNode : public core::PlanNode {
  public:
-  ThrowNode(const core::PlanNodeId& id, core::PlanNodePtr input)
-      : PlanNode(id), sources_{input} {}
+  enum class OperatorMethod {
+    kIsBlocked,
+    kNeedsInput,
+    kAddInput,
+    kNoMoreInput,
+    kGetOutput,
+  };
+
+  ThrowNode(
+      const core::PlanNodeId& id,
+      OperatorMethod throwingMethod,
+      core::PlanNodePtr input)
+      : PlanNode(id), throwingMethod_{throwingMethod}, sources_{input} {}
 
   const RowTypePtr& outputType() const override {
     return sources_[0]->outputType();
+  }
+
+  OperatorMethod throwingMethod() const {
+    return throwingMethod_;
   }
 
   const std::vector<std::shared_ptr<const PlanNode>>& sources() const override {
@@ -829,53 +846,103 @@ class ThrowNode : public core::PlanNode {
  private:
   void addDetails(std::stringstream& /* stream */) const override {}
 
+  const OperatorMethod throwingMethod_;
   std::vector<core::PlanNodePtr> sources_;
 };
 
 // Custom operator for the custom factory.
 class ThrowOperator : public Operator {
  public:
-  ThrowOperator(DriverCtx* ctx, int32_t id, core::PlanNodePtr node)
-      : Operator(ctx, node->outputType(), id, node->id(), "Throw") {}
+  ThrowOperator(
+      DriverCtx* ctx,
+      int32_t id,
+      const std::shared_ptr<const ThrowNode>& node)
+      : Operator(ctx, node->outputType(), id, node->id(), "Throw"),
+        throwingMethod_{node->throwingMethod()} {}
 
   bool needsInput() const override {
+    if (throwingMethod_ == ThrowNode::OperatorMethod::kNeedsInput) {
+      // Trigger a std::bad_function_call exception.
+      std::function<bool(vector_size_t)> nullFunction = nullptr;
+
+      if (nullFunction(123)) {
+        return false;
+      }
+    }
     return !noMoreInput_ && !input_;
   }
 
   void addInput(RowVectorPtr input) override {
+    if (throwingMethod_ == ThrowNode::OperatorMethod::kAddInput) {
+      // Trigger a std::bad_function_call exception.
+      std::function<bool(vector_size_t)> nullFunction = nullptr;
+
+      if (nullFunction(input->size())) {
+        input_ = std::move(input);
+      }
+    }
+
     input_ = std::move(input);
   }
 
   void noMoreInput() override {
+    if (throwingMethod_ == ThrowNode::OperatorMethod::kNoMoreInput) {
+      // Trigger a std::bad_function_call exception.
+      std::function<bool()> nullFunction = nullptr;
+
+      if (nullFunction()) {
+        Operator::noMoreInput();
+      }
+    }
+
     Operator::noMoreInput();
   }
 
   RowVectorPtr getOutput() override {
+    if (throwingMethod_ == ThrowNode::OperatorMethod::kGetOutput) {
+      // Trigger a std::bad_function_call exception.
+      std::function<bool()> nullFunction = nullptr;
+
+      if (nullFunction()) {
+        return std::move(input_);
+      }
+    }
     return std::move(input_);
   }
 
   BlockingReason isBlocked(ContinueFuture* /*future*/) override {
+    if (throwingMethod_ == ThrowNode::OperatorMethod::kIsBlocked) {
+      // Trigger a std::bad_function_call exception.
+      std::function<bool()> nullFunction = nullptr;
+
+      if (nullFunction()) {
+        return BlockingReason::kWaitForMemory;
+      }
+    }
     return BlockingReason::kNotBlocked;
   }
 
   bool isFinished() override {
     return noMoreInput_ && input_ == nullptr;
   }
+
+ private:
+  const ThrowNode::OperatorMethod throwingMethod_;
 };
 
 // Custom factory that throws during driver creation.
 class ThrowNodeFactory : public Operator::PlanNodeTranslator {
  public:
-  ThrowNodeFactory() = default;
+  explicit ThrowNodeFactory(uint32_t maxDrivers) : maxDrivers_{maxDrivers} {}
 
   std::unique_ptr<Operator> toOperator(
       DriverCtx* ctx,
       int32_t id,
       const core::PlanNodePtr& node) override {
-    if (std::dynamic_pointer_cast<const ThrowNode>(node)) {
-      VELOX_CHECK_EQ(driversCreated, 0, "Can only create 1 'throw driver'.");
+    if (auto throwNode = std::dynamic_pointer_cast<const ThrowNode>(node)) {
+      VELOX_CHECK_LT(driversCreated, maxDrivers_, "Too many drivers");
       ++driversCreated;
-      return std::make_unique<ThrowOperator>(ctx, id, node);
+      return std::make_unique<ThrowOperator>(ctx, id, throwNode);
     }
     return nullptr;
   }
@@ -888,6 +955,7 @@ class ThrowNodeFactory : public Operator::PlanNodeTranslator {
   }
 
  private:
+  const uint32_t maxDrivers_;
   uint32_t driversCreated{0};
 };
 
@@ -897,23 +965,66 @@ class ThrowNodeFactory : public Operator::PlanNodeTranslator {
 // This is to test that we do not crash due to early driver destruction and we
 // have a proper error being propagated out.
 TEST_F(DriverTest, driverCreationThrow) {
-  Operator::registerOperator(std::make_unique<ThrowNodeFactory>());
+  Operator::registerOperator(std::make_unique<ThrowNodeFactory>(1));
 
-  auto rows = makeRowVector({"c0"}, {makeFlatVector<int32_t>({1, 2, 3})});
+  auto rows = makeRowVector({makeFlatVector<int32_t>({1, 2, 3})});
 
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-
-  auto plan = PlanBuilder(planNodeIdGenerator)
+  auto plan = PlanBuilder()
                   .values({rows}, true)
                   .addNode([](std::string id, core::PlanNodePtr input) {
-                    return std::make_shared<ThrowNode>(id, input);
+                    return std::make_shared<ThrowNode>(
+                        id, ThrowNode::OperatorMethod::kAddInput, input);
                   })
                   .planNode();
-
+  CursorParameters params;
+  params.planNode = plan;
+  params.maxDrivers = 5;
+  auto cursor = std::make_unique<TaskCursor>(params);
+  auto task = cursor->task();
   // Ensure execution threw correct error.
+  VELOX_ASSERT_THROW(cursor->moveNext(), "Too many drivers");
+  EXPECT_EQ(TaskState::kFailed, task->state());
+}
+
+TEST_F(DriverTest, nonVeloxOperatorException) {
+  Operator::registerOperator(
+      std::make_unique<ThrowNodeFactory>(std::numeric_limits<uint32_t>::max()));
+
+  auto rows = makeRowVector({makeFlatVector<int32_t>({1, 2, 3})});
+
+  auto makePlan = [&](ThrowNode::OperatorMethod throwingMethod) {
+    return PlanBuilder()
+        .values({rows}, true)
+        .addNode([throwingMethod](std::string id, core::PlanNodePtr input) {
+          return std::make_shared<ThrowNode>(id, throwingMethod, input);
+        })
+        .planNode();
+  };
+
   VELOX_ASSERT_THROW(
-      AssertQueryBuilder(plan).maxDrivers(5).copyResults(pool()),
-      "Can only create 1 'throw driver'.");
+      AssertQueryBuilder(makePlan(ThrowNode::OperatorMethod::kIsBlocked))
+          .copyResults(pool()),
+      "Operator::isBlocked failed for [operator: Throw, plan node ID: 1]");
+
+  VELOX_ASSERT_THROW(
+      AssertQueryBuilder(makePlan(ThrowNode::OperatorMethod::kNeedsInput))
+          .copyResults(pool()),
+      "Operator::needsInput failed for [operator: Throw, plan node ID: 1]");
+
+  VELOX_ASSERT_THROW(
+      AssertQueryBuilder(makePlan(ThrowNode::OperatorMethod::kAddInput))
+          .copyResults(pool()),
+      "Operator::addInput failed for [operator: Throw, plan node ID: 1]");
+
+  VELOX_ASSERT_THROW(
+      AssertQueryBuilder(makePlan(ThrowNode::OperatorMethod::kNoMoreInput))
+          .copyResults(pool()),
+      "Operator::noMoreInput failed for [operator: Throw, plan node ID: 1]");
+
+  VELOX_ASSERT_THROW(
+      AssertQueryBuilder(makePlan(ThrowNode::OperatorMethod::kGetOutput))
+          .copyResults(pool()),
+      "Operator::getOutput failed for [operator: Throw, plan node ID: 1]");
 }
 
 DEBUG_ONLY_TEST_F(DriverTest, driverSuspensionRaceWithTaskPause) {
@@ -1201,4 +1312,30 @@ DEBUG_ONLY_TEST_F(DriverTest, driverSuspensionCalledFromOffThread) {
   }
   ASSERT_ANY_THROW(driver->task()->enterSuspended(driver->state()));
   ASSERT_ANY_THROW(driver->task()->leaveSuspended(driver->state()));
+}
+
+DEBUG_ONLY_TEST_F(DriverTest, driverThreadContext) {
+  ASSERT_TRUE(driverThreadContext() == nullptr);
+  std::thread nonDriverThread(
+      [&]() { ASSERT_TRUE(driverThreadContext() == nullptr); });
+  nonDriverThread.join();
+
+  std::atomic<Task*> capturedTask{nullptr};
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::Values::getOutput",
+      std::function<void(const exec::Values*)>([&](const exec::Values* values) {
+        ASSERT_TRUE(driverThreadContext() != nullptr);
+        capturedTask = driverThreadContext()->driverCtx.task.get();
+      }));
+  std::vector<RowVectorPtr> batches;
+  for (int i = 0; i < 4; ++i) {
+    batches.push_back(
+        makeRowVector({"c0"}, {makeFlatVector<int32_t>({1, 2, 3})}));
+  }
+  createDuckDbTable(batches);
+
+  auto plan = PlanBuilder().values(batches).planNode();
+  auto task = AssertQueryBuilder(plan, duckDbQueryRunner_)
+                  .assertResults("SELECT * FROM tmp");
+  ASSERT_EQ(task.get(), capturedTask);
 }

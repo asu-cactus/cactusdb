@@ -29,7 +29,8 @@ class SelectiveDwrfReader {
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
       const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
       DwrfParams& params,
-      common::ScanSpec& scanSpec);
+      common::ScanSpec& scanSpec,
+      bool isRoot = false);
 
   // Compatibility wrapper for tests. Takes the components of DwrfParams as
   // separate.
@@ -37,10 +38,13 @@ class SelectiveDwrfReader {
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
       const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
       StripeStreams& stripe,
+      const StreamLabels& streamLabels,
+      dwio::common::ColumnReaderStatistics& stats,
       common::ScanSpec* FOLLY_NONNULL scanSpec,
-      FlatMapContext flatMapContext = {}) {
-    auto params = DwrfParams(stripe, flatMapContext);
-    return build(requestedType, dataType, params, *scanSpec);
+      FlatMapContext flatMapContext = {},
+      bool isRoot = false) {
+    auto params = DwrfParams(stripe, streamLabels, stats, flatMapContext);
+    return build(requestedType, dataType, params, *scanSpec, isRoot);
   }
 };
 
@@ -54,8 +58,11 @@ class SelectiveColumnReaderFactory : public ColumnReaderFactory {
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
       const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
       StripeStreams& stripe,
+      const StreamLabels& streamLabels,
+      dwio::common::ColumnReaderStatistics& stats,
       FlatMapContext flatMapContext = {}) {
-    auto params = DwrfParams(stripe, std::move(flatMapContext));
+    auto params =
+        DwrfParams(stripe, streamLabels, stats, std::move(flatMapContext));
     auto reader =
         SelectiveDwrfReader::build(requestedType, dataType, params, *scanSpec_);
     reader->setIsTopLevel();

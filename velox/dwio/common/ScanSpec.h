@@ -86,21 +86,21 @@ class ScanSpec {
   }
 
   void addMetadataFilter(
-      MetadataFilter::LeafNode* leaf,
-      std::unique_ptr<common::Filter> filter) {
-    metadataFilters_.emplace_back(leaf, std::move(filter));
+      const MetadataFilter::LeafNode* leaf,
+      common::Filter* filter) {
+    metadataFilters_.emplace_back(leaf, filter);
   }
 
   int numMetadataFilters() const {
     return metadataFilters_.size();
   }
 
-  MetadataFilter::LeafNode* metadataFilterNodeAt(int i) const {
+  const MetadataFilter::LeafNode* metadataFilterNodeAt(int i) const {
     return metadataFilters_[i].first;
   }
 
   common::Filter* metadataFilterAt(int i) const {
-    return metadataFilters_[i].second.get();
+    return metadataFilters_[i].second;
   }
 
   // Returns a constant vector if 'this' corresponds to a partitioning
@@ -208,33 +208,12 @@ class ScanSpec {
   // corresponds to the ColumnReader tree.
   ScanSpec* getOrCreateChild(const Subfield& subfield);
 
-  bool matches(const Subfield::PathElement& element) const {
-    auto kind = element.kind();
-    switch (kind) {
-      case kNestedField:
-        return fieldName_ ==
-            reinterpret_cast<const Subfield::NestedField*>(&element)->name();
-      case kLongSubscript:
-        return subscript_ ==
-            reinterpret_cast<const Subfield::LongSubscript*>(&element)->index();
-      case kStringSubscript:
-        return fieldName_ ==
-            reinterpret_cast<const Subfield::StringSubscript*>(&element)
-                ->index();
-      default:
-        VELOX_CHECK(
-            false, "Only subfields that specify a single field are  supported");
-    }
-    return false;
-  }
-
   ScanSpec* childByName(const std::string& name) const {
-    for (auto& spec : children_) {
-      if (spec->fieldName_ == name) {
-        return spec.get();
-      }
+    auto it = childByFieldName_.find(name);
+    if (it == childByFieldName_.end()) {
+      return nullptr;
     }
-    return nullptr;
+    return it->second;
   }
 
   // Remove a child from this scan spec, returning the removed child.  This is
@@ -382,8 +361,7 @@ class ScanSpec {
   // the pointers to LeafNodes are stored here.  We need to keep these pointers
   // so that we can match the leaf node filter results and apply logical
   // conjunctions later properly.
-  std::vector<
-      std::pair<MetadataFilter::LeafNode*, std::shared_ptr<common::Filter>>>
+  std::vector<std::pair<const MetadataFilter::LeafNode*, common::Filter*>>
       metadataFilters_;
 
   SelectivityInfo selectivity_;
@@ -409,6 +387,8 @@ class ScanSpec {
   // asynchronously constructing reader trees for read-ahead, while
   // 'children_' is reorderable by a running scan.
   std::vector<ScanSpec*> stableChildren_;
+
+  folly::F14FastMap<std::string, ScanSpec*> childByFieldName_;
 
   mutable std::optional<bool> hasFilter_;
   ValueHook* valueHook_ = nullptr;
