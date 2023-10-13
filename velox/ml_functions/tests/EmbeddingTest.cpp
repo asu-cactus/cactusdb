@@ -10,8 +10,8 @@
 #include "velox/ml_functions/Dropout.h"
 #include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/SequencePooling.h"
-#include "velox/parse/TypeResolver.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
+#include "velox/parse/TypeResolver.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -20,8 +20,6 @@ using namespace facebook::velox::exec::test;
 using namespace facebook::velox::core;
 
 // Utility function to generate random float/int values
-
-
 
 class EmbeddingTest : public HiveConnectorTestBase {
  public:
@@ -290,12 +288,12 @@ void EmbeddingTest::testConcat1() {
 
 void EmbeddingTest::testConcat2() {
   std::cout << "[INFO] Test of Concat2." << std::endl;
-  int numSamples = 2;
-  int input1Dims = 5;
-  int input2Dims = 4;
+  int numSamples = 1000;
+  int input1Dims = 5000;
+  int input2Dims = 2000;
 
-  int input1NN = 3;
-  int input2NN = 2;
+  int input1NN = 2000;
+  int input2NN = 3000;
 
   RandomGenerator randomGenerator = RandomGenerator(-1, 1);
 
@@ -321,12 +319,12 @@ void EmbeddingTest::testConcat2() {
   }
 
   // Print input
-  std::cout << "[INFO] input1: \n"
-            << inputRowVector1->toString(0, inputRowVector1->size())
-            << std::endl;
-  std::cout << "[INFO] input2: \n"
-            << inputRowVector2->toString(0, inputRowVector2->size())
-            << std::endl;
+  // std::cout << "[INFO] input1: \n"
+  //           << inputRowVector1->toString(0, inputRowVector1->size())
+  //           << std::endl;
+  // std::cout << "[INFO] input2: \n"
+  //           << inputRowVector2->toString(0, inputRowVector2->size())
+  //           << std::endl;
 
   exec::registerVectorFunction(
       "mat_mul1",
@@ -341,7 +339,12 @@ void EmbeddingTest::testConcat2() {
           weights2->values()->asMutable<float>(), input2Dims, input2NN));
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  exec::registerVectorFunction(
+      "concat",
+      Concat::signatures(),
+      std::make_unique<Concat>(input1NN, input2NN));
 
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto myPlan1 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                      .values({inputRowVector1})
                      .project({"mat_mul1(in1) as o1"})
@@ -361,31 +364,32 @@ void EmbeddingTest::testConcat2() {
   auto t3 = maker.rowVector(
       {"o1", "o2"}, {results1->childAt(0), results2->childAt(0)});
 
-  std::cout << "[INFO] t3: \n" << t3->toString(0, t3->size()) << std::endl;
-
-  exec::registerVectorFunction(
-      "concat",
-      Concat::signatures(),
-      std::make_unique<Concat>(input1NN, input2NN));
-
   auto myPlan3 = exec::test::PlanBuilder(pool_.get())
                      .values({t3})
                      .project({"concat(o1, o2)"})
                      .planNode();
+
   auto results3 =
       exec::test::AssertQueryBuilder(myPlan3).copyResults(pool_.get());
-  std::cout << "[INFO] Results3: \n"
-            << results3->toString(0, results3->size()) << std::endl;
+
+
+  // std::cout << "[INFO] t3: \n" << t3->toString(0, t3->size()) << std::endl;
+
+  
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Concat3 (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  // std::cout << "[INFO] Results3: \n"
+  //           << results3->toString(0, results3->size()) << std::endl;
 };
 
 void EmbeddingTest::testConcat3() {
   std::cout << "[INFO] Test of Concat3." << std::endl;
-  int numSamples = 2;
-  int input1Dims = 5;
-  int input2Dims = 4;
+  int numSamples = 1000;
+  int input1Dims = 5000;
+  int input2Dims = 2000;
 
-  int input1NN = 3;
-  int input2NN = 2;
+  int input1NN = 2000;
+  int input2NN = 3000;
 
   RandomGenerator randomGenerator = RandomGenerator(-1, 1);
 
@@ -411,12 +415,12 @@ void EmbeddingTest::testConcat3() {
   }
 
   // Print input
-  std::cout << "[INFO] input1: \n"
-            << inputRowVector1->toString(0, inputRowVector1->size())
-            << std::endl;
-  std::cout << "[INFO] input2: \n"
-            << inputRowVector2->toString(0, inputRowVector2->size())
-            << std::endl;
+  // std::cout << "[INFO] input1: \n"
+  //           << inputRowVector1->toString(0, inputRowVector1->size())
+  //           << std::endl;
+  // std::cout << "[INFO] input2: \n"
+  //           << inputRowVector2->toString(0, inputRowVector2->size())
+  //           << std::endl;
 
   exec::registerVectorFunction(
       "mat_mul1",
@@ -430,43 +434,35 @@ void EmbeddingTest::testConcat3() {
       std::make_unique<MatrixMultiply>(
           weights2->values()->asMutable<float>(), input2Dims, input2NN));
 
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-
-  auto myPlan1 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                     .values({inputRowVector1})
-                     .project({"mat_mul1(in1) as o1"})
-                    //  .rowNumber({}, "id", false)  rowNumber operator is not in the current version of velox
-                     .planNode();
-
-  auto myPlan2 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                     .values({inputRowVector2})
-                     .project({"mat_mul2(in2) as o2"})
-                     .planNode();
-
-  auto results1 =
-      exec::test::AssertQueryBuilder(myPlan1).copyResults(pool_.get());;
-
-  auto results2 =
-      exec::test::AssertQueryBuilder(myPlan2).copyResults(pool_.get());;
-
-  auto t3 = maker.rowVector(
-      {"o1", "o2"}, {results1->childAt(0), results2->childAt(0)});
-
-  std::cout << "[INFO] t3: \n" << t3->toString(0, t3->size()) << std::endl;
-
   exec::registerVectorFunction(
       "concat",
       Concat::signatures(),
       std::make_unique<Concat>(input1NN, input2NN));
 
-  auto myPlan3 = exec::test::PlanBuilder(pool_.get())
-                     .values({t3})
-                     .project({"concat(o1, o2)"})
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  auto myPlan1 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                     .values({inputRowVector1})
+                     .project({"mat_mul1(in1) as o1"})
+                     .rowNumber({}, std::nullopt, true)
                      .planNode();
+
+  auto myPlan2 =
+      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+          .values({inputRowVector2})
+          .project({"mat_mul2(in2) as o2"})
+          .rowNumber({}, std::nullopt, true)
+          .mergeJoin({"row_number"}, {"row_number"}, myPlan1, "", {"o1", "o2"})
+          .project({"concat(o1,o2)"})
+          .planNode();
+
   auto results3 =
-      exec::test::AssertQueryBuilder(myPlan3).copyResults(pool_.get());
-  std::cout << "[INFO] Results3: \n"
-            << results3->toString(0, results3->size()) << std::endl;
+      exec::test::AssertQueryBuilder(myPlan2).copyResults(pool_.get());
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Concat3 (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  // std::cout << "[INFO] Results3: \n"
+  //           << results3->toString(0, results3->size()) << std::endl;
 };
 
 void EmbeddingTest::testCosineSimilarity() {
@@ -592,7 +588,7 @@ int main(int argc, char** argv) {
   // demo.testBatchNorm1D();
   // demo.testDropout();
   // demo.testConcat1();
-  // demo.testConcat2();
+  demo.testConcat2();
   demo.testConcat3();
   // demo.testCosineSimilarity();
   // demo.testSequencePooling();
