@@ -1,6 +1,11 @@
 #include <folly/init/Init.h>
 #include <torch/torch.h>
 #include <random>
+#include "velox/common/file/FileSystems.h"
+#include "velox/dwio/dwrf/reader/DwrfReader.h"
+#include "velox/dwio/parquet/RegisterParquetReader.h"
+// #include "velox/dwio/parquet/RegisterParquetWriter.h"
+#include "velox/connectors/hive/HiveConfig.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
@@ -21,8 +26,6 @@ using namespace facebook::velox::core;
 
 // Utility function to generate random float/int values
 
-
-
 class TowTowerModelTest : public HiveConnectorTestBase {
  public:
   TowTowerModelTest() {
@@ -34,19 +37,24 @@ class TowTowerModelTest : public HiveConnectorTestBase {
 
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
+    // HiveConnectorTestBase::SetUp();
+    parquet::registerParquetReaderFactory();
 
-    SetUp();
+    // SetUp();
   }
 
   ~TowTowerModelTest() {}
 
   void run();
-  void testTwoTowerModel();
+  void testTwoTowerModelInference();
+  void testDataProcessing();
 
   void TestBody() override {}
 
   void SetUp() {
+    // TODO: not used for now
     HiveConnectorTestBase::SetUp();
+    parquet::registerParquetReaderFactory();
   }
 
   void TearDown() {
@@ -70,8 +78,63 @@ class TowTowerModelTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
 };
 
+void TowTowerModelTest::testDataProcessing() {
+
+  auto hiveConnector =
+      connector::getConnectorFactory(
+          connector::hive::HiveConnectorFactory::kHiveConnectorName)
+          ->newConnector(kHiveConnectorId, nullptr);
+  connector::registerConnector(hiveConnector);
+
+  CursorParameters params;
+
+  // ROW({{"col", INTEGER()}})
+
+  auto plan =
+      PlanBuilder(pool_.get())
+          .tableScan(ROW({"col", "col2"}, {BIGINT(), VARCHAR()}), {}, "")
+          .planNode();
+
+  std::shared_ptr<folly::Executor> executor =
+      std::make_shared<folly::CPUThreadPoolExecutor>(
+          std::thread::hardware_concurrency());
+  std::shared_ptr<core::QueryCtx> queryCtx =
+      std::make_shared<core::QueryCtx>(executor.get());
+
+  std::unordered_map<std::string, std::string> configs = {
+      {std::string(
+           connector::hive::HiveConfig::kFileColumnNamesReadAsLowerCase),
+       "true"}};
+  queryCtx->setConnectorConfigOverridesUnsafe(
+      kHiveConnectorId, std::move(configs));
+  const int numSplitsPerFile = 1;
+  params.queryCtx = queryCtx;
+  params.planNode = plan;
+
+  bool noMoreSplits = false;
+  auto addSplits = [&](exec::Task* task) {
+    if (!noMoreSplits) {
+      auto const splits = HiveConnectorTestBase::makeHiveConnectorSplits(
+          {"/root/velox_latest/data/test1.parquet"},
+          numSplitsPerFile,
+          dwio::common::FileFormat::PARQUET);
+      for (const auto& split : splits) {
+        task->addSplit("0", exec::Split(split));
+      }
+      task->noMoreSplits("0");
+    }
+    noMoreSplits = true;
+  };
+  auto result = readCursor(params, addSplits);
+  auto data = result.second;
+  std::cout << "[INFO] data size: " << data.size() << std::endl;
+  auto col1 = data[0]->as<RowVector>();
+  std::cout << "[INFO] READ data: \n"
+            << col1->toString(0, col1->size()) << std::endl;
+}
+
 // Test Embedding Layer
-void TowTowerModelTest::testTwoTowerModel() {
+void TowTowerModelTest::testTwoTowerModelInference() {
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
   // embeddingDims is shared among all embedding layer
   int embeddingDims = 32;
@@ -144,7 +207,7 @@ void TowTowerModelTest::testTwoTowerModel() {
           occupationNumEmbedding,
           embeddingDims));
 
-  int numSamples = 5;
+  int numSamples = 500;
 
   std::vector<std::vector<int>> userIndicesVector =
       randomGenerator.genLookUpIndices(numSamples, userIdNumEmbedding - 1);
@@ -177,107 +240,24 @@ void TowTowerModelTest::testTwoTowerModel() {
   auto userMeanRatingArray =
       maker.arrayVector<float>(userMeanRatingVector, REAL());
 
-  auto userPlan = exec::test::PlanBuilder(pool_.get())
-                      .values({userIndicesArrayRowVector})
-                      .project({"user_id_embedding(user_id)"})
-                      .planNode();
-
-  auto userEmbedding =
-      exec::test::AssertQueryBuilder(userPlan).copyResults(pool_.get());
-
-  auto genderPlan = exec::test::PlanBuilder(pool_.get())
-                        .values({genderIndicesArrayRowVector})
-                        .project({"gender_embedding(gender)"})
-                        .planNode();
-
-  auto genderEmbedding =
-      exec::test::AssertQueryBuilder(genderPlan).copyResults(pool_.get());
-
-  auto agePlan = exec::test::PlanBuilder(pool_.get())
-                     .values({ageIndicesArrayRowVector})
-                     .project({"age_embedding(age)"})
-                     .planNode();
-
-  auto ageEmbedding =
-      exec::test::AssertQueryBuilder(agePlan).copyResults(pool_.get());
-
-  auto occupationPlan = exec::test::PlanBuilder(pool_.get())
-                            .values({occupationIndicesArrayRowVector})
-                            .project({"occupation_embedding(occupation)"})
-                            .planNode();
-
-  auto occupationEmbedding =
-      exec::test::AssertQueryBuilder(occupationPlan).copyResults(pool_.get());
-
-  // std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
-//   std::cout << "[INFO] Results: \n"
-//             << userEmbedding->toString(0, userEmbedding->size()) << std::endl;
-
   exec::registerVectorFunction(
       "concat1",
       Concat::signatures(),
       std::make_unique<Concat>(embeddingDims, embeddingDims));
-
-  auto in1 = maker.rowVector(
-      {"in1", "in2"}, {userEmbedding->childAt(0), genderEmbedding->childAt(0)});
-
-  auto concatPlan1 = exec::test::PlanBuilder(pool_.get())
-                         .values({in1})
-                         .project({"concat1(in1, in2)"})
-                         .planNode();
-
-  auto out1 =
-      exec::test::AssertQueryBuilder(concatPlan1).copyResults(pool_.get());
 
   exec::registerVectorFunction(
       "concat2",
       Concat::signatures(),
       std::make_unique<Concat>(2 * embeddingDims, embeddingDims));
 
-  auto in2 = maker.rowVector(
-      {"in1", "in2"}, {out1->childAt(0), ageEmbedding->childAt(0)});
-
-  auto concatPlan2 = exec::test::PlanBuilder(pool_.get())
-                         .values({in2})
-                         .project({"concat2(in1, in2)"})
-                         .planNode();
-  auto out2 =
-      exec::test::AssertQueryBuilder(concatPlan2).copyResults(pool_.get());
-
   exec::registerVectorFunction(
       "concat3",
       Concat::signatures(),
       std::make_unique<Concat>(3 * embeddingDims, embeddingDims));
-
-  auto in3 = maker.rowVector(
-      {"in1", "in2"}, {out2->childAt(0), occupationEmbedding->childAt(0)});
-
-  auto concatPlan3 = exec::test::PlanBuilder(pool_.get())
-                         .values({in3})
-                         .project({"concat3(in1, in2)"})
-                         .planNode();
-
-  auto out3 =
-      exec::test::AssertQueryBuilder(concatPlan3).copyResults(pool_.get());
-
   exec::registerVectorFunction(
       "concat4",
       Concat::signatures(),
       std::make_unique<Concat>(4 * embeddingDims, 1));
-
-  auto in4 =
-      maker.rowVector({"in1", "in2"}, {out3->childAt(0), userMeanRatingArray});
-
-  auto concatPlan4 = exec::test::PlanBuilder(pool_.get())
-                         .values({in4})
-                         .project({"concat4(in1, in2) as user_nn_in"})
-                         .planNode();
-
-  auto out4 =
-      exec::test::AssertQueryBuilder(concatPlan4).copyResults(pool_.get());
-
-  std::cout << "[INFO] user DNN input: \n"
-            << out4->toString(0, out4->size()) << std::endl;
 
   randomGenerator.setFloatRange(-1, 1);
   std::vector<std::vector<float>> userNNweight1 =
@@ -396,20 +376,6 @@ void TowTowerModelTest::testTwoTowerModel() {
           batchNorm3WeightVector->elements()->values()->asMutable<float>(),
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
-
-  auto userNNPlan =
-      exec::test::PlanBuilder(pool_.get())
-          .values({out4})
-          .project(
-              {"relu(batch_norm3(mat_add3(mat_mul3(relu(batch_norm2(mat_add2(mat_mul2(relu(batch_norm1(mat_add1(mat_mul1(user_nn_in)))))))))))) as user_nn_out"})
-          .planNode();
-  auto userNNOut =
-      exec::test::AssertQueryBuilder(userNNPlan).copyResults(pool_.get());
-  std::cout << "[INFO] user DNN output: \n"
-            << userNNOut->toString(0, userNNOut->size()) << std::endl;
-
-  // Item-Tower
-
   // movid_id
   int movieIdNumEmbedding = 3668;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
@@ -468,56 +434,15 @@ void TowTowerModelTest::testTwoTowerModel() {
       randomGenerator.genFloat2dVector(numSamples, 1);
   auto itemMeanRatingArray =
       maker.arrayVector<float>(itemMeanRatingVector, REAL());
-
-  auto itemPlan = exec::test::PlanBuilder(pool_.get())
-                      .values({movieIndicesArrayRowVector})
-                      .project({"movie_id_embedding(movie_id)"})
-                      .planNode();
-
-  auto itemEmbedding =
-      exec::test::AssertQueryBuilder(itemPlan).copyResults(pool_.get());
-
-  auto genresPlan = exec::test::PlanBuilder(pool_.get())
-                        .values({genresIndicesArrayRowVector})
-                        .project({"sequence_pooling(genres_embedding(genres))"})
-                        .planNode();
-
-  auto genresEmbedding =
-      exec::test::AssertQueryBuilder(genresPlan).copyResults(pool_.get());
-
   exec::registerVectorFunction(
       "concat2_1",
       Concat::signatures(),
       std::make_unique<Concat>(embeddingDims, embeddingDims));
 
-  auto in2_1 = maker.rowVector(
-      {"in1", "in2"}, {itemEmbedding->childAt(0), genresEmbedding->childAt(0)});
-
-  auto concatPlan2_1 = exec::test::PlanBuilder(pool_.get())
-                           .values({in2_1})
-                           .project({"concat2_1(in1, in2)"})
-                           .planNode();
-
-  auto out2_1 =
-      exec::test::AssertQueryBuilder(concatPlan2_1).copyResults(pool_.get());
-
   exec::registerVectorFunction(
       "concat2_1",
       Concat::signatures(),
       std::make_unique<Concat>(2 * embeddingDims, 1));
-
-  auto in2_2 = maker.rowVector(
-      {"in1", "in2"}, {out2_1->childAt(0), itemMeanRatingArray});
-
-  auto concatPlan2_2 = exec::test::PlanBuilder(pool_.get())
-                           .values({in2_2})
-                           .project({"concat2_1(in1, in2) as item_nn_in"})
-                           .planNode();
-  auto out2_2 =
-      exec::test::AssertQueryBuilder(concatPlan2_2).copyResults(pool_.get());
-
-  std::cout << "[INFO] item dnn input: \n"
-            << out2_2->toString(0, out2_2->size()) << std::endl;
 
   randomGenerator.setFloatRange(-1, 1);
   std::vector<std::vector<float>> itemNNweight1 =
@@ -637,6 +562,155 @@ void TowTowerModelTest::testTwoTowerModel() {
           batchNorm2_3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
+  exec::registerVectorFunction(
+      "cosine_similarity",
+      CosineSimilarity::signatures(),
+      std::make_unique<CosineSimilarity>(128));
+
+  // Below is generating the plan
+  std::chrono::steady_clock::time_point begin =
+      std::chrono::steady_clock::now();
+  auto userPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({userIndicesArrayRowVector})
+                      .project({"user_id_embedding(user_id)"})
+                      .planNode();
+
+  auto userEmbedding =
+      exec::test::AssertQueryBuilder(userPlan).copyResults(pool_.get());
+
+  auto genderPlan = exec::test::PlanBuilder(pool_.get())
+                        .values({genderIndicesArrayRowVector})
+                        .project({"gender_embedding(gender)"})
+                        .planNode();
+
+  auto genderEmbedding =
+      exec::test::AssertQueryBuilder(genderPlan).copyResults(pool_.get());
+
+  auto agePlan = exec::test::PlanBuilder(pool_.get())
+                     .values({ageIndicesArrayRowVector})
+                     .project({"age_embedding(age)"})
+                     .planNode();
+
+  auto ageEmbedding =
+      exec::test::AssertQueryBuilder(agePlan).copyResults(pool_.get());
+
+  auto occupationPlan = exec::test::PlanBuilder(pool_.get())
+                            .values({occupationIndicesArrayRowVector})
+                            .project({"occupation_embedding(occupation)"})
+                            .planNode();
+
+  auto occupationEmbedding =
+      exec::test::AssertQueryBuilder(occupationPlan).copyResults(pool_.get());
+
+  // std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
+  //   std::cout << "[INFO] Results: \n"
+  //             << userEmbedding->toString(0, userEmbedding->size()) <<
+  //             std::endl;
+
+  auto in1 = maker.rowVector(
+      {"in1", "in2"}, {userEmbedding->childAt(0), genderEmbedding->childAt(0)});
+
+  auto concatPlan1 = exec::test::PlanBuilder(pool_.get())
+                         .values({in1})
+                         .project({"concat1(in1, in2)"})
+                         .planNode();
+
+  auto out1 =
+      exec::test::AssertQueryBuilder(concatPlan1).copyResults(pool_.get());
+
+  auto in2 = maker.rowVector(
+      {"in1", "in2"}, {out1->childAt(0), ageEmbedding->childAt(0)});
+
+  auto concatPlan2 = exec::test::PlanBuilder(pool_.get())
+                         .values({in2})
+                         .project({"concat2(in1, in2)"})
+                         .planNode();
+  auto out2 =
+      exec::test::AssertQueryBuilder(concatPlan2).copyResults(pool_.get());
+
+  auto in3 = maker.rowVector(
+      {"in1", "in2"}, {out2->childAt(0), occupationEmbedding->childAt(0)});
+
+  auto concatPlan3 = exec::test::PlanBuilder(pool_.get())
+                         .values({in3})
+                         .project({"concat3(in1, in2)"})
+                         .planNode();
+
+  auto out3 =
+      exec::test::AssertQueryBuilder(concatPlan3).copyResults(pool_.get());
+
+  auto in4 =
+      maker.rowVector({"in1", "in2"}, {out3->childAt(0), userMeanRatingArray});
+
+  auto concatPlan4 = exec::test::PlanBuilder(pool_.get())
+                         .values({in4})
+                         .project({"concat4(in1, in2) as user_nn_in"})
+                         .planNode();
+
+  auto out4 =
+      exec::test::AssertQueryBuilder(concatPlan4).copyResults(pool_.get());
+
+  //   std::cout << "[INFO] user DNN input: \n"
+  //             << out4->toString(0, out4->size()) << std::endl;
+
+  auto userNNPlan =
+      exec::test::PlanBuilder(pool_.get())
+          .values({out4})
+          .project(
+              {"relu(batch_norm3(mat_add3(mat_mul3(relu(batch_norm2(mat_add2(mat_mul2(relu(batch_norm1(mat_add1(mat_mul1(user_nn_in)))))))))))) as user_nn_out"})
+          .planNode();
+  auto userNNOut =
+      exec::test::AssertQueryBuilder(userNNPlan).copyResults(pool_.get());
+  //   std::cout << "[INFO] user DNN output: \n"
+  //             << userNNOut->toString(0, userNNOut->size()) << std::endl;
+
+  // Item-Tower
+
+  auto itemPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({movieIndicesArrayRowVector})
+                      .project({"movie_id_embedding(movie_id)"})
+                      .planNode();
+
+  auto itemEmbedding =
+      exec::test::AssertQueryBuilder(itemPlan).copyResults(pool_.get());
+
+//   std::cout << "[INFO] genresIndicesArrayRowVector 1: \n"
+//             << genresIndicesArrayRowVector->toString(
+//                    0, genresIndicesArrayRowVector->size())
+//             << std::endl;
+
+    auto genresPlan = exec::test::PlanBuilder(pool_.get())
+                          .values({genresIndicesArrayRowVector})
+                          .project({"sequence_pooling(genres_embedding(genres))"})
+                          .planNode();
+
+  auto genresEmbedding =
+      exec::test::AssertQueryBuilder(genresPlan).copyResults(pool_.get());
+
+  auto in2_1 = maker.rowVector(
+      {"in1", "in2"}, {itemEmbedding->childAt(0), genresEmbedding->childAt(0)});
+
+  auto concatPlan2_1 = exec::test::PlanBuilder(pool_.get())
+                           .values({in2_1})
+                           .project({"concat2_1(in1, in2)"})
+                           .planNode();
+
+  auto out2_1 =
+      exec::test::AssertQueryBuilder(concatPlan2_1).copyResults(pool_.get());
+
+  auto in2_2 = maker.rowVector(
+      {"in1", "in2"}, {out2_1->childAt(0), itemMeanRatingArray});
+
+  auto concatPlan2_2 = exec::test::PlanBuilder(pool_.get())
+                           .values({in2_2})
+                           .project({"concat2_1(in1, in2) as item_nn_in"})
+                           .planNode();
+  auto out2_2 =
+      exec::test::AssertQueryBuilder(concatPlan2_2).copyResults(pool_.get());
+
+//   std::cout << "[INFO] item dnn input: \n"
+//             << out2_2->toString(0, out2_2->size()) << std::endl;
+
   auto itemNNPlan =
       exec::test::PlanBuilder(pool_.get())
           .values({out2_2})
@@ -645,13 +719,8 @@ void TowTowerModelTest::testTwoTowerModel() {
           .planNode();
   auto itemNNOut =
       exec::test::AssertQueryBuilder(itemNNPlan).copyResults(pool_.get());
-  std::cout << "[INFO] item NN output: \n"
-            << itemNNOut->toString(0, itemNNOut->size()) << std::endl;
-
-  exec::registerVectorFunction(
-      "cosine_similarity",
-      CosineSimilarity::signatures(),
-      std::make_unique<CosineSimilarity>(128));
+  //   std::cout << "[INFO] item NN output: \n"
+  //             << itemNNOut->toString(0, itemNNOut->size()) << std::endl;
 
   auto finalInputRowVector = maker.rowVector(
       {"in1", "in2"}, {userNNOut->childAt(0), itemNNOut->childAt(0)});
@@ -661,6 +730,13 @@ void TowTowerModelTest::testTwoTowerModel() {
                             .planNode();
   auto scores =
       exec::test::AssertQueryBuilder(finalStagePlan).copyResults(pool_.get());
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Two Tower Model (sec) = "
+            << (std::chrono::duration_cast<std::chrono::microseconds>(
+                    end - begin)
+                    .count()) /
+          1000000.0
+            << std::endl;
   std::cout << "[INFO] final score: \n"
             << scores->toString(0, scores->size()) << std::endl;
 };
@@ -668,5 +744,6 @@ void TowTowerModelTest::testTwoTowerModel() {
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   TowTowerModelTest demo;
-  demo.testTwoTowerModel();
+//   demo.testTwoTowerModelInference();
+  demo.testDataProcessing();
 }
