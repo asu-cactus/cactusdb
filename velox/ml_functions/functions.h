@@ -86,19 +86,19 @@ public:
         // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         // std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
-        std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
-        for (int i = 0; i < m.rows(); ++i) {
-            for (int j = 0; j < m.cols(); ++j) {
-                result[i][j] = m(i, j);
-            }
-        }
-        // std::vector<std::vector<float>> result;
-        // for (int i = 0; i < m.rows(); i++) {
-        //     std::vector<float> row(
-        //     m.row(i).data(),
-        //     m.row(i).data() + m.cols());
-        //     result.push_back(row);
+        // std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
+        // for (int i = 0; i < m.rows(); ++i) {
+        //     for (int j = 0; j < m.cols(); ++j) {
+        //         result[i][j] = m(i, j);
+        //     }
         // }
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < m.rows(); i++) {
+            std::vector<float> row(
+            m.row(i).data(),
+            m.row(i).data() + m.cols());
+            result.push_back(row);
+        }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
     }
@@ -162,9 +162,9 @@ public:
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, rows.size(), dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, rows.size(), dims[0]);
         
-        std::cout << "Matrix shapes MatAdd" << std::endl;
-        std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
-        std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
+        // std::cout << "Matrix shapes MatAdd" << std::endl;
+        // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
+        // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
 
         // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
@@ -386,10 +386,11 @@ public:
 
         std::vector<std::vector<float>> results;
         for (int i = 0; i < rows.size(); ++i) {
-            std::vector<float> result;
-            for (int j = 0; j < dims[2]; ++j) {
-                result.push_back(data[i*dims[2] + j]);
-            }
+            // std::vector<float> result;
+            std::vector<float> result(data + i*dims[2], data+ (i+1)*dims[2]);
+            // for (int j = 0; j < dims[2]; ++j) {
+            //     result.push_back(data[i*dims[2] + j]);
+            // }
             results.push_back(result);
         }
         VectorMaker maker{context.pool()};

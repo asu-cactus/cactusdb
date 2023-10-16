@@ -1,4 +1,5 @@
 #pragma once
+#include <fmt/format.h>
 #include <iostream>
 #include "functions.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
@@ -37,7 +38,7 @@ class Embedding : public MLFunction {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
     auto indicesVector = args[0]->as<ArrayVector>()->elements();
     int* indicesValues = indicesVector->values()->asMutable<int>();
-    int numInputs = indicesVector->size();
+    int numInputs = rows.size();
 
     auto indicesRowVector = args[0];
 
@@ -53,9 +54,11 @@ class Embedding : public MLFunction {
       for (int j = 0; j < numSubIndices; j++) {
         // Support of variadic indexes
         int embedIndex = indicesValues[indicesOffset + j];
-        for (int k = 0; k < dims[1]; k++) {
-          retrievedEmbedding.push_back(weights_[embedIndex * dims[1] + k]);
-        }
+        std::vector<float> embedVector(
+            weights_ + embedIndex * dims[1],
+            weights_ + embedIndex * dims[1] + dims[1]);
+        retrievedEmbedding.insert(
+            retrievedEmbedding.end(), embedVector.begin(), embedVector.end());
       }
       result.push_back(retrievedEmbedding);
     }

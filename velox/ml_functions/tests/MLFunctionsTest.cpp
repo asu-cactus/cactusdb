@@ -110,18 +110,30 @@ class MLFunctionsTest : public HiveConnectorTestBase {
     
     std::unordered_map<std::string, std::shared_ptr<Config>> configs;
     std::shared_ptr<MemoryPool> pool = memory::defaultMemoryManager().addRootPool(
-        "", memoryCapacity, MemoryReclaimer::create());
+        "", memoryCapacity, memory::MemoryReclaimer::create());
    std::unordered_map<std::string, std::string> myMapWithValues = {{core::QueryConfig::kSpillEnabled, "true"}, 
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
                                       {core::QueryConfig::kJoinSpillMemoryThreshold, "1"},
                                        {core::QueryConfig::kSpillableReservationGrowthPct, "1"},
-                                       {core::QueryConfig::kSpillPartitionBits, "1"}
+                                      /* 
+                                      kSpillPartitionBits is removed after PR 5890, 
+                                      kJoinSpillPartitionBits and kAggregationSpillPartitionBits are introduced 
+                                      Please consider how to replace it by check the following link: 
+                                      https://github.com/facebookincubator/velox/pull/5890 
+                                      */
+                                      //  {core::QueryConfig::kSpillPartitionBits, "1"}
                                       };
     auto queryCtx = std::make_shared<core::QueryCtx>(
         executor_.get(),
         myMapWithValues,
         configs,
-        memory::MemoryAllocator::getInstance(),
+        cache::AsyncDataCache::getInstance(),
+        /*
+        Note from origin PR: Removing the relationship of AsyncDataCache inheritance from MemoryAllocator.
+        Please check the following commit:
+        https://github.com/facebookincubator/velox/commit/ad9ffa1fca3fbb3a550ab426a00ebb745b339b34
+        */
+        // memory::MemoryAllocator::getInstance(),
         std::move(pool));
     return queryCtx;
   }
@@ -967,7 +979,14 @@ void MLFunctionsTest::test_spill(){
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
                                       {core::QueryConfig::kJoinSpillMemoryThreshold, std::to_string(27 * MB)},
                                        {core::QueryConfig::kSpillableReservationGrowthPct, "0"},
-                                       {core::QueryConfig::kSpillPartitionBits, "1"}
+                                       /* 
+                                      kSpillPartitionBits is removed after PR 5890, 
+                                      kJoinSpillPartitionBits and kAggregationSpillPartitionBits are introduced 
+                                      Please consider how to replace it by check the following link: 
+                                      https://github.com/facebookincubator/velox/pull/5890 
+                                      */
+                                      //  {core::QueryConfig::kSpillPartitionBits, "1"}
+                                       {core::QueryConfig::kAggregationSpillPartitionBits, "1"}
                                       });
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
@@ -1288,11 +1307,14 @@ void MLFunctionsTest::test_mnist_oom_weights() {
 		              .planFragment();
 
   // optimizer will init the weights
-  
-  auto mat_mul0 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul0", {ARRAY(REAL())}, {}));
-  auto mat_add1 = std::dynamic_pointer_cast<MatrixAddition>(exec::getVectorFunction("mat_add1", {ARRAY(REAL())}, {}));
-  auto mat_mul3 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul3", {ARRAY(REAL())}, {}));
-  auto mat_add4 = std::dynamic_pointer_cast<MatrixAddition>(exec::getVectorFunction("mat_add4", {ARRAY(REAL())}, {}));
+  // config is introduced by the following commit
+  // https://github.com/facebookincubator/velox/commit/9f88bfd54f8389d4ab523343d27d6d40177e1781
+  core::QueryConfig config({});
+
+  auto mat_mul0 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul0", {ARRAY(REAL())}, {}, config));
+  auto mat_add1 = std::dynamic_pointer_cast<MatrixAddition>(exec::getVectorFunction("mat_add1", {ARRAY(REAL())}, {}, config));
+  auto mat_mul3 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul3", {ARRAY(REAL())}, {}, config));
+  auto mat_add4 = std::dynamic_pointer_cast<MatrixAddition>(exec::getVectorFunction("mat_add4", {ARRAY(REAL())}, {}, config));
 
   std::ifstream weights_file(mat_mul0->getWeightsFile()); 
   std::ifstream bias_file(mat_add1->getWeightsFile()); 
