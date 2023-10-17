@@ -14,7 +14,9 @@
 #include "velox/ml_functions/CosineSimilarity.h"
 #include "velox/ml_functions/Dropout.h"
 #include "velox/ml_functions/Embedding.h"
+#include "velox/ml_functions/Encoder.h"
 #include "velox/ml_functions/SequencePooling.h"
+#include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
 
@@ -79,6 +81,399 @@ class TowTowerModelTest : public HiveConnectorTestBase {
 };
 
 void TowTowerModelTest::testDataProcessing() {
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+  // embeddingDims is shared among all embedding layer
+  int embeddingDims = 32;
+  int numSamples = 500000;
+
+  // User-Tower
+
+  // user_id
+  int userIdNumEmbedding = 6040;
+  std::vector<std::vector<float>> userIdEmbeddingWeights =
+      randomGenerator.genFloat2dVector(userIdNumEmbedding, embeddingDims);
+  auto userIdEmbeddingWeightsVector =
+      maker.arrayVector<float>(userIdEmbeddingWeights, REAL());
+
+  // gender
+  int genderNumEmbedding = 2;
+  std::vector<std::vector<float>> genderEmbeddingWeights =
+      randomGenerator.genFloat2dVector(genderNumEmbedding, embeddingDims);
+  auto genderEmbeddingWeightsVector =
+      maker.arrayVector<float>(genderEmbeddingWeights, REAL());
+
+  // age
+  int ageNumEmbedding = 7;
+  std::vector<std::vector<float>> ageEmbeddingWeights =
+      randomGenerator.genFloat2dVector(ageNumEmbedding, embeddingDims);
+  auto ageEmbeddingWeightsVector =
+      maker.arrayVector<float>(ageEmbeddingWeights, REAL());
+
+  // occupation
+  int occupationNumEmbedding = 21;
+  std::vector<std::vector<float>> occupationEmbeddingWeights =
+      randomGenerator.genFloat2dVector(occupationNumEmbedding, embeddingDims);
+  auto occupationEmbeddingWeightsVector =
+      maker.arrayVector<float>(occupationEmbeddingWeights, REAL());
+
+  exec::registerVectorFunction(
+      "user_id_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          userIdEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          userIdNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "gender_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          genderEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          genderNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "age_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          ageEmbeddingWeightsVector->elements()->values()->asMutable<float>(),
+          ageNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "occupation_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          occupationEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          occupationNumEmbedding,
+          embeddingDims));
+  exec::registerVectorFunction(
+      "concat1",
+      Concat::signatures(),
+      std::make_unique<Concat>(embeddingDims, embeddingDims));
+
+  exec::registerVectorFunction(
+      "concat2",
+      Concat::signatures(),
+      std::make_unique<Concat>(2 * embeddingDims, embeddingDims));
+
+  exec::registerVectorFunction(
+      "concat3",
+      Concat::signatures(),
+      std::make_unique<Concat>(3 * embeddingDims, embeddingDims));
+  exec::registerVectorFunction(
+      "concat4",
+      Concat::signatures(),
+      std::make_unique<Concat>(4 * embeddingDims, 1));
+
+  std::vector<std::vector<int>> genderIndicesVector =
+      randomGenerator.genLookUpIndices(numSamples, genderNumEmbedding - 1);
+  auto genderIndicesArray =
+      maker.arrayVector<int>(genderIndicesVector, INTEGER());
+  auto genderIndicesArrayRowVector =
+      maker.rowVector({"gender"}, {genderIndicesArray});
+
+  randomGenerator.setFloatRange(-1, 1);
+  std::vector<std::vector<float>> userNNweight1 =
+      randomGenerator.genFloat2dVector(129, 300);
+  auto userNNweight1Vector = maker.arrayVector<float>(userNNweight1, REAL());
+
+  std::vector<std::vector<float>> userNNBias1 =
+      randomGenerator.genFloat2dVector(300, 1);
+  auto userNNBias1Vector = maker.arrayVector<float>(userNNBias1, REAL());
+
+  std::vector<std::vector<float>> userNNweight2 =
+      randomGenerator.genFloat2dVector(300, 300);
+  auto userNNweight2Vector = maker.arrayVector<float>(userNNweight2, REAL());
+
+  std::vector<std::vector<float>> userNNBias2 =
+      randomGenerator.genFloat2dVector(300, 1);
+  auto userNNBias2Vector = maker.arrayVector<float>(userNNBias2, REAL());
+
+  std::vector<std::vector<float>> userNNweight3 =
+      randomGenerator.genFloat2dVector(300, 128);
+  auto userNNweight3Vector = maker.arrayVector<float>(userNNweight3, REAL());
+
+  std::vector<std::vector<float>> userNNBias3 =
+      randomGenerator.genFloat2dVector(128, 1);
+  auto userNNBias3Vector = maker.arrayVector<float>(userNNBias3, REAL());
+
+  exec::registerVectorFunction(
+      "mat_mul1",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          userNNweight1Vector->elements()->values()->asMutable<float>(),
+          129,
+          300));
+
+  exec::registerVectorFunction(
+      "mat_add1",
+      MatrixAddition::signatures(),
+      std::make_unique<MatrixAddition>(
+          userNNBias1Vector->elements()->values()->asMutable<float>(), 300));
+
+  exec::registerVectorFunction(
+      "mat_mul2",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          userNNweight2Vector->elements()->values()->asMutable<float>(),
+          300,
+          300));
+
+  exec::registerVectorFunction(
+      "mat_add2",
+      MatrixAddition::signatures(),
+      std::make_unique<MatrixAddition>(
+          userNNBias2Vector->elements()->values()->asMutable<float>(), 300));
+
+  exec::registerVectorFunction(
+      "mat_mul3",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          userNNweight3Vector->elements()->values()->asMutable<float>(),
+          300,
+          128));
+
+  exec::registerVectorFunction(
+      "mat_add3",
+      MatrixAddition::signatures(),
+      std::make_unique<MatrixAddition>(
+          userNNBias3Vector->elements()->values()->asMutable<float>(), 128));
+
+  exec::registerVectorFunction(
+      "relu", Relu::signatures(), std::make_unique<Relu>());
+
+  std::vector<std::vector<float>> batchNorm1Weight =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm1WeightVector =
+      maker.arrayVector<float>(batchNorm1Weight, REAL());
+  std::vector<std::vector<float>> batchNorm1Bias =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm1BiasVector = maker.arrayVector<float>(batchNorm1Bias, REAL());
+
+  exec::registerVectorFunction(
+      "batch_norm1",
+      BatchNorm1D::signatures(),
+      std::make_unique<BatchNorm1D>(
+          batchNorm1WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm1BiasVector->elements()->values()->asMutable<float>(),
+          300));
+
+  std::vector<std::vector<float>> batchNorm2Weight =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2WeightVector =
+      maker.arrayVector<float>(batchNorm2Weight, REAL());
+  std::vector<std::vector<float>> batchNorm2Bias =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2BiasVector = maker.arrayVector<float>(batchNorm2Bias, REAL());
+
+  exec::registerVectorFunction(
+      "batch_norm2",
+      BatchNorm1D::signatures(),
+      std::make_unique<BatchNorm1D>(
+          batchNorm2WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm2BiasVector->elements()->values()->asMutable<float>(),
+          300));
+
+  std::vector<std::vector<float>> batchNorm3Weight =
+      randomGenerator.genFloat2dVector(1, 128);
+  auto batchNorm3WeightVector =
+      maker.arrayVector<float>(batchNorm3Weight, REAL());
+  std::vector<std::vector<float>> batchNorm3Bias =
+      randomGenerator.genFloat2dVector(1, 128);
+  auto batchNorm3BiasVector = maker.arrayVector<float>(batchNorm3Bias, REAL());
+
+  exec::registerVectorFunction(
+      "batch_norm3",
+      BatchNorm1D::signatures(),
+      std::make_unique<BatchNorm1D>(
+          batchNorm3WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm3BiasVector->elements()->values()->asMutable<float>(),
+          128));
+
+  int movieIdNumEmbedding = 3668;
+  std::vector<std::vector<float>> movieIdEmbeddingWeights =
+      randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
+  auto movieIdEmbeddingWeightsVector =
+      maker.arrayVector<float>(movieIdEmbeddingWeights, REAL());
+
+  // genres
+  int genresNumEmbedding = 1000;
+  std::vector<std::vector<float>> genresEmbeddingWeights =
+      randomGenerator.genFloat2dVector(genresNumEmbedding, embeddingDims);
+  auto genresEmbeddingWeightsVector =
+      maker.arrayVector<float>(genresEmbeddingWeights, REAL());
+
+  exec::registerVectorFunction(
+      "movie_id_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          movieIdEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          movieIdNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "genres_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          genderEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          genderNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "sequence_pooling",
+      SequencePooling::signatures(),
+      std::make_unique<SequencePooling>(std::string("MEAN"), embeddingDims));
+
+  std::vector<std::vector<int>> genresIndicesVector =
+      randomGenerator.genLookUpIndices(numSamples, genresNumEmbedding - 1, 6);
+  auto genresIndicesArray =
+      maker.arrayVector<int>(genresIndicesVector, INTEGER());
+  auto genresIndicesArrayRowVector =
+      maker.rowVector({"genres"}, {genresIndicesArray});
+
+  exec::registerVectorFunction(
+      "concat2_1",
+      Concat::signatures(),
+      std::make_unique<Concat>(embeddingDims, embeddingDims));
+
+  exec::registerVectorFunction(
+      "concat2_1",
+      Concat::signatures(),
+      std::make_unique<Concat>(2 * embeddingDims, 1));
+
+  randomGenerator.setFloatRange(-1, 1);
+  std::vector<std::vector<float>> itemNNweight1 =
+      randomGenerator.genFloat2dVector(65, 300);
+  auto itemNNweight1Vector = maker.arrayVector<float>(itemNNweight1, REAL());
+
+  std::vector<std::vector<float>> itemNNBias1 =
+      randomGenerator.genFloat2dVector(300, 1);
+  auto itemNNBias1Vector = maker.arrayVector<float>(itemNNBias1, REAL());
+
+  std::vector<std::vector<float>> itemNNweight2 =
+      randomGenerator.genFloat2dVector(300, 300);
+  auto itemNNweight2Vector = maker.arrayVector<float>(itemNNweight2, REAL());
+
+  std::vector<std::vector<float>> itemNNBias2 =
+      randomGenerator.genFloat2dVector(300, 1);
+  auto itemNNBias2Vector = maker.arrayVector<float>(itemNNBias2, REAL());
+
+  std::vector<std::vector<float>> itemNNweight3 =
+      randomGenerator.genFloat2dVector(300, 128);
+  auto itemNNweight3Vector = maker.arrayVector<float>(itemNNweight3, REAL());
+
+  std::vector<std::vector<float>> itemNNBias3 =
+      randomGenerator.genFloat2dVector(128, 1);
+  auto itemNNBias3Vector = maker.arrayVector<float>(itemNNBias3, REAL());
+
+  exec::registerVectorFunction(
+      "mat_mul2_1",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          itemNNweight1Vector->elements()->values()->asMutable<float>(),
+          65,
+          300));
+
+  exec::registerVectorFunction(
+      "mat_add2_1",
+      MatrixAddition::signatures(),
+      std::make_unique<MatrixAddition>(
+          itemNNBias1Vector->elements()->values()->asMutable<float>(), 300));
+
+  exec::registerVectorFunction(
+      "mat_mul2_2",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          itemNNweight2Vector->elements()->values()->asMutable<float>(),
+          300,
+          300));
+
+  exec::registerVectorFunction(
+      "mat_add2_2",
+      MatrixAddition::signatures(),
+      std::make_unique<MatrixAddition>(
+          itemNNBias2Vector->elements()->values()->asMutable<float>(), 300));
+
+  exec::registerVectorFunction(
+      "mat_mul2_3",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          itemNNweight3Vector->elements()->values()->asMutable<float>(),
+          300,
+          128));
+
+  exec::registerVectorFunction(
+      "mat_add2_3",
+      MatrixAddition::signatures(),
+      std::make_unique<MatrixAddition>(
+          itemNNBias3Vector->elements()->values()->asMutable<float>(), 128));
+
+  std::vector<std::vector<float>> batchNorm2_1Weight =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2_1WeightVector =
+      maker.arrayVector<float>(batchNorm2_1Weight, REAL());
+  std::vector<std::vector<float>> batchNorm2_1Bias =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2_1BiasVector =
+      maker.arrayVector<float>(batchNorm2_1Bias, REAL());
+
+  exec::registerVectorFunction(
+      "batch_norm2_1",
+      BatchNorm1D::signatures(),
+      std::make_unique<BatchNorm1D>(
+          batchNorm2_1WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm2_1BiasVector->elements()->values()->asMutable<float>(),
+          300));
+
+  std::vector<std::vector<float>> batchNorm2_2Weight =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2_2WeightVector =
+      maker.arrayVector<float>(batchNorm2_2Weight, REAL());
+  std::vector<std::vector<float>> batchNorm2_2Bias =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2_2BiasVector =
+      maker.arrayVector<float>(batchNorm2_2Bias, REAL());
+
+  exec::registerVectorFunction(
+      "batch_norm2_2",
+      BatchNorm1D::signatures(),
+      std::make_unique<BatchNorm1D>(
+          batchNorm2_2WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm2_2BiasVector->elements()->values()->asMutable<float>(),
+          300));
+
+  std::vector<std::vector<float>> batchNorm2_3Weight =
+      randomGenerator.genFloat2dVector(1, 128);
+  auto batchNorm2_3WeightVector =
+      maker.arrayVector<float>(batchNorm2_3Weight, REAL());
+  std::vector<std::vector<float>> batchNorm2_3Bias =
+      randomGenerator.genFloat2dVector(1, 128);
+  auto batchNorm2_3BiasVector =
+      maker.arrayVector<float>(batchNorm2_3Bias, REAL());
+
+  exec::registerVectorFunction(
+      "batch_norm2_3",
+      BatchNorm1D::signatures(),
+      std::make_unique<BatchNorm1D>(
+          batchNorm2_3WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm2_3BiasVector->elements()->values()->asMutable<float>(),
+          128));
+
+  exec::registerVectorFunction(
+      "cosine_similarity",
+      CosineSimilarity::signatures(),
+      std::make_unique<CosineSimilarity>(128));
 
   auto hiveConnector =
       connector::getConnectorFactory(
@@ -86,13 +481,112 @@ void TowTowerModelTest::testDataProcessing() {
           ->newConnector(kHiveConnectorId, nullptr);
   connector::registerConnector(hiveConnector);
 
-  CursorParameters params;
+  auto inputRowType =
+      ROW({"user_id",
+           "movie_id",
+           "rating",
+           "timestamp",
+           "gender",
+           "age",
+           "occupation",
+           "zipcode",
+           "title",
+           "genres"},
+          {INTEGER(),
+           INTEGER(),
+           INTEGER(),
+           INTEGER(),
+           VARCHAR(),
+           INTEGER(),
+           INTEGER(),
+           VARCHAR(),
+           VARCHAR(),
+           VARCHAR()});
+  exec::registerVectorFunction(
+      "convert_int_array",
+      ConvertToIntArray::signatures(),
+      std::make_unique<ConvertToIntArray>());
 
-  // ROW({{"col", INTEGER()}})
+  exec::registerVectorFunction(
+      "convert_float_array",
+      ConvertToFloatArray::signatures(),
+      std::make_unique<ConvertToFloatArray>());
+
+  exec::registerVectorFunction(
+      "convert_double_to_float_array",
+      ConvertDoubleToFloatArray::signatures(),
+      std::make_unique<ConvertDoubleToFloatArray>());
+
+  exec::registerVectorFunction(
+      "change_rating",
+      ChangeRating::signatures(),
+      std::make_unique<ChangeRating>());
+
+  // init user encoder
+  std::unordered_map<int, int> userIdMapping;
+  for (int i = 1; i < 6041; i++) {
+    userIdMapping[i] = i - 1;
+  }
+
+  exec::registerVectorFunction(
+      "user_id_encoder",
+      IntEncoder::signatures(),
+      std::make_unique<IntEncoder>(userIdMapping));
+
+  // init movie encoder
+  std::unordered_map<int, int> movieIdMapping;
+  for (int i = 1; i < 3953; i++) {
+    movieIdMapping[i] = i - 1;
+  }
+
+  exec::registerVectorFunction(
+      "movie_id_encoder",
+      IntEncoder::signatures(),
+      std::make_unique<IntEncoder>(movieIdMapping));
+
+  // init age encoder
+  std::unordered_map<int, int> ageMapping;
+  ageMapping[1] = 0;
+  ageMapping[18] = 1;
+  ageMapping[25] = 2;
+  ageMapping[35] = 3;
+  ageMapping[45] = 4;
+  ageMapping[50] = 5;
+  ageMapping[56] = 6;
+
+  exec::registerVectorFunction(
+      "age_encoder",
+      IntEncoder::signatures(),
+      std::make_unique<IntEncoder>(ageMapping));
+
+  // init occupation  encoder
+  std::unordered_map<int, int> occupationMapping;
+  for (int i = 0; i < 21; i++) {
+    occupationMapping[i] = i - 1;
+  }
+
+  exec::registerVectorFunction(
+      "occupation_encoder",
+      IntEncoder::signatures(),
+      std::make_unique<IntEncoder>(occupationMapping));
+
+  CursorParameters params;
 
   auto plan =
       PlanBuilder(pool_.get())
-          .tableScan(ROW({"col", "col2"}, {BIGINT(), VARCHAR()}), {}, "")
+          .tableScan(inputRowType, {}, "")
+          .project(
+              {"user_id_encoder(convert_int_array(user_id)) as user_id",
+               "movie_id_encoder(convert_int_array(movie_id)) as movie_id",
+               "change_rating(rating) as rating",
+               "convert_int_array(timestamp) as timestamp",
+               "gender",
+               "age_encoder(convert_int_array(age)) as age",
+               "occupation_encoder(convert_int_array(occupation)) as occupation",
+               "zipcode",
+               "title",
+               "genres"})
+          .limit(0, numSamples, false)
           .planNode();
 
   std::shared_ptr<folly::Executor> executor =
@@ -115,7 +609,7 @@ void TowTowerModelTest::testDataProcessing() {
   auto addSplits = [&](exec::Task* task) {
     if (!noMoreSplits) {
       auto const splits = HiveConnectorTestBase::makeHiveConnectorSplits(
-          {"/root/velox_latest/data/test1.parquet"},
+          {"/root/velox_latest/data/movielens.parquet"},
           numSplitsPerFile,
           dwio::common::FileFormat::PARQUET);
       for (const auto& split : splits) {
@@ -125,12 +619,254 @@ void TowTowerModelTest::testDataProcessing() {
     }
     noMoreSplits = true;
   };
+
+  std::chrono::steady_clock::time_point begin =
+      std::chrono::steady_clock::now();
+
   auto result = readCursor(params, addSplits);
   auto data = result.second;
-  std::cout << "[INFO] data size: " << data.size() << std::endl;
-  auto col1 = data[0]->as<RowVector>();
-  std::cout << "[INFO] READ data: \n"
-            << col1->toString(0, col1->size()) << std::endl;
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+
+  auto userMeanRatingPlan =
+      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+          .values(data)
+          .singleAggregation({"user_id"}, {"avg(rating) as user_mean_rating"})
+          .project({"user_id as r_user_id", "convert_double_to_float_array(user_mean_rating) as user_mean_rating"})
+          .planNode();
+
+  auto movieMeanRatingPlan =
+      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+          .values(data)
+          .singleAggregation({"movie_id"}, {"avg(rating) as movie_mean_rating"})
+          .project({"movie_id as r_movie_id", "convert_double_to_float_array(movie_mean_rating) as movie_mean_rating"})
+          .planNode();
+
+  auto ratingJoinPlan =
+      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+          .values(data)
+          .hashJoin(
+              {"user_id"},
+              {"r_user_id"},
+              userMeanRatingPlan,
+              "",
+              {"user_id",
+               "movie_id",
+               "gender",
+               "age",
+               "occupation",
+               "title",
+               "genres",
+               "user_mean_rating"})
+          .hashJoin(
+              {"movie_id"},
+              {"r_movie_id"},
+              movieMeanRatingPlan,
+              "",
+              {"user_id",
+               "movie_id",
+               "gender",
+               "age",
+               "occupation",
+               "title",
+               "genres",
+               "user_mean_rating",
+               "movie_mean_rating"})
+          .planNode();
+
+  auto preprocessedData =
+      exec::test::AssertQueryBuilder(ratingJoinPlan).copyResults(pool_.get());
+  
+  std::chrono::steady_clock::time_point endDataPreProcessed = std::chrono::steady_clock::now();
+
+  auto userPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({preprocessedData})
+                      .project({"user_id_embedding(user_id)"})
+                      .planNode();
+
+  auto userEmbedding =
+      exec::test::AssertQueryBuilder(userPlan).copyResults(pool_.get());
+
+  auto genderPlan = exec::test::PlanBuilder(pool_.get())
+                        .values({genderIndicesArrayRowVector})
+                        .project({"gender_embedding(gender)"})
+                        .planNode();
+
+  auto genderEmbedding =
+      exec::test::AssertQueryBuilder(genderPlan).copyResults(pool_.get());
+
+  auto agePlan = exec::test::PlanBuilder(pool_.get())
+                     .values({preprocessedData})
+                     .project({"age_embedding(age)"})
+                     .planNode();
+
+  auto ageEmbedding =
+      exec::test::AssertQueryBuilder(agePlan).copyResults(pool_.get());
+
+  auto occupationPlan = exec::test::PlanBuilder(pool_.get())
+                            .values({preprocessedData})
+                            .project({"occupation_embedding(occupation)"})
+                            .planNode();
+
+  auto occupationEmbedding =
+      exec::test::AssertQueryBuilder(occupationPlan).copyResults(pool_.get());
+
+  auto in1 = maker.rowVector(
+      {"in1", "in2"}, {userEmbedding->childAt(0), genderEmbedding->childAt(0)});
+
+  auto concatPlan1 = exec::test::PlanBuilder(pool_.get())
+                         .values({in1})
+                         .project({"concat1(in1, in2)"})
+                         .planNode();
+
+  auto out1 =
+      exec::test::AssertQueryBuilder(concatPlan1).copyResults(pool_.get());
+
+  auto in2 = maker.rowVector(
+      {"in1", "in2"}, {out1->childAt(0), ageEmbedding->childAt(0)});
+
+  auto concatPlan2 = exec::test::PlanBuilder(pool_.get())
+                         .values({in2})
+                         .project({"concat2(in1, in2)"})
+                         .planNode();
+  auto out2 =
+      exec::test::AssertQueryBuilder(concatPlan2).copyResults(pool_.get());
+
+  auto in3 = maker.rowVector(
+      {"in1", "in2"}, {out2->childAt(0), occupationEmbedding->childAt(0)});
+
+  auto concatPlan3 = exec::test::PlanBuilder(pool_.get())
+                         .values({in3})
+                         .project({"concat3(in1, in2)"})
+                         .planNode();
+
+  auto out3 =
+      exec::test::AssertQueryBuilder(concatPlan3).copyResults(pool_.get());
+
+  auto in4 =
+      maker.rowVector({"in1", "in2"}, {out3->childAt(0), preprocessedData->childAt(7)});
+
+  auto concatPlan4 = exec::test::PlanBuilder(pool_.get())
+                         .values({in4})
+                         .project({"concat4(in1, in2) as user_nn_in"})
+                         .planNode();
+
+  auto out4 =
+      exec::test::AssertQueryBuilder(concatPlan4).copyResults(pool_.get());
+
+  //   std::cout << "[INFO] user DNN input: \n"
+  //             << out4->toString(0, out4->size()) << std::endl;
+
+  auto userNNPlan =
+      exec::test::PlanBuilder(pool_.get())
+          .values({out4})
+          .project(
+              {"relu(batch_norm3(mat_add3(mat_mul3(relu(batch_norm2(mat_add2(mat_mul2(relu(batch_norm1(mat_add1(mat_mul1(user_nn_in)))))))))))) as user_nn_out"})
+          .planNode();
+  auto userNNOut =
+      exec::test::AssertQueryBuilder(userNNPlan).copyResults(pool_.get());
+  //   std::cout << "[INFO] user DNN output: \n"
+  //             << userNNOut->toString(0, userNNOut->size()) << std::endl;
+
+  // Item-Tower
+
+  auto itemPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({preprocessedData})
+                      .project({"movie_id_embedding(movie_id)"})
+                      .planNode();
+
+  auto itemEmbedding =
+      exec::test::AssertQueryBuilder(itemPlan).copyResults(pool_.get());
+
+  //   std::cout << "[INFO] genresIndicesArrayRowVector 1: \n"
+  //             << genresIndicesArrayRowVector->toString(
+  //                    0, genresIndicesArrayRowVector->size())
+  //             << std::endl;
+
+  auto genresPlan = exec::test::PlanBuilder(pool_.get())
+                        .values({genresIndicesArrayRowVector})
+                        .project({"sequence_pooling(genres_embedding(genres))"})
+                        .planNode();
+
+  auto genresEmbedding =
+      exec::test::AssertQueryBuilder(genresPlan).copyResults(pool_.get());
+
+  auto in2_1 = maker.rowVector(
+      {"in1", "in2"}, {itemEmbedding->childAt(0), genresEmbedding->childAt(0)});
+
+  auto concatPlan2_1 = exec::test::PlanBuilder(pool_.get())
+                           .values({in2_1})
+                           .project({"concat2_1(in1, in2)"})
+                           .planNode();
+
+  auto out2_1 =
+      exec::test::AssertQueryBuilder(concatPlan2_1).copyResults(pool_.get());
+
+  auto in2_2 = maker.rowVector(
+      {"in1", "in2"}, {out2_1->childAt(0), preprocessedData->childAt(8)});
+
+  auto concatPlan2_2 = exec::test::PlanBuilder(pool_.get())
+                           .values({in2_2})
+                           .project({"concat2_1(in1, in2) as item_nn_in"})
+                           .planNode();
+  auto out2_2 =
+      exec::test::AssertQueryBuilder(concatPlan2_2).copyResults(pool_.get());
+
+    // std::cout << "[INFO] item dnn input: \n"
+    //           << out2_2->toString(0, out2_2->size()) << std::endl;
+
+  auto itemNNPlan =
+      exec::test::PlanBuilder(pool_.get())
+          .values({out2_2})
+          .project(
+              {"relu(batch_norm2_3(mat_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_add2_1(mat_mul2_1(item_nn_in)))))))))))) as item_nn_out"})
+          .planNode();
+  auto itemNNOut =
+      exec::test::AssertQueryBuilder(itemNNPlan).copyResults(pool_.get());
+    // std::cout << "[INFO] item NN output: \n"
+    //           << itemNNOut->toString(0, itemNNOut->size()) << std::endl;
+
+  auto finalInputRowVector = maker.rowVector(
+      {"in1", "in2"}, {userNNOut->childAt(0), itemNNOut->childAt(0)});
+  auto finalStagePlan = exec::test::PlanBuilder(pool_.get())
+                            .values({finalInputRowVector})
+                            .project({"cosine_similarity(in1, in2)"})
+                            .planNode();
+  auto scores =
+      exec::test::AssertQueryBuilder(finalStagePlan).copyResults(pool_.get());
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
+  std::cout << "Time for Preprocessing (sec) = "
+            << (std::chrono::duration_cast<std::chrono::microseconds>(
+                    endDataPreProcessed - begin)
+                    .count()) /
+          1000000.0
+            << std::endl;
+
+  std::cout << "Model Inference (sec) = "
+            << (std::chrono::duration_cast<std::chrono::microseconds>(
+                    end - endDataPreProcessed)
+                    .count()) /
+          1000000.0
+            << std::endl;
+
+  std::cout << "End-End Time (sec) = "
+            << (std::chrono::duration_cast<std::chrono::microseconds>(
+                    end - begin)
+                    .count()) /
+          1000000.0
+            << std::endl;
+//   std::cout << "[INFO] final score: \n"
+//             << scores->toString(0, scores->size()) << std::endl;
+
+  //   std::cout << "[INFO] preprocessedData: \n"
+  //             << preprocessedData->toString(0, preprocessedData->size()) <<
+  //             std::endl;
+
+  //   auto results2 = exec::test::AssertQueryBuilder(movieMeanRatingPlan)
+  //                       .copyResults(pool_.get());
+  //   std::cout << "[INFO] Result: \n"
+  //             << results2->toString(0, results2->size()) << std::endl;
 }
 
 // Test Embedding Layer
@@ -207,7 +943,7 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           occupationNumEmbedding,
           embeddingDims));
 
-  int numSamples = 500;
+  int numSamples = 50000;
 
   std::vector<std::vector<int>> userIndicesVector =
       randomGenerator.genLookUpIndices(numSamples, userIdNumEmbedding - 1);
@@ -674,15 +1410,15 @@ void TowTowerModelTest::testTwoTowerModelInference() {
   auto itemEmbedding =
       exec::test::AssertQueryBuilder(itemPlan).copyResults(pool_.get());
 
-//   std::cout << "[INFO] genresIndicesArrayRowVector 1: \n"
-//             << genresIndicesArrayRowVector->toString(
-//                    0, genresIndicesArrayRowVector->size())
-//             << std::endl;
+  //   std::cout << "[INFO] genresIndicesArrayRowVector 1: \n"
+  //             << genresIndicesArrayRowVector->toString(
+  //                    0, genresIndicesArrayRowVector->size())
+  //             << std::endl;
 
-    auto genresPlan = exec::test::PlanBuilder(pool_.get())
-                          .values({genresIndicesArrayRowVector})
-                          .project({"sequence_pooling(genres_embedding(genres))"})
-                          .planNode();
+  auto genresPlan = exec::test::PlanBuilder(pool_.get())
+                        .values({genresIndicesArrayRowVector})
+                        .project({"sequence_pooling(genres_embedding(genres))"})
+                        .planNode();
 
   auto genresEmbedding =
       exec::test::AssertQueryBuilder(genresPlan).copyResults(pool_.get());
@@ -708,8 +1444,8 @@ void TowTowerModelTest::testTwoTowerModelInference() {
   auto out2_2 =
       exec::test::AssertQueryBuilder(concatPlan2_2).copyResults(pool_.get());
 
-//   std::cout << "[INFO] item dnn input: \n"
-//             << out2_2->toString(0, out2_2->size()) << std::endl;
+  //   std::cout << "[INFO] item dnn input: \n"
+  //             << out2_2->toString(0, out2_2->size()) << std::endl;
 
   auto itemNNPlan =
       exec::test::PlanBuilder(pool_.get())
@@ -744,6 +1480,6 @@ void TowTowerModelTest::testTwoTowerModelInference() {
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   TowTowerModelTest demo;
-//   demo.testTwoTowerModelInference();
+  //   demo.testTwoTowerModelInference();
   demo.testDataProcessing();
 }
