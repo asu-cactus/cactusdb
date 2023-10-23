@@ -59,7 +59,7 @@ class TowTowerModelTest : public HiveConnectorTestBase {
   void testTwoTowerModelInference();
   void testStringEncoder();
   void testDataProcessing();
-  void testEndtoEndPipeline();
+  void testEndtoEndPipeline(int numSamples);
 
   void TestBody() override {}
 
@@ -318,9 +318,9 @@ void TowTowerModelTest::registerFunction() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add1",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add1",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias1Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -332,9 +332,9 @@ void TowTowerModelTest::registerFunction() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias2Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -346,9 +346,9 @@ void TowTowerModelTest::registerFunction() {
           128));
 
   exec::registerVectorFunction(
-      "mat_add3",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add3",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias3Vector->elements()->values()->asMutable<float>(), 128));
 
   exec::registerVectorFunction(
@@ -484,9 +484,9 @@ void TowTowerModelTest::registerFunction() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2_1",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_1",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias1Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -498,9 +498,9 @@ void TowTowerModelTest::registerFunction() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2_2",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias2Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -512,9 +512,9 @@ void TowTowerModelTest::registerFunction() {
           128));
 
   exec::registerVectorFunction(
-      "mat_add2_3",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_3",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias3Vector->elements()->values()->asMutable<float>(), 128));
 
   std::vector<std::vector<float>> batchNorm2_1Weight =
@@ -833,9 +833,9 @@ void TowTowerModelTest::testDataProcessing() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add1",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add1",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias1Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -847,9 +847,9 @@ void TowTowerModelTest::testDataProcessing() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias2Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -861,9 +861,9 @@ void TowTowerModelTest::testDataProcessing() {
           128));
 
   exec::registerVectorFunction(
-      "mat_add3",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add3",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias3Vector->elements()->values()->asMutable<float>(), 128));
 
   exec::registerVectorFunction(
@@ -1006,9 +1006,9 @@ void TowTowerModelTest::testDataProcessing() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2_1",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_1",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias1Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -1020,9 +1020,9 @@ void TowTowerModelTest::testDataProcessing() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2_2",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias2Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -1034,9 +1034,9 @@ void TowTowerModelTest::testDataProcessing() {
           128));
 
   exec::registerVectorFunction(
-      "mat_add2_3",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_3",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias3Vector->elements()->values()->asMutable<float>(), 128));
 
   std::vector<std::vector<float>> batchNorm2_1Weight =
@@ -1386,7 +1386,7 @@ void TowTowerModelTest::testDataProcessing() {
       exec::test::PlanBuilder(pool_.get())
           .values({out4})
           .project(
-              {"relu(batch_norm3(mat_add3(mat_mul3(relu(batch_norm2(mat_add2(mat_mul2(relu(batch_norm1(mat_add1(mat_mul1(user_nn_in)))))))))))) as user_nn_out"})
+              {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_nn_in)))))))))))) as user_nn_out"})
           .planNode();
   auto userNNOut =
       exec::test::AssertQueryBuilder(userNNPlan).copyResults(pool_.get());
@@ -1444,7 +1444,7 @@ void TowTowerModelTest::testDataProcessing() {
       exec::test::PlanBuilder(pool_.get())
           .values({out2_2})
           .project(
-              {"relu(batch_norm2_3(mat_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_add2_1(mat_mul2_1(item_nn_in)))))))))))) as item_nn_out"})
+              {"relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(item_nn_in)))))))))))) as item_nn_out"})
           .planNode();
   auto itemNNOut =
       exec::test::AssertQueryBuilder(itemNNPlan).copyResults(pool_.get());
@@ -1654,9 +1654,9 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add1",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add1",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias1Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -1668,9 +1668,9 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias2Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -1682,9 +1682,9 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           128));
 
   exec::registerVectorFunction(
-      "mat_add3",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add3",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias3Vector->elements()->values()->asMutable<float>(), 128));
 
   exec::registerVectorFunction(
@@ -1839,9 +1839,9 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2_1",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_1",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias1Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -1853,9 +1853,9 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2_2",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias2Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -1867,9 +1867,9 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           128));
 
   exec::registerVectorFunction(
-      "mat_add2_3",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_3",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias3Vector->elements()->values()->asMutable<float>(), 128));
 
   std::vector<std::vector<float>> batchNorm2_1Weight =
@@ -2018,7 +2018,7 @@ void TowTowerModelTest::testTwoTowerModelInference() {
       exec::test::PlanBuilder(pool_.get())
           .values({out4})
           .project(
-              {"relu(batch_norm3(mat_add3(mat_mul3(relu(batch_norm2(mat_add2(mat_mul2(relu(batch_norm1(mat_add1(mat_mul1(user_nn_in)))))))))))) as user_nn_out"})
+              {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_nn_in)))))))))))) as user_nn_out"})
           .planNode();
   auto userNNOut =
       exec::test::AssertQueryBuilder(userNNPlan).copyResults(pool_.get());
@@ -2076,7 +2076,7 @@ void TowTowerModelTest::testTwoTowerModelInference() {
       exec::test::PlanBuilder(pool_.get())
           .values({out2_2})
           .project(
-              {"relu(batch_norm2_3(mat_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_add2_1(mat_mul2_1(item_nn_in)))))))))))) as item_nn_out"})
+              {"relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(item_nn_in)))))))))))) as item_nn_out"})
           .planNode();
   auto itemNNOut =
       exec::test::AssertQueryBuilder(itemNNPlan).copyResults(pool_.get());
@@ -2102,7 +2102,7 @@ void TowTowerModelTest::testTwoTowerModelInference() {
             << scores->toString(0, scores->size()) << std::endl;
 };
 
-void TowTowerModelTest::testEndtoEndPipeline() {
+void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
   int embeddingDims = 32;
 
@@ -2328,9 +2328,9 @@ void TowTowerModelTest::testEndtoEndPipeline() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add1",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add1",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias1Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -2342,9 +2342,9 @@ void TowTowerModelTest::testEndtoEndPipeline() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias2Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -2356,9 +2356,9 @@ void TowTowerModelTest::testEndtoEndPipeline() {
           128));
 
   exec::registerVectorFunction(
-      "mat_add3",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add3",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           userNNBias3Vector->elements()->values()->asMutable<float>(), 128));
 
   exec::registerVectorFunction(
@@ -2494,9 +2494,9 @@ void TowTowerModelTest::testEndtoEndPipeline() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2_1",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_1",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias1Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -2508,9 +2508,9 @@ void TowTowerModelTest::testEndtoEndPipeline() {
           300));
 
   exec::registerVectorFunction(
-      "mat_add2_2",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias2Vector->elements()->values()->asMutable<float>(), 300));
 
   exec::registerVectorFunction(
@@ -2522,9 +2522,9 @@ void TowTowerModelTest::testEndtoEndPipeline() {
           128));
 
   exec::registerVectorFunction(
-      "mat_add2_3",
-      MatrixAddition::signatures(),
-      std::make_unique<MatrixAddition>(
+      "mat_vector_add2_3",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
           itemNNBias3Vector->elements()->values()->asMutable<float>(), 128));
 
   std::vector<std::vector<float>> batchNorm2_1Weight =
@@ -2646,9 +2646,7 @@ void TowTowerModelTest::testEndtoEndPipeline() {
   auto result = readCursor(params, addSplits);
   auto originData = result.second;
 
-  int numSamples = 5;
-  //   int embeddingDims = 2;
-  //   registerFunction();
+  //   int numSamples = 5;
 
   std::vector<int> userIds = randomGenerator.gen1DInt(numSamples, 1, 6040);
   auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
@@ -2717,14 +2715,10 @@ void TowTowerModelTest::testEndtoEndPipeline() {
                "user_mean_rating"})
           .planNode();
 
-  auto userPreprocessedData =
-      exec::test::AssertQueryBuilder(userDataPreprocessPlan)
-          .copyResults(pool_.get());
-
-  //   std::cout << "[INFO] user processed data: \n"
-  //             << userPreprocessedData->toString(0,
-  //             userPreprocessedData->size())
-  //             << std::endl;
+  // std::cout << "[INFO] user processed data: \n"
+  //           << userPreprocessedData->toString(0,
+  //           userPreprocessedData->size())
+  //           << std::endl;
 
   // get average rating for the movie data
   auto movieMeanRatingPlan =
@@ -2760,19 +2754,24 @@ void TowTowerModelTest::testEndtoEndPipeline() {
                "movie_mean_rating"})
           .planNode();
 
+  std::chrono::steady_clock::time_point begin =
+      std::chrono::steady_clock::now();
+
+  auto userPreprocessedData =
+      exec::test::AssertQueryBuilder(userDataPreprocessPlan)
+          .copyResults(pool_.get());
+
   auto moviePreprocessedData =
       exec::test::AssertQueryBuilder(movieDataPreprocessPlan)
           .copyResults(pool_.get());
 
-  //   std::cout << "[INFO] preprocessed movie data: \n"
-  //             << moviePreprocessedData->toString(0,
-  //             moviePreprocessedData->size()) << std::endl;
+  std::chrono::steady_clock::time_point preprocessEnd =
+      std::chrono::steady_clock::now();
+  //   std::cout << "[INFO] movie processed data: \n"
+  //               << moviePreprocessedData->toString(0,
+  //               moviePreprocessedData->size()) << std::endl;
 
-  // user tower inference
-
-  //
-
-  auto userEmbeddingLookUpPlan =
+  auto userTowerInferencePlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
           .values({userPreprocessedData})
           .project(
@@ -2782,9 +2781,13 @@ void TowTowerModelTest::testEndtoEndPipeline() {
                "occupation_embedding(occupation) as occupation",
                "user_mean_rating"})
           .project(
-              {"concat4(concat3(concat2(concat1(user_id, gender), age), occupation), user_mean_rating) as user_tower_features"});
+              {"concat4(concat3(concat2(concat1(user_id, gender), age), occupation), user_mean_rating) as user_tower_features"})
+          .project(
+              //   {"mat_vector_add1(mat_mul1(user_tower_features))"})
+              {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out"})
+          .rowNumber({}, std::nullopt, true);
 
-  auto movieEmbeddingLookUpPlan =
+  auto movieTowerInferencePlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
           .values({moviePreprocessedData})
           .project(
@@ -2792,30 +2795,48 @@ void TowTowerModelTest::testEndtoEndPipeline() {
                "sequence_pooling(genres_embedding(genres)) as genres",
                "movie_mean_rating"})
           .project(
-              {"concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"});
-
-  auto userTowerInferencePlan = userEmbeddingLookUpPlan.project(
-      {"relu(batch_norm3(mat_add3(mat_mul3(relu(batch_norm2(mat_add2(mat_mul2(relu(batch_norm1(mat_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out"});
-
-  auto movieTowerInferencePlan =
-      movieEmbeddingLookUpPlan
+              {"concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
           .project(
-              {"relu(batch_norm2_3(mat_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
+              {"relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
           .rowNumber({}, std::nullopt, true)
           .planNode();
 
-  //   auto tempResult1 = exec::test::AssertQueryBuilder(userTowerInferencePlan)
-  //                         .copyResults(pool_.get());
-  //   auto tempResult2 = exec::test::AssertQueryBuilder(userTowerInferencePlan)
-  //                         .copyResults(pool_.get());
+  //   auto debugData =
+  //       exec::test::AssertQueryBuilder(userTowerInferencePlan)
+  //           .copyResults(pool_.get());
 
-  //   std::cout << "[INFO] temp result: \n"
-  //             << tempResult1->toString(0, tempResult1->size()) << std::endl;
-  //   std::cout << "[INFO] temp result: \n"
-  //             << tempResult2->toString(0, tempResult2->size()) << std::endl;
+  //   std::cout << "[INFO] debug: \n"
+  //             << debugData->toString(0, debugData->size()) << std::endl;
+  //   auto userTowerInferencePlan =
+  //       userEmbeddingLookUpPlan
+  //           .project(
+  //               // {"mat_mul1(user_tower_features)"});
+  //               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features))))))))))))
+  //               as user_nn_out"})
+  //           .rowNumber({}, std::nullopt, true);
+
+  //   auto movieTowerInferencePlan =
+  //       movieEmbeddingLookUpPlan
+  //           .project(
+  //               {"relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features))))))))))))
+  //               as movie_nn_out"})
+  //           // {"mat_mul2_1(movie_tower_features)"})
+  //           .rowNumber({}, std::nullopt, true)
+  //           .planNode();
+
+  // auto tempResult1 =
+  // exec::test::AssertQueryBuilder(userTowerInferencePlan.planNode())
+  //                       .copyResults(pool_.get());
+  // auto tempResult2 = exec::test::AssertQueryBuilder(movieTowerInferencePlan)
+  //                       .copyResults(pool_.get());
+
+  // std::cout << "[INFO] temp result: \n"
+  //           << tempResult1->toString(0, tempResult1->size()) << std::endl;
+  // std::cout << "[INFO] temp result: \n"
+  //           << tempResult2->toString(0, tempResult2->size()) << std::endl;
 
   auto finalStagePlan =
-      userTowerInferencePlan.rowNumber({}, std::nullopt, true)
+      userTowerInferencePlan
           .mergeJoin(
               {"row_number"},
               {"row_number"},
@@ -2828,8 +2849,29 @@ void TowTowerModelTest::testEndtoEndPipeline() {
   auto finalScore =
       exec::test::AssertQueryBuilder(finalStagePlan).copyResults(pool_.get());
 
-  std::cout << "[INFO] temp result: \n"
-            << finalScore->toString(0, finalScore->size()) << std::endl;
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
+  //   std::cout << "[INFO] temp result: \n"
+  //             << finalScore->toString(0, finalScore->size()) << std::endl;
+  std::cout << "Preprocess Time (sec) = "
+            << (std::chrono::duration_cast<std::chrono::microseconds>(
+                    preprocessEnd - begin)
+                    .count()) /
+          1e6
+            << std::endl;
+  std::cout << "Inference Time (sec) = "
+            << (std::chrono::duration_cast<std::chrono::microseconds>(
+                    end - preprocessEnd)
+                    .count()) /
+          1e6
+            << std::endl;
+
+  std::cout << "End-End Time (sec) = "
+            << (std::chrono::duration_cast<std::chrono::microseconds>(
+                    end - begin)
+                    .count()) /
+          1e6
+            << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -2838,5 +2880,10 @@ int main(int argc, char** argv) {
   //   demo.testTwoTowerModelInference();
   //   demo.testDataProcessing();
   // demo.testStringEncoder();
-  demo.testEndtoEndPipeline();
+  int numSamples = 5000;
+  if (argc >= 2) {
+    numSamples = std::stoi(argv[1]);
+  }
+  std::cout << "[INFO] # Samples: " << numSamples << std::endl;
+  demo.testEndtoEndPipeline(numSamples);
 }

@@ -223,6 +223,79 @@ private:
 
 };
 
+
+// TODO: add future support to implement matrix addition in one class
+// matrix addition, matrix addition brodcast by row/col
+class MatrixVectorAddition: public MLFunction {
+public:
+    MatrixVectorAddition(float* weights, int num_cols) {
+        weights_ = weights;
+        dims.push_back(num_cols);
+    }
+
+    MatrixVectorAddition(std::string weightsFile, int num_cols) {
+        weightsFile_ = weightsFile;
+        dims.push_back(num_cols);
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, rows.size(), dims[0]);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, 1, dims[0]);
+
+        m1.rowwise() += m2.row(0);
+
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < m1.rows(); i++) {
+            std::vector<float> row(
+            m1.row(i).data(),
+            m1.row(i).data() + m1.cols());
+            result.push_back(row);
+        }
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(result, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    static std::string getName() {
+        return "mat_vector_add";
+    };
+
+    std::string getWeightsFile() {
+        return weightsFile_;
+    }
+
+    void setWeights(float* weights){
+        weights_ = weights;
+    }
+
+private:
+    float* weights_;
+    std::string weightsFile_;
+
+};
+
+
 class Relu: public MLFunction {
 public:
     Relu() {}
