@@ -53,12 +53,106 @@ class IntEncoder : public exec::VectorFunction {
                 .build()};
   }
 
-
   static std::string getName() {
     return "encoder";
   };
 
-
  private:
   std::unordered_map<int, int> mapping_;
+};
+
+class StringEncoder : public exec::VectorFunction {
+ public:
+  StringEncoder(std::unordered_map<std::string, int> mapping) {
+    mapping_ = mapping;
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+    // Read string input
+    exec::LocalDecodedVector decodedStringHolder(context, *args[0], rows);
+    auto decodedStringInput = decodedStringHolder.get();
+    int numInputs = rows.size();
+
+    std::vector<std::vector<int>> result(numInputs, std::vector<int>(1));
+    for (int i = 0; i < numInputs; i++) {
+      StringView val = decodedStringInput->valueAt<StringView>(i);
+      result[i][0] = mapping_.at(val.data());
+    }
+    VectorMaker maker{context.pool()};
+    output = maker.arrayVector<int>(result, INTEGER());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {exec::FunctionSignatureBuilder()
+                .argumentType("VARCHAR")
+                .returnType("array(INTEGER)")
+                .build()};
+  }
+
+  static std::string getName() {
+    return "encoder_string";
+  };
+
+ private:
+  std::unordered_map<std::string, int> mapping_;
+};
+
+class StringVariadicEncoder : public exec::VectorFunction {
+ public:
+  StringVariadicEncoder(std::unordered_map<std::string, int> mapping) {
+    mapping_ = mapping;
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+    auto arrayVector = args[0]->as<ArrayVector>();
+
+    // Read string input
+    exec::LocalDecodedVector decodedStringHolder(context, *args[0], rows);
+    auto decodedStringInput = decodedStringHolder.get();
+    int numInputs = rows.size();
+
+    StringView* valVector =
+        arrayVector->elements()->values()->asMutable<StringView>();
+    std::vector<std::vector<int>> result;
+    for (int i = 0; i < numInputs; i++) {
+      int numSubIndices = arrayVector->sizeAt(i);
+      int indicesOffset = arrayVector->offsetAt(i);
+      std::vector<int> indices;
+      for (int j = 0; j < numSubIndices; j++) {
+        StringView val = valVector[indicesOffset + j];
+        indices.push_back(mapping_.at(val.data()));
+      }
+      result.push_back(indices);
+    }
+    VectorMaker maker{context.pool()};
+    output = maker.arrayVector<int>(result, INTEGER());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {exec::FunctionSignatureBuilder()
+                .argumentType("array(VARCHAR)")
+                .returnType("array(INTEGER)")
+                .build()};
+  }
+
+  static std::string getName() {
+    return "encoder_string_variadic";
+  };
+
+ private:
+  std::unordered_map<std::string, int> mapping_;
 };

@@ -48,6 +48,17 @@ class RandomGenerator {
     return indicesVectors;
   }
 
+  std::vector<int> gen1DInt(int numRow, int minIndexNumber, int maxIndexNumber) {
+    // max variadic is the maximum number of sampled indices for each data
+    // point, in two-tower model, the value is 6 for genre
+    setIntRange(minIndexNumber, maxIndexNumber);
+    std::vector<int> intVector;
+    for (int i = 0; i <= numRow; i++) {
+      intVector.push_back(genRandomIntValue());
+    }
+    return intVector;
+  }
+
   std::vector<std::vector<float>> genFloat2dVector(int numRow, int numCol) {
     // Initialize the input1 feature vector
     std::vector<std::vector<float>> float2dVector;
