@@ -1095,11 +1095,11 @@ void TowTowerModelTest::testDataProcessing() {
       CosineSimilarity::signatures(),
       std::make_unique<CosineSimilarity>(128));
 
-  auto hiveConnector =
-      connector::getConnectorFactory(
-          connector::hive::HiveConnectorFactory::kHiveConnectorName)
-          ->newConnector(kHiveConnectorId, nullptr);
-  connector::registerConnector(hiveConnector);
+//   auto hiveConnector =
+//       connector::getConnectorFactory(
+//           connector::hive::HiveConnectorFactory::kHiveConnectorName)
+//           ->newConnector(kHiveConnectorId, nullptr);
+//   connector::registerConnector(hiveConnector);
 
   auto inputRowType =
       ROW({"user_id",
@@ -2758,11 +2758,11 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
       std::chrono::steady_clock::now();
 
   auto userPreprocessedData =
-      exec::test::AssertQueryBuilder(userDataPreprocessPlan)
+      exec::test::AssertQueryBuilder(userDataPreprocessPlan).maxDrivers(8)
           .copyResults(pool_.get());
 
   auto moviePreprocessedData =
-      exec::test::AssertQueryBuilder(movieDataPreprocessPlan)
+      exec::test::AssertQueryBuilder(movieDataPreprocessPlan).maxDrivers(8)
           .copyResults(pool_.get());
 
   std::chrono::steady_clock::time_point preprocessEnd =
@@ -2800,40 +2800,6 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
               {"relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
           .rowNumber({}, std::nullopt, true)
           .planNode();
-
-  //   auto debugData =
-  //       exec::test::AssertQueryBuilder(userTowerInferencePlan)
-  //           .copyResults(pool_.get());
-
-  //   std::cout << "[INFO] debug: \n"
-  //             << debugData->toString(0, debugData->size()) << std::endl;
-  //   auto userTowerInferencePlan =
-  //       userEmbeddingLookUpPlan
-  //           .project(
-  //               // {"mat_mul1(user_tower_features)"});
-  //               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features))))))))))))
-  //               as user_nn_out"})
-  //           .rowNumber({}, std::nullopt, true);
-
-  //   auto movieTowerInferencePlan =
-  //       movieEmbeddingLookUpPlan
-  //           .project(
-  //               {"relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features))))))))))))
-  //               as movie_nn_out"})
-  //           // {"mat_mul2_1(movie_tower_features)"})
-  //           .rowNumber({}, std::nullopt, true)
-  //           .planNode();
-
-  // auto tempResult1 =
-  // exec::test::AssertQueryBuilder(userTowerInferencePlan.planNode())
-  //                       .copyResults(pool_.get());
-  // auto tempResult2 = exec::test::AssertQueryBuilder(movieTowerInferencePlan)
-  //                       .copyResults(pool_.get());
-
-  // std::cout << "[INFO] temp result: \n"
-  //           << tempResult1->toString(0, tempResult1->size()) << std::endl;
-  // std::cout << "[INFO] temp result: \n"
-  //           << tempResult2->toString(0, tempResult2->size()) << std::endl;
 
   auto finalStagePlan =
       userTowerInferencePlan
@@ -2875,6 +2841,7 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
 }
 
 int main(int argc, char** argv) {
+  Eigen::setNbThreads(16);
   folly::init(&argc, &argv, false);
   TowTowerModelTest demo;
   //   demo.testTwoTowerModelInference();
