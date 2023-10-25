@@ -1,6 +1,10 @@
 #include <folly/init/Init.h>
 #include <torch/torch.h>
 #include <random>
+#include "velox/common/file/FileSystems.h"
+#include "velox/dwio/dwrf/reader/DwrfReader.h"
+#include "velox/dwio/parquet/RegisterParquetReader.h"
+// #include "velox/dwio/parquet/RegisterParquetWriter.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
@@ -39,7 +43,8 @@ class TowTowerModelTest : public HiveConnectorTestBase {
   ~TowTowerModelTest() {}
 
   void run();
-  void testTwoTowerModel();
+  void testTwoTowerModelInference();
+  void testDataProcessing();
 
   void TestBody() override {}
 
@@ -68,8 +73,70 @@ class TowTowerModelTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
 };
 
+void TowTowerModelTest::testDataProcessing() {
+
+    std::shared_ptr<folly::Executor> executor(
+      std::make_shared<folly::CPUThreadPoolExecutor>(
+          std::thread::hardware_concurrency()));
+    const std::string kHiveConnectorId = "test-hive";
+//     auto hiveConnector =
+//       connector::getConnectorFactory(
+//           connector::hive::HiveConnectorFactory::kHiveConnectorName)
+//           ->newConnector(kHiveConnectorId, nullptr);
+//   connector::registerConnector(hiveConnector);
+
+  // To be able to read local files, we need to register the local file
+  // filesystem. We also need to register the dwrf reader factory as well as a
+  // write protocol, in this case commit is not required:
+//   filesystems::registerLocalFileSystem();
+    // parquet::registerParquetReaderFactory(parquet::ParquetReaderType::NATIVE);
+    // dwrf::registerDwrfReaderFactory();
+  dwrf::registerDwrfReaderFactory();
+//   dwrf
+
+    auto inputRowType = ROW({{"col", INTEGER()}});
+    core::PlanNodeId scanNodeId;
+    auto readPlanFragment = exec::test::PlanBuilder()
+                              .tableScan(inputRowType)
+                              .capturePlanNodeId(scanNodeId)
+                              .planFragment();
+
+    // Create the reader task.
+  auto readTask = exec::Task::create(
+      "my_read_task",
+      readPlanFragment,
+      /*destination=*/0,
+      std::make_shared<core::QueryCtx>(executor.get()));
+ 
+
+  auto connectorSplit = std::make_shared<connector::hive::HiveConnectorSplit>(
+        kHiveConnectorId,
+        "file:/root/velox/data/test.parquet",
+        dwio::common::FileFormat::PARQUET);
+    // Wrap it in a `Split` object and add to the task. We need to specify to
+    // which operator we're adding the split (that's why we captured the
+    // TableScan's id above). Here we could pump subsequent split/files into the
+    // TableScan.
+    readTask->addSplit(scanNodeId, exec::Split{connectorSplit});
+    readTask->noMoreSplits(scanNodeId);
+
+    // Read output vectors and print them.
+  while (auto result = readTask->next()) {
+    LOG(INFO) << "Vector available after processing (scan + sort):";
+    for (vector_size_t i = 0; i < result->size(); ++i) {
+      LOG(INFO) << result->toString(i);
+    }
+  }
+
+
+    // auto plan =
+    //   PlanBuilder(pool_.get())
+    //       .tableScan(kLineitem, selectedRowType, fileColumnNames, {filter})
+    //       .capturePlanNodeId(lineitemPlanNodeId)
+} 
+
 // Test Embedding Layer
-void TowTowerModelTest::testTwoTowerModel() {
+void TowTowerModelTest::testTwoTowerModelInference() {
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
   // embeddingDims is shared among all embedding layer
   int embeddingDims = 32;
@@ -497,14 +564,14 @@ void TowTowerModelTest::testTwoTowerModel() {
           batchNorm2_3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-exec::registerVectorFunction(
+  exec::registerVectorFunction(
       "cosine_similarity",
       CosineSimilarity::signatures(),
       std::make_unique<CosineSimilarity>(128));
 
-
   // Below is generating the plan
-  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  std::chrono::steady_clock::time_point begin =
+      std::chrono::steady_clock::now();
   auto userPlan = exec::test::PlanBuilder(pool_.get())
                       .values({userIndicesArrayRowVector})
                       .project({"user_id_embedding(user_id)"})
@@ -585,8 +652,8 @@ exec::registerVectorFunction(
   auto out4 =
       exec::test::AssertQueryBuilder(concatPlan4).copyResults(pool_.get());
 
-//   std::cout << "[INFO] user DNN input: \n"
-//             << out4->toString(0, out4->size()) << std::endl;
+  //   std::cout << "[INFO] user DNN input: \n"
+  //             << out4->toString(0, out4->size()) << std::endl;
 
   auto userNNPlan =
       exec::test::PlanBuilder(pool_.get())
@@ -596,8 +663,8 @@ exec::registerVectorFunction(
           .planNode();
   auto userNNOut =
       exec::test::AssertQueryBuilder(userNNPlan).copyResults(pool_.get());
-//   std::cout << "[INFO] user DNN output: \n"
-//             << userNNOut->toString(0, userNNOut->size()) << std::endl;
+  //   std::cout << "[INFO] user DNN output: \n"
+  //             << userNNOut->toString(0, userNNOut->size()) << std::endl;
 
   // Item-Tower
 
@@ -610,25 +677,23 @@ exec::registerVectorFunction(
       exec::test::AssertQueryBuilder(itemPlan).copyResults(pool_.get());
 
   std::cout << "[INFO] genresIndicesArrayRowVector 1: \n"
-            << genresIndicesArrayRowVector->toString(0, genresIndicesArrayRowVector->size()) << std::endl;
+            << genresIndicesArrayRowVector->toString(
+                   0, genresIndicesArrayRowVector->size())
+            << std::endl;
 
+  //   auto genresPlan = exec::test::PlanBuilder(pool_.get())
+  //                         .values({genresIndicesArrayRowVector})
+  //                         .project({"sequence_pooling(genres_embedding(genres))"})
+  //                         .planNode();
 
-//   auto genresPlan = exec::test::PlanBuilder(pool_.get())
-//                         .values({genresIndicesArrayRowVector})
-//                         .project({"sequence_pooling(genres_embedding(genres))"})
-//                         .planNode();
-  
   auto genresPlan = exec::test::PlanBuilder(pool_.get())
                         .values({genresIndicesArrayRowVector})
                         .project({"genres_embedding(genres)"})
                         .planNode();
 
-
-
-
   auto genresEmbedding =
       exec::test::AssertQueryBuilder(genresPlan).copyResults(pool_.get());
-  
+
   auto in2_1 = maker.rowVector(
       {"in1", "in2"}, {itemEmbedding->childAt(0), genresEmbedding->childAt(0)});
 
@@ -661,10 +726,8 @@ exec::registerVectorFunction(
           .planNode();
   auto itemNNOut =
       exec::test::AssertQueryBuilder(itemNNPlan).copyResults(pool_.get());
-//   std::cout << "[INFO] item NN output: \n"
-//             << itemNNOut->toString(0, itemNNOut->size()) << std::endl;
-
-  
+  //   std::cout << "[INFO] item NN output: \n"
+  //             << itemNNOut->toString(0, itemNNOut->size()) << std::endl;
 
   auto finalInputRowVector = maker.rowVector(
       {"in1", "in2"}, {userNNOut->childAt(0), itemNNOut->childAt(0)});
@@ -675,7 +738,12 @@ exec::registerVectorFunction(
   auto scores =
       exec::test::AssertQueryBuilder(finalStagePlan).copyResults(pool_.get());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Time for Two Tower Model (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::cout << "Time for Two Tower Model (sec) = "
+            << (std::chrono::duration_cast<std::chrono::microseconds>(
+                    end - begin)
+                    .count()) /
+          1000000.0
+            << std::endl;
   std::cout << "[INFO] final score: \n"
             << scores->toString(0, scores->size()) << std::endl;
 };
@@ -683,5 +751,6 @@ exec::registerVectorFunction(
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   TowTowerModelTest demo;
-  demo.testTwoTowerModel();
+//   demo.testTwoTowerModelInference();
+  demo.testDataProcessing();
 }
