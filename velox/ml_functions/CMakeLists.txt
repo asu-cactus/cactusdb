@@ -66,7 +66,39 @@ target_link_libraries(
   velox_common_base 
   velox_vector_fuzzer
   openblas
+  velox_dwio_parquet_reader
   ${TORCH_LIBRARIES}
 )
+
+add_executable(two_tower_model_pipeline_test tests/TowTowerModelPipelineTest.cpp)
+target_link_libraries(
+  two_tower_model_pipeline_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base 
+  velox_vector_fuzzer
+  openblas
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+# TODO: add or remove this unit test
+# add_executable(parquest_loader tests/TestParquetLoader.cpp)
+# target_link_libraries(
+#   parquest_loader
+#   velox_dwio_parquet_reader
+#   velox_exec_test_lib
+#   velox_exec
+#   velox_hive_connector
+#   velox_link_libs
+#   ${TEST_LINK_LIBS}
+#   ${TORCH_LIBRARIES}
+# )
 
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -march=corei7-avx")
