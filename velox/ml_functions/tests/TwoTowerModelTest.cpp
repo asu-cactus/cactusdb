@@ -3712,15 +3712,17 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
   //   //   std::cout << "[INFO] movie processed data: \n"
   //   //               << moviePreprocessedData->toString(0,
   //   //               moviePreprocessedData->size()) << std::endl;
+  auto resultUserDataMoved = std::move((*resultUserData));
+  auto resultMovieDataMoved = std::move((*resultMovieData));
   auto finalInferencePlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
-          .values((*resultUserData))
+          .values(resultUserDataMoved)
           .rowNumber({}, std::nullopt, true)
           .mergeJoin(
               {"row_number"},
               {"row_number"},
               PlanBuilder(planNodeIdGenerator, pool_.get())
-                  .values((*resultMovieData))
+                  .values(resultMovieDataMoved)
                   .rowNumber({}, std::nullopt, true)
                   .planNode(),
               "",
