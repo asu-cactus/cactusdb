@@ -28,10 +28,22 @@ class Concat : public exec::VectorFunction {
       VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-    auto input1Elements = args[0]->as<ArrayVector>()->elements();
-    auto input2Elements = args[1]->as<ArrayVector>()->elements();
-    float* input1Values = input1Elements->values()->asMutable<float>();
-    float* input2Values = input2Elements->values()->asMutable<float>();
+    // Decoder is required to handle address error, reference code:
+    // ArrayIntersectExcept.cpp
+    BaseVector* left = args[0].get();
+    BaseVector* right = args[1].get();
+
+    exec::LocalDecodedVector leftHolder(context, *left, rows);
+    auto decodedLeftArray = leftHolder.get();
+    auto baseLeftArray =
+        decodedLeftArray->base()->as<ArrayVector>()->elements();
+
+    exec::LocalDecodedVector rightHolder(context, *right, rows);
+    auto decodedRightArray = rightHolder.get();
+    auto baseRightArray = rightHolder->base()->as<ArrayVector>()->elements();
+
+    float* input1Values = baseLeftArray->values()->asMutable<float>();
+    float* input2Values = baseRightArray->values()->asMutable<float>();
 
     std::vector<std::vector<float>> results;
 

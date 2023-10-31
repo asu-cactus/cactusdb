@@ -807,7 +807,7 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   auto movedData = std::move(resultUserData);
   RowVectorPtr printData = movedData[0];
   //   std::cout << "[DEBUG]: \n"
-  //             << movedRatingData[0]->toString(0, movedRatingData[0]->size())
+  //             << movedRatingData[0]->toString(0, mo vedRatingData[0]->size())
   //             << std::endl;
 
   //    std::move(resultUserData);
