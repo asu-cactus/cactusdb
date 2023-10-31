@@ -614,7 +614,7 @@ void TowTowerModelTest::testStringEncoder() {
                        "zipcode",
                        "title",
                        "genres"})
-                  .limit(0, numSamples, false)
+                //   .limit(0, numSamples, false)
                   .planNode();
 
   std::shared_ptr<folly::Executor> executor =
@@ -1208,7 +1208,7 @@ void TowTowerModelTest::testDataProcessing() {
                "zipcode",
                "title",
                "genres"})
-          .limit(0, numSamples, false)
+        //   .limit(0, numSamples, false)
           .planNode();
 
   std::shared_ptr<folly::Executor> executor =

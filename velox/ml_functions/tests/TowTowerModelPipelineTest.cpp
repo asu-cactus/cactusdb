@@ -1,11 +1,11 @@
+#include <boost/interprocess/sync/interprocess_semaphore.hpp>
 #include <folly/init/Init.h>
 #include <torch/torch.h>
 #include <random>
 #include "velox/common/file/FileSystems.h"
+#include "velox/connectors/hive/HiveConfig.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/parquet/RegisterParquetReader.h"
-#include <boost/interprocess/sync/interprocess_semaphore.hpp>
-#include "velox/connectors/hive/HiveConfig.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
@@ -51,10 +51,23 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
     // SetUp();
   }
 
+  static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
+    while (!task->isFinished()) {
+      usleep(1000); // 0.01 second.
+    }
+  }
+  std::shared_ptr<folly::Executor> executor_{
+      std::make_shared<folly::CPUThreadPoolExecutor>(
+          std::thread::hardware_concurrency())};
+  std::shared_ptr<core::QueryCtx> queryCtx_{
+      std::make_shared<core::QueryCtx>(executor_.get())};
+
+  std::shared_ptr<memory::MemoryPool> pool_ =
+      memory::addDefaultLeafMemoryPool();
+  VectorMaker maker{pool_.get()};
+
   ~TowTowerModelPipelineTest() {
-    std::cout << "[DEBUGG0000]" << std::endl;
     HiveConnectorTestBase::TearDown();
-    std::cout << "[DEBUGG1111]" << std::endl;
   }
 
   void run();
@@ -73,31 +86,11 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
     connector::unregisterConnector(kHiveConnectorId);
     parquet::unregisterParquetReaderFactory();
   }
-
-  static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
-    while (!task->isFinished()) {
-      usleep(1000); // 0.01 second.
-    }
-  }
-
-  
 };
-
 
 void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
     int numSamples,
     int numSplit) {
-
-  std::shared_ptr<folly::Executor> executor_{
-      std::make_shared<folly::CPUThreadPoolExecutor>(
-          std::thread::hardware_concurrency())};
-  std::shared_ptr<core::QueryCtx> queryCtx_{
-      std::make_shared<core::QueryCtx>(executor_.get())};
-
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
-  VectorMaker maker{pool_.get()};
-
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
   int embeddingDims = 32;
 
@@ -580,38 +573,47 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
 
   // read raw data
 
-  auto inputRowType =
-      ROW({"user_id",
-           "movie_id",
-           "rating",
-           "timestamp",
-           "gender",
-           "age",
-           "occupation",
-           "zipcode",
-           "title",
-           "genres"},
-          {INTEGER(),
-           INTEGER(),
-           INTEGER(),
-           INTEGER(),
-           VARCHAR(),
-           INTEGER(),
-           INTEGER(),
-           VARCHAR(),
-           VARCHAR(),
-           VARCHAR()});
+  //   auto inputRowType =
+  //       ROW({"user_id",
+  //            "movie_id",
+  //            "rating",
+  //            "timestamp",
+  //            "gender",
+  //            "age",
+  //            "occupation",
+  //            "zipcode",
+  //            "title",
+  //            "genres"},
+  //           {INTEGER(),
+  //            INTEGER(),
+  //            INTEGER(),
+  //            INTEGER(),
+  //            VARCHAR(),
+  //            INTEGER(),
+  //            INTEGER(),
+  //            VARCHAR(),
+  //            VARCHAR(),
+  //            VARCHAR()});
+
+  auto userDataRowType = ROW(
+      {
+          "user_id",
+          "gender",
+          "age",
+          "occupation",
+          "zipcode",
+      },
+      {INTEGER(), VARCHAR(), INTEGER(), INTEGER(), VARCHAR()});
+
+  auto movieDataRowType =
+      ROW({"movie_id", "title", "genres"}, {INTEGER(), VARCHAR(), VARCHAR()});
+
+  auto ratingDataRowType =
+      ROW({"user_id", "movie_id", "rating", "timestamp"},
+          {INTEGER(), INTEGER(), INTEGER(), INTEGER()});
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   CursorParameters params;
-  core::PlanNodeId readRawDataPlanNode;
-
-  //   auto readRawDataPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-  //                              .tableScan(inputRowType, {}, "")
-  //                              .capturePlanNodeId(readRawDataPlanNode)
-  //                              //   .singleAggregation({}, {"count(*)"})
-  //                              .planFragment();
-  // .planNode();
 
   constexpr int64_t KB = 1024L;
   constexpr int64_t MB = 1024L * KB;
@@ -622,205 +624,200 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   uint64_t kSizeKB = 1024UL;
 
   //   int numSplit = 2;
-  auto hiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens.parquet"},
+  auto userHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_user.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
-//   auto hiveSplits1 = makeHiveConnectorSplits(
-//       {"/root/velox_latest/data/movielens.parquet"},
-//       numSplit,
-//       dwio::common::FileFormat::PARQUET);
-  //   int concurrency = 2;
-  boost::interprocess::interprocess_semaphore semaphore(numSplit);
+  auto movieHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_movie.parquet"},
+      numSplit,
+      dwio::common::FileFormat::PARQUET);
+
+  auto ratingUserHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_rating.parquet"},
+      numSplit,
+      dwio::common::FileFormat::PARQUET);
+
+  auto ratingMovieHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_rating.parquet"},
+      numSplit,
+      dwio::common::FileFormat::PARQUET);
 
   std::vector<int> userIds = randomGenerator.gen1DInt(numSamples, 1, 6040);
   auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
-  auto userRowVector = maker.rowVector({"u_user_id"}, {userIdFlatVector});
   std::vector<int> movieIds = randomGenerator.gen1DInt(numSamples, 1, 3706);
   auto movieIdFlatVector = maker.flatVector<int>(movieIds, INTEGER());
-  auto movieRowVector = maker.rowVector({"m_movie_id"}, {movieIdFlatVector});
+  auto queryDataRowVector = maker.rowVector(
+      {"q_user_id", "q_movie_id"}, {userIdFlatVector, movieIdFlatVector});
 
-  auto changeRatingPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                              .tableScan(inputRowType, {}, "")
-                              .capturePlanNodeId(readRawDataPlanNode)
-                              .project(
-                                  {"user_id",
-                                   "movie_id",
-                                   "gender",
-                                   "age",
-                                   "occupation",
-                                   "title",
-                                   "genres",
-                                   "change_rating(rating) as rating"})
-                              .limit(0, numSamples, false)
-                              .planFragment();
-                            //   .planNode();
-//   core::PlanNodeId readRawDataPlanNode1;
-//   auto changeRatingPlan1 = PlanBuilder(planNodeIdGenerator, pool_.get())
-//                                .tableScan(inputRowType, {}, "")
-//                                .capturePlanNodeId(readRawDataPlanNode1)
-//                                .project(
-//                                    {"user_id",
-//                                     "movie_id",
-//                                     "gender",
-//                                     "age",
-//                                     "occupation",
-//                                     "title",
-//                                     "genres",
-//                                     "change_rating(rating) as rating"})
-//                                .planNode();
-  //   // get average rating for the user data
-//   auto userDataPreprocessPlan =
-//       PlanBuilder(planNodeIdGenerator, pool_.get())
-//           .values({userRowVector})
-//           .hashJoin(
-//               {"u_user_id"},
-//               {"user_id"},
-//               changeRatingPlan,
-//               "",
-//               {"u_user_id", "gender", "age", "occupation", "rating"})
-//           .singleAggregation(
-//               {"u_user_id", "gender", "age", "occupation"},
-//               {"avg(rating) as user_mean_rating"})
-//           .project(
-//               {"user_id_encoder(convert_int_array(u_user_id)) as user_id",
-//                "gender_encoder(gender) as gender",
-//                "age_encoder(convert_int_array(age)) as age",
-//                "occupation_encoder(convert_int_array(occupation)) as occupation",
-//                "convert_double_to_float_array(user_mean_rating) as user_mean_rating"})
-//           .planFragment();
+  core::PlanNodeId readUserDataPlanNodeId;
+  core::PlanNodeId readUserAvgRatingDataPlanNodeId;
+  core::PlanNodeId readMovieDataPlanNodeId;
+  core::PlanNodeId readMovieAvgRatingDataPlanNodeId;
 
-//   auto movieDataPreprocessPlan =
-//       PlanBuilder(planNodeIdGenerator, pool_.get())
-//           .values({movieRowVector})
-//           .hashJoin(
-//               {"m_movie_id"},
-//               {"movie_id"},
-//               changeRatingPlan1,
-//               "",
-//               {"m_movie_id", "genres", "rating"})
-//           .singleAggregation(
-//               {"m_movie_id", "genres"}, {"avg(rating) as movie_mean_rating"})
-//           .project(
-//               {"movie_id_encoder(convert_int_array(m_movie_id)) as movie_id",
-//                "genres_encoder(split(genres, '|')) as genres",
-//                "convert_double_to_float_array(movie_mean_rating) as movie_mean_rating"})
-//           .planFragment();
+  auto readUserAvgRatingDataPlan =
+      PlanBuilder(planNodeIdGenerator, pool_.get())
+          .tableScan(ratingDataRowType, {}, "")
+          .capturePlanNodeId(readUserAvgRatingDataPlanNodeId)
+          .project({"user_id", "change_rating(rating) as rating"})
+          .singleAggregation({"user_id"}, {"avg(rating) as user_mean_rating"})
+          .planNode();
 
-//   std::shared_ptr<std::vector<RowVectorPtr>> resultUserData =
-//       std::make_shared<std::vector<RowVectorPtr>>();
+  auto readMovieAvgRatingDataPlan =
+      PlanBuilder(planNodeIdGenerator, pool_.get())
+          .tableScan(ratingDataRowType, {}, "")
+          .capturePlanNodeId(readMovieAvgRatingDataPlanNodeId)
+          .project({"movie_id", "change_rating(rating) as rating"})
+          .singleAggregation({"movie_id"}, {"avg(rating) as movie_mean_rating"})
+          .planNode();
+
+  auto joinedUserAndMovieDataPlan =
+      PlanBuilder(planNodeIdGenerator, pool_.get())
+          .values({queryDataRowVector})
+          .hashJoin(
+              {"q_user_id"},
+              {"user_id"},
+              PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(userDataRowType, {}, "")
+                  .capturePlanNodeId(readUserDataPlanNodeId)
+                  .planNode(),
+              "",
+              {"q_user_id", "gender", "age", "occupation", "q_movie_id"})
+          .hashJoin(
+              {"q_user_id"},
+              {"user_id"},
+              readUserAvgRatingDataPlan,
+              "",
+              {"user_id",
+               "gender",
+               "age",
+               "occupation",
+               "user_mean_rating",
+               "q_movie_id"})
+          .hashJoin(
+              {"q_movie_id"},
+              {"movie_id"},
+              PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(movieDataRowType, {}, "")
+                  .capturePlanNodeId(readMovieDataPlanNodeId)
+                  .planNode(),
+              "",
+              {"user_id",
+               "gender",
+               "age",
+               "occupation",
+               "user_mean_rating",
+               "q_movie_id",
+               "genres"})
+          .hashJoin(
+              {"q_movie_id"},
+              {"movie_id"},
+              readMovieAvgRatingDataPlan,
+              "",
+              {"user_id",
+               "gender",
+               "age",
+               "occupation",
+               "user_mean_rating",
+               "movie_id",
+               "genres",
+               "movie_mean_rating"})
+          .project(
+              // pre processing
+              {"user_id_encoder(convert_int_array(user_id)) as user_id",
+               "gender_encoder(gender) as gender",
+               "age_encoder(convert_int_array(age)) as age",
+               "occupation_encoder(convert_int_array(occupation)) as occupation",
+               "convert_double_to_float_array(user_mean_rating) as user_mean_rating",
+               "movie_id_encoder(convert_int_array(movie_id)) as movie_id",
+               "genres_encoder(split(genres, '|')) as genres",
+               "convert_double_to_float_array(movie_mean_rating) as  movie_mean_rating"})
+          .project(
+              // look-up embedding
+              {"user_id_embedding(user_id) as user_id",
+               "gender_embedding(gender) as gender",
+               "age_embedding(age) as age",
+               "occupation_embedding(occupation) as occupation",
+               "user_mean_rating",
+               "movie_id_embedding(movie_id) as movie_id",
+               "sequence_pooling(genres_embedding(genres)) as genres",
+               "movie_mean_rating"})
+          .project(
+              {"concat4(concat3(concat2(concat1(user_id, gender), age),occupation), user_mean_rating) as user_tower_features",
+               "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
+          .project(
+              {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
+               "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
+          .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
+          .planFragment();
+
+
   std::vector<RowVectorPtr> resultUserData;
-//   std::shared_ptr<std::vector<RowVectorPtr>> resultMovieData =
-//       std::make_shared<std::vector<RowVectorPtr>>();
+  boost::interprocess::interprocess_semaphore semaphore(2);
   auto taskUser = exec::Task::create(
       "0",
-      std::move(changeRatingPlan),
+      joinedUserAndMovieDataPlan,
       0,
-      std::move(queryCtx_),
-    //   [](RowVectorPtr /*unused*/, ContinueFuture* /*unused*/) {
-    //       return exec::BlockingReason::kNotBlocked;
-    //     }
-      [&resultUserData](RowVectorPtr vector, ContinueFuture* future) {
+      queryCtx_,
+      [&resultUserData, &semaphore](
+          RowVectorPtr vector, ContinueFuture* future) {
         if (vector) {
-            for (auto& child : vector->children()) {
-                child->loadedVector();
-            }
-          resultUserData.push_back(std::move(vector));
-        //   std::move(resultUserData);
+          semaphore.post();
+        //   for (auto& child : vector->children()) {
+        //   child->loadedVector();
+        // }
+          resultUserData.push_back(vector);
         }
         return exec::BlockingReason::kNotBlocked;
-      }
-      );
-
-//   auto taskMovie = exec::Task::create(
-//       "1",
-//       movieDataPreprocessPlan,
-//       1,
-//       queryCtx_,
-//       [resultMovieData](RowVectorPtr vector, ContinueFuture* future) {
-//         if (vector) {
-//           resultMovieData->push_back(vector);
-//         }
-//         return exec::BlockingReason::kNotBlocked;
-//       });
+      });
 
   std::chrono::steady_clock::time_point begin =
       std::chrono::steady_clock::now();
   taskUser->start(taskUser, numSplit);
-//   taskMovie->start(taskMovie, numSplit);
+  //   taskReadRating->start(taskReadRating, numSplit);
 
-  for (auto& split : hiveSplits) {
-    taskUser->addSplit(readRawDataPlanNode, exec::Split(std::move(split)));
+  for (auto& split : userHiveSplits) {
+    // semaphore.wait();
+    taskUser->addSplit(readUserDataPlanNodeId, exec::Split(std::move(split)));
   }
-//   for (auto& split : hiveSplits1) {
-//     taskMovie->addSplit(readRawDataPlanNode1, exec::Split(std::move(split)));
-//   }
-  taskUser->noMoreSplits(readRawDataPlanNode);
-//   taskMovie->noMoreSplits(readRawDataPlanNode1);
-    waitForTaskCompletion(taskUser.get());
-// waitForTaskDriversToFinish(taskUser.get());
-//   waitForFinishedDrivers(taskUser);
-//   waitForFinishedDrivers(taskMovie);
+  taskUser->noMoreSplits(readUserDataPlanNodeId);
 
-    // int numberOfSplit = (*resultUserData).size();
-    // RowVectorPtr printData = (*resultUserData)[0];
-    // std::cout << "[DEBUG] number of split " << numberOfSplit << ", " << printData->size() << std::endl;
-    // std::move(resultUserData);
-    RowVectorPtr printData = std::move(resultUserData[0]);
-    std::cout << "[DEBUG]: \n"
-            << printData->toString(0, printData->size()) << std::endl;
+  for (auto& split : movieHiveSplits) {
+    // semaphore.wait();
+    taskUser->addSplit(readMovieDataPlanNodeId, exec::Split(std::move(split)));
+  }
+  taskUser->noMoreSplits(readMovieDataPlanNodeId);
 
-//    std::move(resultUserData);
- 
+  for (auto& split : ratingUserHiveSplits) {
+    // semaphore.wait();
+    taskUser->addSplit(
+        readUserAvgRatingDataPlanNodeId, exec::Split(std::move(split)));
+  }
+  taskUser->noMoreSplits(readUserAvgRatingDataPlanNodeId);
 
+  for (auto& split : ratingMovieHiveSplits) {
+    // semaphore.wait();
+    taskUser->addSplit(
+        readMovieAvgRatingDataPlanNodeId, exec::Split(std::move(split)));
+  }
+  taskUser->noMoreSplits(readMovieAvgRatingDataPlanNodeId);
+
+  waitForFinishedDrivers(taskUser);
+
+  auto movedData = std::move(resultUserData);
+  RowVectorPtr printData = movedData[0];
+  //   std::cout << "[DEBUG]: \n"
+  //             << movedRatingData[0]->toString(0, movedRatingData[0]->size())
+  //             << std::endl;
+
+  //    std::move(resultUserData);
 
   std::chrono::steady_clock::time_point preprocessEnd =
       std::chrono::steady_clock::now();
-//   auto finalInferencePlan =
-//       PlanBuilder(planNodeIdGenerator, pool_.get())
-//           .values((*resultUserData))
-//           .rowNumber({}, std::nullopt, true)
-//           .mergeJoin(
-//               {"row_number"},
-//               {"row_number"},
-//               PlanBuilder(planNodeIdGenerator, pool_.get())
-//                   .values((*resultMovieData))
-//                   .rowNumber({}, std::nullopt, true)
-//                   .planNode(),
-//               "",
-//               {"user_id",
-//                "gender",
-//                "age",
-//                "occupation",
-//                "user_mean_rating",
-//                "movie_id",
-//                "genres",
-//                "movie_mean_rating"})
-//           .project(
-//               {"user_id_embedding(user_id) as user_id",
-//                "gender_embedding(gender) as gender",
-//                "age_embedding(age) as age",
-//                "occupation_embedding(occupation) as occupation",
-//                "user_mean_rating",
-//                "movie_id_embedding(movie_id) as movie_id",
-//                "sequence_pooling(genres_embedding(genres)) as genres",
-//                "movie_mean_rating"})
-//           .project(
-//               {"concat4(concat3(concat2(concat1(user_id, gender), age),occupation), user_mean_rating) as user_tower_features",
-//                "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
-//           .project(
-//               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
-//                "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
-//           .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
-//           .planNode();
 
-//   auto finalScore = exec::test::AssertQueryBuilder(finalInferencePlan)
-//                         .copyResults(pool_.get());
 
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
-  //   //   std::cout << "[INFO] temp result: \n"
-  //   //             << finalScore->toString(0, finalScore->size()) <<
   std::cout << "Preprocess Time (sec) = "
             << (std::chrono::duration_cast<std::chrono::microseconds>(
                     preprocessEnd - begin)
@@ -840,9 +837,6 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                     .count()) /
           1e6
             << std::endl;
-  std::move(resultUserData);
-
-//   usleep(1000000);
 }
 
 int main(int argc, char** argv) {
