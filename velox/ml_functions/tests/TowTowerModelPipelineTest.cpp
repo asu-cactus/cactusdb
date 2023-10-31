@@ -71,8 +71,8 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
   }
 
   void run();
-  void testEndtoEndPipelineMultiThreading(int numSamples, int numSplit);
-  void testEndtoEndPipelineMultiThreadingMateralize(
+  int64_t testEndtoEndPipelineMultiThreading(int numSamples, int numSplit);
+  int64_t testEndtoEndPipelineMultiThreadingmaterialize(
       int numSamples,
       int numSplit);
 
@@ -91,7 +91,7 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
   }
 };
 
-void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
+int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
     int numSamples,
     int numSplit) {
   std::cout
@@ -600,9 +600,9 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   constexpr int64_t KB = 1024L;
   constexpr int64_t MB = 1024L * KB;
   constexpr int64_t GB = 1024L * MB;
-  std::shared_ptr<memory::MemoryPool> rootPool{
-      memory::defaultMemoryManager().addRootPool("root", 5000 * MB)};
-  queryCtx_->testingOverrideMemoryPool(rootPool);
+  //   std::shared_ptr<memory::MemoryPool> rootPool{
+  //       memory::defaultMemoryManager().addRootPool("root", 5000 * MB)};
+  //   queryCtx_->testingOverrideMemoryPool(rootPool);
   uint64_t kSizeKB = 1024UL;
 
   //   int numSplit = 2;
@@ -785,6 +785,8 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
 
   waitForFinishedDrivers(taskUser);
 
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
   auto movedData = std::move(resultUserData);
   RowVectorPtr printData = movedData[0];
   //   std::cout << "[DEBUG]: \n"
@@ -792,24 +794,9 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   //             << std::endl;
 
   //    std::move(resultUserData);
-
-  std::chrono::steady_clock::time_point preprocessEnd =
-      std::chrono::steady_clock::now();
-
-  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-
-  std::cout << "Preprocess Time (sec) = "
-            << (std::chrono::duration_cast<std::chrono::microseconds>(
-                    preprocessEnd - begin)
-                    .count()) /
-          1e6
-            << std::endl;
-  std::cout << "Inference Time (sec) = "
-            << (std::chrono::duration_cast<std::chrono::microseconds>(
-                    end - preprocessEnd)
-                    .count()) /
-          1e6
-            << std::endl;
+  int64_t time =
+      (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
+           .count());
 
   std::cout << "End-End Time (sec) = "
             << (std::chrono::duration_cast<std::chrono::microseconds>(
@@ -817,14 +804,17 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                     .count()) /
           1e6
             << std::endl;
+  return time;
 }
 
-void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
+int64_t
+TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
     int numSamples,
     int numSplit) {
   std::cout
-      << "[INFO]: TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize"
+      << "[INFO]: TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize"
       << std::endl;
+
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
   int embeddingDims = 32;
 
@@ -1305,22 +1295,13 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
       CosineSimilarity::signatures(),
       std::make_unique<CosineSimilarity>(128));
 
-  auto userDataRowType = ROW(
-      {
-          "user_id",
-          "gender",
-          "age",
-          "occupation",
-          "zipcode",
-      },
-      {INTEGER(), VARCHAR(), INTEGER(), INTEGER(), VARCHAR()});
+  auto userRatingDataRowType =
+      ROW({"user_id", "gender", "age", "occupation", "user_mean_rating"},
+          {INTEGER(), VARCHAR(), INTEGER(), INTEGER(), DOUBLE()});
 
-  auto movieDataRowType =
-      ROW({"movie_id", "title", "genres"}, {INTEGER(), VARCHAR(), VARCHAR()});
-
-  auto ratingDataRowType =
-      ROW({"user_id", "movie_id", "rating", "timestamp"},
-          {INTEGER(), INTEGER(), INTEGER(), INTEGER()});
+  auto movieRatingDataRowType =
+      ROW({"movie_id", "genres", "movie_mean_rating"},
+          {INTEGER(), VARCHAR(), DOUBLE()});
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   CursorParameters params;
@@ -1328,28 +1309,18 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
   constexpr int64_t KB = 1024L;
   constexpr int64_t MB = 1024L * KB;
   constexpr int64_t GB = 1024L * MB;
-  std::shared_ptr<memory::MemoryPool> rootPool{
-      memory::defaultMemoryManager().addRootPool("root", 5000 * MB)};
-  queryCtx_->testingOverrideMemoryPool(rootPool);
+  //   std::shared_ptr<memory::MemoryPool> rootPool{
+  //       memory::defaultMemoryManager().addRootPool("root", 5000 * MB)};
+  //   queryCtx_->testingOverrideMemoryPool(rootPool);
   uint64_t kSizeKB = 1024UL;
 
   //   int numSplit = 2;
-  auto userHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_user.parquet"},
+  auto userRatingHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_user_rating.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
-  auto movieHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_movie.parquet"},
-      numSplit,
-      dwio::common::FileFormat::PARQUET);
-
-  auto ratingUserHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_rating.parquet"},
-      numSplit,
-      dwio::common::FileFormat::PARQUET);
-
-  auto ratingMovieHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_rating.parquet"},
+  auto movieRatingHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_movie_rating.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
@@ -1360,25 +1331,19 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
   auto queryDataRowVector = maker.rowVector(
       {"q_user_id", "q_movie_id"}, {userIdFlatVector, movieIdFlatVector});
 
-  core::PlanNodeId readUserDataPlanNodeId;
-  core::PlanNodeId readUserAvgRatingDataPlanNodeId;
-  core::PlanNodeId readMovieDataPlanNodeId;
-  core::PlanNodeId readMovieAvgRatingDataPlanNodeId;
+  core::PlanNodeId readUserRatingDataPlanNodeId;
+  core::PlanNodeId readMovieRatingDataPlanNodeId;
 
-  auto readUserAvgRatingDataPlan =
+  auto readUserRatingDataPlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
-          .tableScan(ratingDataRowType, {}, "")
-          .capturePlanNodeId(readUserAvgRatingDataPlanNodeId)
-          .project({"user_id", "change_rating(rating) as rating"})
-          .singleAggregation({"user_id"}, {"avg(rating) as user_mean_rating"})
+          .tableScan(userRatingDataRowType, {}, "")
+          .capturePlanNodeId(readUserRatingDataPlanNodeId)
           .planNode();
 
-  auto readMovieAvgRatingDataPlan =
+  auto readMovieRatingDataPlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
-          .tableScan(ratingDataRowType, {}, "")
-          .capturePlanNodeId(readMovieAvgRatingDataPlanNodeId)
-          .project({"movie_id", "change_rating(rating) as rating"})
-          .singleAggregation({"movie_id"}, {"avg(rating) as movie_mean_rating"})
+          .tableScan(movieRatingDataRowType, {}, "")
+          .capturePlanNodeId(readMovieRatingDataPlanNodeId)
           .planNode();
 
   auto joinedUserAndMovieDataPlan =
@@ -1387,16 +1352,7 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
           .hashJoin(
               {"q_user_id"},
               {"user_id"},
-              PlanBuilder(planNodeIdGenerator, pool_.get())
-                  .tableScan(userDataRowType, {}, "")
-                  .capturePlanNodeId(readUserDataPlanNodeId)
-                  .planNode(),
-              "",
-              {"q_user_id", "gender", "age", "occupation", "q_movie_id"})
-          .hashJoin(
-              {"q_user_id"},
-              {"user_id"},
-              readUserAvgRatingDataPlan,
+              readUserRatingDataPlan,
               "",
               {"user_id",
                "gender",
@@ -1407,22 +1363,7 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
           .hashJoin(
               {"q_movie_id"},
               {"movie_id"},
-              PlanBuilder(planNodeIdGenerator, pool_.get())
-                  .tableScan(movieDataRowType, {}, "")
-                  .capturePlanNodeId(readMovieDataPlanNodeId)
-                  .planNode(),
-              "",
-              {"user_id",
-               "gender",
-               "age",
-               "occupation",
-               "user_mean_rating",
-               "q_movie_id",
-               "genres"})
-          .hashJoin(
-              {"q_movie_id"},
-              {"movie_id"},
-              readMovieAvgRatingDataPlan,
+              readMovieRatingDataPlan,
               "",
               {"user_id",
                "gender",
@@ -1441,7 +1382,7 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
                "convert_double_to_float_array(user_mean_rating) as user_mean_rating",
                "movie_id_encoder(convert_int_array(movie_id)) as movie_id",
                "genres_encoder(split(genres, '|')) as genres",
-               "convert_double_to_float_array(movie_mean_rating) as  movie_mean_rating"})
+               "convert_double_to_float_array(movie_mean_rating) as movie_mean_rating"})
           .project(
               // look-up embedding
               {"user_id_embedding(user_id) as user_id",
@@ -1453,7 +1394,7 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
                "sequence_pooling(genres_embedding(genres)) as genres",
                "movie_mean_rating"})
           .project(
-              {"concat4(concat3(concat2(concat1(user_id, gender), age),occupation), user_mean_rating) as user_tower_features",
+              {"concat4(concat3(concat2(concat1(user_id, gender),age),occupation), user_mean_rating) as user_tower_features",
                "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
           .project(
               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
@@ -1471,10 +1412,6 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
       [&resultUserData, &semaphore](
           RowVectorPtr vector, ContinueFuture* future) {
         if (vector) {
-          semaphore.post();
-          //   for (auto& child : vector->children()) {
-          //   child->loadedVector();
-          // }
           resultUserData.push_back(vector);
         }
         return exec::BlockingReason::kNotBlocked;
@@ -1485,59 +1422,33 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
   taskUser->start(taskUser, numSplit);
   //   taskReadRating->start(taskReadRating, numSplit);
 
-  for (auto& split : userHiveSplits) {
-    // semaphore.wait();
-    taskUser->addSplit(readUserDataPlanNodeId, exec::Split(std::move(split)));
-  }
-  taskUser->noMoreSplits(readUserDataPlanNodeId);
-
-  for (auto& split : movieHiveSplits) {
-    // semaphore.wait();
-    taskUser->addSplit(readMovieDataPlanNodeId, exec::Split(std::move(split)));
-  }
-  taskUser->noMoreSplits(readMovieDataPlanNodeId);
-
-  for (auto& split : ratingUserHiveSplits) {
-    // semaphore.wait();
+  for (auto& split : userRatingHiveSplits) {
     taskUser->addSplit(
-        readUserAvgRatingDataPlanNodeId, exec::Split(std::move(split)));
+        readUserRatingDataPlanNodeId, exec::Split(std::move(split)));
   }
-  taskUser->noMoreSplits(readUserAvgRatingDataPlanNodeId);
+  taskUser->noMoreSplits(readUserRatingDataPlanNodeId);
 
-  for (auto& split : ratingMovieHiveSplits) {
-    // semaphore.wait();
+  for (auto& split : movieRatingHiveSplits) {
     taskUser->addSplit(
-        readMovieAvgRatingDataPlanNodeId, exec::Split(std::move(split)));
+        readMovieRatingDataPlanNodeId, exec::Split(std::move(split)));
   }
-  taskUser->noMoreSplits(readMovieAvgRatingDataPlanNodeId);
+  taskUser->noMoreSplits(readMovieRatingDataPlanNodeId);
 
   waitForFinishedDrivers(taskUser);
-
-  auto movedData = std::move(resultUserData);
-  RowVectorPtr printData = movedData[0];
-  //   std::cout << "[DEBUG]: \n"
-  //             << movedRatingData[0]->toString(0, mo vedRatingData[0]->size())
-  //             << std::endl;
-
-  //    std::move(resultUserData);
 
   std::chrono::steady_clock::time_point preprocessEnd =
       std::chrono::steady_clock::now();
 
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
-  std::cout << "Preprocess Time (sec) = "
-            << (std::chrono::duration_cast<std::chrono::microseconds>(
-                    preprocessEnd - begin)
-                    .count()) /
-          1e6
-            << std::endl;
-  std::cout << "Inference Time (sec) = "
-            << (std::chrono::duration_cast<std::chrono::microseconds>(
-                    end - preprocessEnd)
-                    .count()) /
-          1e6
-            << std::endl;
+  auto movedData = std::move(resultUserData);
+  RowVectorPtr printData = movedData[0];
+  //   std::cout << "[DEBUG]: \n"
+  //             << printData->toString(0, printData->size()) << std::endl;
+
+  int64_t time =
+      (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
+           .count());
 
   std::cout << "End-End Time (sec) = "
             << (std::chrono::duration_cast<std::chrono::microseconds>(
@@ -1545,6 +1456,7 @@ void TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingMateralize(
                     .count()) /
           1e6
             << std::endl;
+  return time;
 }
 
 int main(int argc, char** argv) {
@@ -1554,12 +1466,36 @@ int main(int argc, char** argv) {
 
   int numSamples = 5000;
   int numSplit = 2;
+  int benchmarkMode = 2; // 0: non-materialize 1: materialize 2: both
   if (argc >= 2) {
     numSamples = std::stoi(argv[1]);
     numSplit = std::stoi(argv[2]);
+    benchmarkMode = std::stoi(argv[3]);
   }
   std::cout << "[INFO] # Samples: " << numSamples << " # Split: " << numSplit
             << std::endl;
-  //   demo.testEndtoEndPipelineMultiThreading(numSamples, numSplit);
-  demo.testEndtoEndPipelineMultiThreadingMateralize(numSamples, numSplit);
+  int64_t nonMaterializeLatency = 0;
+  int64_t materializeLatency = 0;
+  int numLoop = 10;
+  if (benchmarkMode == 0 or benchmarkMode == 2) {
+    for (int i = 0; i < numLoop; i++) {
+      nonMaterializeLatency +=
+          demo.testEndtoEndPipelineMultiThreading(numSamples, numSplit);
+    }
+    nonMaterializeLatency = nonMaterializeLatency / 10;
+  }
+
+  if (benchmarkMode == 1 or benchmarkMode == 2) {
+    for (int i = 0; i < numLoop; i++) {
+      materializeLatency += demo.testEndtoEndPipelineMultiThreadingmaterialize(
+          numSamples, numSplit);
+    }
+    materializeLatency = materializeLatency / 10;
+  }
+
+  std::cout << "==========================================" << std::endl;
+  std::cout << "Benchmark Result EndtoEndPipeline (sec) = "
+            << nonMaterializeLatency / 1e6 << std::endl;
+  std::cout << "Benchmark Result EndtoEndPipeline Materialize (sec) = "
+            << materializeLatency / 1e6 << std::endl;
 }
