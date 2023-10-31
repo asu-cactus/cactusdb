@@ -633,39 +633,54 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
       {"q_user_id", "q_movie_id"}, {userIdFlatVector, movieIdFlatVector});
 
   core::PlanNodeId readUserDataPlanNodeId;
-  core::PlanNodeId readUserAvgRatingDataPlanNodeId;
+  core::PlanNodeId readRatingDataPlanNodeId1;
+  core::PlanNodeId readRatingDataPlanNodeId2;
   core::PlanNodeId readMovieDataPlanNodeId;
-  core::PlanNodeId readMovieAvgRatingDataPlanNodeId;
 
+  // plan node to join user table and rating table then run aggregation
   auto readUserAvgRatingDataPlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
-          .tableScan(ratingDataRowType, {}, "")
-          .capturePlanNodeId(readUserAvgRatingDataPlanNodeId)
-          .project({"user_id", "change_rating(rating) as rating"})
-          .singleAggregation({"user_id"}, {"avg(rating) as user_mean_rating"})
+          .tableScan(userDataRowType, {}, "")
+          .capturePlanNodeId(readUserDataPlanNodeId)
+          .hashJoin(
+              {"user_id"},
+              {"r_user_id"},
+              PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(ratingDataRowType, {}, "")
+                  .capturePlanNodeId(readRatingDataPlanNodeId1)
+                  .project(
+                      {"user_id as r_user_id",
+                       "change_rating(rating) as rating"})
+                  .singleAggregation(
+                      {"r_user_id"}, {"avg(rating) as user_mean_rating"})
+                  .planNode(),
+              "",
+              {"user_id", "gender", "age", "occupation", "user_mean_rating"})
           .planNode();
 
+  // plan node to join movie table and rating table then run aggregation
   auto readMovieAvgRatingDataPlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
-          .tableScan(ratingDataRowType, {}, "")
-          .capturePlanNodeId(readMovieAvgRatingDataPlanNodeId)
-          .project({"movie_id", "change_rating(rating) as rating"})
-          .singleAggregation({"movie_id"}, {"avg(rating) as movie_mean_rating"})
+          .tableScan(movieDataRowType, {}, "")
+          .capturePlanNodeId(readMovieDataPlanNodeId)
+          .hashJoin(
+              {"movie_id"},
+              {"r_movie_id"},
+              PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(ratingDataRowType, {}, "")
+                  .capturePlanNodeId(readRatingDataPlanNodeId2)
+                  .project({"movie_id as r_movie_id", "change_rating(rating) as rating"})
+                  .singleAggregation(
+                      {"r_movie_id"}, {"avg(rating) as movie_mean_rating"})
+                  .planNode(),
+              "",
+              {"movie_id", "genres", "movie_mean_rating"})
           .planNode();
 
   auto joinedUserAndMovieDataPlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
           .values({queryDataRowVector})
-          .hashJoin(
-              {"q_user_id"},
-              {"user_id"},
-              PlanBuilder(planNodeIdGenerator, pool_.get())
-                  .tableScan(userDataRowType, {}, "")
-                  .capturePlanNodeId(readUserDataPlanNodeId)
-                  .planNode(),
-              "",
-              {"q_user_id", "gender", "age", "occupation", "q_movie_id"})
-          .hashJoin(
+          .hashJoin( // join with user-rating  table
               {"q_user_id"},
               {"user_id"},
               readUserAvgRatingDataPlan,
@@ -676,22 +691,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                "occupation",
                "user_mean_rating",
                "q_movie_id"})
-          .hashJoin(
-              {"q_movie_id"},
-              {"movie_id"},
-              PlanBuilder(planNodeIdGenerator, pool_.get())
-                  .tableScan(movieDataRowType, {}, "")
-                  .capturePlanNodeId(readMovieDataPlanNodeId)
-                  .planNode(),
-              "",
-              {"user_id",
-               "gender",
-               "age",
-               "occupation",
-               "user_mean_rating",
-               "q_movie_id",
-               "genres"})
-          .hashJoin(
+          .hashJoin( // join with movie-rating table
               {"q_movie_id"},
               {"movie_id"},
               readMovieAvgRatingDataPlan,
@@ -704,8 +704,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                "movie_id",
                "genres",
                "movie_mean_rating"})
-          .project(
-              // pre processing
+          .project( // pre processing, apply encoder
               {"user_id_encoder(convert_int_array(user_id)) as user_id",
                "gender_encoder(gender) as gender",
                "age_encoder(convert_int_array(age)) as age",
@@ -714,8 +713,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                "movie_id_encoder(convert_int_array(movie_id)) as movie_id",
                "genres_encoder(split(genres, '|')) as genres",
                "convert_double_to_float_array(movie_mean_rating) as  movie_mean_rating"})
-          .project(
-              // look-up embedding
+          .project( // look-up embedding
               {"user_id_embedding(user_id) as user_id",
                "gender_embedding(gender) as gender",
                "age_embedding(age) as age",
@@ -724,10 +722,10 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                "movie_id_embedding(movie_id) as movie_id",
                "sequence_pooling(genres_embedding(genres)) as genres",
                "movie_mean_rating"})
-          .project(
+          .project( // concate embedding vectors
               {"concat4(concat3(concat2(concat1(user_id, gender), age),occupation), user_mean_rating) as user_tower_features",
                "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
-          .project(
+          .project( // user/movie tower inference
               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
                "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
           .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
@@ -772,16 +770,16 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   for (auto& split : ratingUserHiveSplits) {
     // semaphore.wait();
     taskUser->addSplit(
-        readUserAvgRatingDataPlanNodeId, exec::Split(std::move(split)));
+        readRatingDataPlanNodeId1, exec::Split(std::move(split)));
   }
-  taskUser->noMoreSplits(readUserAvgRatingDataPlanNodeId);
+  taskUser->noMoreSplits(readRatingDataPlanNodeId1);
 
   for (auto& split : ratingMovieHiveSplits) {
     // semaphore.wait();
     taskUser->addSplit(
-        readMovieAvgRatingDataPlanNodeId, exec::Split(std::move(split)));
+        readRatingDataPlanNodeId2, exec::Split(std::move(split)));
   }
-  taskUser->noMoreSplits(readMovieAvgRatingDataPlanNodeId);
+  taskUser->noMoreSplits(readRatingDataPlanNodeId2);
 
   waitForFinishedDrivers(taskUser);
 
@@ -1349,7 +1347,7 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
   auto joinedUserAndMovieDataPlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
           .values({queryDataRowVector})
-          .hashJoin(
+          .hashJoin( // join with user-rating table
               {"q_user_id"},
               {"user_id"},
               readUserRatingDataPlan,
@@ -1360,7 +1358,7 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
                "occupation",
                "user_mean_rating",
                "q_movie_id"})
-          .hashJoin(
+          .hashJoin( // join with movie-rating table
               {"q_movie_id"},
               {"movie_id"},
               readMovieRatingDataPlan,
@@ -1373,8 +1371,7 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
                "movie_id",
                "genres",
                "movie_mean_rating"})
-          .project(
-              // pre processing
+          .project( // pre-processing, run encoder
               {"user_id_encoder(convert_int_array(user_id)) as user_id",
                "gender_encoder(gender) as gender",
                "age_encoder(convert_int_array(age)) as age",
@@ -1383,8 +1380,7 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
                "movie_id_encoder(convert_int_array(movie_id)) as movie_id",
                "genres_encoder(split(genres, '|')) as genres",
                "convert_double_to_float_array(movie_mean_rating) as movie_mean_rating"})
-          .project(
-              // look-up embedding
+          .project( // look-up embedding for user/movie features
               {"user_id_embedding(user_id) as user_id",
                "gender_embedding(gender) as gender",
                "age_embedding(age) as age",
@@ -1393,13 +1389,14 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
                "movie_id_embedding(movie_id) as movie_id",
                "sequence_pooling(genres_embedding(genres)) as genres",
                "movie_mean_rating"})
-          .project(
+          .project( // concat embedding vectors
               {"concat4(concat3(concat2(concat1(user_id, gender),age),occupation), user_mean_rating) as user_tower_features",
                "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
-          .project(
+          .project( // inference for user/movie twoer
               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
                "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
-          .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
+          .project( // compute recommendation score
+              {"cosine_similarity(user_nn_out, movie_nn_out)"})
           .planFragment();
 
   std::vector<RowVectorPtr> resultUserData;
@@ -1420,7 +1417,6 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
   std::chrono::steady_clock::time_point begin =
       std::chrono::steady_clock::now();
   taskUser->start(taskUser, numSplit);
-  //   taskReadRating->start(taskReadRating, numSplit);
 
   for (auto& split : userRatingHiveSplits) {
     taskUser->addSplit(
@@ -1476,13 +1472,13 @@ int main(int argc, char** argv) {
             << std::endl;
   int64_t nonMaterializeLatency = 0;
   int64_t materializeLatency = 0;
-  int numLoop = 10;
+  int numLoop = 1;
   if (benchmarkMode == 0 or benchmarkMode == 2) {
     for (int i = 0; i < numLoop; i++) {
       nonMaterializeLatency +=
           demo.testEndtoEndPipelineMultiThreading(numSamples, numSplit);
     }
-    nonMaterializeLatency = nonMaterializeLatency / 10;
+    nonMaterializeLatency = nonMaterializeLatency / numLoop;
   }
 
   if (benchmarkMode == 1 or benchmarkMode == 2) {
@@ -1490,7 +1486,7 @@ int main(int argc, char** argv) {
       materializeLatency += demo.testEndtoEndPipelineMultiThreadingmaterialize(
           numSamples, numSplit);
     }
-    materializeLatency = materializeLatency / 10;
+    materializeLatency = materializeLatency / numLoop;
   }
 
   std::cout << "==========================================" << std::endl;
