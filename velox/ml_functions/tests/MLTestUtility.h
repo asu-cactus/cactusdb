@@ -53,7 +53,7 @@ class RandomGenerator {
     // point, in two-tower model, the value is 6 for genre
     setIntRange(minIndexNumber, maxIndexNumber);
     std::vector<int> intVector;
-    for (int i = 0; i <= numRow; i++) {
+    for (int i = 0; i < numRow; i++) {
       intVector.push_back(genRandomIntValue());
     }
     return intVector;
