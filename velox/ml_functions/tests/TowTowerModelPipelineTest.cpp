@@ -18,6 +18,7 @@
 #include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/Encoder.h"
 #include "velox/ml_functions/SequencePooling.h"
+#include "velox/ml_functions/ComplexLayer.h"
 #include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
@@ -84,6 +85,13 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
       int numSplit,
       int batchSize,
       int numDriver);
+
+  int64_t testEndtoEndPipelineFusedMultiThreading(
+      int numSamples,
+      int numSplit,
+      int batchSize,
+      int numDriver);
+
   int64_t testEndtoEndPipelineMultiThreadingmaterialize(
       int numSamples,
       int numSplit);
@@ -762,8 +770,6 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                "movie_id",
                "genres",
                "movie_mean_rating"})
-          //    .localPartition({})
-          //   .finalAggregation()
           .project( // pre processing, apply encoder
               {"user_id_encoder(convert_int_array(user_id)) as user_id",
                "gender_encoder(gender) as gender",
@@ -883,6 +889,727 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   //             << std::endl;
   return time;
 }
+
+int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
+    int numSamples,
+    int numSplit,
+    int batchSize,
+    int numDriver) {
+  std::cout
+      << "[INFO]: TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading"
+      << std::endl;
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+  int embeddingDims = 32;
+
+  // init user encoder
+  std::unordered_map<int, int> userIdMapping;
+  for (int i = 1; i < 6041; i++) {
+    userIdMapping[i] = i - 1;
+  }
+
+  exec::registerVectorFunction(
+      "user_id_encoder",
+      IntEncoder::signatures(),
+      std::make_unique<IntEncoder>(userIdMapping));
+
+  // init movie encoder
+  std::unordered_map<int, int> movieIdMapping;
+  for (int i = 1; i < 3953; i++) {
+    movieIdMapping[i] = i - 1;
+  }
+
+  exec::registerVectorFunction(
+      "movie_id_encoder",
+      IntEncoder::signatures(),
+      std::make_unique<IntEncoder>(movieIdMapping));
+
+  // init age encoder
+  std::unordered_map<int, int> ageMapping;
+  ageMapping[1] = 0;
+  ageMapping[18] = 1;
+  ageMapping[25] = 2;
+  ageMapping[35] = 3;
+  ageMapping[45] = 4;
+  ageMapping[50] = 5;
+  ageMapping[56] = 6;
+
+  exec::registerVectorFunction(
+      "age_encoder",
+      IntEncoder::signatures(),
+      std::make_unique<IntEncoder>(ageMapping));
+
+  // init occupation  encoder
+  std::unordered_map<int, int> occupationMapping;
+  for (int i = 0; i < 21; i++) {
+    occupationMapping[i] = i;
+  }
+
+  exec::registerVectorFunction(
+      "occupation_encoder",
+      IntEncoder::signatures(),
+      std::make_unique<IntEncoder>(occupationMapping));
+
+  std::unordered_map<std::string, int> genderMapping;
+  genderMapping["F"] = 0;
+  genderMapping["M"] = 1;
+
+  exec::registerVectorFunction(
+      "gender_encoder",
+      StringEncoder::signatures(),
+      std::make_unique<StringEncoder>(genderMapping));
+
+  std::unordered_map<std::string, int> genresMapping = {
+      {"Animation", 1},
+      {"Children's", 2},
+      {"Comedy", 3},
+      {"Adventure", 4},
+      {"Fantasy", 5},
+      {"Romance", 6},
+      {"Drama", 7},
+      {"Action", 8},
+      {"Crime", 9},
+      {"Thriller", 10},
+      {"Horror", 11},
+      {"Sci-Fi", 12},
+      {"Documentary", 13},
+      {"War", 14},
+      {"Musical", 15},
+      {"Mystery", 16},
+      {"Film-Noir", 17},
+      {"Western", 18}};
+
+  exec::registerVectorFunction(
+      "genres_encoder",
+      StringVariadicEncoder::signatures(),
+      std::make_unique<StringVariadicEncoder>(genresMapping));
+
+  exec::registerVectorFunction(
+      "convert_int_array",
+      ConvertToIntArray::signatures(),
+      std::make_unique<ConvertToIntArray>());
+
+  exec::registerVectorFunction(
+      "convert_float_array",
+      ConvertToFloatArray::signatures(),
+      std::make_unique<ConvertToFloatArray>());
+
+  exec::registerVectorFunction(
+      "convert_double_to_float_array",
+      ConvertDoubleToFloatArray::signatures(),
+      std::make_unique<ConvertDoubleToFloatArray>());
+
+  exec::registerVectorFunction(
+      "change_rating",
+      ChangeRating::signatures(),
+      std::make_unique<ChangeRating>());
+
+  // User-Tower
+
+  // user_id
+  int userIdNumEmbedding = 6040;
+  std::vector<std::vector<float>> userIdEmbeddingWeights =
+      randomGenerator.genFloat2dVector(userIdNumEmbedding, embeddingDims);
+  auto userIdEmbeddingWeightsVector =
+      maker.arrayVector<float>(userIdEmbeddingWeights, REAL());
+
+  // gender
+  int genderNumEmbedding = 2;
+  std::vector<std::vector<float>> genderEmbeddingWeights =
+      randomGenerator.genFloat2dVector(genderNumEmbedding, embeddingDims);
+  auto genderEmbeddingWeightsVector =
+      maker.arrayVector<float>(genderEmbeddingWeights, REAL());
+
+  // age
+  int ageNumEmbedding = 7;
+  std::vector<std::vector<float>> ageEmbeddingWeights =
+      randomGenerator.genFloat2dVector(ageNumEmbedding, embeddingDims);
+  auto ageEmbeddingWeightsVector =
+      maker.arrayVector<float>(ageEmbeddingWeights, REAL());
+
+  // occupation
+  int occupationNumEmbedding = 21;
+  std::vector<std::vector<float>> occupationEmbeddingWeights =
+      randomGenerator.genFloat2dVector(occupationNumEmbedding, embeddingDims);
+  auto occupationEmbeddingWeightsVector =
+      maker.arrayVector<float>(occupationEmbeddingWeights, REAL());
+
+  exec::registerVectorFunction(
+      "user_id_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          userIdEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          userIdNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "gender_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          genderEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          genderNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "age_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          ageEmbeddingWeightsVector->elements()->values()->asMutable<float>(),
+          ageNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "occupation_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          occupationEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          occupationNumEmbedding,
+          embeddingDims));
+  exec::registerVectorFunction(
+      "concat1",
+      Concat::signatures(),
+      std::make_unique<Concat>(embeddingDims, embeddingDims));
+
+  exec::registerVectorFunction(
+      "concat2",
+      Concat::signatures(),
+      std::make_unique<Concat>(2 * embeddingDims, embeddingDims));
+
+  exec::registerVectorFunction(
+      "concat3",
+      Concat::signatures(),
+      std::make_unique<Concat>(3 * embeddingDims, embeddingDims));
+  exec::registerVectorFunction(
+      "concat4",
+      Concat::signatures(),
+      std::make_unique<Concat>(4 * embeddingDims, 1));
+
+  randomGenerator.setFloatRange(-1, 1);
+  std::vector<std::vector<float>> userNNweight1 =
+      randomGenerator.genFloat2dVector(129, 300);
+  auto userNNweight1Vector = maker.arrayVector<float>(userNNweight1, REAL());
+
+  std::vector<std::vector<float>> userNNBias1 =
+      randomGenerator.genFloat2dVector(300, 1);
+  auto userNNBias1Vector = maker.arrayVector<float>(userNNBias1, REAL());
+
+  std::vector<std::vector<float>> userNNweight2 =
+      randomGenerator.genFloat2dVector(300, 300);
+  auto userNNweight2Vector = maker.arrayVector<float>(userNNweight2, REAL());
+
+  std::vector<std::vector<float>> userNNBias2 =
+      randomGenerator.genFloat2dVector(300, 1);
+  auto userNNBias2Vector = maker.arrayVector<float>(userNNBias2, REAL());
+
+  std::vector<std::vector<float>> userNNweight3 =
+      randomGenerator.genFloat2dVector(300, 128);
+  auto userNNweight3Vector = maker.arrayVector<float>(userNNweight3, REAL());
+
+  std::vector<std::vector<float>> userNNBias3 =
+      randomGenerator.genFloat2dVector(128, 1);
+  auto userNNBias3Vector = maker.arrayVector<float>(userNNBias3, REAL());
+
+  exec::registerVectorFunction(
+      "relu", Relu::signatures(), std::make_unique<Relu>());
+
+  std::vector<std::vector<float>> batchNorm1Weight =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm1WeightVector =
+      maker.arrayVector<float>(batchNorm1Weight, REAL());
+  std::vector<std::vector<float>> batchNorm1Bias =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm1BiasVector = maker.arrayVector<float>(batchNorm1Bias, REAL());
+
+  std::vector<std::vector<float>> batchNorm2Weight =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2WeightVector =
+      maker.arrayVector<float>(batchNorm2Weight, REAL());
+  std::vector<std::vector<float>> batchNorm2Bias =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2BiasVector = maker.arrayVector<float>(batchNorm2Bias, REAL());
+
+  std::vector<std::vector<float>> batchNorm3Weight =
+      randomGenerator.genFloat2dVector(1, 128);
+  auto batchNorm3WeightVector =
+      maker.arrayVector<float>(batchNorm3Weight, REAL());
+  std::vector<std::vector<float>> batchNorm3Bias =
+      randomGenerator.genFloat2dVector(1, 128);
+  auto batchNorm3BiasVector = maker.arrayVector<float>(batchNorm3Bias, REAL());
+
+  exec::registerVectorFunction(
+      "fully_layer_with_batch_norm1",
+      FullyConnectWithBatchNormAndRelu::signatures(),
+      std::make_unique<FullyConnectWithBatchNormAndRelu>(
+          userNNweight1Vector->elements()->values()->asMutable<float>(),
+          userNNBias1Vector->elements()->values()->asMutable<float>(),
+          batchNorm1WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm1BiasVector->elements()->values()->asMutable<float>(),
+          float(1e-5),
+          129,
+          300));
+  
+  exec::registerVectorFunction(
+      "fully_layer_with_batch_norm2",
+      FullyConnectWithBatchNormAndRelu::signatures(),
+      std::make_unique<FullyConnectWithBatchNormAndRelu>(
+          userNNweight2Vector->elements()->values()->asMutable<float>(),
+          userNNBias2Vector->elements()->values()->asMutable<float>(),
+          batchNorm2WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm2BiasVector->elements()->values()->asMutable<float>(),
+          float(1e-5),
+          300,
+          300));
+
+  exec::registerVectorFunction(
+      "fully_layer_with_batch_norm3",
+      FullyConnectWithBatchNormAndRelu::signatures(),
+      std::make_unique<FullyConnectWithBatchNormAndRelu>(
+          userNNweight3Vector->elements()->values()->asMutable<float>(),
+          userNNBias3Vector->elements()->values()->asMutable<float>(),
+          batchNorm3WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm3BiasVector->elements()->values()->asMutable<float>(),
+          float(1e-5),
+          300,
+          128));
+
+  int movieIdNumEmbedding = 3668;
+  std::vector<std::vector<float>> movieIdEmbeddingWeights =
+      randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
+  auto movieIdEmbeddingWeightsVector =
+      maker.arrayVector<float>(movieIdEmbeddingWeights, REAL());
+
+  // genres
+  int genresNumEmbedding = 1000;
+  std::vector<std::vector<float>> genresEmbeddingWeights =
+      randomGenerator.genFloat2dVector(genresNumEmbedding, embeddingDims);
+  auto genresEmbeddingWeightsVector =
+      maker.arrayVector<float>(genresEmbeddingWeights, REAL());
+
+  exec::registerVectorFunction(
+      "movie_id_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          movieIdEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          movieIdNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "genres_embedding",
+      Embedding::signatures(),
+      std::make_unique<Embedding>(
+          genderEmbeddingWeightsVector->elements()
+              ->values()
+              ->asMutable<float>(),
+          genderNumEmbedding,
+          embeddingDims));
+
+  exec::registerVectorFunction(
+      "sequence_pooling",
+      SequencePooling::signatures(),
+      std::make_unique<SequencePooling>(std::string("MEAN"), embeddingDims));
+
+  exec::registerVectorFunction(
+      "concat2_1",
+      Concat::signatures(),
+      std::make_unique<Concat>(embeddingDims, embeddingDims));
+
+  exec::registerVectorFunction(
+      "concat2_2",
+      Concat::signatures(),
+      std::make_unique<Concat>(2 * embeddingDims, 1));
+
+  randomGenerator.setFloatRange(-1, 1);
+  std::vector<std::vector<float>> itemNNweight1 =
+      randomGenerator.genFloat2dVector(65, 300);
+  auto itemNNweight1Vector = maker.arrayVector<float>(itemNNweight1, REAL());
+
+  std::vector<std::vector<float>> itemNNBias1 =
+      randomGenerator.genFloat2dVector(300, 1);
+  auto itemNNBias1Vector = maker.arrayVector<float>(itemNNBias1, REAL());
+
+  std::vector<std::vector<float>> itemNNweight2 =
+      randomGenerator.genFloat2dVector(300, 300);
+  auto itemNNweight2Vector = maker.arrayVector<float>(itemNNweight2, REAL());
+
+  std::vector<std::vector<float>> itemNNBias2 =
+      randomGenerator.genFloat2dVector(300, 1);
+  auto itemNNBias2Vector = maker.arrayVector<float>(itemNNBias2, REAL());
+
+  std::vector<std::vector<float>> itemNNweight3 =
+      randomGenerator.genFloat2dVector(300, 128);
+  auto itemNNweight3Vector = maker.arrayVector<float>(itemNNweight3, REAL());
+
+  std::vector<std::vector<float>> itemNNBias3 =
+      randomGenerator.genFloat2dVector(128, 1);
+  auto itemNNBias3Vector = maker.arrayVector<float>(itemNNBias3, REAL());
+
+  std::vector<std::vector<float>> batchNorm2_1Weight =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2_1WeightVector =
+      maker.arrayVector<float>(batchNorm2_1Weight, REAL());
+  std::vector<std::vector<float>> batchNorm2_1Bias =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2_1BiasVector =
+      maker.arrayVector<float>(batchNorm2_1Bias, REAL());
+
+  std::vector<std::vector<float>> batchNorm2_2Weight =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2_2WeightVector =
+      maker.arrayVector<float>(batchNorm2_2Weight, REAL());
+  std::vector<std::vector<float>> batchNorm2_2Bias =
+      randomGenerator.genFloat2dVector(1, 300);
+  auto batchNorm2_2BiasVector =
+      maker.arrayVector<float>(batchNorm2_2Bias, REAL());
+
+  std::vector<std::vector<float>> batchNorm2_3Weight =
+      randomGenerator.genFloat2dVector(1, 128);
+  auto batchNorm2_3WeightVector =
+      maker.arrayVector<float>(batchNorm2_3Weight, REAL());
+  std::vector<std::vector<float>> batchNorm2_3Bias =
+      randomGenerator.genFloat2dVector(1, 128);
+  auto batchNorm2_3BiasVector =
+      maker.arrayVector<float>(batchNorm2_3Bias, REAL());
+
+  exec::registerVectorFunction(
+      "fully_layer_with_batch_norm2_1",
+      FullyConnectWithBatchNormAndRelu::signatures(),
+      std::make_unique<FullyConnectWithBatchNormAndRelu>(
+          itemNNweight1Vector->elements()->values()->asMutable<float>(),
+          itemNNBias1Vector->elements()->values()->asMutable<float>(),
+          batchNorm2_1WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm2_1BiasVector->elements()->values()->asMutable<float>(),
+          float(1e-5),
+          65,
+          300));
+
+  exec::registerVectorFunction(
+      "fully_layer_with_batch_norm2_2",
+      FullyConnectWithBatchNormAndRelu::signatures(),
+      std::make_unique<FullyConnectWithBatchNormAndRelu>(
+          itemNNweight2Vector->elements()->values()->asMutable<float>(),
+          itemNNBias2Vector->elements()->values()->asMutable<float>(),
+          batchNorm2_2WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm2_2BiasVector->elements()->values()->asMutable<float>(),
+          float(1e-5),
+          300,
+          300));
+  exec::registerVectorFunction(
+      "fully_layer_with_batch_norm2_3",
+      FullyConnectWithBatchNormAndRelu::signatures(),
+      std::make_unique<FullyConnectWithBatchNormAndRelu>(
+          itemNNweight3Vector->elements()->values()->asMutable<float>(),
+          itemNNBias3Vector->elements()->values()->asMutable<float>(),
+          batchNorm2_3WeightVector->elements()->values()->asMutable<float>(),
+          batchNorm2_3BiasVector->elements()->values()->asMutable<float>(),
+          float(1e-5),
+          300,
+          128));
+
+
+  exec::registerVectorFunction(
+      "cosine_similarity",
+      CosineSimilarity::signatures(),
+      std::make_unique<CosineSimilarity>(128));
+
+  auto userDataRowType = ROW(
+      {
+          "user_id",
+          "gender",
+          "age",
+          "occupation",
+          "zipcode",
+      },
+      {INTEGER(), VARCHAR(), INTEGER(), INTEGER(), VARCHAR()});
+
+  auto movieDataRowType =
+      ROW({"movie_id", "title", "genres"}, {INTEGER(), VARCHAR(), VARCHAR()});
+
+  auto ratingDataRowType =
+      ROW({"user_id", "movie_id", "rating", "timestamp"},
+          {INTEGER(), INTEGER(), INTEGER(), INTEGER()});
+
+  auto queryDataRowType =
+      ROW({"q_user_id", "q_movie_id"}, {INTEGER(), INTEGER()});
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  CursorParameters params;
+
+  constexpr int64_t KB = 1024L;
+  constexpr int64_t MB = 1024L * KB;
+  constexpr int64_t GB = 1024L * MB;
+  queryCtx_->testingOverrideConfigUnsafe({
+      {core::QueryConfig::kPreferredOutputBatchRows, std::to_string(batchSize)},
+      //   {core::QueryConfig::kMaxOutputBatchRows, "600"}
+  });
+  uint64_t kSizeKB = 1024UL;
+  // std::shared_ptr<memory::MemoryPool> rootPool{
+  //     memory::defaultMemoryManager().addRootPool("root", 5000 * MB)};
+  // queryCtx_->testingOverrideMemoryPool(rootPool);
+  //   int numSplit = 2;
+  auto queryDataHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/query_data.parquet"},
+      numSplit,
+      dwio::common::FileFormat::PARQUET);
+
+  auto userHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_user_s_8192.parquet"},
+      1,
+      dwio::common::FileFormat::PARQUET);
+  auto movieHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_movie_s_8192.parquet"},
+      1,
+      dwio::common::FileFormat::PARQUET);
+
+  auto ratingUserHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_rating_s_8192.parquet"},
+      numSplit,
+      dwio::common::FileFormat::PARQUET);
+
+  auto ratingMovieHiveSplits = makeHiveConnectorSplits(
+      {"/root/velox_latest/data/movielens_rating_s_8192.parquet"},
+      numSplit,
+      dwio::common::FileFormat::PARQUET);
+
+  //   std::vector<RowVectorPtr> queryDataRowVector;
+  //   std::vector<int> userIds;
+  //   int numBatch = int(numSamples / batchSize);
+  //   for (int i = 0; i < numBatch; i++) {
+  //     std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1,
+  //     6040); auto userIdFlatVector = maker.flatVector<int>(userIds,
+  //     INTEGER()); std::vector<int> movieIds =
+  //     randomGenerator.gen1DInt(batchSize, 1, 3706); auto movieIdFlatVector =
+  //     maker.flatVector<int>(movieIds, INTEGER()); auto
+  //     queryDataRowVectorBatch = maker.rowVector(
+  //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
+  //         movieIdFlatVector});
+  //     queryDataRowVector.push_back(queryDataRowVectorBatch);
+  //   }
+  //   std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1, 6040);
+  //   auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
+  //   std::vector<int> movieIds = randomGenerator.gen1DInt(batchSize, 1, 3706);
+  //   auto movieIdFlatVector = maker.flatVector<int>(movieIds, INTEGER());
+  //   auto queryDataRowVector = maker.rowVector(
+  //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
+  //         movieIdFlatVector});
+  // use python script to generate splitted query table
+  std::string cmdToGenData = fmt::format(
+      "python3 /root/velox_latest/data/gen_data.py -n {}", numSamples);
+  int returnCode = system(cmdToGenData.c_str());
+
+  core::PlanNodeId readQueryDataPlanNodeId;
+  core::PlanNodeId readUserDataPlanNodeId;
+  core::PlanNodeId readRatingDataPlanNodeId1;
+  core::PlanNodeId readRatingDataPlanNodeId2;
+  core::PlanNodeId readMovieDataPlanNodeId;
+
+  // plan node to join user table and rating table then run aggregation
+  auto readUserAvgRatingDataPlan =
+      PlanBuilder(planNodeIdGenerator, pool_.get())
+          .tableScan(userDataRowType, {}, "")
+          .capturePlanNodeId(readUserDataPlanNodeId)
+          .hashJoin(
+              {"user_id"},
+              {"r_user_id"},
+              PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(ratingDataRowType, {}, "")
+                  .capturePlanNodeId(readRatingDataPlanNodeId1)
+                  .project(
+                      {"user_id as r_user_id",
+                       "change_rating(rating) as rating"})
+                  .partialAggregation(
+                      {"r_user_id"}, {"avg(rating) as user_mean_rating"})
+                  .localPartition({})
+                  .finalAggregation()
+                  .planNode(),
+              "",
+              {"user_id", "gender", "age", "occupation", "user_mean_rating"})
+          .planNode();
+
+  // plan node to join movie table and rating table then run aggregation
+  auto readMovieAvgRatingDataPlan =
+      PlanBuilder(planNodeIdGenerator, pool_.get())
+          .tableScan(movieDataRowType, {}, "")
+          .capturePlanNodeId(readMovieDataPlanNodeId)
+          .hashJoin(
+              {"movie_id"},
+              {"r_movie_id"},
+              PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(ratingDataRowType, {}, "")
+                  .capturePlanNodeId(readRatingDataPlanNodeId2)
+                  .project(
+                      {"movie_id as r_movie_id",
+                       "change_rating(rating) as rating"})
+                  .partialAggregation(
+                      {"r_movie_id"}, {"avg(rating) as movie_mean_rating"})
+                  .localPartition({})
+                  .finalAggregation()
+                  .planNode(),
+              "",
+              {"movie_id", "genres", "movie_mean_rating"})
+          .planNode();
+
+  auto joinedUserAndMovieDataPlan =
+      PlanBuilder(planNodeIdGenerator, pool_.get())
+          .tableScan(queryDataRowType, {}, "")
+          //   .tableScan(asRowType(queryDataRowVector->type()))
+          .capturePlanNodeId(readQueryDataPlanNodeId)
+          //   .values(queryDataRowVector)
+          // if use parallelizable, there is a one thing needs to be resolved is
+          // how to merge results together
+          //   .values(queryDataRowVector, true /*parallelizable*/)
+          //   .localPartition(std::vector<std::string>{})
+          .hashJoin( // join with user-rating  table
+              {"q_user_id"},
+              {"user_id"},
+              readUserAvgRatingDataPlan,
+              "",
+              {"user_id",
+               "gender",
+               "age",
+               "occupation",
+               "user_mean_rating",
+               "q_movie_id"})
+          .hashJoin( // join with movie-rating table
+              {"q_movie_id"},
+              {"movie_id"},
+              readMovieAvgRatingDataPlan,
+              "",
+              {"user_id",
+               "gender",
+               "age",
+               "occupation",
+               "user_mean_rating",
+               "movie_id",
+               "genres",
+               "movie_mean_rating"})
+          .project( // pre processing, apply encoder
+              {"user_id_encoder(convert_int_array(user_id)) as user_id",
+               "gender_encoder(gender) as gender",
+               "age_encoder(convert_int_array(age)) as age",
+               "occupation_encoder(convert_int_array(occupation)) as occupation",
+               "convert_double_to_float_array(user_mean_rating) as user_mean_rating",
+               "movie_id_encoder(convert_int_array(movie_id)) as movie_id",
+               "genres_encoder(split(genres, '|')) as genres",
+               "convert_double_to_float_array(movie_mean_rating) as movie_mean_rating"})
+          .project( // look-up embedding
+              {"user_id_embedding(user_id) as user_id",
+               "gender_embedding(gender) as gender",
+               "age_embedding(age) as age",
+               "occupation_embedding(occupation) as occupation",
+               "user_mean_rating",
+               "movie_id_embedding(movie_id) as movie_id",
+               "sequence_pooling(genres_embedding(genres)) as genres",
+               "movie_mean_rating"})
+          .project( // concate embedding vectors
+              {"concat4(concat3(concat2(concat1(user_id, gender),age),occupation), user_mean_rating) as user_tower_features",
+               "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
+          .project( // user/movie tower inference
+              {"fully_layer_with_batch_norm3(fully_layer_with_batch_norm2(fully_layer_with_batch_norm1(user_tower_features))) as user_nn_out",
+               "fully_layer_with_batch_norm2_3(fully_layer_with_batch_norm2_2(fully_layer_with_batch_norm2_1(movie_tower_features))) as movie_nn_out"
+            })
+        //   .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
+          .planFragment();
+
+  std::vector<RowVectorPtr> resultUserData;
+  boost::interprocess::interprocess_semaphore semaphore(2);
+  auto taskUser = exec::Task::create(
+      "0",
+      joinedUserAndMovieDataPlan,
+      0,
+      queryCtx_,
+      [&resultUserData, &semaphore](
+          RowVectorPtr vector, ContinueFuture* future) {
+        if (vector) {
+          semaphore.post();
+          //   for (auto& child : vector->children()) {
+          //   child->loadedVector();
+          // }
+          resultUserData.push_back(vector);
+        }
+        return exec::BlockingReason::kNotBlocked;
+      });
+
+  std::chrono::steady_clock::time_point begin =
+      std::chrono::steady_clock::now();
+  taskUser->start(taskUser, numDriver);
+  //   taskReadRating->start(taskReadRating, numSplit);
+
+  for (auto& split : queryDataHiveSplits) {
+    // semaphore.wait();
+    taskUser->addSplit(readQueryDataPlanNodeId, exec::Split(std::move(split)));
+  }
+  taskUser->noMoreSplits(readQueryDataPlanNodeId);
+
+  for (auto& split : userHiveSplits) {
+    // semaphore.wait();
+    taskUser->addSplit(readUserDataPlanNodeId, exec::Split(std::move(split)));
+  }
+  taskUser->noMoreSplits(readUserDataPlanNodeId);
+
+  for (auto& split : movieHiveSplits) {
+    // semaphore.wait();
+    taskUser->addSplit(readMovieDataPlanNodeId, exec::Split(std::move(split)));
+  }
+  taskUser->noMoreSplits(readMovieDataPlanNodeId);
+
+  for (auto& split : ratingUserHiveSplits) {
+    // semaphore.wait();
+    taskUser->addSplit(
+        readRatingDataPlanNodeId1, exec::Split(std::move(split)));
+  }
+  taskUser->noMoreSplits(readRatingDataPlanNodeId1);
+
+  for (auto& split : ratingMovieHiveSplits) {
+    // semaphore.wait();
+    taskUser->addSplit(
+        readRatingDataPlanNodeId2, exec::Split(std::move(split)));
+  }
+  taskUser->noMoreSplits(readRatingDataPlanNodeId2);
+
+  waitForFinishedDrivers(taskUser);
+
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
+  auto movedData = std::move(resultUserData);
+  int totalNumOfRecord = 0;
+  for (auto batchData : movedData) {
+    totalNumOfRecord += batchData->size();
+  }
+
+  //   for (int i = 0; i < movedData.size(); i++) {
+  //     RowVectorPtr printData = movedData[i];
+  //     std::cout << "[DEBUG], batch : " << i << "\n"
+  //                 << printData->toString(0, printData->size())
+  //                 << std::endl;
+  //   }
+
+  //    std::move(resultUserData);
+  std::cout << fmt::format(
+                   "[DEBUG] # Batches: {}, # TotalRecords: {}",
+                   movedData.size(),
+                   totalNumOfRecord)
+            << std::endl;
+
+  int64_t time =
+      (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
+           .count());
+
+  //   std::cout << "End-End Time (sec) = "
+  //             << (std::chrono::duration_cast<std::chrono::microseconds>(
+  //                     end - begin)
+  //                     .count()) /
+  //           1e6
+  //             << std::endl;
+  return time;
+}
+
 
 int64_t
 TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
@@ -1535,15 +2262,15 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
   return time;
 }
 
-DEFINE_int32(num_sample, 4, "Number of samples");
-DEFINE_int32(num_split, 4, "Number of drivers");
+DEFINE_int32(num_sample, 500, "Number of samples");
+DEFINE_int32(num_split, 1, "Number of drivers");
 DEFINE_int32(
     benchmark_mode,
     0,
     "Benchmark Mode, 0-non-materialize, 1-materialize, 2-both");
 DEFINE_int32(batch_size, 500, "Batch size");
 DEFINE_int32(num_repeat, 1, "Number of repeat run");
-DEFINE_int32(num_driver, 2, "Number of driver");
+DEFINE_int32(num_driver, 1, "Number of driver");
 
 int main(int argc, char** argv) {
   Eigen::setNbThreads(16);
@@ -1603,7 +2330,7 @@ int main(int argc, char** argv) {
 
   if (benchmarkMode == 0 or benchmarkMode == 2) {
     for (int i = 0; i < numRepeat; i++) {
-      nonMaterializeLatency += demo.testEndtoEndPipelineMultiThreading(
+      nonMaterializeLatency += demo.testEndtoEndPipelineFusedMultiThreading(
           numSamples, numSplit, batchSize, numDriver);
     }
     nonMaterializeLatency = nonMaterializeLatency / numRepeat;
