@@ -1,5 +1,7 @@
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
+#include <boost/program_options.hpp>
 #include <folly/init/Init.h>
+#include <gflags/gflags.h>
 #include <torch/torch.h>
 #include <random>
 #include "velox/common/file/FileSystems.h"
@@ -27,6 +29,7 @@ using namespace facebook::velox::exec::test;
 using namespace facebook::velox::core;
 
 // Utility function to generate random float/int values
+namespace po = boost::program_options;
 
 class TowTowerModelPipelineTest : public HiveConnectorTestBase {
  public:
@@ -605,11 +608,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
       ROW({"user_id", "movie_id", "rating", "timestamp"},
           {INTEGER(), INTEGER(), INTEGER(), INTEGER()});
 
-  auto queryDataRowType = ROW(
-      {
-          "q_user_id", "q_movie_id"
-      },
-      {INTEGER(), INTEGER()});
+  auto queryDataRowType =
+      ROW({"q_user_id", "q_movie_id"}, {INTEGER(), INTEGER()});
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   CursorParameters params;
@@ -649,37 +649,32 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
       {"/root/velox_latest/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
-  
-//   std::vector<RowVectorPtr> queryDataRowVector;
-//   std::vector<int> userIds;
-//   int numBatch = int(numSamples / batchSize);
-//   for (int i = 0; i < numBatch; i++) {
-//     std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1, 6040);
-//     auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
-//     std::vector<int> movieIds = randomGenerator.gen1DInt(batchSize, 1, 3706);
-//     auto movieIdFlatVector = maker.flatVector<int>(movieIds, INTEGER());
-//     auto queryDataRowVectorBatch = maker.rowVector(
-//         {"q_user_id", "q_movie_id"}, {userIdFlatVector, movieIdFlatVector});
-//     queryDataRowVector.push_back(queryDataRowVectorBatch);    
-//   }
-//   std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1, 6040);
-//   auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
-//   std::vector<int> movieIds = randomGenerator.gen1DInt(batchSize, 1, 3706);
-//   auto movieIdFlatVector = maker.flatVector<int>(movieIds, INTEGER());
-//   auto queryDataRowVector = maker.rowVector(
-//         {"q_user_id", "q_movie_id"}, {userIdFlatVector, movieIdFlatVector});
 
-//   uint32_t rows = numSamples/numSplit;
-//   auto config = std::make_shared<facebook::velox::dwrf::Config>();
-//   config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
-//   config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
-//   auto file = TempFilePath::create();
-//   writeToFile("/root/velox_latest/data/a.o", {queryDataRowVector}, config);
-
-//   auto queryDataHiveSplits =  makeHiveConnectorSplits("/root/velox_latest/data/a.o", numSplit, dwio::common::FileFormat::DWRF);
-  std::string cmdToGenData = fmt::format("python3 /root/velox_latest/data/gen_data.py -n {}", numSamples);
+  //   std::vector<RowVectorPtr> queryDataRowVector;
+  //   std::vector<int> userIds;
+  //   int numBatch = int(numSamples / batchSize);
+  //   for (int i = 0; i < numBatch; i++) {
+  //     std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1,
+  //     6040); auto userIdFlatVector = maker.flatVector<int>(userIds,
+  //     INTEGER()); std::vector<int> movieIds =
+  //     randomGenerator.gen1DInt(batchSize, 1, 3706); auto movieIdFlatVector =
+  //     maker.flatVector<int>(movieIds, INTEGER()); auto
+  //     queryDataRowVectorBatch = maker.rowVector(
+  //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
+  //         movieIdFlatVector});
+  //     queryDataRowVector.push_back(queryDataRowVectorBatch);
+  //   }
+  //   std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1, 6040);
+  //   auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
+  //   std::vector<int> movieIds = randomGenerator.gen1DInt(batchSize, 1, 3706);
+  //   auto movieIdFlatVector = maker.flatVector<int>(movieIds, INTEGER());
+  //   auto queryDataRowVector = maker.rowVector(
+  //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
+  //         movieIdFlatVector});
+  // use python script to generate splitted query table
+  std::string cmdToGenData = fmt::format(
+      "python3 /root/velox_latest/data/gen_data.py -n {}", numSamples);
   int returnCode = system(cmdToGenData.c_str());
-//   std::cout << fmt::format("[debug] execute command: {}, result: {}", cmdToGenData, returnCode);
 
   core::PlanNodeId readQueryDataPlanNodeId;
   core::PlanNodeId readUserDataPlanNodeId;
@@ -735,13 +730,14 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
 
   auto joinedUserAndMovieDataPlan =
       PlanBuilder(planNodeIdGenerator, pool_.get())
-      .tableScan(queryDataRowType, {}, "")
-    //   .tableScan(asRowType(queryDataRowVector->type()))
-      .capturePlanNodeId(readQueryDataPlanNodeId)
-    //   .values(queryDataRowVector)
-      // if use parallelizable, there is a one thing needs to be resolved is how to merge results together
-        //   .values(queryDataRowVector, true /*parallelizable*/)
-        //   .localPartition(std::vector<std::string>{})
+          .tableScan(queryDataRowType, {}, "")
+          //   .tableScan(asRowType(queryDataRowVector->type()))
+          .capturePlanNodeId(readQueryDataPlanNodeId)
+          //   .values(queryDataRowVector)
+          // if use parallelizable, there is a one thing needs to be resolved is
+          // how to merge results together
+          //   .values(queryDataRowVector, true /*parallelizable*/)
+          //   .localPartition(std::vector<std::string>{})
           .hashJoin( // join with user-rating  table
               {"q_user_id"},
               {"user_id"},
@@ -766,8 +762,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                "movie_id",
                "genres",
                "movie_mean_rating"})
-            //    .localPartition({})
-                //   .finalAggregation()
+          //    .localPartition({})
+          //   .finalAggregation()
           .project( // pre processing, apply encoder
               {"user_id_encoder(convert_int_array(user_id)) as user_id",
                "gender_encoder(gender) as gender",
@@ -792,7 +788,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
           .project( // user/movie tower inference
               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
                "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
-        //   .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
+          .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
           .planFragment();
 
   std::vector<RowVectorPtr> resultUserData;
@@ -860,14 +856,13 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   for (auto batchData : movedData) {
     totalNumOfRecord += batchData->size();
   }
- 
-//   for (int i = 0; i < movedData.size(); i++) {
-//     RowVectorPtr printData = movedData[i];
-//     std::cout << "[DEBUG], batch : " << i << "\n"
-//                 << printData->toString(0, printData->size())
-//                 << std::endl;
-//   }
-    
+
+  //   for (int i = 0; i < movedData.size(); i++) {
+  //     RowVectorPtr printData = movedData[i];
+  //     std::cout << "[DEBUG], batch : " << i << "\n"
+  //                 << printData->toString(0, printData->size())
+  //                 << std::endl;
+  //   }
 
   //    std::move(resultUserData);
   std::cout << fmt::format(
@@ -1540,54 +1535,86 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
   return time;
 }
 
+DEFINE_int32(num_sample, 4, "Number of samples");
+DEFINE_int32(num_split, 4, "Number of drivers");
+DEFINE_int32(
+    benchmark_mode,
+    0,
+    "Benchmark Mode, 0-non-materialize, 1-materialize, 2-both");
+DEFINE_int32(batch_size, 500, "Batch size");
+DEFINE_int32(num_repeat, 1, "Number of repeat run");
+DEFINE_int32(num_driver, 2, "Number of driver");
+
 int main(int argc, char** argv) {
   Eigen::setNbThreads(16);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
-  TowTowerModelPipelineTest demo;
 
-  int numSamples = 5000;
-  int numSplit = 2;
-  int benchmarkMode = 2; // 0: non-materialize 1: materialize 2: both
-  int batchSize = 500;
-  int numLoop = 1;
-  int numDriver = 2;
+  //   po::options_description desc("Allowed options");
+  //   desc.add_options()("help", "Display this help message")
+  //     ("num_sample",po::value<int>()->default_value(5000),"Number of query
+  //     samples")
+  //     ("num_split", po::value<int>()->default_value(2), "Number of split")
+  //     ("benchmark_mode",po::value<int>()->default_value(0),"Benchmark Mode:
+  //     0-non-materialize, 1-materialize, 2-both")
+  //     ("batch_size", po::value<int>()->default_value(500), "batch size")
+  //     ("num_repeat",po::value<int>()->default_value(1),"number of repreat run
+  //     to measure latency")
+  //     ("num_driver", po::value<int>()->default_value(2), "number of driver");
 
-  if (argc >= 2) {
-    numSamples = std::stoi(argv[1]);
-    numSplit = std::stoi(argv[2]);
-    benchmarkMode = std::stoi(argv[3]);
-    batchSize = std::stoi(argv[4]);
-    numLoop = std::stoi(argv[5]);
-    numDriver = std::stoi(argv[6]);
-  }
+  //   po::variables_map vm;
+  //   po::store(po::parse_command_line(argc, argv, desc), vm);
+  //   po::notify(vm);
+
+  //   if (vm.count("help")) {
+  //     std::cout << desc << std::endl;
+  //     return 1;
+  //   }
+
+  //   int numSamples = vm["num_sample"].as<int>(); // default 5000
+  //   int numSplit = vm["num_split"].as<int>(); // default 2
+  //   int benchmarkMode = vm["benchmark_mode"].as<int>(); // default 0 0:
+  //   non-materialize 1: materialize 2: both int batchSize =
+  //   vm["batch_size"].as<int>(); // default 500 int numRepeat =
+  //   vm["num_repeat"].as<int>(); // default 1 int numDriver =
+  //   vm["num_driver"].as<int>(); // default 2
+  int numSamples = FLAGS_num_sample;
+  int numSplit = FLAGS_num_split; // default 2
+  int benchmarkMode = FLAGS_benchmark_mode; // default 0 0: non-materialize 1:
+                                            // materialize 2: both
+  int batchSize = FLAGS_batch_size; // default 500
+  int numRepeat = FLAGS_num_repeat; // default 1
+  int numDriver = FLAGS_num_driver;
+
   std::cout
       << fmt::format(
-             "[INFO] # Samples: {}, # Split: {}, numLoop: {}, #Driver: {}",
+             "[INFO] # Samples: {}, # Batch Size: {}, # Split: {}, #Driver: {}, numRepeat: {}",
              numSamples,
+             batchSize,
              numSplit,
-             numLoop,
-             numDriver)
+             numDriver,
+             numRepeat)
       << std::endl;
-  //   std::cout << "[INFO] # Samples: " << numSamples << " # Split: " <<
-  //   numSplit <<
-  //             " numLoop " << numLoop << std::endl;
+
+  TowTowerModelPipelineTest demo;
+
   int64_t nonMaterializeLatency = 0;
   int64_t materializeLatency = 0;
 
   if (benchmarkMode == 0 or benchmarkMode == 2) {
-    for (int i = 0; i < numLoop; i++) {
+    for (int i = 0; i < numRepeat; i++) {
       nonMaterializeLatency += demo.testEndtoEndPipelineMultiThreading(
           numSamples, numSplit, batchSize, numDriver);
     }
-    nonMaterializeLatency = nonMaterializeLatency / numLoop;
+    nonMaterializeLatency = nonMaterializeLatency / numRepeat;
   }
 
   if (benchmarkMode == 1 or benchmarkMode == 2) {
-    for (int i = 0; i < numLoop; i++) {
+    for (int i = 0; i < numRepeat; i++) {
       materializeLatency += demo.testEndtoEndPipelineMultiThreadingmaterialize(
           numSamples, numSplit);
     }
-    materializeLatency = materializeLatency / numLoop;
+    materializeLatency = materializeLatency / numRepeat;
   }
 
   std::cout << "==========================================" << std::endl;
