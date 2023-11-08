@@ -680,6 +680,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
   //         movieIdFlatVector});
   // use python script to generate splitted query table
+  // FIXME refactor the code to generate query parquet file via velox parquet writer, ref: SinkTests.cpp
   std::string cmdToGenData = fmt::format(
       "python3 /root/velox_latest/data/gen_data.py -n {}", numSamples);
   int returnCode = system(cmdToGenData.c_str());
@@ -1399,6 +1400,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
   //         movieIdFlatVector});
   // use python script to generate splitted query table
+  // FIXME refactor the code to generate query parquet file via velox parquet writer, ref: SinkTests.cpp
   std::string cmdToGenData = fmt::format(
       "python3 /root/velox_latest/data/gen_data.py -n {}", numSamples);
   int returnCode = system(cmdToGenData.c_str());
