@@ -61,6 +61,23 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx]
+
+class CustomDataLoader:
+    def __init__(self, data, batch_size):
+        self.data = data
+        self.batch_size = batch_size
+        self.current_index = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.current_index >= len(self.data):
+            raise StopIteration
+        batch = self.data[self.current_index:self.current_index + self.batch_size]
+        self.current_index += self.batch_size
+        return batch
+
 # load the model
 totalStart = time.time()
 modelStart = time.time()
@@ -69,6 +86,7 @@ modelEnd = time.time()
 
 # Load input from txt
 dataStart = time.time()
+# txt file
 # file_path = 'random_data.txt'
 # custom_dataset = TextLineDataset(file_path)
 # data_loader = DataLoader(dataset=custom_dataset, batch_size=batch, num_workers=8)
@@ -82,12 +100,14 @@ dataStart = time.time()
 #     values = list(map(float, line.strip().split()))
 #     data.append(values)
 # data = np.array(data, dtype=np.float32)
+# npy file
 file_path = 'random_data.npy'
 data = np.load(file_path)
 data_tensor = torch.tensor(data)
 custom_dataset = CustomDataset(data_tensor)
-
 data_loader = DataLoader(dataset=custom_dataset, batch_size=batch_size, shuffle=False, num_workers=8)
+
+
 dataEnd = time.time()
 inferStart = time.time()
 with torch.no_grad():

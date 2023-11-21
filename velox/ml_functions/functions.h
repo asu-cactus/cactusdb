@@ -511,6 +511,7 @@ public:
         const TypePtr& type,
         exec::EvalCtx& context,
         VectorPtr& output) const override {
+        std::cout << "run torchnn" << std::endl;
         // std::cout << rows.size() << std::endl;
         // torch::set_num_threads(30);
         torch::set_num_threads(8);
