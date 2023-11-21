@@ -716,13 +716,6 @@ void test_optimizer_demo(int argc, char** argv){
 
 std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, DataFrame data, int features, int first_layer, int second_layer, std::string test_action){
   if (test_action == "Merge2Single"){
-    // auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
-    // auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-    // core::PlanNodeId p0;
-    // auto oldplan = myPlan2->sources()[0];
-// int oldPlanId = std::stoi(oldplan->id());
-    // auto first = AssertQueryBuilder(udf_plan_builder.planNode()).copyResults(pool_.get());
-    // std::cout << "before Results:" << first->toString() << std::endl;
     std::vector<int> dimensions;
     dimensions.push_back(features);
     dimensions.push_back(first_layer);
@@ -759,9 +752,60 @@ std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, Dat
     return planBuilderExecShared;
   }
   else if (test_action == "Mul2JoinAgg"){
-    core::PlanNodeId p = "0";
-    std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(udf_plan_builder);
-    std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p});
+    // Here we directly start from null plan, 
+    // Todo: connect with other before plan(related with sources)
+    exec::registerVectorFunction(
+    "mat_mul_b",
+    MatrixMultiply_b::signatures(),
+    std::make_unique<MatrixMultiply_b>(row, col, samples, weight)
+  );
+
+  auto nodeid = planBuilder.planNode()->id();
+  std::vector<std::string> str = udf_plan_builder.findExprStrings(nodeid);
+  std::string searchString = "mat_mul0(v)"
+  std::string replaceString = "result";
+
+  std::size_t found = str[0].find(searchString);
+  while (found != std::string::npos) {
+      str[0].replace(found, searchString.length(), replaceString);
+      found = str[0].find(searchString, found + replaceString.length());
+  }
+  
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  core::PlanNodeId p2;
+  core::PlanNodeId p3;
+
+  auto inputs = ROW({
+        {"v", ARRAY(REAL())},
+        {"v_row", BIGINT()},
+        {"v_col", BIGINT()},
+    });
+
+  auto weights = ROW({
+        {"w", ARRAY(REAL())},
+        {"w_row", BIGINT()},
+        {"w_col", BIGINT()},
+    });
+
+  auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
+                  .tableScan(inputs)
+                  .capturePlanNodeId(p2)
+                  .hashJoin(
+                      {"v_col"},
+                      {"w_row"},
+                    exec::test::PlanBuilder(planNodeIdGenerator)
+                   .tableScan(weights)
+                   .capturePlanNodeId(p3)
+                   .planNode(),
+                    "", // extra filter
+                    {"v_row", "w_col", "v", "w"})
+                  .project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+                  .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
+                  .project({str[0]})
+                  .planBuild();
+
+    std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
+    std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p2, p3});
     return planBuilderExecShared;
   }
   else {
@@ -804,7 +848,7 @@ void test_optimizer_mcts(int argc, char** argv){
   // auto cost = cost_estimation(plan_s2_builder_1);
   // std::cout << cost << std::endl;
 
-  // auto plan_s1_builder_2 = rewriten_udf(udf_plan_builder, test_action2);
+  auto plan_s1_builder_2 = rewriten_udf(udf_plan_builder, test_action2);
   // auto plan_s2_builder_2 = rewriten_tradition(plan_s1_builder_2);
   // auto cost = cost_estimation(plan_s2_builder_2);
   // std::cout << cost << std::endl;
