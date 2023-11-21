@@ -1153,37 +1153,39 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
 void MLFunctionsTest::test_conv2d() {
     int cnn_layer1_filters = 64;
     int cnn_layer1_filter_dims[] = {3,3,1}; // height * width * channels
-    int weights1_size = cnn_layer1_filter_dims[0] * cnn_layer1_filter_dims[1] * cnn_layer1_filter_dims[2] * cnn_layer1_filters;
+    int weights1_size = cnn_layer1_filter_dims[0] * cnn_layer1_filter_dims[1] * cnn_layer1_filter_dims[2] * cnn_layer1_filters; //3*3*1*64 = 576
 
     int cnn_layer2_filters = 64;
     int cnn_layer2_filter_dims[] = {3,3,64};
-    int weights2_size = cnn_layer2_filter_dims[0] * cnn_layer2_filter_dims[1] * cnn_layer2_filter_dims[2] * cnn_layer2_filters;
+    int weights2_size = cnn_layer2_filter_dims[0] * cnn_layer2_filter_dims[1] * cnn_layer2_filter_dims[2] * cnn_layer2_filters; //3*3*64*64 = 36864
 
     int input_dims[] = {28,28,1}; 
-    int input_size = input_dims[0] * input_dims[1] * input_dims[2];
+    int input_size = input_dims[0] * input_dims[1] * input_dims[2]; //28*28*1 = 784
     int num_samples = 1;
 
+    // {64, 3, 3, 1, 28, 28}
+    // {64, 3, 3, 64, 26, 26}
     int dims1[] = {cnn_layer1_filters, cnn_layer1_filter_dims[0], cnn_layer1_filter_dims[1], cnn_layer1_filter_dims[2], input_dims[0], input_dims[1]};
     int dims2[] = {cnn_layer2_filters, cnn_layer2_filter_dims[0], cnn_layer2_filter_dims[1], cnn_layer2_filter_dims[2], input_dims[0] - cnn_layer1_filter_dims[0] + 1, input_dims[1] - cnn_layer1_filter_dims[1] + 1};
     std::ifstream weights_file("/home/ubuntu/cnn_weights.txt"); 
     std::ifstream bias_file("/home/ubuntu/cnn_bias.txt"); 
     std::ifstream test_file("/home/ubuntu/test_file.txt"); 
 
-    FlatVectorPtr<float> weights_1 = get_tensor(weights_file, weights1_size, cnn_layer1_filters * cnn_layer1_filter_dims[2]);
-    FlatVectorPtr<float> bias_1 = get_tensor(bias_file, cnn_layer1_filters, 1);
+    FlatVectorPtr<float> weights_1 = get_tensor(weights_file, weights1_size, cnn_layer1_filters * cnn_layer1_filter_dims[2]); // 576, 64*1
+    FlatVectorPtr<float> bias_1 = get_tensor(bias_file, cnn_layer1_filters, 1); //64,1
 
-    FlatVectorPtr<float> weights_2 = get_tensor(weights_file, weights2_size, cnn_layer2_filters * cnn_layer2_filter_dims[2]); 
-    FlatVectorPtr<float> bias_2 = get_tensor(bias_file, cnn_layer2_filters, 1);
+    FlatVectorPtr<float> weights_2 = get_tensor(weights_file, weights2_size, cnn_layer2_filters * cnn_layer2_filter_dims[2]); //36864,64*64=4096
+    FlatVectorPtr<float> bias_2 = get_tensor(bias_file, cnn_layer2_filters, 1); // 64,1
 
     int input3_size = 9216; // num_features
     int layer3_size = 512; // num units in hidden layer 1
     int layer4_size = 10;
 
 
-    FlatVectorPtr<float> weights_3 = get_tensor(weights_file, layer3_size * input3_size, input3_size);
-    FlatVectorPtr<float> bias_3 = get_tensor(bias_file, layer3_size, 1);
-    FlatVectorPtr<float> weights_4 = get_tensor(weights_file, layer4_size * layer3_size, layer3_size);
-    FlatVectorPtr<float> bias_4 = get_tensor(bias_file, layer4_size, 1);
+    FlatVectorPtr<float> weights_3 = get_tensor(weights_file, layer3_size * input3_size, input3_size);//512*9216, 9216
+    FlatVectorPtr<float> bias_3 = get_tensor(bias_file, layer3_size, 1);//512,1
+    FlatVectorPtr<float> weights_4 = get_tensor(weights_file, layer4_size * layer3_size, layer3_size);//10*512, 512
+    FlatVectorPtr<float> bias_4 = get_tensor(bias_file, layer4_size, 1);//10,1
 
     float* w3 =  weights_3->values()->asMutable<float>();
     float* w4 =  weights_4->values()->asMutable<float>();
@@ -1198,16 +1200,16 @@ void MLFunctionsTest::test_conv2d() {
     float* bias_4_values = bias_4->values()->asMutable<float>();
     
 
-    FlatVectorPtr<float> bias_3_mat = maker.flatVector<float>(num_samples * layer3_size);
+    FlatVectorPtr<float> bias_3_mat = maker.flatVector<float>(num_samples * layer3_size);//512
     for(int i=0; i < bias_3_mat->size(); i++)
       bias_3_mat->set(i, bias_3_values[i%layer3_size]);
     
-    FlatVectorPtr<float> bias_4_mat = maker.flatVector<float>(num_samples * layer4_size);
+    FlatVectorPtr<float> bias_4_mat = maker.flatVector<float>(num_samples * layer4_size);//10
     for(int i=0; i < bias_4_mat->size(); i++)
       bias_4_mat->set(i, bias_4_values[i%layer4_size]);
 
 
-    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples * input_dims[2]);
+    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples * input_dims[2]);//784,1
     float* data = input->values()->asMutable<float>();
 
     std::vector<std::vector<float>> featureVectors;

@@ -720,7 +720,18 @@ class PlanBuilder {
     return {}; // Return an empty vector if the nodeId is not found
   }
 
-
+void editExprStrings(core::PlanNodeId& nodeId, std::vector<std::string> newExprStrings){
+    auto it = exprStringsMap_.find(nodeId);
+    if (it != exprStringsMap_.end()) {
+       it->second = newExprStrings;
+    }
+  }
+//Todo: fix after plan
+void replacePlan(core::PlanNodePtr newPlan){
+    core::PlanNodeId id = planNode_->id();
+    exprStringsMap_.erase(id);
+    planNode_ = newPlan;
+}
   /// Add a user-defined PlanNode as the root of the plan. 'func' takes
   /// the current root of the plan and returns the new root.
   PlanBuilder& addNode(

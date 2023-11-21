@@ -57,7 +57,7 @@ std::vector<std::vector<float>> create_weight_block(int total_size, float* value
 std::vector<std::vector<float>> create_block_index(int parts, int flag);
 FileStructure block_to_files(std::vector<std::vector<float>> valuesArray, int parts, int flag);
 DataFrame data_generate(int features, int samples, int first_layer, int second_layer);
-PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, int second_layer, int memoryLimit, std::vector<std::vector<float>> feature, int splitsNum, int threadsNum);
+PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, int second_layer);
 PlanBuilderExec build_plan_udf_torch(DataFrame data, int features, int first_layer, int second_layer, int memoryLimit, std::vector<std::vector<float>> feature, int splitsNum, int threadsNum);
 void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector<std::vector<float>> features, int splitsNum, int threadsNum);
 DynamicMetaData decision_maker(PlanBuilder& planBuilder);
@@ -67,6 +67,8 @@ void exec_plan_relational(PlanBuilderExec planBuilderOpt, int memoryLimit, std::
 std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum);
 void exec_pure_torch(int num_samples, int input_size, int layer1_size, int layer2_size,float* w1,float* w2,float* b1,float* b2,float* input_values);
 void test_optimizer_demo(int argc, char** argv);
+std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, DataFrame data, int features, int first_layer, int second_layer, std::string test_action);
+PlanBuilderExec rewriten_tradition(PlanBuilderExec plan_s1_builder);
 
 auto pool_ = memory::addDefaultLeafMemoryPool();
 std::shared_ptr<folly::Executor> executor_{
@@ -327,7 +329,7 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
   return data;
 }
 
-PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, int second_layer, int memoryLimit, std::vector<std::vector<float>> feature, int splitsNum, int threadsNum){
+PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, int second_layer){
   auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
   auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
   core::PlanNodeId p0;
@@ -668,21 +670,21 @@ void test_optimizer_demo(int argc, char** argv){
   int splits_num_udf = 4;
   int threads_num_udf = 4;
 
-  int memory_limit_rela = 10000;//mb
+  int memory_limit_rela = 100000;//mb
   int splits_num_rela = 4;
   int threads_num_rela = 4;
   
-  int flag = 3;
+  int flag = 1;
   auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
   if (flag == 0){
-    auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
+    auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size);
     exec_plan_udf(udf_plan_builder, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
   }
   else if(flag == 1){
     auto udf_plan_torch_builder = build_plan_udf_torch(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
   }
   else if(flag == 2){
-    auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
+    auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size);
     auto relational_plan = optiming_plan(*(udf_plan_builder.planBuilder), data, num_samples, input_features_size, first_layer_output_size, second_layer_output_size);
     exec_plan_relational(relational_plan.planBuilderExec, memory_limit_rela, relational_plan.inputsPaths, relational_plan.weightPaths, threads_num_rela);
   }
@@ -712,6 +714,104 @@ void test_optimizer_demo(int argc, char** argv){
     
 }
 
+std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, DataFrame data, int features, int first_layer, int second_layer, std::string test_action){
+  if (test_action == "Merge2Single"){
+    // auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+    // auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+    // core::PlanNodeId p0;
+    // auto oldplan = myPlan2->sources()[0];
+// int oldPlanId = std::stoi(oldplan->id());
+    // auto first = AssertQueryBuilder(udf_plan_builder.planNode()).copyResults(pool_.get());
+    // std::cout << "before Results:" << first->toString() << std::endl;
+    std::vector<int> dimensions;
+    dimensions.push_back(features);
+    dimensions.push_back(first_layer);
+    dimensions.push_back(second_layer);
+
+    float* weights[2] = {data.weights[0], data.weights[1]};
+    float* bias[2] = {data.bias[0], data.bias[1]};
+
+    exec::registerVectorFunction(
+      "torchDNN",
+      TorchDNN::signatures(),
+      std::make_unique<TorchDNN>(weights, bias, dimensions)
+    );
+
+    core::PlanNodeId p = "0";
+    auto oldplan = udf_plan_builder.planNode()->sources()[0];
+    udf_plan_builder.replacePlan(oldplan);
+    udf_plan_builder.project({"torchDNN(v)"});
+    // udf_plan_builder.editExprStrings(p, {"torchDNN(v)"});
+    // auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    // auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
+    //               .tableScan(asRowType(inputRowVector->type()))
+    //               .capturePlanNodeId(p0)
+    //               .project({"torchDNN(v)"})
+    //               .planBuild();
+    // std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
+    // auto second = AssertQueryBuilder(udf_plan_builder.planNode()).copyResults(pool_.get());
+    // std::cout << "after Results:" << second->toString() << std::endl;
+
+    std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(udf_plan_builder);
+    std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p});
+    PlanBuilderExec planBuilderExec(planBuilderShared, {p});
+    exec_plan_udf(planBuilderExec, 1000, data.features, 4, 4);
+    return planBuilderExecShared;
+  }
+  else if (test_action == "Mul2JoinAgg"){
+    core::PlanNodeId p = "0";
+    std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(udf_plan_builder);
+    std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p});
+    return planBuilderExecShared;
+  }
+  else {
+    core::PlanNodeId p = "0";
+    std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(udf_plan_builder);
+    std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p});
+    return planBuilderExecShared;
+  }
+}
+
+void test_optimizer_mcts(int argc, char** argv){
+  folly::init(&argc, &argv, false);
+  functions::prestosql::registerAllScalarFunctions();
+  aggregate::prestosql::registerAllAggregateFunctions();
+  parse::registerTypeResolver();
+  const std::string kHiveConnectorId = "test-hive";
+  auto hiveConnector =
+      connector::getConnectorFactory(
+          connector::hive::HiveConnectorFactory::kHiveConnectorName)
+          ->newConnector(kHiveConnectorId, nullptr);
+  connector::registerConnector(hiveConnector);
+
+  filesystems::registerLocalFileSystem();
+  dwrf::registerDwrfReaderFactory();
+
+  int input_features_size = 500;//597540
+  int num_samples = 1000;
+  int first_layer_output_size = 1024;
+  int second_layer_output_size = 14588;
+  auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
+  // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+  auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size);
+  // exec_plan_udf(udf_plan_builder, 1000, data.features, 4, 4);
+  std::string test_action1 = "Merge2Single";
+  std::string test_action2 = "Mul2JoinAgg";
+
+  auto plan_s1_builder_1 = rewriten_udf(*(udf_plan_builder.planBuilder), data, input_features_size, first_layer_output_size, second_layer_output_size, test_action1);
+  // exec_plan_udf(plan_s1_builder_1, 1000, data.features, 4, 4);
+  // auto plan_s2_builder_1 = rewriten_tradition(plan_s1_builder_1);
+  // auto cost = cost_estimation(plan_s2_builder_1);
+  // std::cout << cost << std::endl;
+
+  // auto plan_s1_builder_2 = rewriten_udf(udf_plan_builder, test_action2);
+  // auto plan_s2_builder_2 = rewriten_tradition(plan_s1_builder_2);
+  // auto cost = cost_estimation(plan_s2_builder_2);
+  // std::cout << cost << std::endl;
+
+}
+
 int main(int argc, char** argv) {
-    test_optimizer_demo(argc, argv);
+    // test_optimizer_demo(argc, argv);
+    test_optimizer_mcts(argc, argv);
 }
