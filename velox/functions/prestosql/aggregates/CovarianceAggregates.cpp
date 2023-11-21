@@ -559,7 +559,7 @@ template <
     typename TIntermediateInput,
     typename TIntermediateResult,
     typename TResultAccessor>
-bool registerCovariance(const std::string& name) {
+exec::AggregateRegistrationResult registerCovariance(const std::string& name) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures = {
       // (double, double) -> double
       exec::AggregateFunctionSignatureBuilder()
@@ -582,7 +582,9 @@ bool registerCovariance(const std::string& name) {
       std::move(signatures),
       [](core::AggregationNode::Step step,
          const std::vector<TypePtr>& argTypes,
-         const TypePtr& resultType) -> std::unique_ptr<exec::Aggregate> {
+         const TypePtr& resultType,
+         const core::QueryConfig& /*config*/)
+          -> std::unique_ptr<exec::Aggregate> {
         auto rawInputType = exec::isRawInput(step)
             ? argTypes[0]
             : (exec::isPartialOutput(step) ? DOUBLE() : resultType);

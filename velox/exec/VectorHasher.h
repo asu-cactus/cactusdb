@@ -45,13 +45,6 @@ class UniqueValue {
     }
   }
 
-  explicit UniqueValue(Date value) {
-    // The number of valid bytes of Date stored in data_ is
-    // (int64_t)value.days().
-    size_ = sizeof(int64_t);
-    data_ = value.days();
-  }
-
   uint32_t size() const {
     return size_;
   }
@@ -301,7 +294,6 @@ class VectorHasher {
       case TypeKind::BIGINT:
       case TypeKind::VARCHAR:
       case TypeKind::VARBINARY:
-      case TypeKind::DATE:
         return true;
       default:
         return false;
@@ -318,6 +310,10 @@ class VectorHasher {
   }
 
   std::string toString() const;
+
+  size_t numUniqueValues() const {
+    return uniqueValues_.size();
+  }
 
  private:
   static constexpr uint32_t kStringASRangeMaxSize = 7;
@@ -423,7 +419,7 @@ class VectorHasher {
       unique.setId(uniqueValues_.size() + 1);
       if (uniqueValues_.insert(unique).second) {
         if (uniqueValues_.size() > kMaxDistinct) {
-          distinctOverflow_ = true;
+          setDistinctOverflow();
         }
       }
     }
@@ -523,6 +519,10 @@ class VectorHasher {
 
   void copyStringToLocal(const UniqueValue* unique);
 
+  void setDistinctOverflow();
+
+  void setRangeOverflow();
+
   static inline bool
   isNullAt(const char* group, int32_t nullByte, uint8_t nullMask) {
     return (group[nullByte] & nullMask) != 0;
@@ -578,11 +578,6 @@ class VectorHasher {
 };
 
 template <>
-inline int64_t VectorHasher::toInt64(Date value) const {
-  return value.days();
-}
-
-template <>
 bool VectorHasher::makeValueIdsForRows<TypeKind::VARCHAR>(
     char** groups,
     int32_t numGroups,
@@ -626,7 +621,7 @@ inline uint64_t VectorHasher::valueId(StringView value) {
   copyStringToLocal(&*pair.first);
   if (!rangeOverflow_) {
     if (size > kStringASRangeMaxSize) {
-      rangeOverflow_ = true;
+      setRangeOverflow();
     } else {
       updateRange(stringAsNumber(data, size));
     }
@@ -701,6 +696,11 @@ template <>
 bool VectorHasher::makeValueIdsDecoded<bool, false>(
     const SelectivityVector& rows,
     uint64_t* result);
+
+/// Creates VectorHasher instances for specified columns.
+std::vector<std::unique_ptr<VectorHasher>> createVectorHashers(
+    const RowTypePtr& rowType,
+    const std::vector<core::FieldAccessTypedExprPtr>& keys);
 
 } // namespace facebook::velox::exec
 

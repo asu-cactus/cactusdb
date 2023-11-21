@@ -25,7 +25,6 @@ namespace facebook::velox::exec {
 class Driver;
 class JoinBridge;
 class LocalExchangeMemoryManager;
-class LocalExchangeSource;
 class MergeSource;
 class MergeJoinSource;
 class Split;
@@ -43,7 +42,7 @@ struct BarrierState {
   /// all hashtables from the peers and assembles them into one (HashBuilder
   /// operator does that). After the last drier done its work, the promises are
   /// fulfilled and the non-last drivers can continue.
-  std::vector<ContinuePromise> promises;
+  std::vector<ContinuePromise> allPeersFinishedPromises;
 };
 
 /// Structure to accumulate splits for distribution.

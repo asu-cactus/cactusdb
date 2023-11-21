@@ -15,10 +15,18 @@
  */
 #pragma once
 
+#include <folly/Synchronized.h>
+
 #include "velox/common/memory/HashStringAllocator.h"
 #include "velox/core/PlanNode.h"
+#include "velox/core/QueryConfig.h"
+#include "velox/exec/AggregateUtil.h"
 #include "velox/expression/FunctionSignature.h"
 #include "velox/vector/BaseVector.h"
+
+namespace facebook::velox::core {
+class ExpressionEvaluator;
+}
 
 namespace facebook::velox::exec {
 
@@ -54,12 +62,6 @@ class Aggregate {
     return 1;
   }
 
-  /// Return an alignment that satisfies both the accumulator alignment
-  /// requirement of this function and the alignment passed in.
-  int32_t combineAlignment(int32_t alignment) const {
-    return combineAlignmentInternal(alignment);
-  }
-
   // Return true if accumulator is allocated from external memory, e.g. memory
   // not managed by Velox.
   virtual bool accumulatorUsesExternalMemory() const {
@@ -86,6 +88,18 @@ class Aggregate {
   void setAllocator(HashStringAllocator* allocator) {
     setAllocatorInternal(allocator);
   }
+
+  /// Called for functions that take one or more lambda expression as input.
+  /// These expressions must appear after all non-lambda inputs.
+  /// These expressions cannot use captures.
+  ///
+  /// @param lambdaExpressions A list of lambda inputs (in the order they appear
+  /// in function call).
+  /// @param expressionEvaluator An instance of ExpressionEvaluator to use for
+  /// evaluating lambda expressions.
+  void setLambdaExpressions(
+      std::vector<core::LambdaTypedExprPtr> lambdaExpressions,
+      std::shared_ptr<core::ExpressionEvaluator> expressionEvaluator);
 
   // Sets the offset and null indicator position of 'this'.
   // @param offset Offset in bytes from the start of the row of the accumulator
@@ -193,7 +207,7 @@ class Aggregate {
   //
   // 'result' and its parts are expected to be singly referenced. If
   // other threads or operators hold references that they would use
-  // after 'result' has been updated by this, effects will b unpredictable.
+  // after 'result' has been updated by this, effects will be unpredictable.
   virtual void
   extractValues(char** groups, int32_t numGroups, VectorPtr* result) = 0;
 
@@ -209,8 +223,13 @@ class Aggregate {
   /// Produces an accumulator initialized from a single value for each
   /// row in 'rows'. The raw arguments of the aggregate are in 'args',
   /// which have the same meaning as in addRawInput. The result is
-  /// placed in 'result'. 'result is allocated if nullptr, otherwise
-  /// it is expected to be a writable flat vector of the right type.
+  /// placed in 'result'. 'result' is expected to be a writable flat vector of
+  /// the right type.
+  ///
+  /// @param rows A set of rows to produce intermediate results for. The
+  /// 'result' is expected to have rows.size() rows. Invalid rows represent rows
+  /// that were masked out, these need to have correct intermediate results as
+  /// well. It is possible that all entries in 'rows' are invalid (masked out).
   virtual void toIntermediate(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -237,7 +256,8 @@ class Aggregate {
       const std::string& name,
       core::AggregationNode::Step step,
       const std::vector<TypePtr>& argTypes,
-      const TypePtr& resultType);
+      const TypePtr& resultType,
+      const core::QueryConfig& config);
 
   // Returns the intermediate type for 'name' with signature
   // 'argTypes'. Throws if cannot resolve.
@@ -246,11 +266,6 @@ class Aggregate {
       const std::vector<TypePtr>& argTypes);
 
  protected:
-  // The following internal function should not be overriden by any user-defined
-  // aggregation function. They shall only be overridden by
-  // AggregateCompanionAdapter.
-  virtual int32_t combineAlignmentInternal(int32_t otherAlignment) const;
-
   virtual void setAllocatorInternal(HashStringAllocator* allocator);
 
   virtual void setOffsetsInternal(
@@ -265,6 +280,7 @@ class Aggregate {
   // accumulator update methods. Use like: { auto tracker =
   // trackRowSize(group); update(group); }
   RowSizeTracker<char, uint32_t> trackRowSize(char* group) {
+    VELOX_DCHECK(!isFixedSize());
     return RowSizeTracker<char, uint32_t>(group[rowSizeOffset_], *allocator_);
   }
 
@@ -312,9 +328,23 @@ class Aggregate {
   }
 
   template <typename T>
+  void destroyAccumulator(char* group) const {
+    auto accumulator = value<T>(group);
+    std::destroy_at(accumulator);
+    memset(accumulator, 0, sizeof(T));
+  }
+
+  template <typename T>
+  void destroyAccumulators(folly::Range<char**> groups) const {
+    for (auto group : groups) {
+      destroyAccumulator<T>(group);
+    }
+  }
+
+  template <typename T>
   static uint64_t* getRawNulls(T* vector) {
     if (vector->mayHaveNulls()) {
-      BufferPtr nulls = vector->mutableNulls(vector->size());
+      BufferPtr& nulls = vector->mutableNulls(vector->size());
       return nulls->asMutable<uint64_t>();
     } else {
       return nullptr;
@@ -347,7 +377,9 @@ class Aggregate {
   // operator for this aggregate. If 0, clearing the null as part of update
   // is not needed.
   uint64_t numNulls_ = 0;
-  HashStringAllocator* allocator_;
+  HashStringAllocator* allocator_{nullptr};
+  std::shared_ptr<core::ExpressionEvaluator> expressionEvaluator_{nullptr};
+  std::vector<core::LambdaTypedExprPtr> lambdaExpressions_;
 
   // When selectivity vector has holes, in the pushdown, we need to generate a
   // different indices vector as the one we get from the DecodedVector is simply
@@ -360,37 +392,40 @@ class Aggregate {
 using AggregateFunctionFactory = std::function<std::unique_ptr<Aggregate>(
     core::AggregationNode::Step step,
     const std::vector<TypePtr>& argTypes,
-    const TypePtr& resultType)>;
+    const TypePtr& resultType,
+    const core::QueryConfig& config)>;
 
 /// Register an aggregate function with the specified name and signatures. If
 /// registerCompanionFunctions is true, also register companion aggregate and
-/// scalar functions with it.
-bool registerAggregateFunction(
+/// scalar functions with it. When functions with `name` already exist, if
+/// overwrite is true, existing registration will be replaced. Otherwise, return
+/// false without overwriting the registry.
+AggregateRegistrationResult registerAggregateFunction(
     const std::string& name,
     std::vector<std::shared_ptr<AggregateFunctionSignature>> signatures,
     AggregateFunctionFactory factory,
-    bool registerCompanionFunctions = false);
+    bool registerCompanionFunctions = false,
+    bool overwrite = false);
 
 /// Returns signatures of the aggregate function with the specified name.
 /// Returns empty std::optional if function with that name is not found.
 std::optional<std::vector<std::shared_ptr<AggregateFunctionSignature>>>
 getAggregateFunctionSignatures(const std::string& name);
 
-using AggregateFunctionSignatureMap = std::unordered_map<
-    std::string,
-    std::vector<std::shared_ptr<AggregateFunctionSignature>>>;
+using AggregateFunctionSignatureMap =
+    std::unordered_map<std::string, std::vector<AggregateFunctionSignaturePtr>>;
 
 /// Returns a mapping of all Aggregate functions in registry.
 /// The mapping is function name -> list of function signatures.
 AggregateFunctionSignatureMap getAggregateFunctionSignatures();
 
 struct AggregateFunctionEntry {
-  std::vector<std::shared_ptr<AggregateFunctionSignature>> signatures;
+  std::vector<AggregateFunctionSignaturePtr> signatures;
   AggregateFunctionFactory factory;
 };
 
-using AggregateFunctionMap =
-    std::unordered_map<std::string, AggregateFunctionEntry>;
+using AggregateFunctionMap = folly::Synchronized<
+    std::unordered_map<std::string, AggregateFunctionEntry>>;
 
 AggregateFunctionMap& aggregateFunctions();
 

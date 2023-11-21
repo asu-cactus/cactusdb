@@ -35,7 +35,7 @@ DEFINE_bool(use_random_seed, false, "");
 namespace facebook::velox::dwio::common {
 
 using namespace facebook::velox::test;
-using namespace facebook::velox::dwio::type::fbhive;
+using namespace facebook::velox::type::fbhive;
 using namespace facebook::velox::dwio::common;
 using namespace facebook::velox;
 using namespace facebook::velox::common;
@@ -94,7 +94,7 @@ void E2EFilterTestBase::readWithoutFilter(
     uint64_t& time) {
   dwio::common::ReaderOptions readerOpts{leafPool_.get()};
   dwio::common::RowReaderOptions rowReaderOpts;
-  std::string_view data(sinkPtr_->getData(), sinkPtr_->size());
+  std::string_view data(sinkPtr_->data(), sinkPtr_->size());
   auto input = std::make_unique<BufferedInput>(
       std::make_shared<InMemoryReadFile>(data), readerOpts.getMemoryPool());
   auto reader = makeReader(readerOpts, std::move(input));
@@ -146,11 +146,12 @@ void E2EFilterTestBase::readWithFilter(
     bool skipCheck) {
   dwio::common::ReaderOptions readerOpts{leafPool_.get()};
   dwio::common::RowReaderOptions rowReaderOpts;
-  std::string_view data(sinkPtr_->getData(), sinkPtr_->size());
+  std::string_view data(sinkPtr_->data(), sinkPtr_->size());
   auto input = std::make_unique<BufferedInput>(
       std::make_shared<InMemoryReadFile>(data), readerOpts.getMemoryPool());
   auto reader = makeReader(readerOpts, std::move(input));
-  // The  spec must stay live over the lifetime of the reader.
+
+  // The spec must stay live over the lifetime of the reader.
   setUpRowReaderOptions(rowReaderOpts, spec);
   OwnershipChecker ownershipChecker;
   auto rowReader = reader->createRowReader(rowReaderOpts);
@@ -452,7 +453,7 @@ void E2EFilterTestBase::testMetadataFilterImpl(
   specC->setChannel(0);
   ReaderOptions readerOpts{leafPool_.get()};
   RowReaderOptions rowReaderOpts;
-  std::string_view data(sinkPtr_->getData(), sinkPtr_->size());
+  std::string_view data(sinkPtr_->data(), sinkPtr_->size());
   auto input = std::make_unique<BufferedInput>(
       std::make_shared<InMemoryReadFile>(data), readerOpts.getMemoryPool());
   auto reader = makeReader(readerOpts, std::move(input));
@@ -577,6 +578,25 @@ void E2EFilterTestBase::testMetadataFilter() {
         "not (a = 1 and b.c = 2)",
         [](int64_t a, int64_t c) { return !(a == 1 && c == 2); });
   }
+  {
+    SCOPED_TRACE("Leaf node lifecycle");
+    auto column = vectorMaker.flatVector<int64_t>(batchSize_, folly::identity);
+    batches = {
+        vectorMaker.rowVector({"a", "b", "c"}, {column, column, column})};
+    writeToMemory(batches[0]->type(), batches, false);
+    auto spec = std::make_shared<common::ScanSpec>("<root>");
+    spec->addAllChildFields(*batches[0]->type());
+    auto untypedExpr = parse::parseExpr("a = 1 or b + c = 2", {});
+    auto typedExpr = core::Expressions::inferTypes(
+        untypedExpr, batches[0]->type(), leafPool_.get());
+    auto metadataFilter =
+        std::make_shared<MetadataFilter>(*spec, *typedExpr, &evaluator);
+    // Top level metadata filter is null, so leaf node shoud not be referenced
+    // from ScanSpec.
+    ASSERT_EQ(spec->childByName("a")->numMetadataFilters(), 0);
+    ASSERT_EQ(spec->childByName("b")->numMetadataFilters(), 0);
+    ASSERT_EQ(spec->childByName("c")->numMetadataFilters(), 0);
+  }
 }
 
 void E2EFilterTestBase::testSubfieldsPruning() {
@@ -630,7 +650,7 @@ void E2EFilterTestBase::testSubfieldsPruning() {
       ->setFilter(common::createBigintValues({1}, false));
   ReaderOptions readerOpts{leafPool_.get()};
   RowReaderOptions rowReaderOpts;
-  std::string_view data(sinkPtr_->getData(), sinkPtr_->size());
+  std::string_view data(sinkPtr_->data(), sinkPtr_->size());
   auto input = std::make_unique<BufferedInput>(
       std::make_shared<InMemoryReadFile>(data), readerOpts.getMemoryPool());
   auto reader = makeReader(readerOpts, std::move(input));
@@ -695,7 +715,7 @@ void E2EFilterTestBase::testMutationCornerCases() {
   auto& rowType = batches[0]->type();
   writeToMemory(rowType, batches, false);
   ReaderOptions readerOpts{leafPool_.get()};
-  std::string_view data(sinkPtr_->getData(), sinkPtr_->size());
+  std::string_view data(sinkPtr_->data(), sinkPtr_->size());
   auto input = std::make_unique<BufferedInput>(
       std::make_shared<InMemoryReadFile>(data), readerOpts.getMemoryPool());
   auto reader = makeReader(readerOpts, std::move(input));
