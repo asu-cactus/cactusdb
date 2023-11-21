@@ -30,7 +30,7 @@ using namespace facebook::velox::memory;
 namespace facebook::velox::dwrf {
 
 /* static */ std::unique_ptr<Writer> E2EWriterTestUtil::writeData(
-    std::unique_ptr<DataSink> sink,
+    std::unique_ptr<FileSink> sink,
     const std::shared_ptr<const Type>& type,
     const std::vector<VectorPtr>& batches,
     const std::shared_ptr<Config>& config,
@@ -39,16 +39,16 @@ namespace facebook::velox::dwrf {
         layoutPlannerFactory,
     const int64_t writerMemoryCap) {
   // write file to memory
-  WriterOptions options;
+  dwrf::WriterOptions options;
   options.config = config;
   options.schema = type;
   options.memoryBudget = writerMemoryCap;
   options.flushPolicyFactory = flushPolicyFactory;
   options.layoutPlannerFactory = layoutPlannerFactory;
 
-  auto writer = std::make_unique<Writer>(
-      options,
+  auto writer = std::make_unique<dwrf::Writer>(
       std::move(sink),
+      options,
       velox::memory::defaultMemoryManager().addRootPool());
 
   for (size_t i = 0; i < batches.size(); ++i) {
@@ -74,7 +74,8 @@ namespace facebook::velox::dwrf {
     const int64_t writerMemoryCap,
     const bool verifyContent) {
   // write file to memory
-  auto sink = std::make_unique<MemorySink>(pool, 200 * 1024 * 1024);
+  auto sink = std::make_unique<MemorySink>(
+      200 * 1024 * 1024, FileSink::Options{.pool = &pool});
   auto sinkPtr = sink.get();
 
   // Writer owns sink. Keeping writer alive to avoid deleting the sink.
@@ -88,10 +89,10 @@ namespace facebook::velox::dwrf {
       writerMemoryCap);
   // read it back and compare
   auto readFile = std::make_shared<InMemoryReadFile>(
-      std::string_view(sinkPtr->getData(), sinkPtr->size()));
+      std::string_view(sinkPtr->data(), sinkPtr->size()));
   auto input = std::make_unique<BufferedInput>(readFile, pool);
 
-  ReaderOptions readerOpts{&pool};
+  dwio::common::ReaderOptions readerOpts{&pool};
   RowReaderOptions rowReaderOpts;
   auto reader = std::make_unique<DwrfReader>(readerOpts, std::move(input));
   EXPECT_GE(numStripesUpper, reader->getNumberOfStripes());

@@ -25,10 +25,10 @@ DEPENDENCY_DIR=${DEPENDENCY_DIR:-$(pwd)}
 
 function install_aws-sdk-cpp {
   local AWS_REPO_NAME="aws/aws-sdk-cpp"
-  local AWS_SDK_VERSION="1.9.96"
+  local AWS_SDK_VERSION="1.10.57"
 
   github_checkout $AWS_REPO_NAME $AWS_SDK_VERSION --depth 1 --recurse-submodules
-  cmake_install -DCMAKE_BUILD_TYPE=Debug -DBUILD_SHARED_LIBS:BOOL=OFF -DMINIMIZE_SIZE:BOOL=ON -DENABLE_TESTING:BOOL=OFF -DBUILD_ONLY:STRING="s3;identity-management" -DCMAKE_INSTALL_PREFIX="${DEPENDENCY_DIR}/install"
+  cmake_install -DCMAKE_BUILD_TYPE=Debug -DBUILD_SHARED_LIBS:BOOL=OFF -DMINIMIZE_SIZE:BOOL=ON -DENABLE_TESTING:BOOL=OFF -DBUILD_ONLY:STRING="s3;identity-management"
 }
 
 function install_gcs-sdk-cpp {
@@ -61,6 +61,35 @@ function install_gcs-sdk-cpp {
     -DGOOGLE_CLOUD_CPP_ENABLE=storage
 }
 
+function install_azure-storage-sdk-cpp {
+  github_checkout azure/azure-sdk-for-cpp azure-storage-blobs_12.8.0
+
+  cd sdk/core/azure-core
+  if ! grep -q "baseline" vcpkg.json; then
+    # build and install azure-core with the version compatible with system pre-installed openssl
+    openssl_version=$(openssl version -v | awk '{print $2}')
+    if [[ "$openssl_version" == 1.1.1* ]]; then
+      openssl_version="1.1.1n"
+    fi
+    sed -i 's/"version-string"/"builtin-baseline": "dafef74af53669ef1cc9015f55e0ce809ead62aa","version-string"/' vcpkg.json
+    sed -i "s/\"version-string\"/\"overrides\": [{ \"name\": \"openssl\", \"version-string\": \"$openssl_version\" }],\"version-string\"/" vcpkg.json
+  fi
+  cmake_install -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+
+  cd -
+  # install azure-storage-common
+  cd sdk/storage/azure-storage-common
+  cmake_install -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+
+  cd -
+  # install azure-storage-blobs
+  cd sdk/storage/azure-storage-blobs
+  if ! grep -q "baseline" vcpkg.json; then
+    sed -i 's/"version-semver"/"builtin-baseline": "dafef74af53669ef1cc9015f55e0ce809ead62aa","version-semver"/' vcpkg.json
+  fi
+  cmake_install -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+}
+
 function install_libhdfs3 {
   github_checkout apache/hawq master
   cd $DEPENDENCY_DIR/hawq/depends/libhdfs3
@@ -76,7 +105,6 @@ function install_libhdfs3 {
   cmake_install
 }
 
-DEPENDENCY_DIR=${DEPENDENCY_DIR:-$(pwd)}
 cd "${DEPENDENCY_DIR}" || exit
 # aws-sdk-cpp missing dependencies
 
@@ -88,10 +116,15 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
       apt install -y --no-install-recommends libxml2-dev libgsasl7-dev uuid-dev
       # Dependencies of GCS, probably a workaround until the docker image is rebuilt
       apt install -y --no-install-recommends libc-ares-dev libcurl4-openssl-dev
+      # Dependencies of Azure Storage Blob cpp
+      apt install -y openssl
    else # Assume Fedora/CentOS
       yum -y install libxml2-devel libgsasl-devel libuuid-devel
       # Dependencies of GCS, probably a workaround until the docker image is rebuilt
       yum -y install curl-devel c-ares-devel
+      # Dependencies of Azure Storage Blob Cpp
+      yum -y install perl-IPC-Cmd
+      yum -y install openssl
    fi
 fi
 
@@ -102,12 +135,14 @@ fi
 install_aws=0
 install_gcs=0
 install_hdfs=0
+install_abfs=0
 
 if [ "$#" -eq 0 ]; then
     # Install all adapters by default
     install_aws=1
     install_gcs=1
     install_hdfs=1
+    install_abfs=1
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -122,6 +157,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     hdfs)
       install_hdfs=1
+      shift # past argument
+      ;;
+    abfs)
+      install_abfs=1
       shift # past argument
       ;;
     *)
@@ -139,6 +178,9 @@ if [ $install_aws -eq 1 ]; then
 fi
 if [ $install_hdfs -eq 1 ]; then
   install_libhdfs3
+fi
+if [ $install_abfs -eq 1 ]; then
+  install_azure-storage-sdk-cpp
 fi
 
 _ret=$?

@@ -22,6 +22,14 @@
 namespace facebook::velox::functions {
 namespace {
 
+struct ExtraParams {
+  union params {
+    struct round {
+      std::optional<int32_t> decimal{};
+    } round;
+  } params;
+};
+
 template <
     typename R /* Result Type */,
     typename A /* Argument1 */,
@@ -102,9 +110,13 @@ template <
     typename R /* Result Type */,
     typename A /* Argument */,
     typename Operation /* Arithmetic operation */>
-class DecimalUnaryBaseFunction : public exec::VectorFunction {
+class DecimalUnaryFunction : public exec::VectorFunction {
  public:
-  explicit DecimalUnaryBaseFunction(uint8_t aRescale) : aRescale_(aRescale) {}
+  explicit DecimalUnaryFunction(
+      uint8_t aPrecision,
+      uint8_t aRescale,
+      const ExtraParams& param)
+      : aPrecision_(aPrecision), aRescale_(aRescale), param_(param) {}
 
   void apply(
       const SelectivityVector& rows,
@@ -119,14 +131,16 @@ class DecimalUnaryBaseFunction : public exec::VectorFunction {
       // Fast path for constant vectors.
       auto constant = args[0]->asUnchecked<SimpleVector<A>>()->valueAt(0);
       context.applyToSelectedNoThrow(rows, [&](auto row) {
-        Operation::template apply<R, A>(rawResults[row], constant, aRescale_);
+        Operation::template apply<R, A>(
+            rawResults[row], constant, aPrecision_, aRescale_, param_);
       });
     } else {
       // Fast path for flat.
       auto flatA = args[0]->asUnchecked<FlatVector<A>>();
       auto rawA = flatA->mutableRawValues();
       context.applyToSelectedNoThrow(rows, [&](auto row) {
-        Operation::template apply<R, A>(rawResults[row], rawA[row], aRescale_);
+        Operation::template apply<R, A>(
+            rawResults[row], rawA[row], aPrecision_, aRescale_, param_);
       });
     }
   }
@@ -146,7 +160,9 @@ class DecimalUnaryBaseFunction : public exec::VectorFunction {
     return result->asUnchecked<FlatVector<R>>()->mutableRawValues();
   }
 
+  const uint8_t aPrecision_;
   const uint8_t aRescale_;
+  const ExtraParams param_;
 };
 
 template <typename A /* Argument */>
@@ -160,28 +176,86 @@ class DecimalBetweenFunction : public exec::VectorFunction {
       exec::EvalCtx& context,
       VectorPtr& result) const override {
     prepareResults(rows, resultType, context, result);
-    // Second and third arguments must always be constant.
-    VELOX_CHECK(args[1]->isConstantEncoding() && args[2]->isConstantEncoding());
-    auto constantB = args[1]->asUnchecked<SimpleVector<A>>()->valueAt(0);
-    auto constantC = args[2]->asUnchecked<SimpleVector<A>>()->valueAt(0);
+
+    // Fast path when the first argument is a flat vector.
     if (args[0]->isFlatEncoding()) {
-      // Fast path if first argument is flat.
-      auto flatA = args[0]->asUnchecked<FlatVector<A>>();
-      auto rawA = flatA->mutableRawValues();
-      context.applyToSelectedNoThrow(rows, [&](auto row) {
-        result->asUnchecked<FlatVector<bool>>()->set(
-            row, rawA[row] >= constantB && rawA[row] <= constantC);
-      });
+      auto rawA = args[0]->asUnchecked<FlatVector<A>>()->mutableRawValues();
+
+      if (args[1]->isConstantEncoding() && args[2]->isConstantEncoding()) {
+        auto constantB = args[1]->asUnchecked<SimpleVector<A>>()->valueAt(0);
+        auto constantC = args[2]->asUnchecked<SimpleVector<A>>()->valueAt(0);
+        context.applyToSelectedNoThrow(rows, [&](auto row) {
+          result->asUnchecked<FlatVector<bool>>()->set(
+              row, rawA[row] >= constantB && rawA[row] <= constantC);
+        });
+        return;
+      }
+
+      if (args[1]->isConstantEncoding() && args[2]->isFlatEncoding()) {
+        auto constantB = args[1]->asUnchecked<SimpleVector<A>>()->valueAt(0);
+        auto rawC = args[2]->asUnchecked<FlatVector<A>>()->mutableRawValues();
+        context.applyToSelectedNoThrow(rows, [&](auto row) {
+          result->asUnchecked<FlatVector<bool>>()->set(
+              row, rawA[row] >= constantB && rawA[row] <= rawC[row]);
+        });
+        return;
+      }
+
+      if (args[1]->isFlatEncoding() && args[2]->isConstantEncoding()) {
+        auto rawB = args[1]->asUnchecked<FlatVector<A>>()->mutableRawValues();
+        auto constantC = args[2]->asUnchecked<SimpleVector<A>>()->valueAt(0);
+        context.applyToSelectedNoThrow(rows, [&](auto row) {
+          result->asUnchecked<FlatVector<bool>>()->set(
+              row, rawA[row] >= rawB[row] && rawA[row] <= constantC);
+        });
+        return;
+      }
+
+      if (args[1]->isFlatEncoding() && args[2]->isFlatEncoding()) {
+        auto rawB = args[1]->asUnchecked<FlatVector<A>>()->mutableRawValues();
+        auto rawC = args[2]->asUnchecked<FlatVector<A>>()->mutableRawValues();
+        context.applyToSelectedNoThrow(rows, [&](auto row) {
+          result->asUnchecked<FlatVector<bool>>()->set(
+              row, rawA[row] >= rawB[row] && rawA[row] <= rawC[row]);
+        });
+        return;
+      }
     } else {
-      // Path if first argument is encoded.
+      // Fast path when the first argument is encoded but the second and third
+      // are constants.
       exec::DecodedArgs decodedArgs(rows, args, context);
-      auto a = decodedArgs.at(0);
-      context.applyToSelectedNoThrow(rows, [&](auto row) {
-        auto value = a->valueAt<A>(row);
-        result->asUnchecked<FlatVector<bool>>()->set(
-            row, value >= constantB && value <= constantC);
-      });
+      auto aDecoded = decodedArgs.at(0);
+      auto aDecodedData = aDecoded->data<A>();
+
+      if (args[1]->isConstantEncoding() && args[2]->isConstantEncoding()) {
+        auto constantB = args[1]->asUnchecked<SimpleVector<A>>()->valueAt(0);
+        auto constantC = args[2]->asUnchecked<SimpleVector<A>>()->valueAt(0);
+        context.applyToSelectedNoThrow(rows, [&](auto row) {
+          auto value = aDecodedData[aDecoded->index(row)];
+          result->asUnchecked<FlatVector<bool>>()->set(
+              row, value >= constantB && value <= constantC);
+        });
+        return;
+      }
     }
+
+    // Decode the input in all other cases.
+    exec::DecodedArgs decodedArgs(rows, args, context);
+    auto aDecoded = decodedArgs.at(0);
+    auto bDecoded = decodedArgs.at(1);
+    auto cDecoded = decodedArgs.at(2);
+
+    auto aDecodedData = aDecoded->data<A>();
+    auto bDecodedData = bDecoded->data<A>();
+    auto cDecodedData = cDecoded->data<A>();
+
+    context.applyToSelectedNoThrow(rows, [&](auto row) {
+      auto aValue = aDecodedData[aDecoded->index(row)];
+      auto bValue = bDecodedData[bDecoded->index(row)];
+      auto cValue = cDecodedData[cDecoded->index(row)];
+      result->asUnchecked<FlatVector<bool>>()->set(
+          row, aValue >= bValue && aValue <= cValue);
+    });
   }
 
  private:
@@ -328,12 +402,33 @@ class Divide {
 class Round {
  public:
   template <typename R, typename A>
-  inline static void apply(R& r, const A& a, uint8_t aRescale) {
-    // aRescale holds the scale of the input.
-    auto temp = a;
-    DecimalUtil::divideWithRoundUp<A, A, int128_t>(
-        temp, a, DecimalUtil::kPowersOfTen[aRescale], false, 0, 0);
-    r = temp;
+  inline static void apply(
+      R& r,
+      const A& a,
+      uint8_t aPrecision,
+      uint8_t aRescale,
+      const ExtraParams& extraParams) {
+    auto decimalParam = extraParams.params.round.decimal;
+    if (!decimalParam.has_value()) {
+      // Basic round function.
+      DecimalUtil::divideWithRoundUp<R, A, int128_t>(
+          r, a, DecimalUtil::kPowersOfTen[aRescale], false, 0, 0);
+      return;
+    }
+    // RoundN function.
+    if (a == 0 || aPrecision - aRescale + decimalParam.value() <= 0) {
+      r = 0;
+      return;
+    }
+    if (decimalParam >= aRescale) {
+      r = a;
+      return;
+    }
+    auto reScaleFactor =
+        DecimalUtil::kPowersOfTen[aRescale - decimalParam.value()];
+    DecimalUtil::divideWithRoundUp<R, A, int128_t>(
+        r, a, reScaleFactor, false, 0, 0);
+    r = r * reScaleFactor;
   }
 
   inline static uint8_t computeRescaleFactor(
@@ -345,16 +440,26 @@ class Round {
 
   inline static std::pair<uint8_t, uint8_t> computeResultPrecisionScale(
       const uint8_t aPrecision,
-      const uint8_t aScale) {
-    return {
-        std::min(38, aPrecision - aScale + std::min((uint8_t)1, aScale)), 0};
+      const uint8_t aScale,
+      const ExtraParams& extraParams) {
+    if (!extraParams.params.round.decimal.has_value()) {
+      // Return result precision and scale for basic round function.
+      return {
+          std::min(38, aPrecision - aScale + std::min((uint8_t)1, aScale)), 0};
+    }
+    return {std::min(38, aPrecision + 1), aScale};
   }
 };
 
 class Abs {
  public:
   template <typename R, typename A>
-  inline static void apply(R& r, const A& a, uint8_t /*aRescale*/) {
+  inline static void apply(
+      R& r,
+      const A& a,
+      uint8_t aPrecision,
+      uint8_t /*aRescale*/,
+      const ExtraParams& /*param*/) {
     if constexpr (std::is_same_v<R, A>) {
       r = a < 0 ? R(-a) : a;
     }
@@ -369,7 +474,8 @@ class Abs {
 
   inline static std::pair<uint8_t, uint8_t> computeResultPrecisionScale(
       const uint8_t aPrecision,
-      const uint8_t aScale) {
+      const uint8_t aScale,
+      const ExtraParams& param) {
     return {aPrecision, aScale};
   }
 };
@@ -377,7 +483,12 @@ class Abs {
 class Negate {
  public:
   template <typename R, typename A>
-  inline static void apply(R& r, const A& a, uint8_t /*aRescale*/) {
+  inline static void apply(
+      R& r,
+      const A& a,
+      uint8_t aPrecision,
+      uint8_t /*aRescale*/,
+      const ExtraParams& /*param*/) {
     if constexpr (std::is_same_v<R, A>) {
       r = R(-a);
     }
@@ -392,7 +503,8 @@ class Negate {
 
   inline static std::pair<uint8_t, uint8_t> computeResultPrecisionScale(
       const uint8_t aPrecision,
-      const uint8_t aScale) {
+      const uint8_t aScale,
+      const ExtraParams& /*additionalParm*/) {
     return {aPrecision, aScale};
   }
 };
@@ -454,9 +566,16 @@ std::vector<std::shared_ptr<exec::FunctionSignature>> decimalRoundSignature() {
           .integerVariable("a_scale")
           .integerVariable(
               "r_precision", "min(38, a_precision - a_scale + min(1, a_scale))")
-          .integerVariable("r_scale", "0")
-          .returnType("DECIMAL(r_precision, r_scale)")
+          .returnType("DECIMAL(r_precision, 0)")
           .argumentType("DECIMAL(a_precision, a_scale)")
+          .build(),
+      exec::FunctionSignatureBuilder()
+          .integerVariable("a_precision")
+          .integerVariable("a_scale")
+          .integerVariable("r_precision", "min(38, a_precision + 1)")
+          .returnType("DECIMAL(r_precision, a_scale)")
+          .argumentType("DECIMAL(a_precision, a_scale)")
+          .argumentType("integer")
           .build()};
 }
 
@@ -484,26 +603,36 @@ decimalBetweenSignature() {
 
 template <typename Operation>
 std::shared_ptr<exec::VectorFunction> createDecimalUnary(
-    const std::string& /*name*/,
-    const std::vector<exec::VectorFunctionArg>& inputArgs) {
+    const std::string& name,
+    const std::vector<exec::VectorFunctionArg>& inputArgs,
+    const core::QueryConfig& /*config*/) {
   auto aType = inputArgs[0].type;
   auto [aPrecision, aScale] = getDecimalPrecisionScale(*aType);
+  ExtraParams extraParams{};
+  if (inputArgs.size() == 2) {
+    // Round can accept additional argument like number of decimal places.
+    VELOX_CHECK_EQ(inputArgs[1].type->kind(), TypeKind::INTEGER);
+    extraParams.params.round.decimal =
+        inputArgs[1]
+            .constantValue->asUnchecked<SimpleVector<int32_t>>()
+            ->valueAt(0);
+  }
   auto [rPrecision, rScale] =
-      Operation::computeResultPrecisionScale(aPrecision, aScale);
+      Operation::computeResultPrecisionScale(aPrecision, aScale, extraParams);
   uint8_t aRescale = Operation::computeRescaleFactor(aScale, 0, rScale);
   if (aType->isShortDecimal()) {
     return std::make_shared<
-        DecimalUnaryBaseFunction<int64_t /*result*/, int64_t, Operation>>(
-        aRescale);
+        DecimalUnaryFunction<int64_t /*result*/, int64_t, Operation>>(
+        aPrecision, aRescale, extraParams);
   } else if (aType->isLongDecimal()) {
     if (rPrecision <= ShortDecimalType::kMaxPrecision) {
       return std::make_shared<
-          DecimalUnaryBaseFunction<int64_t /*result*/, int128_t, Operation>>(
-          aRescale);
+          DecimalUnaryFunction<int64_t /*result*/, int128_t, Operation>>(
+          aPrecision, aRescale, extraParams);
     }
     return std::make_shared<
-        DecimalUnaryBaseFunction<int128_t /*result*/, int128_t, Operation>>(
-        aRescale);
+        DecimalUnaryFunction<int128_t /*result*/, int128_t, Operation>>(
+        aPrecision, aRescale, extraParams);
   }
   VELOX_UNSUPPORTED();
 }
@@ -511,7 +640,8 @@ std::shared_ptr<exec::VectorFunction> createDecimalUnary(
 template <typename Operation>
 std::shared_ptr<exec::VectorFunction> createDecimalFunction(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs,
+    const core::QueryConfig& /*config*/) {
   auto aType = inputArgs[0].type;
   auto bType = inputArgs[1].type;
   auto [aPrecision, aScale] = getDecimalPrecisionScale(*aType);
@@ -538,12 +668,23 @@ std::shared_ptr<exec::VectorFunction> createDecimalFunction(
             Operation>>(aRescale, bRescale);
       }
     } else {
-      // LHS is short decimal and rhs is a long decimal, result is long decimal.
-      return std::make_shared<DecimalBaseFunction<
-          int128_t /*result*/,
-          int64_t,
-          int128_t,
-          Operation>>(aRescale, bRescale);
+      if (rPrecision > ShortDecimalType::kMaxPrecision) {
+        // LHS is short decimal and rhs is a long decimal, result is long
+        // decimal.
+        return std::make_shared<DecimalBaseFunction<
+            int128_t /*result*/,
+            int64_t,
+            int128_t,
+            Operation>>(aRescale, bRescale);
+      } else {
+        // In some cases such as division, the result type can still be a short
+        // decimal even though RHS is a long decimal.
+        return std::make_shared<DecimalBaseFunction<
+            int64_t /*result*/,
+            int64_t,
+            int128_t,
+            Operation>>(aRescale, bRescale);
+      }
     }
   } else {
     if (bType->isShortDecimal()) {
@@ -567,7 +708,8 @@ std::shared_ptr<exec::VectorFunction> createDecimalFunction(
 
 std::shared_ptr<exec::VectorFunction> createDecimalBetweenFunction(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs,
+    const core::QueryConfig& /*config*/) {
   auto aType = inputArgs[0].type;
   auto bType = inputArgs[1].type;
   auto cType = inputArgs[2].type;

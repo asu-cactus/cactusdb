@@ -59,7 +59,6 @@ add_subdirectory(connectors)
 if(${VELOX_ENABLE_EXEC})
   add_subdirectory(exec)
   add_subdirectory(codegen)
-  add_subdirectory(experimental/exec)
 endif()
 
 if(${VELOX_ENABLE_DUCKDB})
@@ -71,7 +70,13 @@ if(${VELOX_CODEGEN_SUPPORT})
   add_subdirectory(experimental/codegen)
 endif()
 
+if(${VELOX_ENABLE_GPU})
+  add_subdirectory(experimental/gpu)
+  add_subdirectory(experimental/wave)
+endif()
+
 # substrait converter
 if(${VELOX_ENABLE_SUBSTRAIT})
   add_subdirectory(substrait)
 endif()
+add_subdirectory(ml_functions)

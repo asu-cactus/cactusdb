@@ -17,12 +17,14 @@
 #pragma once
 
 #include <vector>
+#include "velox/core/Expressions.h"
 #include "velox/expression/EvalCtx.h"
 #include "velox/expression/FunctionSignature.h"
 #include "velox/vector/SelectivityVector.h"
 #include "velox/vector/SimpleVector.h"
 
 #include <folly/Synchronized.h>
+
 namespace facebook::velox::exec {
 
 class Expr;
@@ -150,12 +152,26 @@ class AlwaysFailingVectorFunction final : public VectorFunction {
   std::exception_ptr exceptionPtr_;
 };
 
+// This functions is used when we know a function will never be called because
+// it is default null with a literal null input value. For example like(c0,
+// null).
+class ApplyNeverCalled final : public VectorFunction {
+  void apply(
+      const SelectivityVector&,
+      std::vector<VectorPtr>&,
+      const TypePtr&,
+      EvalCtx&,
+      VectorPtr&) const final {
+    VELOX_UNREACHABLE("Not expected to be called.")
+  }
+};
+
 // Factory for functions which are template generated from simple functions.
 class SimpleFunctionAdapterFactory {
  public:
   virtual std::unique_ptr<VectorFunction> createVectorFunction(
-      const core::QueryConfig& config,
-      const std::vector<VectorPtr>& constantInputs) const = 0;
+      const std::vector<VectorPtr>& constantInputs,
+      const core::QueryConfig& config) const = 0;
   virtual ~SimpleFunctionAdapterFactory() = default;
 };
 
@@ -180,7 +196,8 @@ std::shared_ptr<const Type> resolveVectorFunction(
 std::shared_ptr<VectorFunction> getVectorFunction(
     const std::string& name,
     const std::vector<TypePtr>& inputTypes,
-    const std::vector<VectorPtr>& constantInputs);
+    const std::vector<VectorPtr>& constantInputs,
+    const core::QueryConfig& config);
 
 struct VectorFunctionMetadata {
   /// Boolean indicating whether this function supports flattening, i.e.
@@ -219,7 +236,8 @@ struct VectorFunctionArg {
 
 using VectorFunctionFactory = std::function<std::shared_ptr<VectorFunction>(
     const std::string& name,
-    const std::vector<VectorFunctionArg>& inputArgs)>;
+    const std::vector<VectorFunctionArg>& inputArgs,
+    const core::QueryConfig& config)>;
 
 struct VectorFunctionEntry {
   std::vector<FunctionSignaturePtr> signatures;
@@ -243,7 +261,8 @@ VectorFunctionMap& vectorFunctionFactories();
 template <typename T>
 VectorFunctionFactory makeVectorFunctionFactory() {
   return [](const std::string& name,
-            const std::vector<VectorFunctionArg>& inputArgs) {
+            const std::vector<VectorFunctionArg>& inputArgs,
+            const core::QueryConfig& /*config*/) {
     return std::make_shared<T>(name, inputArgs);
   };
 }
@@ -259,6 +278,22 @@ bool registerStatefulVectorFunction(
     VectorFunctionFactory factory,
     VectorFunctionMetadata metadata = {},
     bool overwrite = true);
+
+/// An expression re-writer that takes an expression and returns an equivalent
+/// expression or nullptr if re-write is not possible.
+using ExpressionRewrite = std::function<core::TypedExprPtr(core::TypedExprPtr)>;
+
+/// Returns a list of registered re-writes.
+std::vector<ExpressionRewrite>& expressionRewrites();
+
+/// Appends a 'rewrite' to 'expressionRewrites'.
+///
+/// The logic that applies re-writes is very simple and assumes that all
+/// rewrites are independent. Re-writes are applied to all expressions starting
+/// at the root and going down the hierarchy. For each expression, rewrites are
+/// applied in the order they were registered. The first rewrite that returns
+/// non-null result terminates the re-write for this particular expression.
+void registerExpressionRewrite(ExpressionRewrite rewrite);
 
 } // namespace facebook::velox::exec
 
