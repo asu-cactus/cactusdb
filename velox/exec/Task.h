@@ -159,8 +159,6 @@ class Task : public std::enable_shared_from_this<Task> {
   /// `next` again.
   RowVectorPtr next(ContinueFuture* future = nullptr);
 
-   /// try optimizer execution of 'task'.
-  std::vector<std::shared_ptr<Driver>> op ();
   /// Resumes execution of 'self' after a successful pause. All 'drivers_' must
   /// be off-thread and there must be no 'exception_'
   static void resume(std::shared_ptr<Task> self);

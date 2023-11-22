@@ -271,10 +271,8 @@ PlanBuilder& PlanBuilder::projectExpressions(
       projectNames.push_back(fmt::format("p{}", i));
     }
   }
-  auto id = nextPlanNodeId();
-  exprStringsMap_[id] = projections;
   planNode_ = std::make_shared<core::ProjectNode>(
-      id,
+      nextPlanNodeId(),
       std::move(projectNames),
       std::move(expressions),
       planNode_);

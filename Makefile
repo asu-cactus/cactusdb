@@ -102,16 +102,6 @@ release:				#: Build the release version
 	$(MAKE) cmake BUILD_DIR=release BUILD_TYPE=Release EXTRA_CMAKE_FLAGS="-DVELOX_ENABLE_PARQUET=ON" && \
 	$(MAKE) build BUILD_DIR=release
 
-mytest2: release
-	$(BUILD_BASE_DIR)/release/velox/examples/velox_mytest2
-
-mytest3: release
-	$(BUILD_BASE_DIR)/release/velox/examples/velox_mytest3
-
-optimizer: release
-	$(BUILD_BASE_DIR)/release/velox/optimizer/velox_op
-
-
 min_debug:				#: Minimal build with debugging symbols
 	$(MAKE) cmake BUILD_DIR=debug BUILD_TYPE=debug EXTRA_CMAKE_FLAGS=-DVELOX_BUILD_MINIMAL=ON
 	$(MAKE) build BUILD_DIR=debug

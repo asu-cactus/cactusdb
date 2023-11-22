@@ -863,7 +863,6 @@ std::string MemoryPoolImpl::treeMemoryUsage() const {
     const MemoryUsage usage{
         .name = name(),
         .currentUsage = stats.currentBytes,
-        // .currentUsage = stats.cumulativeBytes,
         .peakUsage = stats.peakBytes};
     out << usage.toString() << "\n";
   }

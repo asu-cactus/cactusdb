@@ -24,8 +24,6 @@ add_subdirectory(row)
 add_subdirectory(flag_definitions)
 add_subdirectory(external/date)
 add_subdirectory(external/md5)
-add_subdirectory(optimizer)
-add_subdirectory(ml_functions)
 #
 
 # examples depend on expression

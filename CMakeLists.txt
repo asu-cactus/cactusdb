@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.14)
 # the policy allows us to change options without caching
 cmake_policy(SET CMP0077 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-set (CMAKE_PREFIX_PATH "$HOME/libtorch")
+
 # Sets new behavior for CMP0135, which controls how timestamps are extracted
 # when using ExternalProject_Add():
 # https://cmake.org/cmake/help/latest/policy/CMP0135.html
