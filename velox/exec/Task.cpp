@@ -556,7 +556,56 @@ RowVectorPtr Task::next(ContinueFuture* future) {
   }
 }
 
-// static
+
+std::vector<std::shared_ptr<Driver>> Task::op(){
+  VELOX_CHECK_EQ(
+      core::ExecutionStrategy::kUngrouped,
+      planFragment_.executionStrategy,
+      "Single-threaded execution supports only ungrouped execution");
+
+  if (!splitsStates_.empty()) {
+    for (const auto& it : splitsStates_) {
+      VELOX_CHECK(
+          it.second.noMoreSplits,
+          "Single-threaded execution requires all splits to be added before "
+          "calling Task::next().");
+    }
+  }
+
+  VELOX_CHECK_EQ(state_, kRunning, "Task has already finished processing.");
+
+  // On first call, create the drivers.
+  if (driverFactories_.empty()) {
+    VELOX_CHECK_NULL(
+        consumerSupplier_,
+        "Single-threaded execution doesn't support delivering results to a "
+        "callback");
+
+    LocalPlanner::plan(planFragment_, nullptr, &driverFactories_, 1);
+    exchangeClients_.resize(driverFactories_.size());
+
+    // In Task::next() we always assume ungrouped execution.
+    for (const auto& factory : driverFactories_) {
+      VELOX_CHECK(factory->supportsSingleThreadedExecution());
+      numDriversUngrouped_ += factory->numDrivers;
+      numTotalDrivers_ += factory->numTotalDrivers;
+      taskStats_.pipelineStats.emplace_back(
+          factory->inputDriver, factory->outputDriver);
+    }
+
+    // Create drivers.
+    auto self = shared_from_this();
+    std::vector<std::shared_ptr<Driver>> drivers;
+    drivers.reserve(numDriversUngrouped_);
+    createSplitGroupStateLocked(kUngroupedGroupId);
+    createDriversLocked(self, kUngroupedGroupId, drivers);
+
+    drivers_ = std::move(drivers);
+  }
+
+  return drivers_;
+}
+
 void Task::start(
     std::shared_ptr<Task> self,
     uint32_t maxDrivers,

@@ -127,6 +127,15 @@ class VectorFunction {
       const {
     return std::nullopt;
   }
+
+  virtual int getSize() const {
+    return 0;
+  }
+};
+
+class MLFunction : public virtual exec::VectorFunction {
+public:
+    virtual int getShape() const = 0;
 };
 
 /// Vector function that generates the specified error for every row. Use this

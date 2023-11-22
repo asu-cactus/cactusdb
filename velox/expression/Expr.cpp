@@ -18,6 +18,8 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <fstream>
 
+#include <iostream>
+
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/base/Fs.h"
 #include "velox/common/base/SuccinctPrinter.h"
@@ -1470,6 +1472,8 @@ void Expr::applyFunction(
   auto isAscii = type()->isVarchar()
       ? computeIsAsciiForResult(vectorFunction_.get(), inputValues_, rows)
       : std::nullopt;
+
+
 
   try {
     vectorFunction_->apply(rows, inputValues_, type(), context, result);
