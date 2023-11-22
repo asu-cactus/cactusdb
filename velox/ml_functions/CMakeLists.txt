@@ -13,9 +13,7 @@
 # limitations under the License.
 
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
-
 set(CMAKE_PREFIX_PATH "$HOME/libtorch")
-
 find_package(Torch REQUIRED)
 
 
@@ -32,7 +30,6 @@ target_link_libraries(
   velox_tpch_connector
   velox_memory
   velox_common_base 
-
   velox_vector_fuzzer
   openblas
   ${TORCH_LIBRARIES}
@@ -105,4 +102,3 @@ target_link_libraries(
 # )
 
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -march=corei7-avx")
-

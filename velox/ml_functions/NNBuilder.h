@@ -185,7 +185,6 @@ class NNBuilder {
     return *this;
   }
 
-
   private:
     int function_count;
     std::string compute_string;
@@ -194,8 +193,6 @@ class NNBuilder {
     // in case the weights for each layer is stored in a separate file
     std::string weightsFile_;
     std::string biasFile_;
-
 };
-
 
 
