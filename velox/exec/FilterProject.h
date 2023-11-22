@@ -41,10 +41,6 @@ class FilterProject : public Operator {
     return !input_;
   }
 
-  const std::unique_ptr<ExprSet>& getExprs() const {
-    return exprs_;
-  }
-
   void addInput(RowVectorPtr input) override;
 
   RowVectorPtr getOutput() override;
@@ -97,13 +93,11 @@ class FilterProject : public Operator {
   // If true exprs_[0] is a filter and the other expressions are projections
   const bool hasFilter_{false};
 
-
   // Cached filter and project node for lazy initialization. After
   // initialization, they will be reset, and initialized_ will be set to true.
   std::shared_ptr<const core::ProjectNode> project_;
   std::shared_ptr<const core::FilterNode> filter_;
   bool initialized_{false};
-
 
   std::unique_ptr<ExprSet> exprs_;
   int32_t numExprs_;
