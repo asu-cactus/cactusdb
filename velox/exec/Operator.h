@@ -257,6 +257,7 @@ class Operator : public BaseRuntimeStatWriter {
   class PlanNodeTranslator {
    public:
     virtual ~PlanNodeTranslator() = default;
+
     // Translates plan node to operator. Returns nullptr if the plan node cannot
     // be handled by this factory.
     virtual std::unique_ptr<Operator>

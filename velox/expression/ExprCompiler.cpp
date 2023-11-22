@@ -29,7 +29,6 @@
 #include "velox/expression/TryExpr.h"
 #include "velox/expression/VectorFunction.h"
 
-
 namespace facebook::velox::exec {
 
 namespace {
@@ -169,8 +168,7 @@ ExprPtr compileExpression(
     const core::QueryConfig& config,
     memory::MemoryPool* pool,
     const std::unordered_set<std::string>& flatteningCandidates,
-    bool enableConstantFolding,
-    const std::unordered_set<std::string>& optimizingCandidates);
+    bool enableConstantFolding);
 
 std::vector<ExprPtr> compileInputs(
     const TypedExprPtr& expr,
@@ -178,8 +176,7 @@ std::vector<ExprPtr> compileInputs(
     const core::QueryConfig& config,
     memory::MemoryPool* pool,
     const std::unordered_set<std::string>& flatteningCandidates,
-    bool enableConstantFolding,
-    const std::unordered_set<std::string>& optimizingCandidates) {
+    bool enableConstantFolding) {
   std::vector<ExprPtr> compiledInputs;
   auto flattenIf = shouldFlatten(expr, flatteningCandidates);
   for (auto& input : expr->inputs()) {
@@ -198,8 +195,7 @@ std::vector<ExprPtr> compileInputs(
               config,
               pool,
               flatteningCandidates,
-              enableConstantFolding,
-              optimizingCandidates));
+              enableConstantFolding));
         }
       } else {
         compiledInputs.push_back(compileExpression(
@@ -208,8 +204,7 @@ std::vector<ExprPtr> compileInputs(
             config,
             pool,
             flatteningCandidates,
-            enableConstantFolding,
-            optimizingCandidates));
+            enableConstantFolding));
       }
     }
   }
@@ -265,8 +260,7 @@ std::shared_ptr<Expr> compileLambda(
     const core::QueryConfig& config,
     memory::MemoryPool* pool,
     const std::unordered_set<std::string>& flatteningCandidates,
-    bool enableConstantFolding,
-    const std::unordered_set<std::string>& optimizingCandidates) {
+    bool enableConstantFolding) {
   auto signature = lambda->signature();
   auto parameterNames = signature->names();
   Scope lambdaScope(std::move(parameterNames), scope, scope->exprSet);
@@ -276,8 +270,7 @@ std::shared_ptr<Expr> compileLambda(
       config,
       pool,
       flatteningCandidates,
-      enableConstantFolding,
-      optimizingCandidates);
+      enableConstantFolding);
 
   // The lambda depends on the captures. For a lambda caller to be
   // able to peel off encodings, the captures too must be peelable.
@@ -354,7 +347,6 @@ std::vector<VectorPtr> getConstantInputs(const std::vector<ExprPtr>& exprs) {
   return constants;
 }
 
-
 core::TypedExprPtr rewriteExpression(const core::TypedExprPtr& expr) {
   for (auto& rewrite : expressionRewrites()) {
     if (auto rewritten = rewrite(expr)) {
@@ -365,14 +357,12 @@ core::TypedExprPtr rewriteExpression(const core::TypedExprPtr& expr) {
 }
 
 ExprPtr compileRewrittenExpression(
-
     const TypedExprPtr& expr,
     Scope* scope,
     const core::QueryConfig& config,
     memory::MemoryPool* pool,
     const std::unordered_set<std::string>& flatteningCandidates,
-    bool enableConstantFolding,
-    const std::unordered_set<std::string>& optimizingCandidates) {
+    bool enableConstantFolding) {
   ExprPtr alreadyCompiled = getAlreadyCompiled(expr.get(), &scope->visited);
   if (alreadyCompiled) {
     if (!alreadyCompiled->isMultiplyReferenced()) {
@@ -391,7 +381,7 @@ ExprPtr compileRewrittenExpression(
   ExprPtr result;
   auto resultType = expr->type();
   auto compiledInputs = compileInputs(
-      expr, scope, config, pool, flatteningCandidates, enableConstantFolding, optimizingCandidates);
+      expr, scope, config, pool, flatteningCandidates, enableConstantFolding);
   auto inputTypes = getTypes(compiledInputs);
   bool isConstantExpr = false;
   if (dynamic_cast<const core::ConcatTypedExpr*>(expr.get())) {
@@ -410,7 +400,6 @@ ExprPtr compileRewrittenExpression(
         cast->nullOnFailure());
     result = castExpr;
   } else if (auto call = dynamic_cast<const core::CallTypedExpr*>(expr.get())) {
-
     if (auto specialForm = getSpecialForm(
             config,
             call->name(),
@@ -511,8 +500,7 @@ ExprPtr compileRewrittenExpression(
         config,
         pool,
         flatteningCandidates,
-        enableConstantFolding,
-        optimizingCandidates);
+        enableConstantFolding);
   } else {
     VELOX_UNSUPPORTED("Unknown typed expression");
   }
@@ -526,7 +514,6 @@ ExprPtr compileRewrittenExpression(
   scope->visited[expr.get()] = folded;
   return folded;
 }
-
 
 ExprPtr compileExpression(
     const TypedExprPtr& expr,
@@ -547,7 +534,6 @@ ExprPtr compileExpression(
       flatteningCandidates,
       enableConstantFolding);
 }
-
 
 /// Walk expression tree and collect names of functions used in CallTypedExpr
 /// into provided 'names' set.
@@ -585,36 +571,6 @@ std::unordered_set<std::string> collectFlatteningCandidates(
     return flatteningCandidates;
   });
 }
-
-bool checkOptimizing(const std::shared_ptr<MLFunction>& ptr){
-  return true;
-}
-
-// walk expression tree and collect names of functions used in ML part can be optimized.
-std::unordered_set<std::string> collectOptimizingCandidates(
-    const std::vector<TypedExprPtr>& exprs,
-    const std::vector<int>& flag) {
-  std::unordered_set<std::string> names;
-  for (const auto& expr : exprs) {
-    collectCallNames(expr, names);
-  }
-
-  return vectorFunctionFactories().withRLock([&](auto& functionMap) {
-    std::unordered_set<std::string> optimizingCandidates;
-    for (const auto& name : names) {
-      auto it = functionMap.find(name);
-      if (it != functionMap.end()) {
-        auto VectorFunctionPtr = it->second.factory(name, {});
-        if (auto call = std::dynamic_pointer_cast<MLFunction>(VectorFunctionPtr)) {
-          if (checkOptimizing(call)){
-            optimizingCandidates.insert(name);
-          }
-        }
-      }
-    }
-    return optimizingCandidates;
-  });
-}
 } // namespace
 
 std::vector<std::shared_ptr<Expr>> compileExpressions(
@@ -624,46 +580,21 @@ std::vector<std::shared_ptr<Expr>> compileExpressions(
     bool enableConstantFolding) {
   Scope scope({}, nullptr, exprSet);
   std::vector<std::shared_ptr<Expr>> exprs;
-  std::vector<int> flag;
-  // exprs.reserve(sources.size());
+  exprs.reserve(sources.size());
 
   // Precompute a set of function calls that support flattening. This allows to
   // lock function registry once vs. locking for each function call.
   auto flatteningCandidates = collectFlatteningCandidates(sources);
-  std::unordered_set<std::string> optimizingCandidates{};
-  // auto optimizingCandidates = collectOptimizingCandidates(sources, flag);
 
-  auto optimizedSize = optimizingCandidates.size() + sources.size();
-
-  // exprs.reserve(optimizedSize);
-
-  // flag.push_back(0);
-  // flag.push_back(1);
-  // flag.push_back(0);
-  // int i = 0;
   for (auto& source : sources) {
-    // if (flag[i]== 0){
     exprs.push_back(compileExpression(
         source,
         &scope,
         execCtx->queryCtx()->queryConfig(),
         execCtx->pool(),
         flatteningCandidates,
-        enableConstantFolding,
-        optimizingCandidates));
+        enableConstantFolding));
   }
-  // else {
-  //   exprs.push_back(compileExpression(
-  //       source,
-  //       &scope,
-  //       execCtx->queryCtx()->queryConfig(),
-  //       execCtx->pool(),
-  //       flatteningCandidates,
-  //       enableConstantFolding,
-  //       optimizingCandidates));
-  // }
-  // i++;
-  // }
   return exprs;
 }
 

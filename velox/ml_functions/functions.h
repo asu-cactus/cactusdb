@@ -1,12 +1,9 @@
-
 #pragma once
-
 #include "velox/expression/VectorFunction.h"
 #include <Eigen/Dense>
 #include <cblas.h>
 #include <chrono>
 #include "velox/exec/Task.h"
-
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -76,7 +73,6 @@ public:
         float* input_values = input_elements->values()->asMutable<float>();
         int input_size = input_elements->size();
 
-
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
         
@@ -102,7 +98,6 @@ public:
             m.row(i).data(),
             m.row(i).data() + m.cols());
             result.push_back(row);
-
         }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
@@ -138,74 +133,6 @@ private:
     
 };
 
-
-class MatrixMultiply_b: public MLFunction {
-public:
-    MatrixMultiply_b(int num_rows, int num_cols, int num_samples, float* weights) {
-        dims.push_back(num_rows);
-        dims.push_back(num_cols);
-        dims.push_back(num_samples);
-        weights_ = weights;
-    }
-
-    void apply(
-        const SelectivityVector& rows,
-        std::vector<VectorPtr>& args,
-        const TypePtr& type,
-        exec::EvalCtx& context,
-        VectorPtr& output) const override {
-        
-        BaseVector::ensureWritable(rows, type, context.pool(), output);
-        VectorMaker maker{context.pool()};
- 
-        // auto input_elements_w = args[1]->as<ArrayVector>()->elements();
-        // float* input_values_w = input_elements_w->values()->asMutable<float>();
-        // float* input_values_w = weights_;
-        auto input_elements_v = args[0];
-
-        auto input_elements_w = args[1]->as<ArrayVector>()->elements();
-        float* input_values_w = input_elements_w->values()->asMutable<float>();
-        auto ss = input_elements_v->as<DictionaryVector<ComplexType>>();
-        // auto ss3 = args[0]->as<ArrayVector>()->elements();
-        auto ss2 = ss->valueVector();
-        auto ss3 = ss2->as<ArrayVector>()->elements();
-        float* input_values_v = ss3->values()->asMutable<float>();
-        // auto varrayVector = std::make_shared<ArrayVector<float>>();
-        // const int elements_v_per_row = 1500000; //6000*250
-        // const int elements_w_per_row = 125000; // 250*500
-        std::vector<std::vector<float>> result(1, std::vector<float>(dims[1]*dims[2])); //6000*500
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, dims[2], dims[0]);//3*2
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); //2*5
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
-        for (int i = 0; i < m.rows(); ++i) {
-                for (int j = 0; j < m.cols(); ++j) {
-                    result[0][i * dims[1] + j] = m(i, j);
-            }
-        }
-        output = maker.arrayVector<float>(result, REAL());
-    }
-
-    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-        return {exec::FunctionSignatureBuilder()
-                     .returnType("array(REAL)")
-                     .argumentType("array(REAL)")
-                     .argumentType("array(REAL)")
-                     .build()};
-    }
-
-    float* getTensor() const override {
-        return weights_;
-    }
-
-    static std::string getName() {
-        return "mat_mul_b";
-    };
-
-
-private:
-    float* weights_;
-    
-};
 // there is no need to pass any parameter here since dimensions can be figured out from the input 
 // can the optimiser figure out the dimensions from the context?
 class MatrixAddition: public MLFunction {
@@ -217,7 +144,6 @@ public:
 
     MatrixAddition(std::string weightsFile, int num_cols) {
         weightsFile_ = weightsFile;
-
         dims.push_back(num_cols);
     }
 
@@ -265,7 +191,6 @@ public:
             result.push_back(row);
         }
         VectorMaker maker{context.pool()};
-
         output = maker.arrayVector<float>(result, REAL());
     }
 
@@ -370,10 +295,10 @@ private:
 
 };
 
+
 class Relu: public MLFunction {
 public:
     Relu() {}
-
 
     float static relu_function(float x) {
         return (x > 0.0f) ? x : 0.0f;
@@ -394,7 +319,6 @@ public:
         // considering all arrays have same size
         int num_rows = args[0]->size();
         int num_cols = input_size / num_rows;
-
         
         std::vector<std::vector<float>> result;
         for (int i = 0; i < num_rows; i++) {
@@ -411,7 +335,6 @@ public:
         //         result[i][j] = std::max(0.0f, input_values[i*num_cols + j]);
         //     }
         // }
-
         // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         // std::cout << "Time difference for RELU(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         VectorMaker maker{context.pool()};
@@ -462,7 +385,6 @@ public:
         for (int i = 0; i < exp.rows(); i++) {
             exp.row(i) /= sum(i);
         }
-
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
      //    std::cout << "Time difference for Softmax(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         std::vector<std::vector<float>> result(num_rows, std::vector<float>(num_cols));
@@ -508,7 +430,6 @@ public:
         exec::EvalCtx& context,
         VectorPtr& output) const override {
 
-
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         torch::nn::Linear dense1(dims[0], dims[1]);
         torch::nn::Linear dense2(dims[1],dims[2]);
@@ -536,7 +457,6 @@ public:
         torch::Tensor softmax_output = torch::nn::functional::softmax(layer2_output, 1);
         float* data = softmax_output.data_ptr<float>();
 
-
         std::vector<std::vector<float>> results;
         for (int i = 0; i < rows.size(); ++i) {
             // std::vector<float> result;
@@ -544,12 +464,10 @@ public:
             // for (int j = 0; j < dims[2]; ++j) {
             //     result.push_back(data[i*dims[2] + j]);
             // }
-
             results.push_back(result);
         }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(results, REAL());
-
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -728,6 +646,8 @@ private:
 };
 
 
+
+
 class VectorScalarAddition: public MLFunction {
 
 public:
@@ -825,10 +745,21 @@ public:
             }
         }
 
+        // for(int i=0; i < 64; i++){
+
+        //     for(int j=0; j < 144; j++){
+        //         if(j % 12 == 0)
+        //             std::cout << std::endl;
+        //         std::cout << results[0][i*144 + j];
+        //     }
+            
+        // }
+
 
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(results, REAL());
     }
+
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
         return {exec::FunctionSignatureBuilder()
