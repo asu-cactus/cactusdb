@@ -96,7 +96,6 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   void test_torch_dense_layer_multithreading();
   void mytest();
   void test_land_cover_conv3();
-
   void test_mnist_oom_weights();
 
   std::unique_ptr<MemoryManager> memoryManager_;
@@ -115,13 +114,6 @@ class MLFunctionsTest : public HiveConnectorTestBase {
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
                                       {core::QueryConfig::kJoinSpillMemoryThreshold, "1"},
                                        {core::QueryConfig::kSpillableReservationGrowthPct, "1"},
-                                      /* 
-                                      kSpillPartitionBits is removed after PR 5890, 
-                                      kJoinSpillPartitionBits and kAggregationSpillPartitionBits are introduced 
-                                      Please consider how to replace it by check the following link: 
-                                      https://github.com/facebookincubator/velox/pull/5890 
-                                      */
-                                      //  {core::QueryConfig::kSpillPartitionBits, "1"}
                                       };
     auto queryCtx = std::make_shared<core::QueryCtx>(
         executor_.get(),
@@ -206,6 +198,7 @@ void MLFunctionsTest::test_mat_mul() {
                   .project({"mat_mul(x)"})
 		              .planNode();
 
+
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto results = exec::test::AssertQueryBuilder(myPlan)
                   .maxDrivers(4)
@@ -213,6 +206,7 @@ void MLFunctionsTest::test_mat_mul() {
                   .config("preferred_output_batch_rows", std::to_string(10))
                   .config("preferred_output_batch_bytes", std::to_string(1000))
                   .copyResults(pool_.get());
+
 
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
@@ -257,18 +251,22 @@ void MLFunctionsTest::test_mat_add() {
                   .project({"mat_add(x)"})
 		              .planNode();
 
+
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::cout << "Time for Matrix Addition (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
   // std::cout << "Results:" << results->toString() << std::endl;
   // std::cout << results->toString(0, results->size()) << std::endl;
+
 }
 
 void MLFunctionsTest::test_relu(){
  
+
   int num_rows = 1000;
   int num_cols = 5000; 
+
 
   std::vector<std::vector<float>> inputVectors;
   for(int i=0; i < num_rows; i++){
@@ -292,6 +290,7 @@ void MLFunctionsTest::test_relu(){
                   .values({inputRowVector})
                   .project({"relu(x)"})
 		              .planNode();
+
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
@@ -408,9 +407,11 @@ void MLFunctionsTest::test_dense_layer() {
 
 void MLFunctionsTest::test_torch_dense_layer(){
  
+
   int input_size = 768; // num_features
   int layer1_size = 3072; // num units in hidden layer 1
   int layer2_size = 768;
+
   
   std::vector<int> dimensions;
   dimensions.push_back(input_size);
@@ -418,19 +419,23 @@ void MLFunctionsTest::test_torch_dense_layer(){
   dimensions.push_back(layer2_size);
   
 
+
   int num_samples = std::atoi(std::getenv("samples"));
   int num_splits = std::atoi(std::getenv("splits"));
   int velox_threads = std::atoi(std::getenv("vthreads"));
   int torch_threads = std::atoi(std::getenv("tthreads"));
   torch::set_num_threads(torch_threads);
+
   
   // std::ifstream weights_file("../../../../velox/ml_functions/tests/weights.txt"); 
   // std::ifstream bias_file("../../../../velox/ml_functions/tests/bias.txt"); 
   // std::ifstream test_file("../../../../velox/ml_functions/tests/test_samples.txt"); 
  
+
   std::ifstream weights_file("/home/ubuntu/bert_weights.txt"); 
   std::ifstream bias_file("/home/ubuntu/bert_bias.txt"); 
   std::ifstream test_file("/home/ubuntu/bert_input.txt"); 
+
 
   FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
   FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
@@ -448,6 +453,7 @@ void MLFunctionsTest::test_torch_dense_layer(){
     featureVectors.push_back(featureVector);
   }
 
+
   auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
   auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
  
@@ -460,6 +466,7 @@ void MLFunctionsTest::test_torch_dense_layer(){
     TorchDNN::signatures(),
     std::make_unique<TorchDNN>(weights, bias, dimensions)
   );
+
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   core::PlanNodeId p0;
   
@@ -514,6 +521,7 @@ void MLFunctionsTest::test_torch_dense_layer(){
   std::stringstream ss;
   ss << num_samples << "," << num_splits << "," << velox_threads << "," << torch_threads << ",";
   std::cout << ss.str() << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+
 }
 
 void MLFunctionsTest::test_mnist() {
@@ -590,7 +598,9 @@ FlatVectorPtr<float> MLFunctionsTest::get_tensor(std::ifstream& file, int size, 
 }
 
 FlatVectorPtr<float> MLFunctionsTest::get_tensor(VectorMaker& m, std::ifstream& file, int size, int lines){
+
     //std::cout << "Loading tensor of size " << size << std::endl;
+
     FlatVectorPtr<float> tensor = m.flatVector<float>(size);
     int index = 0;
     std::string line;
@@ -979,6 +989,7 @@ void MLFunctionsTest::test_spill(){
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
                                       {core::QueryConfig::kJoinSpillMemoryThreshold, std::to_string(27 * MB)},
                                        {core::QueryConfig::kSpillableReservationGrowthPct, "0"},
+
                                        /* 
                                       kSpillPartitionBits is removed after PR 5890, 
                                       kJoinSpillPartitionBits and kAggregationSpillPartitionBits are introduced 
@@ -987,6 +998,7 @@ void MLFunctionsTest::test_spill(){
                                       */
                                       //  {core::QueryConfig::kSpillPartitionBits, "1"}
                                        {core::QueryConfig::kAggregationSpillPartitionBits, "1"}
+
                                       });
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
@@ -1399,21 +1411,25 @@ void MLFunctionsTest::test_conv2d() {
     std::ifstream bias_file("/home/ubuntu/cnn_bias.txt"); 
     std::ifstream test_file("/home/ubuntu/test_file.txt"); 
 
-    FlatVectorPtr<float> weights_1 = get_tensor(weights_file, weights1_size, cnn_layer1_filters * cnn_layer1_filter_dims[2]);
-    FlatVectorPtr<float> bias_1 = get_tensor(bias_file, cnn_layer1_filters, 1);
 
-    FlatVectorPtr<float> weights_2 = get_tensor(weights_file, weights2_size, cnn_layer2_filters * cnn_layer2_filter_dims[2]); 
-    FlatVectorPtr<float> bias_2 = get_tensor(bias_file, cnn_layer2_filters, 1);
+    FlatVectorPtr<float> weights_1 = get_tensor(weights_file, weights1_size, cnn_layer1_filters * cnn_layer1_filter_dims[2]); // 576, 64*1
+    FlatVectorPtr<float> bias_1 = get_tensor(bias_file, cnn_layer1_filters, 1); //64,1
+
+    FlatVectorPtr<float> weights_2 = get_tensor(weights_file, weights2_size, cnn_layer2_filters * cnn_layer2_filter_dims[2]); //36864,64*64=4096
+    FlatVectorPtr<float> bias_2 = get_tensor(bias_file, cnn_layer2_filters, 1); // 64,1
+
 
     int input3_size = 9216; // num_features
     int layer3_size = 512; // num units in hidden layer 1
     int layer4_size = 10;
 
 
-    FlatVectorPtr<float> weights_3 = get_tensor(weights_file, layer3_size * input3_size, input3_size);
-    FlatVectorPtr<float> bias_3 = get_tensor(bias_file, layer3_size, 1);
-    FlatVectorPtr<float> weights_4 = get_tensor(weights_file, layer4_size * layer3_size, layer3_size);
-    FlatVectorPtr<float> bias_4 = get_tensor(bias_file, layer4_size, 1);
+
+    FlatVectorPtr<float> weights_3 = get_tensor(weights_file, layer3_size * input3_size, input3_size);//512*9216, 9216
+    FlatVectorPtr<float> bias_3 = get_tensor(bias_file, layer3_size, 1);//512,1
+    FlatVectorPtr<float> weights_4 = get_tensor(weights_file, layer4_size * layer3_size, layer3_size);//10*512, 512
+    FlatVectorPtr<float> bias_4 = get_tensor(bias_file, layer4_size, 1);//10,1
+
 
     float* w3 =  weights_3->values()->asMutable<float>();
     float* w4 =  weights_4->values()->asMutable<float>();
@@ -1428,16 +1444,20 @@ void MLFunctionsTest::test_conv2d() {
     float* bias_4_values = bias_4->values()->asMutable<float>();
     
 
-    FlatVectorPtr<float> bias_3_mat = maker.flatVector<float>(num_samples * layer3_size);
+
+    FlatVectorPtr<float> bias_3_mat = maker.flatVector<float>(num_samples * layer3_size);//512
     for(int i=0; i < bias_3_mat->size(); i++)
       bias_3_mat->set(i, bias_3_values[i%layer3_size]);
     
-    FlatVectorPtr<float> bias_4_mat = maker.flatVector<float>(num_samples * layer4_size);
+    FlatVectorPtr<float> bias_4_mat = maker.flatVector<float>(num_samples * layer4_size);//10
+
     for(int i=0; i < bias_4_mat->size(); i++)
       bias_4_mat->set(i, bias_4_values[i%layer4_size]);
 
 
-    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples * input_dims[2]);
+
+    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples * input_dims[2]);//784,1
+
     float* data = input->values()->asMutable<float>();
 
     std::vector<std::vector<float>> featureVectors;
@@ -1472,6 +1492,7 @@ void MLFunctionsTest::test_conv2d() {
    std::cout << results->toString(0, results->size()) << std::endl;
 
 }
+
 
 void MLFunctionsTest::test_deep_bench_conv1() {
     int cnn_filters = 64;
@@ -1508,6 +1529,7 @@ void MLFunctionsTest::test_deep_bench_conv1() {
     float* bias_values = bias->values()->asMutable<float>();
    
     FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples * input_dims[2]);
+
     float* data = input->values()->asMutable<float>();
 
     std::vector<std::vector<float>> featureVectors;
@@ -1518,6 +1540,7 @@ void MLFunctionsTest::test_deep_bench_conv1() {
 
     auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
     auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+
     
     // std::string compute =  NNBuilder()
     //                       .convLayer(cnn_filters, dims, weights->values()->asMutable<float>(), 
@@ -1697,6 +1720,7 @@ void MLFunctionsTest::test_land_cover_conv3() {
   
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   task->start(task, confs[2]);
+
   task->noMoreSplits(p0);
   // Start task with 2 as maximum drivers and wait for execution to finish
   waitForFinishedDrivers(task);
@@ -1705,6 +1729,7 @@ void MLFunctionsTest::test_land_cover_conv3() {
 }
 
 void MLFunctionsTest::run() {
+
    test_mat_mul();
   //  test_mat_add();
   //  test_relu();
@@ -1723,6 +1748,7 @@ void MLFunctionsTest::run() {
   //  test_mnist_multithreading();
   //  test_mnist_oom_weights();
   // test_torch_dense_layer();
+
 
 }
 

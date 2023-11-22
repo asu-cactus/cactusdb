@@ -62,3 +62,34 @@ target_link_libraries(
   velox_exec_test_lib
   velox_memory
   velox_vector_test_lib)
+
+# add_executable(velox_mytest mytest.cpp)
+
+# target_link_libraries(velox_mytest velox_type velox_vector
+#   velox_memory velox_expression)
+
+add_executable(velox_mytest2 mytest2.cpp)
+
+target_link_libraries(
+  velox_mytest2
+  velox_type
+  velox_vector
+  velox_exec
+  velox_exec_test_lib
+  velox_memory
+  velox_vector_test_lib
+  velox_hive_connector
+  velox_vector_fuzzer
+  )
+
+  add_executable(velox_mytest3 mytest3.cpp)
+
+target_link_libraries(
+  velox_mytest3
+  velox_type
+  velox_vector
+  velox_exec
+  velox_exec_test_lib
+  velox_memory
+  velox_vector_test_lib
+  velox_hive_connector)
