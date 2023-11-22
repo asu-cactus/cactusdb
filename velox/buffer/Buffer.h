@@ -94,9 +94,7 @@ class Buffer {
 
   template <typename T>
   T* asMutable() const {
-    // TODO: change this to isMutable(). See
-    // https://github.com/facebookincubator/velox/issues/6562.
-    VELOX_CHECK(!isView());
+    VELOX_CHECK(mutable_);
     // We can't check actual types, but we can sanity-check POD/non-POD
     // conversion. `void` is special as it's used in type-erased contexts
     VELOX_DCHECK((std::is_same_v<T, void>) || podType_ == is_pod_like_v<T>);
@@ -117,7 +115,7 @@ class Buffer {
   // respectively.
   // TODO: `resize` is probably a better name for this method
   virtual void setSize(size_t size) {
-    VELOX_CHECK(!isView());
+    VELOX_CHECK(mutable_);
     VELOX_CHECK_LE(size, capacity_);
     size_ = size;
     checkEndGuard();
@@ -136,11 +134,18 @@ class Buffer {
   }
 
   bool isMutable() const {
-    return !isView() && unique();
+    return mutable_;
   }
 
   virtual bool isView() const {
     return false;
+  }
+
+  virtual void setIsMutable(bool isMutable) {
+    VELOX_CHECK(
+        !isMutable || referenceCount_ == 1,
+        "A multiply referenced Buffer should not be set to mutable");
+    mutable_ = isMutable;
   }
 
   friend std::ostream& operator<<(std::ostream& os, const Buffer& buffer) {
@@ -212,7 +217,7 @@ class Buffer {
   }
 
   virtual void copyFrom(const Buffer* other, size_t bytes) {
-    VELOX_CHECK(!isView());
+    VELOX_CHECK(mutable_);
     VELOX_CHECK_GE(capacity_, bytes);
     VELOX_CHECK(podType_);
     memcpy(data_, other->data_, bytes);
@@ -240,6 +245,7 @@ class Buffer {
   uint64_t size_ = 0;
   uint64_t capacity_ = 0;
   std::atomic<int32_t> referenceCount_;
+  bool mutable_ = true;
   bool podType_ = true;
   // Pad to 64 bytes. If using as int32_t[], guarantee that value at index -1 ==
   // -1.
@@ -345,7 +351,7 @@ class AlignedBuffer : public Buffer {
     auto oldSize = old->size();
 
     if (size > oldSize && size < old->capacity() && old->unique()) {
-      VELOX_CHECK(!old->isView());
+      VELOX_CHECK(old->mutable_);
       reinterpret_cast<ImplClass<T>*>(old)->template fillNewMemory<T>(
           oldSize, size, initValue);
       // set size explicitly instead of setSize because `fillNewMemory` already
@@ -582,7 +588,7 @@ class NonPODAlignedBuffer : public Buffer {
   }
 
   void copyFrom(const Buffer* other, size_t bytes) override {
-    VELOX_CHECK(!isView());
+    VELOX_CHECK(mutable_);
     VELOX_CHECK_GE(size_, bytes);
     VELOX_DCHECK(
         dynamic_cast<const NonPODAlignedBuffer<T>*>(other) != nullptr,
@@ -653,6 +659,9 @@ class BufferView : public Buffer {
   bool isView() const override {
     return true;
   }
+  void setIsMutable(bool isMutable) override {
+    VELOX_CHECK(!isMutable, "A BufferView cannot be set to mutable");
+  }
 
  private:
   BufferView(const uint8_t* data, size_t size, Releaser releaser, bool podType)
@@ -663,6 +672,7 @@ class BufferView : public Buffer {
       // payloads.
       : Buffer(nullptr, const_cast<uint8_t*>(data), size, podType),
         releaser_(releaser) {
+    mutable_ = false;
     size_ = size;
     capacity_ = size;
     releaser_.addRef();

@@ -77,7 +77,7 @@ TEST_F(LimitTest, limitOverLocalExchange) {
   params.planNode = PlanBuilder()
                         .tableScan(asRowType(data->type()))
                         .capturePlanNodeId(scanNodeId)
-                        .localPartition(std::vector<std::string>{})
+                        .localPartition({})
                         .limit(0, 20, true)
                         .planNode();
 

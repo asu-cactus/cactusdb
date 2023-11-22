@@ -16,33 +16,71 @@
 
 #include "velox/expression/FunctionCallToSpecialForm.h"
 
-#include "velox/expression/SpecialFormRegistry.h"
+#include "velox/expression/CastExpr.h"
+#include "velox/expression/CoalesceExpr.h"
+#include "velox/expression/ConjunctExpr.h"
+#include "velox/expression/SwitchExpr.h"
+#include "velox/expression/TryExpr.h"
 
 namespace facebook::velox::exec {
+namespace {
+using RegistryType =
+    std::unordered_map<std::string, std::unique_ptr<FunctionCallToSpecialForm>>;
+
+RegistryType makeRegistry() {
+  RegistryType registry;
+  registry.emplace(
+      "and", std::make_unique<ConjunctCallToSpecialForm>(true /* isAnd */));
+  registry.emplace("cast", std::make_unique<CastCallToSpecialForm>());
+  registry.emplace("coalesce", std::make_unique<CoalesceCallToSpecialForm>());
+  registry.emplace("if", std::make_unique<IfCallToSpecialForm>());
+  registry.emplace(
+      "or", std::make_unique<ConjunctCallToSpecialForm>(false /* isAnd */));
+  registry.emplace("switch", std::make_unique<SwitchCallToSpecialForm>());
+  registry.emplace("try", std::make_unique<TryCallToSpecialForm>());
+
+  return registry;
+}
+
+RegistryType& functionCallToSpecialFormRegistry() {
+  static RegistryType registry = makeRegistry();
+  return registry;
+}
+} // namespace
 
 TypePtr resolveTypeForSpecialForm(
     const std::string& functionName,
     const std::vector<TypePtr>& argTypes) {
-  auto specialForm = specialFormRegistry().getSpecialForm(functionName);
-  if (specialForm == nullptr) {
+  auto& registry = functionCallToSpecialFormRegistry();
+
+  auto it = registry.find(functionName);
+  if (it == registry.end()) {
     return nullptr;
   }
 
-  return specialForm->resolveType(argTypes);
+  return it->second->resolveType(argTypes);
 }
 
 ExprPtr constructSpecialForm(
     const std::string& functionName,
     const TypePtr& type,
     std::vector<ExprPtr>&& compiledChildren,
-    bool trackCpuUsage,
-    const core::QueryConfig& config) {
-  auto specialForm = specialFormRegistry().getSpecialForm(functionName);
-  if (specialForm == nullptr) {
+    bool trackCpuUsage) {
+  auto& registry = functionCallToSpecialFormRegistry();
+
+  auto it = registry.find(functionName);
+  if (it == registry.end()) {
     return nullptr;
   }
 
-  return specialForm->constructSpecialForm(
-      type, std::move(compiledChildren), trackCpuUsage, config);
+  return it->second->constructSpecialForm(
+      type, std::move(compiledChildren), trackCpuUsage);
+}
+
+bool isFunctionCallToSpecialFormRegistered(const std::string& functionName) {
+  const auto& registry = functionCallToSpecialFormRegistry();
+
+  auto it = registry.find(functionName);
+  return it != registry.end();
 }
 } // namespace facebook::velox::exec

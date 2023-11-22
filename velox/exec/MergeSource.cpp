@@ -122,11 +122,7 @@ class MergeExchangeSource : public MergeSource {
       int destination,
       memory::MemoryPool* FOLLY_NONNULL pool)
       : mergeExchange_(mergeExchange),
-        client_(std::make_unique<ExchangeClient>(
-            taskId,
-            destination,
-            pool,
-            ExchangeClient::kDefaultMaxQueuedBytes)) {
+        client_(std::make_unique<ExchangeClient>(destination, pool)) {
     client_->addRemoteTaskId(taskId);
     client_->noMoreRemoteTasks();
   }

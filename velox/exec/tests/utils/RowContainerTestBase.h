@@ -19,10 +19,12 @@
 #include <random>
 #include "velox/common/file/FileSystems.h"
 #include "velox/dwio/common/tests/utils/BatchMaker.h"
+#include "velox/exec/ContainerRowSerde.h"
 #include "velox/exec/RowContainer.h"
 #include "velox/exec/VectorHasher.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 #include "velox/serializers/PrestoSerializer.h"
+#include "velox/vector/tests/utils/VectorMaker.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
 namespace facebook::velox::exec::test {
@@ -31,6 +33,7 @@ class RowContainerTestBase : public testing::Test,
                              public velox::test::VectorTestBase {
  protected:
   void SetUp() override {
+    pool_ = memory::addDefaultLeafMemoryPool();
     if (!isRegisteredVectorSerde()) {
       facebook::velox::serializer::presto::PrestoVectorSerde::
           registerVectorSerde();
@@ -54,18 +57,20 @@ class RowContainerTestBase : public testing::Test,
       const std::vector<TypePtr>& keyTypes,
       const std::vector<TypePtr>& dependentTypes,
       bool isJoinBuild = true) {
-    auto container = std::make_unique<RowContainer>(
+    static const std::vector<std::unique_ptr<Aggregate>> kEmptyAggregates;
+    return std::make_unique<RowContainer>(
         keyTypes,
         !isJoinBuild,
-        std::vector<Accumulator>{},
+        kEmptyAggregates,
         dependentTypes,
         isJoinBuild,
         isJoinBuild,
         true,
         true,
-        pool_.get());
-    VELOX_CHECK(container->testingMutable());
-    return container;
+        pool_.get(),
+        ContainerRowSerde::instance());
   }
+
+  std::shared_ptr<memory::MemoryPool> pool_;
 };
 } // namespace facebook::velox::exec::test

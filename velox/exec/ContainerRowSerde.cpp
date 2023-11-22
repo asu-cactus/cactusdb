@@ -16,10 +16,16 @@
 
 #include "velox/exec/ContainerRowSerde.h"
 #include "velox/common/base/Exceptions.h"
+#include "velox/common/memory/ByteStream.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/FlatVector.h"
 
 namespace facebook::velox::exec {
+
+const ContainerRowSerde& ContainerRowSerde::instance() {
+  static auto instance = std::make_unique<ContainerRowSerde>();
+  return *instance;
+}
 
 namespace {
 
@@ -121,7 +127,7 @@ void writeNulls(
 }
 
 void serializeArray(
-    const BaseVector& elements,
+    BaseVector& elements,
     vector_size_t offset,
     vector_size_t size,
     ByteStream& out) {
@@ -135,7 +141,7 @@ void serializeArray(
 }
 
 void serializeArray(
-    const BaseVector& elements,
+    BaseVector& elements,
     folly::Range<const vector_size_t*> indices,
     ByteStream& out) {
   out.appendOne<int32_t>(indices.size());
@@ -190,7 +196,7 @@ template <TypeKind Kind>
 void deserializeOne(ByteStream& in, vector_size_t index, BaseVector& result) {
   using T = typename TypeTraits<Kind>::NativeType;
   // Check that the vector is writable. This is faster than dynamic_cast.
-  VELOX_CHECK_EQ(result.encoding(), VectorEncoding::Simple::FLAT);
+  VELOX_CHECK(result.encoding() == VectorEncoding::Simple::FLAT);
   auto values = result.asUnchecked<FlatVector<T>>();
   values->set(index, in.read<T>());
 }
@@ -199,7 +205,7 @@ void deserializeString(
     ByteStream& in,
     vector_size_t index,
     BaseVector& result) {
-  VELOX_CHECK_EQ(result.encoding(), VectorEncoding::Simple::FLAT);
+  VELOX_CHECK(result.encoding() == VectorEncoding::Simple::FLAT);
   auto values = result.asUnchecked<FlatVector<StringView>>();
   auto size = in.read<int32_t>();
   auto buffer = values->getBufferWithSpace(size);
@@ -243,10 +249,10 @@ void deserializeOne<TypeKind::ROW>(
     vector_size_t index,
     BaseVector& result) {
   const auto& type = result.type()->as<TypeKind::ROW>();
-  VELOX_CHECK_EQ(result.encoding(), VectorEncoding::Simple::ROW);
+  VELOX_CHECK(result.encoding() == VectorEncoding::Simple::ROW);
   auto row = result.asUnchecked<RowVector>();
   auto childrenSize = type.size();
-  VELOX_CHECK_EQ(childrenSize, row->childrenSize());
+  VELOX_CHECK(childrenSize == row->childrenSize());
   auto nulls = readNulls(in, childrenSize);
   for (auto i = 0; i < childrenSize; ++i) {
     auto child = row->childAt(i);
@@ -259,7 +265,6 @@ void deserializeOne<TypeKind::ROW>(
       deserializeSwitch(in, index, *child);
     }
   }
-  result.setNull(index, false);
 }
 
 // Reads the size, null flags and deserializes from 'in', appending to
@@ -286,7 +291,7 @@ void deserializeOne<TypeKind::ARRAY>(
     ByteStream& in,
     vector_size_t index,
     BaseVector& result) {
-  VELOX_CHECK_EQ(result.encoding(), VectorEncoding::Simple::ARRAY);
+  VELOX_CHECK(result.encoding() == VectorEncoding::Simple::ARRAY);
   auto array = result.asUnchecked<ArrayVector>();
   if (array->size() <= index) {
     array->resize(index + 1);
@@ -294,7 +299,6 @@ void deserializeOne<TypeKind::ARRAY>(
   vector_size_t offset;
   auto size = deserializeArray(in, *array->elements(), offset);
   array->setOffsetAndSize(index, offset, size);
-  result.setNull(index, false);
 }
 
 template <>
@@ -302,7 +306,7 @@ void deserializeOne<TypeKind::MAP>(
     ByteStream& in,
     vector_size_t index,
     BaseVector& result) {
-  VELOX_CHECK_EQ(result.encoding(), VectorEncoding::Simple::MAP);
+  VELOX_CHECK(result.encoding() == VectorEncoding::Simple::MAP);
   auto map = result.asUnchecked<MapVector>();
   if (map->size() <= index) {
     map->resize(index + 1);
@@ -311,10 +315,9 @@ void deserializeOne<TypeKind::MAP>(
   auto keySize = deserializeArray(in, *map->mapKeys(), keyOffset);
   vector_size_t valueOffset;
   auto valueSize = deserializeArray(in, *map->mapValues(), valueOffset);
-  VELOX_CHECK_EQ(keySize, valueSize);
-  VELOX_CHECK_EQ(keyOffset, valueOffset);
+  VELOX_CHECK(keySize == valueSize);
+  VELOX_CHECK(keyOffset == valueOffset);
   map->setOffsetAndSize(index, keyOffset, keySize);
-  result.setNull(index, false);
 }
 
 void deserializeSwitch(
@@ -326,18 +329,19 @@ void deserializeSwitch(
 }
 
 // Comparison of serialization and vector.
-std::optional<int32_t> compareSwitch(
+int compareSwitch(
     ByteStream& stream,
     const BaseVector& vector,
     vector_size_t index,
     CompareFlags flags);
 
 template <TypeKind Kind>
-std::optional<int32_t> compare(
+int32_t compare(
     ByteStream& left,
     const BaseVector& right,
     vector_size_t index,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
   using T = typename TypeTraits<Kind>::NativeType;
   auto rightValue = right.asUnchecked<SimpleVector<T>>()->valueAt(index);
   auto leftValue = left.read<T>();
@@ -372,66 +376,73 @@ int compareStringAsc(
 }
 
 template <>
-std::optional<int32_t> compare<TypeKind::VARCHAR>(
+int compare<TypeKind::VARCHAR>(
     ByteStream& left,
     const BaseVector& right,
     vector_size_t index,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   auto result = compareStringAsc(left, right, index, flags.equalsOnly);
   return flags.ascending ? result : result * -1;
 }
 
 template <>
-std::optional<int32_t> compare<TypeKind::VARBINARY>(
+int compare<TypeKind::VARBINARY>(
     ByteStream& left,
     const BaseVector& right,
     vector_size_t index,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   auto result = compareStringAsc(left, right, index, flags.equalsOnly);
   return flags.ascending ? result : result * -1;
 }
 
 template <>
-std::optional<int32_t> compare<TypeKind::ROW>(
+int compare<TypeKind::ROW>(
     ByteStream& left,
     const BaseVector& right,
     vector_size_t index,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   auto row = right.wrappedVector()->asUnchecked<RowVector>();
   auto wrappedIndex = right.wrappedIndex(index);
-  VELOX_CHECK_EQ(row->encoding(), VectorEncoding::Simple::ROW);
+  VELOX_CHECK(row->encoding() == VectorEncoding::Simple::ROW);
   const auto& type = row->type()->as<TypeKind::ROW>();
   auto childrenSize = type.size();
-  VELOX_CHECK_EQ(childrenSize, row->childrenSize());
+  VELOX_CHECK(childrenSize == row->childrenSize());
   auto nulls = readNulls(left, childrenSize);
   for (auto i = 0; i < childrenSize; ++i) {
     auto child = row->childAt(i);
     auto leftNull = bits::isBitSet(nulls.data(), i);
     auto rightNull = child->isNullAt(wrappedIndex);
-
-    if (leftNull || rightNull) {
-      auto result = BaseVector::compareNulls(leftNull, rightNull, flags);
-      if (result.has_value() && result.value() == 0) {
-        continue;
-      }
-      return result;
-    }
-
-    auto result = compareSwitch(left, *child, wrappedIndex, flags);
-    if (result.has_value() && result.value() == 0) {
+    if (leftNull && rightNull) {
       continue;
     }
-    return result;
+    if (leftNull) {
+      return flags.nullsFirst ? -1 : 1;
+    }
+    if (rightNull) {
+      return flags.nullsFirst ? 1 : -1;
+    }
+    auto result = compareSwitch(left, *child, wrappedIndex, flags);
+    if (result) {
+      return result;
+    }
   }
   return 0;
 }
 
-std::optional<int32_t> compareArrays(
+int32_t compareArrays(
     ByteStream& left,
-    const BaseVector& elements,
+    BaseVector& elements,
     vector_size_t offset,
     vector_size_t rightSize,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   int leftSize = left.read<int32_t>();
   if (leftSize != rightSize && flags.equalsOnly) {
     return flags.ascending ? 1 : -1;
@@ -440,32 +451,32 @@ std::optional<int32_t> compareArrays(
   auto leftNulls = readNulls(left, leftSize);
   auto wrappedElements = elements.wrappedVector();
   for (auto i = 0; i < compareSize; ++i) {
+    auto elementIndex = elements.wrappedIndex(offset + i);
     bool leftNull = bits::isBitSet(leftNulls.data(), i);
-    bool rightNull = elements.isNullAt(offset + i);
-
-    if (leftNull || rightNull) {
-      auto result = BaseVector::compareNulls(leftNull, rightNull, flags);
-      if (result.has_value() && result.value() == 0) {
+    bool rightNull = wrappedElements->isNullAt(elementIndex);
+    if (leftNull) {
+      if (rightNull) {
         continue;
       }
+      return flags.nullsFirst ? -1 : 1;
+    } else if (rightNull) {
+      return flags.nullsFirst ? 1 : -1;
+    }
+    int result = compareSwitch(left, *wrappedElements, elementIndex, flags);
+    if (result) {
       return result;
     }
-
-    auto elementIndex = elements.wrappedIndex(offset + i);
-    auto result = compareSwitch(left, *wrappedElements, elementIndex, flags);
-    if (result.has_value() && result.value() == 0) {
-      continue;
-    }
-    return result;
   }
   return flags.ascending ? (leftSize - rightSize) : (rightSize - leftSize);
 }
 
-std::optional<int32_t> compareArrayIndices(
+int32_t compareArrayIndices(
     ByteStream& left,
-    const BaseVector& elements,
+    BaseVector& elements,
     folly::Range<const vector_size_t*> rightIndices,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   int32_t leftSize = left.read<int32_t>();
   int32_t rightSize = rightIndices.size();
   if (leftSize != rightSize && flags.equalsOnly) {
@@ -475,35 +486,35 @@ std::optional<int32_t> compareArrayIndices(
   auto leftNulls = readNulls(left, leftSize);
   auto wrappedElements = elements.wrappedVector();
   for (auto i = 0; i < compareSize; ++i) {
+    auto elementIndex = elements.wrappedIndex(rightIndices[i]);
     bool leftNull = bits::isBitSet(leftNulls.data(), i);
-    bool rightNull = elements.isNullAt(rightIndices[i]);
-
-    if (leftNull || rightNull) {
-      auto result = BaseVector::compareNulls(leftNull, rightNull, flags);
-      if (result.has_value() && result.value() == 0) {
+    bool rightNull = wrappedElements->isNullAt(elementIndex);
+    if (leftNull) {
+      if (rightNull) {
         continue;
       }
+      return flags.nullsFirst ? -1 : 1;
+    } else if (rightNull) {
+      return flags.nullsFirst ? 1 : -1;
+    }
+    int result = compareSwitch(left, *wrappedElements, elementIndex, flags);
+    if (result) {
       return result;
     }
-
-    auto elementIndex = elements.wrappedIndex(rightIndices[i]);
-    auto result = compareSwitch(left, *wrappedElements, elementIndex, flags);
-    if (result.has_value() && result.value() == 0) {
-      continue;
-    }
-    return result;
   }
   return flags.ascending ? (leftSize - rightSize) : (rightSize - leftSize);
 }
 
 template <>
-std::optional<int32_t> compare<TypeKind::ARRAY>(
+int compare<TypeKind::ARRAY>(
     ByteStream& left,
     const BaseVector& right,
     vector_size_t index,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   auto array = right.wrappedVector()->asUnchecked<ArrayVector>();
-  VELOX_CHECK_EQ(array->encoding(), VectorEncoding::Simple::ARRAY);
+  VELOX_CHECK(array->encoding() == VectorEncoding::Simple::ARRAY);
   auto wrappedIndex = right.wrappedIndex(index);
   return compareArrays(
       left,
@@ -514,29 +525,33 @@ std::optional<int32_t> compare<TypeKind::ARRAY>(
 }
 
 template <>
-std::optional<int32_t> compare<TypeKind::MAP>(
+int compare<TypeKind::MAP>(
     ByteStream& left,
     const BaseVector& right,
     vector_size_t index,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   auto map = right.wrappedVector()->asUnchecked<MapVector>();
-  VELOX_CHECK_EQ(map->encoding(), VectorEncoding::Simple::MAP);
+  VELOX_CHECK(map->encoding() == VectorEncoding::Simple::MAP);
   auto wrappedIndex = right.wrappedIndex(index);
   auto size = map->sizeAt(wrappedIndex);
   std::vector<vector_size_t> indices(size);
   auto rightIndices = map->sortedKeyIndices(wrappedIndex);
   auto result = compareArrayIndices(left, *map->mapKeys(), rightIndices, flags);
-  if (result.has_value() && result.value() == 0) {
-    return compareArrayIndices(left, *map->mapValues(), rightIndices, flags);
+  if (result) {
+    return result;
   }
-  return result;
+  return compareArrayIndices(left, *map->mapValues(), rightIndices, flags);
 }
 
-std::optional<int32_t> compareSwitch(
+int32_t compareSwitch(
     ByteStream& stream,
     const BaseVector& vector,
     vector_size_t index,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   return VELOX_DYNAMIC_TYPE_DISPATCH(
       compare, vector.typeKind(), stream, vector, index, flags);
 }
@@ -570,6 +585,8 @@ int32_t compare(
     ByteStream& right,
     const Type* /*type*/,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   using T = typename TypeTraits<Kind>::NativeType;
   T leftValue = left.read<T>();
   T rightValue = right.read<T>();
@@ -583,6 +600,8 @@ int32_t compare<TypeKind::VARCHAR>(
     ByteStream& right,
     const Type* /*type*/,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   std::string leftStorage;
   std::string rightStorage;
   StringView leftValue = readStringView(left, leftStorage);
@@ -597,6 +616,8 @@ int32_t compare<TypeKind::VARBINARY>(
     ByteStream& right,
     const Type* /*type*/,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   std::string leftStorage;
   std::string rightStorage;
   StringView leftValue = readStringView(left, leftStorage);
@@ -610,6 +631,8 @@ int32_t compareArrays(
     ByteStream& right,
     const Type* elementType,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   auto leftSize = left.read<int32_t>();
   auto rightSize = right.read<int32_t>();
   if (flags.equalsOnly && leftSize != rightSize) {
@@ -644,6 +667,8 @@ int32_t compare<TypeKind::ROW>(
     ByteStream& right,
     const Type* type,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   const auto& rowType = type->as<TypeKind::ROW>();
   int size = rowType.size();
   auto leftNulls = readNulls(left, size);
@@ -674,6 +699,8 @@ int32_t compare<TypeKind::ARRAY>(
     ByteStream& right,
     const Type* type,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   return compareArrays(left, right, type->childAt(0).get(), flags);
 }
 
@@ -683,6 +710,8 @@ int32_t compare<TypeKind::MAP>(
     ByteStream& right,
     const Type* type,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   auto result = compareArrays(left, right, type->childAt(0).get(), flags);
   if (result) {
     return result;
@@ -695,6 +724,8 @@ int32_t compareSwitch(
     ByteStream& right,
     const Type* type,
     CompareFlags flags) {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
   return VELOX_DYNAMIC_TYPE_DISPATCH(
       compare, type->kind(), left, right, type, flags);
 }
@@ -773,59 +804,41 @@ uint64_t hashSwitch(ByteStream& in, const Type* type) {
 
 } // namespace
 
-// static
 void ContainerRowSerde::serialize(
     const BaseVector& source,
     vector_size_t index,
-    ByteStream& out) {
-  VELOX_DCHECK(
-      !source.isNullAt(index), "Null top-level values are not supported");
+    ByteStream& out) const {
   serializeSwitch(source, index, out);
 }
 
-// static
 void ContainerRowSerde::deserialize(
     ByteStream& in,
     vector_size_t index,
-    BaseVector* result) {
+    BaseVector* result) const {
   deserializeSwitch(in, index, *result);
 }
 
-// static
 int32_t ContainerRowSerde::compare(
     ByteStream& left,
     const DecodedVector& right,
     vector_size_t index,
-    CompareFlags flags) {
-  VELOX_DCHECK(
-      !right.isNullAt(index), "Null top-level values are not supported");
-  VELOX_DCHECK(!flags.mayStopAtNull(), "not supported null handling mode");
-  return compareSwitch(left, *right.base(), right.index(index), flags).value();
+    CompareFlags flags) const {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
+
+  return compareSwitch(left, *right.base(), right.index(index), flags);
 }
 
-// static
 int32_t ContainerRowSerde::compare(
     ByteStream& left,
     ByteStream& right,
     const Type* type,
-    CompareFlags flags) {
-  VELOX_DCHECK(!flags.mayStopAtNull(), "not supported null handling mode");
+    CompareFlags flags) const {
+  VELOX_DCHECK(!flags.stopAtNull, "not supported compare flag");
 
   return compareSwitch(left, right, type, flags);
 }
 
-std::optional<int32_t> ContainerRowSerde::compareWithNulls(
-    ByteStream& left,
-    const DecodedVector& right,
-    vector_size_t index,
-    CompareFlags flags) {
-  VELOX_DCHECK(
-      !right.isNullAt(index), "Null top-level values are not supported");
-  return compareSwitch(left, *right.base(), right.index(index), flags);
-}
-
-// static
-uint64_t ContainerRowSerde::hash(ByteStream& in, const Type* type) {
+uint64_t ContainerRowSerde::hash(ByteStream& in, const Type* type) const {
   return hashSwitch(in, type);
 }
 

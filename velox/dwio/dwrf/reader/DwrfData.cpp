@@ -23,18 +23,14 @@ namespace facebook::velox::dwrf {
 DwrfData::DwrfData(
     std::shared_ptr<const dwio::common::TypeWithId> nodeType,
     StripeStreams& stripe,
-    const StreamLabels& streamLabels,
     FlatMapContext flatMapContext)
     : memoryPool_(stripe.getMemoryPool()),
       nodeType_(std::move(nodeType)),
       flatMapContext_(std::move(flatMapContext)),
-      stripeRows_{stripe.stripeRows()},
       rowsPerRowGroup_{stripe.rowsPerRowGroup()} {
-  EncodingKey encodingKey{nodeType_->id(), flatMapContext_.sequence};
-  std::unique_ptr<dwio::common::SeekableInputStream> stream = stripe.getStream(
-      encodingKey.forKind(proto::Stream_Kind_PRESENT),
-      streamLabels.label(),
-      false);
+  EncodingKey encodingKey{nodeType_->id, flatMapContext_.sequence};
+  std::unique_ptr<dwio::common::SeekableInputStream> stream =
+      stripe.getStream(encodingKey.forKind(proto::Stream_Kind_PRESENT), false);
   if (stream) {
     notNullDecoder_ = createBooleanRleDecoder(std::move(stream), encodingKey);
   }
@@ -45,9 +41,7 @@ DwrfData::DwrfData(
   // because the first filter can come from a hash join or other run
   // time pushdown.
   indexStream_ = stripe.getStream(
-      encodingKey.forKind(proto::Stream_Kind_ROW_INDEX),
-      streamLabels.label(),
-      false);
+      encodingKey.forKind(proto::Stream_Kind_ROW_INDEX), false);
 }
 
 uint64_t DwrfData::skipNulls(uint64_t numValues, bool /*nullsOnly*/) {
@@ -163,8 +157,7 @@ void DwrfData::filterRowGroups(
     auto columnStats =
         buildColumnStatisticsFromProto(entry.statistics(), *dwrfContext);
     if (filter &&
-        !testFilter(
-            filter, columnStats.get(), rowGroupSize, nodeType_->type())) {
+        !testFilter(filter, columnStats.get(), rowGroupSize, nodeType_->type)) {
       VLOG(1) << "Drop stride " << i << " on " << scanSpec.toString();
       bits::setBit(result.filterResult.data(), i);
       continue;
@@ -175,7 +168,7 @@ void DwrfData::filterRowGroups(
               metadataFilter,
               columnStats.get(),
               rowGroupSize,
-              nodeType_->type())) {
+              nodeType_->type)) {
         bits::setBit(
             result.metadataFilterResults[metadataFiltersStartIndex + j]
                 .second.data(),

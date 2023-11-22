@@ -64,7 +64,7 @@ template <
 void applyTypedFirstMatch(
     const SelectivityVector& rows,
     DecodedVector& arrayDecoded,
-    DecodedVector& elementsDecoded,
+    const DecodedVector& elementsDecoded,
     DecodedVector& searchDecoded,
     FlatVector<int64_t>& flatResult) {
   auto baseArray = arrayDecoded.base()->as<ArrayVector>();
@@ -73,7 +73,7 @@ void applyTypedFirstMatch(
   auto indices = arrayDecoded.indices();
 
   auto elementsBase = elementsDecoded.base();
-  auto elementIndices = elementsDecoded.indices();
+
   auto searchBase = searchDecoded.base();
   auto searchIndices = searchDecoded.indices();
 
@@ -84,9 +84,8 @@ void applyTypedFirstMatch(
 
     int i;
     for (i = 0; i < size; i++) {
-      if (!elementsDecoded.isNullAt(offset + i) &&
-          elementsBase->equalValueAt(
-              searchBase, elementIndices[offset + i], searchIndex)) {
+      if (!elementsBase->isNullAt(offset + i) &&
+          elementsBase->equalValueAt(searchBase, offset + i, searchIndex)) {
         flatResult.set(row, i + 1);
         break;
       }
@@ -155,7 +154,7 @@ template <
 void applyTypedWithInstance(
     const SelectivityVector& rows,
     DecodedVector& arrayDecoded,
-    DecodedVector& elementsDecoded,
+    const DecodedVector& elementsDecoded,
     DecodedVector& searchDecoded,
     const DecodedVector& instanceDecoded,
     FlatVector<int64_t>& flatResult) {
@@ -165,7 +164,6 @@ void applyTypedWithInstance(
   auto indices = arrayDecoded.indices();
 
   auto elementsBase = elementsDecoded.base();
-  auto elementIndices = elementsDecoded.indices();
 
   auto searchBase = searchDecoded.base();
   auto searchIndices = searchDecoded.indices();
@@ -188,9 +186,8 @@ void applyTypedWithInstance(
 
     int i;
     for (i = startIndex; i != endIndex; i += step) {
-      if (!elementsDecoded.isNullAt(offset + i) &&
-          elementsBase->equalValueAt(
-              searchBase, elementIndices[offset + i], searchIndex)) {
+      if (!elementsBase->isNullAt(offset + i) &&
+          elementsBase->equalValueAt(searchBase, offset + i, searchIndex)) {
         --instance;
         if (instance == 0) {
           flatResult.set(row, i + 1);

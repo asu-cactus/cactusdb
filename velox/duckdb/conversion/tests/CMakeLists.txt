@@ -19,6 +19,7 @@ add_test(velox_duckdb_conversion_test velox_duckdb_conversion_test)
 
 target_link_libraries(
   velox_duckdb_conversion_test
+  velox_duckdb_functions
   velox_duckdb_parser
   velox_parse_expression
   velox_functions_prestosql

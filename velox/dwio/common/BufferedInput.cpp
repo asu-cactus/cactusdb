@@ -16,12 +16,9 @@
 
 #include <fmt/format.h>
 
-#include "folly/io/Cursor.h"
 #include "velox/dwio/common/BufferedInput.h"
 
 DEFINE_bool(wsVRLoad, false, "Use WS VRead API to load");
-
-using ::facebook::velox::common::Region;
 
 namespace facebook::velox::dwio::common {
 
@@ -42,26 +39,24 @@ void BufferedInput::load(const LogType logType) {
   offsets_.reserve(regions_.size());
   buffers_.reserve(regions_.size());
 
-  if (useVRead()) {
+  if (wsVRLoad_) {
+    std::vector<void*> buffers;
+    buffers.reserve(regions_.size());
+    loadWithAction(
+        logType,
+        [&buffers](
+            void* buf, uint64_t /* length */, uint64_t /* offset */, LogType) {
+          buffers.push_back(buf);
+        });
+
     // Now we have all buffers and regions, load it in parallel
-    std::vector<folly::IOBuf> iobufs(regions_.size());
-    input_->vread(regions_, {iobufs.data(), iobufs.size()}, logType);
-    for (size_t i = 0; i < regions_.size(); ++i) {
-      const auto& region = regions_[i];
-      auto iobuf = std::move(iobufs[i]);
-
-      auto allocated = allocate(region);
-      folly::io::Cursor cursor(&iobuf);
-      DWIO_ENSURE_EQ(
-          cursor.totalLength(), allocated.size(), "length mismatch.");
-      cursor.pull(allocated.data(), allocated.size());
-    }
-
+    input_->vread(buffers, regions_, logType);
   } else {
-    for (const auto& region : regions_) {
-      auto allocated = allocate(region);
-      input_->read(allocated.data(), allocated.size(), region.offset, logType);
-    }
+    loadWithAction(
+        logType,
+        [this](void* buf, uint64_t length, uint64_t offset, LogType type) {
+          input_->read(buf, length, offset, type);
+        });
   }
 
   // clear the loaded regions
@@ -90,15 +85,6 @@ std::unique_ptr<SeekableInputStream> BufferedInput::enqueue(
       [region, this, i = regions_.size() - 1]() {
         return readInternal(region.offset, region.length, i);
       });
-}
-
-bool BufferedInput::useVRead() const {
-  // Use value explicitly set by the user if any, otherwise use the GFLAG
-  // We want to update this on every use for now because during the onboarding
-  // to wsVRLoad=true we may change the value of this GFLAG programatically from
-  // a config update so we can rollback fast from config without the need of a
-  // deployment
-  return wsVRLoad_.value_or(FLAGS_wsVRLoad);
 }
 
 // Sort regions and enqueuedToOffset in the same way
@@ -148,7 +134,7 @@ void BufferedInput::mergeRegions() {
   te[e[0]] = 0;
   for (size_t ib = 1; ib < r.size(); ++ib) {
     DWIO_ENSURE_GT(r[ib].length, 0, "invalid region");
-    if (!tryMerge(r[ia], r[ib])) {
+    if (wsVRLoad_ || !tryMerge(r[ia], r[ib])) {
       r[++ia] = r[ib];
     }
     te[e[ib]] = ia;
@@ -158,19 +144,23 @@ void BufferedInput::mergeRegions() {
   std::swap(e, te);
 }
 
+void BufferedInput::loadWithAction(
+    const LogType logType,
+    std::function<void(void*, uint64_t, uint64_t, LogType)> action) {
+  for (const auto& region : regions_) {
+    readRegion(region, logType, action);
+  }
+}
+
 bool BufferedInput::tryMerge(Region& first, const Region& second) {
   DWIO_ENSURE_GE(second.offset, first.offset, "regions should be sorted.");
-  const int64_t gap = second.offset - first.offset - first.length;
-
-  // Duplicate regions (extension==0) is the only case allowed to merge for
-  // useVRead()
-  const int64_t extension = gap + second.length;
-  if (useVRead()) {
-    return extension == 0;
-  }
+  int64_t gap = second.offset - first.offset - first.length;
 
   // compare with 0 since it's comparison in different types
   if (gap < 0 || gap <= maxMergeDistance_) {
+    // ensure try merge will handle duplicate regions (extension==0)
+    int64_t extension = gap + second.length;
+
     // the second region is inside first one if extension is negative
     if (extension > 0) {
       first.length += extension;

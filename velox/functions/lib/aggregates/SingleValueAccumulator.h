@@ -17,12 +17,12 @@
 #pragma once
 
 #include "velox/common/memory/HashStringAllocator.h"
-#include "velox/vector/DecodedVector.h"
+#include "velox/exec/ContainerRowSerde.h"
 
 namespace facebook::velox::functions::aggregate {
 
-/// An accumulator for a single variable-width value (a string, a map, an array
-/// or a struct).
+// An accumulator for a single variable-width value (a string, a map, an array
+// or a struct).
 struct SingleValueAccumulator {
   void write(
       const BaseVector* vector,
@@ -33,21 +33,16 @@ struct SingleValueAccumulator {
 
   bool hasValue() const;
 
-  /// Returns 0 if stored and new values are equal; <0 if stored value is less
-  /// then new value; >0 if stored value is greater than new value. If
-  /// flags.nullHandlingMode is StopAtNull, returns std::nullopt
-  /// in case of null array elements, map values, and struct fields.
-  /// If flags.nullHandlingMode is NoStop then NULL is considered equal to NULL.
-  std::optional<int32_t> compare(
-      const DecodedVector& decoded,
-      vector_size_t index,
-      CompareFlags compareFlags) const;
+  // Returns 0 if stored and new values are equal; <0 if stored value is less
+  // then new value; >0 if stored value is greated than new value
+  int32_t compare(const DecodedVector& decoded, vector_size_t index) const;
 
-  /// Returns memory back to HashStringAllocator.
   void destroy(HashStringAllocator* allocator);
 
  private:
-  HashStringAllocator::Position start_;
+  static constexpr int kInitialBytes{20};
+
+  HashStringAllocator::Header* begin_{nullptr};
 };
 
 } // namespace facebook::velox::functions::aggregate

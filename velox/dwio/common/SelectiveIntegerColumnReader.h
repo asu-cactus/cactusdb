@@ -25,18 +25,18 @@ namespace facebook::velox::dwio::common {
 class SelectiveIntegerColumnReader : public SelectiveColumnReader {
  public:
   SelectiveIntegerColumnReader(
-      const TypePtr& requestedType,
+      std::shared_ptr<const dwio::common::TypeWithId> requestedType,
       dwio::common::FormatParams& params,
       velox::common::ScanSpec& scanSpec,
-      std::shared_ptr<const dwio::common::TypeWithId> type)
+      const TypePtr& type)
       : SelectiveColumnReader(
-            requestedType,
+            std::move(requestedType),
             params,
             scanSpec,
-            std::move(type)) {}
+            type) {}
 
   void getValues(RowSet rows, VectorPtr* result) override {
-    getIntValues(rows, requestedType_, result);
+    getIntValues(rows, nodeType_->type, result);
   }
 
  protected:
@@ -211,12 +211,12 @@ void SelectiveIntegerColumnReader::readCommon(RowSet rows) {
       } else {
         processValueHook<Reader, false>(rows, scanSpec_->valueHook());
       }
+      return;
+    }
+    if (isDense) {
+      processFilter<Reader, true>(filter, ExtractToReader(this), rows);
     } else {
-      if (isDense) {
-        processFilter<Reader, true>(filter, ExtractToReader(this), rows);
-      } else {
-        processFilter<Reader, false>(filter, ExtractToReader(this), rows);
-      }
+      processFilter<Reader, false>(filter, ExtractToReader(this), rows);
     }
   } else {
     if (isDense) {

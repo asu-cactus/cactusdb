@@ -15,40 +15,34 @@
  */
 #pragma once
 
-#include "velox/exec/AggregateInfo.h"
 #include "velox/exec/AggregationMasks.h"
-#include "velox/exec/DistinctAggregations.h"
 #include "velox/exec/HashTable.h"
-#include "velox/exec/SortedAggregations.h"
 #include "velox/exec/Spiller.h"
 #include "velox/exec/TreeOfLosers.h"
 #include "velox/exec/VectorHasher.h"
 
 namespace facebook::velox::exec {
 
+class Aggregate;
+
 class GroupingSet {
  public:
   GroupingSet(
-      const RowTypePtr& inputType,
       std::vector<std::unique_ptr<VectorHasher>>&& hashers,
       std::vector<column_index_t>&& preGroupedKeys,
-      std::vector<AggregateInfo>&& aggregates,
+      std::vector<std::unique_ptr<Aggregate>>&& aggregates,
+      std::vector<std::optional<column_index_t>>&& aggrMaskChannels,
+      std::vector<std::vector<column_index_t>>&& channelLists,
+      std::vector<std::vector<VectorPtr>>&& constantLists,
+      std::vector<TypePtr>&& intermediateTypes,
       bool ignoreNullKeys,
       bool isPartial,
       bool isRawInput,
-      const common::SpillConfig* spillConfig,
-      uint32_t* numSpillRuns,
+      const Spiller::Config* spillConfig,
       tsan_atomic<bool>* nonReclaimableSection,
       OperatorCtx* operatorCtx);
 
   ~GroupingSet();
-
-  // Used by MarkDistinct operator to identify rows with unique values.
-  static std::unique_ptr<GroupingSet> createForMarkDistinct(
-      const RowTypePtr& inputType,
-      std::vector<std::unique_ptr<VectorHasher>>&& hashers,
-      OperatorCtx* operatorCtx,
-      tsan_atomic<bool>* nonReclaimableSection);
 
   void addInput(const RowVectorPtr& input, bool mayPushdown);
 
@@ -63,12 +57,9 @@ class GroupingSet {
   bool hasOutput();
 
   /// Called if partial aggregation has reached memory limit or if hasOutput()
-  /// returns true. 'maxOutputRows' and 'maxOutputBytes' specify the max number
-  /// of rows/bytes to return in 'result' respectively. The function stops
-  /// producing output if it exceeds either limit.
+  /// returns true.
   bool getOutput(
-      int32_t maxOutputRows,
-      int32_t maxOutputBytes,
+      int32_t batchSize,
       RowContainerIterator& iterator,
       RowVectorPtr& result);
 
@@ -100,20 +91,10 @@ class GroupingSet {
   /// of this will be in a paused state and off thread.
   void spill(int64_t targetRows, int64_t targetBytes);
 
-  /// Spills all the rows in container starting from the offset specified by
-  /// 'rowIterator'.
-  void spill(const RowContainerIterator& rowIterator);
-
   /// Returns the spiller stats including total bytes and rows spilled so far.
-  std::optional<SpillStats> spilledStats() const {
-    if (spiller_ == nullptr) {
-      return std::nullopt;
-    }
-    return spiller_->stats();
+  Spiller::Stats spilledStats() const {
+    return spiller_ != nullptr ? spiller_->stats() : Spiller::Stats{};
   }
-
-  /// Returns true if spilling has triggered on this grouping set.
-  bool hasSpilled() const;
 
   /// Returns the hashtable stats.
   HashTableStats hashTableStats() const {
@@ -135,10 +116,6 @@ class GroupingSet {
 
   /// Returns an estimate of the average row size.
   std::optional<int64_t> estimateRowSize() const;
-
-  memory::MemoryPool& testingPool() const {
-    return pool_;
-  }
 
  private:
   void addInputForActiveRows(const RowVectorPtr& input, bool mayPushdown);
@@ -166,14 +143,10 @@ class GroupingSet {
   // index for this aggregation), otherwise it returns reference to activeRows_.
   const SelectivityVector& getSelectivityVector(size_t aggregateIndex) const;
 
-  // Checks if input will fit in the existing memory and increases reservation
-  // if not. If reservation cannot be increased, spills enough to make 'input'
-  // fit.
+  // Checks if input will fit in the existing memory and increases
+  // reservation if not. If reservation cannot be increased, spills
+  // enough to make 'input' fit.
   void ensureInputFits(const RowVectorPtr& input);
-
-  // Reserves memory for output processing. If reservation cannot be increased,
-  // spills enough to make output fit.
-  void ensureOutputFits();
 
   // Copies the grouping keys and aggregates for 'groups' into 'result' If
   // partial output, extracts the intermediate type for aggregates, final result
@@ -182,22 +155,15 @@ class GroupingSet {
 
   // Produces output in if spilling has occurred. First produces data
   // from non-spilled partitions, then merges spill runs and unspilled data
-  // form spilled partitions. Returns nullptr when at end. 'maxOutputRows' and
-  // 'maxOutputBytes' specifies the max number of output rows and bytes in
-  // 'result'.
-  bool getOutputWithSpill(
-      int32_t maxOutputRows,
-      int32_t maxOutputBytes,
-      const RowVectorPtr& result);
+  // form spilled partitions. Returns nullptr when at end. 'batchSize' specifies
+  // the max number of output rows in 'result'.
+  bool getOutputWithSpill(int32_t batchSize, const RowVectorPtr& result);
 
   // Reads rows from the current spilled partition until producing a batch of
   // final results in 'result'. Returns false and leaves 'result' empty when
-  // the partition is fully read. 'maxOutputRows' and 'maxOutputBytes' specify
-  // the max number of output rows and bytes in 'result'.
-  bool mergeNext(
-      int32_t maxOutputRows,
-      int32_t maxOutputBytes,
-      const RowVectorPtr& result);
+  // the partition is fully read. 'batchSize' specifies the max number of output
+  // rows in 'result'.
+  bool mergeNext(int32_t batchSize, const RowVectorPtr& result);
 
   // Initializes a new row in 'mergeRows' with the keys from the
   // current element from 'keys'. Accumulators are left in the initial
@@ -220,20 +186,6 @@ class GroupingSet {
   // groups.
   void extractSpillResult(const RowVectorPtr& result);
 
-  // Return a list of accumulators for 'aggregates_', plus one more accumulator
-  // for 'sortedAggregations_', and one for each 'distinctAggregations_'.  When
-  // 'excludeToIntermediate' is true, skip the functions that support
-  // 'toIntermediate'.
-  std::vector<Accumulator> accumulators(bool excludeToIntermediate);
-
-  // Calculates the number of groups to extract from 'rowsWhileReadingSpill_'
-  // container with rows starting at 'nonSpilledIndex_' in 'nonSpilledRows_'.
-  // 'maxOutputRows' and 'maxOutputBytes' specifies the max number of groups and
-  // bytes to extract.
-  size_t numNonSpilledGroupsToExtract(
-      int32_t maxOutputRows,
-      int32_t maxOutputBytes) const;
-
   std::vector<column_index_t> keyChannels_;
 
   /// A subset of grouping keys on which the input is clustered.
@@ -243,12 +195,17 @@ class GroupingSet {
   const bool isGlobal_;
   const bool isPartial_;
   const bool isRawInput_;
-  const core::QueryConfig* const queryConfig_;
-
-  std::vector<AggregateInfo> aggregates_;
+  std::vector<std::unique_ptr<Aggregate>> aggregates_;
   AggregationMasks masks_;
-  std::unique_ptr<SortedAggregations> sortedAggregations_;
-  std::vector<std::unique_ptr<DistinctAggregations>> distinctAggregations_;
+  // Argument list for the corresponding element of 'aggregates_'.
+  const std::vector<std::vector<column_index_t>> channelLists_;
+  // Constant arguments to aggregates. Corresponds pairwise to
+  // 'channelLists_'. This is used when channelLists_[i][j] ==
+  // kConstantChannel.
+  const std::vector<std::vector<VectorPtr>> constantLists_;
+
+  // Types for extracting accumulators for spilling.
+  const std::vector<TypePtr> intermediateTypes_;
 
   const bool ignoreNullKeys_;
 
@@ -256,9 +213,7 @@ class GroupingSet {
   // If it is zero, then there is no such limit.
   const uint64_t spillMemoryThreshold_;
 
-  const common::SpillConfig* const spillConfig_;
-
-  uint32_t* const numSpillRuns_;
+  const Spiller::Config* const spillConfig_; // Not owned.
 
   // Indicates if this grouping set and the associated hash aggregation operator
   // is under non-reclaimable execution section or not.
@@ -279,7 +234,7 @@ class GroupingSet {
   // Used to allocate memory for a single row accumulating results of global
   // aggregation
   HashStringAllocator stringAllocator_;
-  memory::AllocationPool rows_;
+  AllocationPool rows_;
   const bool isAdaptive_;
 
   bool noMoreInput_{false};
@@ -319,19 +274,19 @@ class GroupingSet {
   // one.
   bool nextKeyIsEqual_{false};
 
-  // The set of rows that are outside of the spillable hash number ranges. Used
-  // when producing output.
+  // The set of rows that are outside of the spillable hash number
+  // ranges. Used when producing output.
   std::optional<Spiller::SpillRows> nonSpilledRows_;
 
   // Index of first in 'nonSpilledRows_' that has not been added to output.
-  size_t nonSpilledRowIndex_{0};
+  size_t nonSpilledIndex_ = 0;
 
   // Pool of the OperatorCtx. Used for spilling.
   memory::MemoryPool& pool_;
 
-  // The RowContainer of 'table_' is moved here before freeing 'table_' when
-  // starting to read spill output.
-  std::unique_ptr<RowContainer> nonSpilledRowContainer_;
+  // The RowContainer of 'table_' is moved here before freeing
+  // 'table_' when starting to read spill output.
+  std::unique_ptr<RowContainer> rowsWhileReadingSpill_;
 
   // Counts input batches and triggers spilling if folly hash of this % 100 <=
   // 'testSpillPct_';.

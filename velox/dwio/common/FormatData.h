@@ -92,7 +92,7 @@ class FormatData {
   struct FilterRowGroupsResult {
     std::vector<uint64_t> filterResult;
     std::vector<std::pair<
-        const velox::common::MetadataFilter::LeafNode*,
+        velox::common::MetadataFilter::LeafNode*,
         std::vector<uint64_t>>>
         metadataFilterResults;
     int totalCount = 0;
@@ -132,8 +132,7 @@ class FormatData {
 /// Base class for format-specific reader initialization arguments.
 class FormatParams {
  public:
-  explicit FormatParams(memory::MemoryPool& pool, ColumnReaderStatistics& stats)
-      : pool_(pool), stats_(stats) {}
+  explicit FormatParams(memory::MemoryPool& pool) : pool_(pool) {}
 
   virtual ~FormatParams() = default;
 
@@ -147,13 +146,8 @@ class FormatParams {
     return pool_;
   }
 
-  ColumnReaderStatistics& runtimeStatistics() {
-    return stats_;
-  }
-
  private:
   memory::MemoryPool& pool_;
-  ColumnReaderStatistics& stats_;
 };
 
 } // namespace facebook::velox::dwio::common

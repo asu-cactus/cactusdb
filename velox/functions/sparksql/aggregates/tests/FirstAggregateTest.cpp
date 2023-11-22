@@ -44,17 +44,13 @@ class FirstAggregateTest : public AggregationTestBase {
 
       createDuckDbTable(vectors);
 
-      // We do not test with TableScan because having two input splits makes the
-      // result non-deterministic.
       {
         SCOPED_TRACE("ignore null + group by");
         testAggregations(
             vectors,
             {"c0"},
             {"spark_first_ignore_null(c1)"},
-            "SELECT c0, first(c1 ORDER BY c1 NULLS LAST) FROM tmp GROUP BY c0",
-            /*config*/ {},
-            /*testWithTableScan*/ false);
+            "SELECT c0, first(c1 ORDER BY c1 NULLS LAST) FROM tmp GROUP BY c0");
       }
       {
         // Expected result should have first 7 rows including nulls.
@@ -66,13 +62,7 @@ class FirstAggregateTest : public AggregationTestBase {
                 [](auto row) { return row; }, // valueAt
                 [](auto row) { return row % 3 == 0; }), // nullAt
         })};
-        testAggregations(
-            vectors,
-            {"c0"},
-            {"spark_first(c1)"},
-            expected,
-            /*config*/ {},
-            /*testWithTableScan*/ false);
+        testAggregations(vectors, {"c0"}, {"spark_first(c1)"}, expected);
       }
     }
 
@@ -85,24 +75,13 @@ class FirstAggregateTest : public AggregationTestBase {
         SCOPED_TRACE("ignore null + global");
         auto expectedTrue = {makeRowVector({makeNullableFlatVector<T>({1})})};
         testAggregations(
-            vectors,
-            {},
-            {"spark_first_ignore_null(c0)"},
-            expectedTrue,
-            /*config*/ {},
-            /*testWithTableScan*/ false);
+            vectors, {}, {"spark_first_ignore_null(c0)"}, expectedTrue);
       }
       {
         SCOPED_TRACE("not ignore null + global");
         auto expectedFalse = {
             makeRowVector({makeNullableFlatVector<T>({std::nullopt})})};
-        testAggregations(
-            vectors,
-            {},
-            {"spark_first(c0)"},
-            expectedFalse,
-            /*config*/ {},
-            /*testWithTableScan*/ false);
+        testAggregations(vectors, {}, {"spark_first(c0)"}, expectedFalse);
       }
     }
   }
@@ -114,23 +93,12 @@ class FirstAggregateTest : public AggregationTestBase {
     {
       SCOPED_TRACE("ignore null + group by");
       testAggregations(
-          data,
-          {"c0"},
-          {"spark_first_ignore_null(c1)"},
-          ignoreNullData,
-          /*config*/ {},
-          /*testWithTableScan*/ false);
+          data, {"c0"}, {"spark_first_ignore_null(c1)"}, ignoreNullData);
     }
 
     {
       SCOPED_TRACE("not ignore null + group by");
-      testAggregations(
-          data,
-          {"c0"},
-          {"spark_first(c1)"},
-          hasNullData,
-          /*config*/ {},
-          /*testWithTableScan*/ false);
+      testAggregations(data, {"c0"}, {"spark_first(c1)"}, hasNullData);
     }
   }
 
@@ -141,23 +109,12 @@ class FirstAggregateTest : public AggregationTestBase {
     {
       SCOPED_TRACE("ignore null + global");
       testAggregations(
-          data,
-          {},
-          {"spark_first_ignore_null(c0)"},
-          ignoreNullData,
-          /*config*/ {},
-          /*testWithTableScan*/ false);
+          data, {}, {"spark_first_ignore_null(c0)"}, ignoreNullData);
     }
 
     {
       SCOPED_TRACE("not ignore null + global");
-      testAggregations(
-          data,
-          {},
-          {"spark_first(c0)"},
-          hasNullData,
-          /*config*/ {},
-          /*testWithTableScan*/ false);
+      testAggregations(data, {}, {"spark_first(c0)"}, hasNullData);
     }
   }
 };
@@ -240,30 +197,29 @@ TEST_F(FirstAggregateTest, timestampGlobal) {
 TEST_F(FirstAggregateTest, dateGroupBy) {
   auto vectors = {makeRowVector({
       makeFlatVector<int32_t>(98, [](auto row) { return row % 7; }),
-      makeFlatVector<int32_t>(
+      makeFlatVector<Date>(
           98, // size
-          [](auto row) { return row; }, // valueAt
-          nullEvery(3),
-          DATE()),
+          [](auto row) { return Date(row); }, // valueAt
+          nullEvery(3)),
   })};
 
   auto ignoreNullData = {makeRowVector({
       makeFlatVector<int32_t>(7, [](auto row) { return row; }),
-      makeFlatVector<int32_t>(
+      makeFlatVector<Date>(
           7, // size
-          [](auto row) { return row % 3 == 0 ? row + 7 : row; }, // valueAt
-          nullptr,
-          DATE()),
+          [](auto row) {
+            return row % 3 == 0 ? Date(row + 7) : Date(row);
+          } // valueAt
+          ),
   })};
 
   // Expected result should have first 7 rows including nulls.
   auto hasNullData = {makeRowVector({
       makeFlatVector<int32_t>(7, [](auto row) { return row; }),
-      makeFlatVector<int32_t>(
+      makeFlatVector<Date>(
           7, // size
-          [](auto row) { return row; }, // valueAt
-          [](auto row) { return row % 3 == 0; },
-          DATE()), // nullAt
+          [](auto row) { return Date(row); }, // valueAt
+          [](auto row) { return row % 3 == 0; }), // nullAt
   })};
 
   testGroupBy(vectors, ignoreNullData, hasNullData);
@@ -271,85 +227,14 @@ TEST_F(FirstAggregateTest, dateGroupBy) {
 
 TEST_F(FirstAggregateTest, dateGlobal) {
   auto vectors = {makeRowVector({
-      makeNullableFlatVector<int32_t>(
-          {std::nullopt, 1, 2, std::nullopt}, DATE()),
+      makeNullableFlatVector<Date>(
+          {std::nullopt, Date(1), Date(2), std::nullopt}),
   })};
 
-  auto ignoreNullData = {
-      makeRowVector({makeNullableFlatVector<int32_t>({1}, DATE())})};
+  auto ignoreNullData = {makeRowVector({makeFlatVector<Date>({Date(1)})})};
 
   auto hasNullData = {
-      makeRowVector({makeNullableFlatVector<int32_t>({std::nullopt}, DATE())})};
-
-  testGlobalAggregate(vectors, ignoreNullData, hasNullData);
-}
-
-TEST_F(FirstAggregateTest, shortDecimalGroupBy) {
-  auto vectors = {makeRowVector({
-      makeFlatVector<int32_t>({0, 1, 0, 1}),
-      makeNullableFlatVector<int64_t>(
-          {1, std::nullopt, std::nullopt, 2}, DECIMAL(8, 2)),
-  })};
-
-  auto ignoreNullData = {makeRowVector({
-      makeFlatVector<int32_t>({0, 1}),
-      makeFlatVector<int64_t>({1, 2}, DECIMAL(8, 2)),
-  })};
-
-  auto hasNullData = {makeRowVector({
-      makeFlatVector<int32_t>({0, 1}),
-      makeNullableFlatVector<int64_t>({1, std::nullopt}, DECIMAL(8, 2)),
-  })};
-
-  testGroupBy(vectors, ignoreNullData, hasNullData);
-}
-
-TEST_F(FirstAggregateTest, shortDecimalGlobal) {
-  auto vectors = {makeRowVector({
-      makeNullableFlatVector<int64_t>({std::nullopt, 1}, DECIMAL(8, 2)),
-  })};
-
-  std::vector<int64_t> shortDecimalRawVector = {1};
-  auto ignoreNullData = {makeRowVector(
-      {makeFlatVector<int64_t>(shortDecimalRawVector, DECIMAL(8, 2))})};
-
-  auto hasNullData = {makeRowVector(
-      {makeNullableFlatVector<int64_t>({std::nullopt}, DECIMAL(8, 2))})};
-
-  testGlobalAggregate(vectors, ignoreNullData, hasNullData);
-}
-
-TEST_F(FirstAggregateTest, longDecimalGroupBy) {
-  auto vectors = {makeRowVector({
-      makeFlatVector<int32_t>({0, 1, 0, 1}),
-      makeNullableFlatVector<int128_t>(
-          {1, std::nullopt, std::nullopt, 2}, DECIMAL(38, 8)),
-  })};
-
-  auto ignoreNullData = {makeRowVector({
-      makeFlatVector<int32_t>({0, 1}),
-      makeFlatVector<int128_t>({1, 2}, DECIMAL(38, 8)),
-  })};
-
-  auto hasNullData = {makeRowVector({
-      makeFlatVector<int32_t>({0, 1}),
-      makeNullableFlatVector<int128_t>({1, std::nullopt}, DECIMAL(38, 8)),
-  })};
-
-  testGroupBy(vectors, ignoreNullData, hasNullData);
-}
-
-TEST_F(FirstAggregateTest, longDecimalGlobal) {
-  auto vectors = {makeRowVector({
-      makeNullableFlatVector<int128_t>({std::nullopt, 1}, DECIMAL(28, 2)),
-  })};
-
-  std::vector<int128_t> longDecimalRawVector = {1};
-  auto ignoreNullData = {makeRowVector(
-      {makeFlatVector<int128_t>(longDecimalRawVector, DECIMAL(28, 2))})};
-
-  auto hasNullData = {makeRowVector(
-      {makeNullableFlatVector<int128_t>({std::nullopt}, DECIMAL(28, 2))})};
+      makeRowVector({makeNullableFlatVector<Date>({std::nullopt})})};
 
   testGlobalAggregate(vectors, ignoreNullData, hasNullData);
 }
@@ -422,9 +307,7 @@ TEST_F(FirstAggregateTest, varcharGroupBy) {
         vectors,
         {"c0"},
         {"spark_first_ignore_null(c1)"},
-        "SELECT c0, first(c1) FROM tmp WHERE c1 IS NOT NULL GROUP BY c0",
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+        "SELECT c0, first(c1) FROM tmp WHERE c1 IS NOT NULL GROUP BY c0");
   }
 
   {
@@ -436,13 +319,7 @@ TEST_F(FirstAggregateTest, varcharGroupBy) {
             [&data](auto row) { return StringView(data[row]); }, // valueAt
             nullEvery(3)),
     })};
-    testAggregations(
-        vectors,
-        {"c0"},
-        {"spark_first(c1)"},
-        expected,
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+    testAggregations(vectors, {"c0"}, {"spark_first(c1)"}, expected);
   }
 }
 
@@ -533,13 +410,7 @@ TEST_F(FirstAggregateTest, mapGroupBy) {
           [](auto idx) { return idx * 0.1; }), // valueAt
   })};
 
-  testAggregations(
-      vectors,
-      {"c0"},
-      {"spark_first(c1)"},
-      expected,
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+  testAggregations(vectors, {"c0"}, {"spark_first(c1)"}, expected);
 }
 
 TEST_F(FirstAggregateTest, mapGlobal) {

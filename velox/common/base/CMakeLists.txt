@@ -14,8 +14,13 @@
 
 add_library(velox_exception Exceptions.cpp VeloxException.cpp Exceptions.h)
 target_link_libraries(
-  velox_exception PUBLIC velox_flag_definitions velox_process Folly::folly
-                         fmt::fmt gflags::gflags glog::glog)
+  velox_exception
+  velox_flag_definitions
+  velox_process
+  glog::glog
+  Folly::folly
+  fmt::fmt
+  gflags::gflags)
 
 add_library(
   velox_common_base
@@ -29,10 +34,7 @@ add_library(
   StatsReporter.cpp
   SuccinctPrinter.cpp)
 
-target_link_libraries(
-  velox_common_base
-  PUBLIC velox_exception Folly::folly fmt::fmt xsimd
-  PRIVATE velox_process velox_test_util glog::glog)
+target_link_libraries(velox_common_base velox_exception velox_process xsimd)
 
 if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)
@@ -41,14 +43,3 @@ endif()
 if(${VELOX_ENABLE_BENCHMARKS})
   add_subdirectory(benchmarks)
 endif()
-
-add_library(velox_id_map BigintIdMap.cpp)
-target_link_libraries(
-  velox_id_map
-  velox_memory
-  velox_flag_definitions
-  velox_process
-  glog::glog
-  Folly::folly
-  fmt::fmt
-  gflags::gflags)

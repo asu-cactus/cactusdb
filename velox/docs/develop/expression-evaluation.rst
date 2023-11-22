@@ -194,9 +194,7 @@ compiler to convert concat(a, concat(b, concat(c, d))) expression to
 concat(a, b, c, d).
 
 Other functions that can leverage this optimization include concat(array,..) and
-map_concat(map,..). However, only signatures that have the same input type for
-all inputs are currently supported. For eg, concat(array<T>, concat(array<T>, array<T>))
-will be flattened but concat(T, concat(array<T>, array<T>)) will not.
+map_concat(map,..).
 
 A function declaring support for flattening must have a signature with variadic
 arguments of the same type and return type must be the same as input type.
@@ -240,9 +238,7 @@ Executable expressions include a set of metadata that’s used during evaluation
 This is calculated by Expr::computeMetadata() virtual methods and stored in
 member variables of the exec::Expr class.
 
-* *distinctFields_* - List of distinct input columns.
-* *multiplyReferencedFields_* - Subset of distinctFields_ that are used as inputs by multiple subexpressions.
-* *sameAsParentDistinctFields_* - True if distinctFields_ matches one of the parent's distinctFields_ (parents to refer expressions that have this expression as input).
+* *distinctFields_* - List of distinct input columns if different from the parent expression. This list is empty if the list of distinct input columns is the same as for the parent expression.
 * *propagatesNulls_* - Boolean indicating whether a null in any of the input columns causes this expression to always return null for the row.
 * *deterministic_* - Boolean indicating whether this expression and all its children are deterministic.
 * *hasConditionals_* - Boolean indicating whether this expression or any of its children is an IF, SWITCH, AND or OR expression.
@@ -457,3 +453,4 @@ SWITCH expression evaluation goes through the following steps:
 SWITCH expression sets EvalCtx::isFinalSelection flag to false. The expressions
 are expected to use this flag to decide whether the partially populated result
 vector must be preserved or can be overwritten.
+

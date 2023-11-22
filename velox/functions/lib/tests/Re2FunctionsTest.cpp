@@ -37,15 +37,14 @@ namespace {
 
 std::shared_ptr<exec::VectorFunction> makeRegexExtract(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config) {
-  return makeRe2Extract(name, inputArgs, config, /*emptyNoMatch=*/false);
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
+  return makeRe2Extract(name, inputArgs, /*emptyNoMatch=*/false);
 }
 
 class Re2FunctionsTest : public test::FunctionBaseTest {
  public:
   static void SetUpTestCase() {
-    test::FunctionBaseTest::SetUpTestCase();
+    parse::registerTypeResolver();
     exec::registerStatefulVectorFunction(
         "re2_match", re2MatchSignatures(), makeRe2Match);
     exec::registerStatefulVectorFunction(
@@ -591,16 +590,6 @@ TEST_F(Re2FunctionsTest, likePatternSuffix) {
 
   std::string input = generateString(kLikePatternCharacterSet, 65);
   EXPECT_TRUE(like(input, generateString(kAnyWildcardCharacter) + input));
-}
-
-TEST_F(Re2FunctionsTest, nullConstantPatternOrEscape) {
-  // Test null pattern.
-  ASSERT_TRUE(
-      !evaluateOnce<bool>("like('a', cast (null as varchar))").has_value());
-
-  // Test null escape.
-  ASSERT_TRUE(
-      !evaluateOnce<bool>("like('a', 'a', cast(null as varchar))").has_value());
 }
 
 TEST_F(Re2FunctionsTest, likePatternAndEscape) {

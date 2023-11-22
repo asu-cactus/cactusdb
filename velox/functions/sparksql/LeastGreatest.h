@@ -41,15 +41,13 @@ namespace facebook::velox::functions::sparksql {
 
 std::shared_ptr<exec::VectorFunction> makeLeast(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config);
+    const std::vector<exec::VectorFunctionArg>& inputArgs);
 
 std::vector<std::shared_ptr<exec::FunctionSignature>> leastSignatures();
 
 std::shared_ptr<exec::VectorFunction> makeGreatest(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config);
+    const std::vector<exec::VectorFunctionArg>& inputArgs);
 
 std::vector<std::shared_ptr<exec::FunctionSignature>> greatestSignatures();
 

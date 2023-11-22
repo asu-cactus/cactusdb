@@ -67,43 +67,39 @@ class ReduceFunction : public exec::VectorFunction {
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
-      const TypePtr& outputType,
+      const TypePtr& /* outputType */,
       exec::EvalCtx& context,
       VectorPtr& result) const override {
     VELOX_CHECK_EQ(args.size(), 4);
+
     // Flatten input array.
     exec::LocalDecodedVector arrayDecoder(context, *args[0], rows);
     auto& decodedArray = *arrayDecoder.get();
 
     auto flatArray = flattenArray(rows, args[0], decodedArray);
-    // Identify the rows need to be computed.
-    exec::LocalSelectivityVector nonNullRowsHolder(*context.execCtx());
-    const SelectivityVector* nonNullRows = &rows;
-    if (flatArray->mayHaveNulls()) {
-      nonNullRowsHolder.get(rows);
-      nonNullRowsHolder->deselectNulls(
-          flatArray->rawNulls(), rows.begin(), rows.end());
-      nonNullRows = nonNullRowsHolder.get();
-    }
+
     const auto& initialState = args[1];
     auto partialResult =
         BaseVector::create(initialState->type(), rows.end(), context.pool());
-    // Process empty arrays.
+
+    // Process null and empty arrays.
+    auto* rawNulls = flatArray->rawNulls();
     auto* rawSizes = flatArray->rawSizes();
-    nonNullRows->applyToSelected([&](auto row) {
-      if (rawSizes[row] == 0) {
+    rows.applyToSelected([&](auto row) {
+      if (rawNulls && bits::isBitNull(rawNulls, row)) {
+        partialResult->setNull(row, true);
+      } else if (rawSizes[row] == 0) {
         partialResult->copy(initialState.get(), row, row, 1);
       }
     });
 
-    // Make sure already populated entries in 'partialResult' do not get
-    // overwritten if 'arrayRows' shrinks in subsequent iterations.
-    const SelectivityVector& validRowsInReusedResult = *nonNullRows;
+    // Fix finalSelection at "rows" unless already fixed.
+    exec::ScopedFinalSelectionSetter scopedFinalSelectionSetter(context, &rows);
+    const SelectivityVector& finalSelectionRows = *context.finalSelection();
 
     // Loop over lambda functions and apply these to elements of the base array.
     // In most cases there will be only one function and the loop will run once.
-    auto inputFuncIt =
-        args[2]->asUnchecked<FunctionVector>()->iterator(nonNullRows);
+    auto inputFuncIt = args[2]->asUnchecked<FunctionVector>()->iterator(&rows);
 
     BufferPtr elementIndices =
         allocateIndices(flatArray->size(), context.pool());
@@ -147,7 +143,7 @@ class ReduceFunction : public exec::VectorFunction {
         std::vector<VectorPtr> lambdaArgs = {state, dictNthElements};
         entry.callable->apply(
             arrayRows,
-            &validRowsInReusedResult,
+            finalSelectionRows,
             nullptr,
             &context,
             lambdaArgs,
@@ -157,26 +153,20 @@ class ReduceFunction : public exec::VectorFunction {
         n++;
       }
     }
+
     // Apply output function.
-    VectorPtr localResult;
-    auto outputFuncIt =
-        args[3]->asUnchecked<FunctionVector>()->iterator(nonNullRows);
+    auto outputFuncIt = args[3]->asUnchecked<FunctionVector>()->iterator(&rows);
     while (auto entry = outputFuncIt.next()) {
       std::vector<VectorPtr> lambdaArgs = {partialResult};
       entry.callable->apply(
           *entry.rows,
-          &validRowsInReusedResult,
+          finalSelectionRows,
           nullptr,
           &context,
           lambdaArgs,
           nullptr,
-          &localResult);
+          &result);
     }
-    if (flatArray->rawNulls()) {
-      exec::EvalCtx::addNulls(
-          rows, flatArray->rawNulls(), context, outputType, localResult);
-    }
-    context.moveOrCopyResult(localResult, rows, result);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

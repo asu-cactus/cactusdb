@@ -257,8 +257,7 @@ TEST_F(ArrayExceptTest, varbinary) {
   auto right = makeNullableArrayVector<StringView>(
       {{"b"_sv, "d"_sv}}, ARRAY(VARBINARY()));
 
-  const std::vector<std::vector<std::optional<StringView>>> data = {{}};
-  auto expected = makeNullableArrayVector<StringView>(data, ARRAY(VARBINARY()));
+  auto expected = makeNullableArrayVector<StringView>({{}}, ARRAY(VARBINARY()));
   testExpr(expected, "array_except(c0, c1)", {left, left});
   testExpr(expected, "array_except(c0, c1)", {right, right});
 

@@ -13,19 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#include "velox/exec/Spill.h"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <memory>
-
 #include "velox/common/base/RuntimeMetrics.h"
-#include "velox/common/base/tests/GTestUtils.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/exec/OperatorUtils.h"
-#include "velox/exec/Spill.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 #include "velox/serializers/PrestoSerializer.h"
-#include "velox/type/Timestamp.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
 using namespace facebook::velox;
@@ -53,11 +49,11 @@ class TestRuntimeStatWriter : public BaseRuntimeStatWriter {
 };
 } // namespace
 
-class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
+class SpillTest : public testing::Test,
                   public facebook::velox::test::VectorTestBase {
  public:
   explicit SpillTest()
-      : statWriter_(std::make_unique<TestRuntimeStatWriter>(runtimeStats_)) {
+      : statWriter_(std::make_unique<TestRuntimeStatWriter>(stats_)) {
     setThreadLocalRunTimeStatWriter(statWriter_.get());
   }
 
@@ -75,7 +71,6 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
     }
     filesystems::registerLocalFileSystem();
     rng_.seed(1);
-    compressionKind_ = GetParam();
   }
 
   uint8_t randPartitionBitOffset() {
@@ -90,7 +85,6 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
 
   void setupSpillState(
       int64_t targetFileSize,
-      uint64_t writeBufferSize,
       int numPartitions,
       int numBatches,
       int numRowsPerBatch = 1000,
@@ -102,8 +96,7 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
     state_.reset();
     batchesByPartition_.clear();
     values_.clear();
-    runtimeStats_.clear();
-    stats_.wlock()->reset();
+    stats_.clear();
 
     spillPath_ = tempDir_->path + "/test";
     values_.resize(numBatches * numRowsPerBatch);
@@ -130,7 +123,7 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
         std::reverse(values_.begin() + kNumNulls, values_.end());
       } else {
         std::reverse(values_.begin(), values_.end());
-        ASSERT_FALSE(values_.back().has_value());
+        assert(!values_.back().has_value());
       }
     } else {
       if (!nullsFirst) {
@@ -150,36 +143,24 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
     // vectors have the ith element = i * 'numBatches' + batch, where batch is
     // the batch number of the vector in the partition. When read back, both
     // partitions produce an ascending sequence of integers without gaps.
-    stats_.wlock()->reset();
     state_ = std::make_unique<SpillState>(
-        spillPath_,
-        numPartitions,
-        1,
-        compareFlags,
-        targetFileSize,
-        writeBufferSize,
-        compressionKind_,
-        pool(),
-        &stats_);
-    ASSERT_EQ(targetFileSize, state_->targetFileSize());
-    ASSERT_EQ(numPartitions, state_->maxPartitions());
-    ASSERT_EQ(stats_.rlock()->spilledPartitions, 0);
-    ASSERT_EQ(stats_.rlock()->spilledPartitions, 0);
-    ASSERT_TRUE(state_->spilledPartitionSet().empty());
-    ASSERT_EQ(compressionKind_, state_->compressionKind());
+        spillPath_, numPartitions, 1, compareFlags, targetFileSize, *pool());
+    EXPECT_EQ(targetFileSize, state_->targetFileSize());
+    EXPECT_EQ(numPartitions, state_->maxPartitions());
+    EXPECT_EQ(0, state_->spilledPartitions());
+    EXPECT_TRUE(state_->spilledPartitionSet().empty());
+    EXPECT_EQ(0, state_->spilledFiles());
 
     for (auto partition = 0; partition < state_->maxPartitions(); ++partition) {
-      ASSERT_FALSE(state_->isPartitionSpilled(partition));
+      EXPECT_FALSE(state_->isPartitionSpilled(partition));
       // Expect an exception if partition is not set to spill.
       {
         RowVectorPtr dummyInput;
-        VELOX_ASSERT_THROW(
-            state_->appendToPartition(partition, dummyInput),
-            fmt::format("Partition {} is not spilled", partition));
+        EXPECT_ANY_THROW(state_->appendToPartition(partition, dummyInput));
       }
       state_->setPartitionSpilled(partition);
-      ASSERT_TRUE(state_->isPartitionSpilled(partition));
-      ASSERT_FALSE(state_->hasFiles(partition));
+      EXPECT_TRUE(state_->isPartitionSpilled(partition));
+      EXPECT_FALSE(state_->hasFiles(partition));
       for (auto iter = 0; iter < numBatches / 2; ++iter) {
         batchesByPartition_[partition].push_back(
             makeRowVector({makeFlatVector<int64_t>(
@@ -194,7 +175,7 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
                 })}));
         state_->appendToPartition(
             partition, batchesByPartition_[partition].back());
-        ASSERT_TRUE(state_->hasFiles(partition));
+        EXPECT_TRUE(state_->hasFiles(partition));
 
         batchesByPartition_[partition].push_back(makeRowVector({makeFlatVector<
             int64_t>(
@@ -212,17 +193,17 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
             })}));
         state_->appendToPartition(
             partition, batchesByPartition_[partition].back());
-        ASSERT_TRUE(state_->hasFiles(partition));
+        EXPECT_TRUE(state_->hasFiles(partition));
 
         // Indicates that the next additions to 'partition' are not sorted
         // with respect to the values added so far.
         state_->finishWrite(partition);
-        ASSERT_TRUE(state_->hasFiles(partition));
+        EXPECT_TRUE(state_->hasFiles(partition));
       }
     }
-    ASSERT_EQ(stats_.rlock()->spilledPartitions, numPartitions);
+    EXPECT_EQ(numPartitions, state_->spilledPartitions());
     for (int i = 0; i < numPartitions; ++i) {
-      ASSERT_TRUE(state_->spilledPartitionSet().contains(i));
+      EXPECT_TRUE(state_->spilledPartitionSet().contains(i));
     }
     // NOTE: we write numBatches for each partition. If the target file size is
     // 1, we will end up with 'numPartitions * numBatches' spilled files as each
@@ -233,10 +214,9 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
     if (targetFileSize > 1) {
       expectedFiles /= 2;
     }
-    ASSERT_EQ(stats_.rlock()->spilledFiles, expectedFiles);
-    ASSERT_GT(
-        stats_.rlock()->spilledBytes,
-        numPartitions * numBatches * sizeof(int64_t));
+    EXPECT_EQ(expectedFiles, state_->spilledFiles());
+    EXPECT_LT(
+        numPartitions * numBatches * sizeof(int64_t), state_->spilledBytes());
   }
 
   // 'numDuplicates' specifies the number of duplicates generated for each
@@ -257,69 +237,27 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
         numDuplicates,
         compareFlags.empty() ? true : compareFlags[0].nullsFirst,
         compareFlags.empty() ? true : compareFlags[0].ascending));
-
-    const auto prevGStats = globalSpillStats();
     setupSpillState(
         targetFileSize,
-        0,
         numPartitions,
         numBatches,
         numRowsPerBatch,
         numDuplicates,
         compareFlags);
-    const auto stats = stats_.copy();
-    ASSERT_EQ(stats.spilledPartitions, numPartitions);
-    ASSERT_EQ(stats.spilledFiles, expectedNumSpilledFiles);
-    ASSERT_GT(stats.spilledBytes, 0);
-    ASSERT_GT(stats.spillDiskWrites, 0);
-    ASSERT_GT(stats.spillWriteTimeUs, 0);
-    ASSERT_GT(stats.spillFlushTimeUs, 0);
-    ASSERT_GT(stats.spilledRows, 0);
-    // NOTE: the following stats are not collected by spill state.
-    ASSERT_EQ(stats.spillFillTimeUs, 0);
-    ASSERT_EQ(stats.spillSortTimeUs, 0);
-    const auto newGStats = globalSpillStats();
-    ASSERT_EQ(
-        prevGStats.spilledPartitions + stats.spilledPartitions,
-        newGStats.spilledPartitions);
-    ASSERT_EQ(
-        prevGStats.spilledFiles + stats.spilledFiles, newGStats.spilledFiles);
-    ASSERT_EQ(
-        prevGStats.spilledBytes + stats.spilledBytes, newGStats.spilledBytes);
-    ASSERT_EQ(
-        prevGStats.spillDiskWrites + stats.spillDiskWrites,
-        newGStats.spillDiskWrites);
-    ASSERT_EQ(
-        prevGStats.spillWriteTimeUs + stats.spillWriteTimeUs,
-        newGStats.spillWriteTimeUs);
-    ASSERT_EQ(
-        prevGStats.spillFlushTimeUs + stats.spillFlushTimeUs,
-        newGStats.spillFlushTimeUs);
-    ASSERT_EQ(
-        prevGStats.spilledRows + stats.spilledRows, newGStats.spilledRows);
-    ASSERT_EQ(
-        prevGStats.spillFillTimeUs + stats.spillFillTimeUs,
-        newGStats.spillFillTimeUs);
-    ASSERT_EQ(
-        prevGStats.spillSortTimeUs + stats.spillSortTimeUs,
-        newGStats.spillSortTimeUs);
 
+    ASSERT_EQ(expectedNumSpilledFiles, state_->spilledFiles());
     std::vector<std::string> spilledFiles = state_->testingSpilledFilePaths();
     std::unordered_set<std::string> spilledFileSet(
         spilledFiles.begin(), spilledFiles.end());
-    ASSERT_EQ(spilledFileSet.size(), spilledFiles.size());
-    ASSERT_EQ(expectedNumSpilledFiles, spilledFileSet.size());
+    EXPECT_EQ(spilledFileSet.size(), spilledFiles.size());
+    EXPECT_EQ(expectedNumSpilledFiles, spilledFileSet.size());
     // Verify the spilled file exist on file system.
     std::shared_ptr<FileSystem> fs =
         filesystems::getFileSystem(tempDir_->path, nullptr);
-    uint64_t totalFileBytes{0};
     for (const auto& spilledFile : spilledFileSet) {
       auto readFile = fs->openFileForRead(spilledFile);
-      ASSERT_NE(readFile.get(), nullptr);
-      totalFileBytes += readFile->size();
+      EXPECT_NE(readFile.get(), nullptr);
     }
-    ASSERT_EQ(stats.spilledBytes, totalFileBytes);
-    ASSERT_EQ(prevGStats.spilledBytes + totalFileBytes, newGStats.spilledBytes);
 
     for (auto partition = 0; partition < state_->maxPartitions(); ++partition) {
       int numReadBatches = 0;
@@ -358,46 +296,29 @@ class SpillTest : public ::testing::TestWithParam<common::CompressionKind>,
       // We do two append writes per each input batch.
       ASSERT_EQ(numBatches, numReadBatches);
     }
-    const auto finalStats = stats_.copy();
-    ASSERT_EQ(
-        finalStats.toString(),
-        fmt::format(
-            "spillRuns[{}] spilledInputBytes[{}] spilledBytes[{}] spilledRows[{}] spilledPartitions[{}] spilledFiles[{}] spillFillTimeUs[{}] spillSortTime[{}] spillSerializationTime[{}] spillDiskWrites[{}] spillFlushTime[{}] spillWriteTime[{}]",
-            finalStats.spillRuns,
-            succinctBytes(finalStats.spilledInputBytes),
-            succinctBytes(finalStats.spilledBytes),
-            finalStats.spilledRows,
-            finalStats.spilledPartitions,
-            finalStats.spilledFiles,
-            succinctMicros(finalStats.spillFillTimeUs),
-            succinctMicros(finalStats.spillSortTimeUs),
-            succinctMicros(finalStats.spillSerializationTimeUs),
-            finalStats.spillDiskWrites,
-            succinctMicros(finalStats.spillFlushTimeUs),
-            succinctMicros(finalStats.spillWriteTimeUs)));
-
+    // Both spilled bytes and files stats are cleared after merge read.
+    EXPECT_EQ(0, state_->spilledBytes());
+    EXPECT_EQ(0, state_->spilledFiles());
     // Verify the spilled files are still there after spill state destruction.
     for (const auto& spilledFile : spilledFileSet) {
-      ASSERT_TRUE(fs->exists(spilledFile));
+      EXPECT_NO_THROW(fs->exists(spilledFile));
     }
     // Verify stats.
-    ASSERT_EQ(runtimeStats_["spillFileSize"].count, spilledFiles.size());
+    ASSERT_EQ(stats_["spillFileSize"].count, spilledFiles.size());
   }
 
   folly::Random::DefaultGenerator rng_;
   std::shared_ptr<TempDirectoryPath> tempDir_;
   memory::MemoryAllocator* allocator_;
-  common::CompressionKind compressionKind_;
   std::vector<std::optional<int64_t>> values_;
   std::vector<std::vector<RowVectorPtr>> batchesByPartition_;
   std::string spillPath_;
-  folly::Synchronized<SpillStats> stats_;
   std::unique_ptr<SpillState> state_;
-  std::unordered_map<std::string, RuntimeMetric> runtimeStats_;
+  std::unordered_map<std::string, RuntimeMetric> stats_;
   std::unique_ptr<TestRuntimeStatWriter> statWriter_;
 };
 
-TEST_P(SpillTest, spillState) {
+TEST_F(SpillTest, spillState) {
   // Set the target file size to a large value to avoid new file creation
   // triggered by batch write.
 
@@ -416,7 +337,7 @@ TEST_P(SpillTest, spillState) {
   spillStateTest(kGB, 2, 10, 10, {}, 10);
 }
 
-TEST_P(SpillTest, spillTimestamp) {
+TEST_F(SpillTest, spillTimestamp) {
   // Verify that timestamp type retains it nanosecond precision when spilled and
   // read back.
   auto tempDirectory = exec::test::TempDirectoryPath::create();
@@ -427,20 +348,9 @@ TEST_P(SpillTest, spillTimestamp) {
       Timestamp{12, 0},
       Timestamp{0, 17'123'456},
       Timestamp{1, 17'123'456},
-      Timestamp{-1, 17'123'456},
-      Timestamp{Timestamp::kMaxSeconds, Timestamp::kMaxNanos},
-      Timestamp{Timestamp::kMinSeconds, 0}};
+      Timestamp{-1, 17'123'456}};
 
-  SpillState state(
-      spillPath,
-      1,
-      1,
-      emptyCompareFlags,
-      1024,
-      0,
-      compressionKind_,
-      pool(),
-      &stats_);
+  SpillState state(spillPath, 1, 1, emptyCompareFlags, 1024, *pool());
   int partitionIndex = 0;
   state.setPartitionSpilled(partitionIndex);
   EXPECT_TRUE(state.isPartitionSpilled(partitionIndex));
@@ -462,7 +372,7 @@ TEST_P(SpillTest, spillTimestamp) {
   ASSERT_EQ(nullptr, merge->next());
 }
 
-TEST_P(SpillTest, spillStateWithSmallTargetFileSize) {
+TEST_F(SpillTest, spillStateWithSmallTargetFileSize) {
   // Set the target file size to a small value to open a new file on each batch
   // write.
 
@@ -481,7 +391,7 @@ TEST_P(SpillTest, spillStateWithSmallTargetFileSize) {
   spillStateTest(1, 2, 10, 10, {}, 10 * 2);
 }
 
-TEST_P(SpillTest, spillPartitionId) {
+TEST_F(SpillTest, spillPartitionId) {
   SpillPartitionId partitionId1_2(1, 2);
   ASSERT_EQ(partitionId1_2.partitionBitOffset(), 1);
   ASSERT_EQ(partitionId1_2.partitionNumber(), 2);
@@ -528,7 +438,7 @@ TEST_P(SpillTest, spillPartitionId) {
   }
 }
 
-TEST_P(SpillTest, spillPartitionSet) {
+TEST_F(SpillTest, spillPartitionSet) {
   for (int iter = 0; iter < 5; ++iter) {
     folly::Random::DefaultGenerator rng;
     rng.seed(iter);
@@ -625,7 +535,7 @@ TEST_P(SpillTest, spillPartitionSet) {
   }
 }
 
-TEST_P(SpillTest, spillPartitionSpilt) {
+TEST_F(SpillTest, spillPartitionSpilt) {
   for (int seed = 0; seed < 5; ++seed) {
     SCOPED_TRACE(fmt::format("seed: {}", seed));
     int numBatches = 100;
@@ -671,7 +581,7 @@ TEST_P(SpillTest, spillPartitionSpilt) {
   }
 }
 
-TEST_P(SpillTest, nonExistSpillFileOnDeletion) {
+TEST_F(SpillTest, nonExistSpillFileOnDeletion) {
   const int32_t numRowsPerBatch = 100;
   std::vector<RowVectorPtr> batches;
   setupSpillState(kGB, 1, 2, numRowsPerBatch);
@@ -679,98 +589,4 @@ TEST_P(SpillTest, nonExistSpillFileOnDeletion) {
   // test.
   tempDir_.reset();
   state_.reset();
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    SpillTestSuite,
-    SpillTest,
-    ::testing::Values(
-        common::CompressionKind::CompressionKind_NONE,
-        common::CompressionKind::CompressionKind_ZLIB,
-        common::CompressionKind::CompressionKind_SNAPPY,
-        common::CompressionKind::CompressionKind_ZSTD,
-        common::CompressionKind::CompressionKind_LZ4,
-        common::CompressionKind::CompressionKind_GZIP));
-
-TEST(SpillTest, spillStats) {
-  SpillStats stats1;
-  ASSERT_TRUE(stats1.empty());
-  stats1.spillRuns = 100;
-  stats1.spilledInputBytes = 2048;
-  stats1.spilledBytes = 1024;
-  stats1.spilledPartitions = 1024;
-  stats1.spilledFiles = 1023;
-  stats1.spillWriteTimeUs = 1023;
-  stats1.spillFlushTimeUs = 1023;
-  stats1.spillDiskWrites = 1023;
-  stats1.spillSortTimeUs = 1023;
-  stats1.spillFillTimeUs = 1023;
-  stats1.spilledRows = 1023;
-  stats1.spillSerializationTimeUs = 1023;
-  ASSERT_FALSE(stats1.empty());
-  SpillStats stats2;
-  stats2.spillRuns = 100;
-  stats2.spilledInputBytes = 2048;
-  stats2.spilledBytes = 1024;
-  stats2.spilledPartitions = 1025;
-  stats2.spilledFiles = 1026;
-  stats2.spillWriteTimeUs = 1026;
-  stats2.spillFlushTimeUs = 1027;
-  stats2.spillDiskWrites = 1028;
-  stats2.spillSortTimeUs = 1029;
-  stats2.spillFillTimeUs = 1030;
-  stats2.spilledRows = 1031;
-  stats2.spillSerializationTimeUs = 1032;
-  ASSERT_TRUE(stats1 < stats2);
-  ASSERT_TRUE(stats1 <= stats2);
-  ASSERT_FALSE(stats1 > stats2);
-  ASSERT_FALSE(stats1 >= stats2);
-  ASSERT_TRUE(stats1 != stats2);
-  ASSERT_FALSE(stats1 == stats2);
-
-  ASSERT_TRUE(stats1 == stats1);
-  ASSERT_FALSE(stats1 != stats1);
-  ASSERT_FALSE(stats1 > stats1);
-  ASSERT_TRUE(stats1 >= stats1);
-  ASSERT_FALSE(stats1 < stats1);
-  ASSERT_TRUE(stats1 <= stats1);
-
-  SpillStats delta = stats2 - stats1;
-  ASSERT_EQ(delta.spilledInputBytes, 0);
-  ASSERT_EQ(delta.spilledBytes, 0);
-  ASSERT_EQ(delta.spilledPartitions, 1);
-  ASSERT_EQ(delta.spilledFiles, 3);
-  ASSERT_EQ(delta.spillWriteTimeUs, 3);
-  ASSERT_EQ(delta.spillFlushTimeUs, 4);
-  ASSERT_EQ(delta.spillDiskWrites, 5);
-  ASSERT_EQ(delta.spillSortTimeUs, 6);
-  ASSERT_EQ(delta.spillFillTimeUs, 7);
-  ASSERT_EQ(delta.spilledRows, 8);
-  ASSERT_EQ(delta.spillSerializationTimeUs, 9);
-  delta = stats1 - stats2;
-  ASSERT_EQ(delta.spilledInputBytes, 0);
-  ASSERT_EQ(delta.spilledBytes, 0);
-  ASSERT_EQ(delta.spilledPartitions, -1);
-  ASSERT_EQ(delta.spilledFiles, -3);
-  ASSERT_EQ(delta.spillWriteTimeUs, -3);
-  ASSERT_EQ(delta.spillFlushTimeUs, -4);
-  ASSERT_EQ(delta.spillDiskWrites, -5);
-  ASSERT_EQ(delta.spillSortTimeUs, -6);
-  ASSERT_EQ(delta.spillFillTimeUs, -7);
-  ASSERT_EQ(delta.spilledRows, -8);
-  ASSERT_EQ(delta.spillSerializationTimeUs, -9);
-  stats1.spilledInputBytes = 2060;
-  stats1.spilledBytes = 1030;
-  VELOX_ASSERT_THROW(stats1 < stats2, "");
-  VELOX_ASSERT_THROW(stats1 > stats2, "");
-  VELOX_ASSERT_THROW(stats1 <= stats2, "");
-  VELOX_ASSERT_THROW(stats1 >= stats2, "");
-  ASSERT_TRUE(stats1 != stats2);
-  ASSERT_FALSE(stats1 == stats2);
-  const SpillStats zeroStats;
-  stats1.reset();
-  ASSERT_EQ(zeroStats, stats1);
-  ASSERT_EQ(
-      stats2.toString(),
-      "spillRuns[100] spilledInputBytes[2.00KB] spilledBytes[1.00KB] spilledRows[1031] spilledPartitions[1025] spilledFiles[1026] spillFillTimeUs[1.03ms] spillSortTime[1.03ms] spillSerializationTime[1.03ms] spillDiskWrites[1028] spillFlushTime[1.03ms] spillWriteTime[1.03ms]");
 }

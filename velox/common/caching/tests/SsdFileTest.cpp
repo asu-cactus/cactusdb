@@ -45,9 +45,6 @@ class SsdFileTest : public testing::Test {
     if (ssdFile_) {
       ssdFile_->deleteFile();
     }
-    if (cache_) {
-      cache_->shutdown();
-    }
   }
 
   void initializeCache(
@@ -56,7 +53,8 @@ class SsdFileTest : public testing::Test {
       bool setNoCowFlag = false) {
     // tmpfs does not support O_DIRECT, so turn this off for testing.
     FLAGS_ssd_odirect = false;
-    cache_ = AsyncDataCache::create(MemoryAllocator::getInstance());
+    cache_ = std::make_shared<AsyncDataCache>(
+        MemoryAllocator::createDefaultInstance(), maxBytes);
 
     fileName_ = StringIdLease(fileIds(), "fileInStorage");
 

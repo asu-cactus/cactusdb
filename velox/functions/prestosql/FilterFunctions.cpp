@@ -70,6 +70,12 @@ class FilterFunctionBase : public exec::VectorFunction {
     auto rawResultOffsets = resultOffsets->asMutable<vector_size_t>();
     auto numElements = lambdaArgs[0]->size();
 
+    SelectivityVector finalSelection;
+    if (!context.isFinalSelection()) {
+      finalSelection =
+          toElementRows<T>(numElements, *context.finalSelection(), input.get());
+    }
+
     auto elementToTopLevelRows = getElementToTopLevelRows(
         numElements, rows, input.get(), context.pool());
 
@@ -84,7 +90,7 @@ class FilterFunctionBase : public exec::VectorFunction {
       VectorPtr bits;
       entry.callable->apply(
           elementRows,
-          nullptr,
+          finalSelection,
           wrapCapture,
           &context,
           lambdaArgs,
@@ -153,12 +159,10 @@ class ArrayFilterFunction : public FilterFunctionBase {
                                              numSelected,
                                              std::move(elements))
                                        : nullptr;
-    // Set nulls for rows not present in 'rows'.
-    BufferPtr newNulls = addNullsForUnselectedRows(flatArray, rows);
     auto localResult = std::make_shared<ArrayVector>(
         flatArray->pool(),
         flatArray->type(),
-        std::move(newNulls),
+        flatArray->nulls(),
         rows.end(),
         std::move(resultOffsets),
         std::move(resultSizes),
@@ -220,12 +224,10 @@ class MapFilterFunction : public FilterFunctionBase {
                                            numSelected,
                                            std::move(values))
                                      : nullptr;
-    // Set nulls for rows not present in 'rows'.
-    BufferPtr newNulls = addNullsForUnselectedRows(flatMap, rows);
     auto localResult = std::make_shared<MapVector>(
         flatMap->pool(),
         outputType,
-        std::move(newNulls),
+        flatMap->nulls(),
         rows.end(),
         std::move(resultOffsets),
         std::move(resultSizes),

@@ -57,21 +57,18 @@ class ColumnSelector {
    */
   explicit ColumnSelector(
       const std::shared_ptr<const velox::RowType>& schema,
-      const MetricsLogPtr& log = nullptr,
-      bool fileColumnNamesReadAsLowerCase = false)
-      : ColumnSelector(schema, schema, log, fileColumnNamesReadAsLowerCase) {}
+      const MetricsLogPtr& log = nullptr)
+      : ColumnSelector(schema, schema, log) {}
 
   explicit ColumnSelector(
       const std::shared_ptr<const velox::RowType>& schema,
       const std::shared_ptr<const velox::RowType>& contentSchema,
-      MetricsLogPtr log = nullptr,
-      bool fileColumnNamesReadAsLowerCase = false)
+      MetricsLogPtr log = nullptr)
       : log_{std::move(log)}, schema_{schema}, state_{ReadState::kAll} {
     buildNodes(schema, contentSchema);
 
     // no filter, read everything
     setReadAll();
-    checkSelectColNonDuplicate(fileColumnNamesReadAsLowerCase);
   }
 
   /**
@@ -80,26 +77,18 @@ class ColumnSelector {
   explicit ColumnSelector(
       const std::shared_ptr<const velox::RowType>& schema,
       const std::vector<std::string>& names,
-      const MetricsLogPtr& log = nullptr,
-      bool fileColumnNamesReadAsLowerCase = false)
-      : ColumnSelector(
-            schema,
-            schema,
-            names,
-            log,
-            fileColumnNamesReadAsLowerCase) {}
+      const MetricsLogPtr& log = nullptr)
+      : ColumnSelector(schema, schema, names, log) {}
 
   explicit ColumnSelector(
       const std::shared_ptr<const velox::RowType>& schema,
       const std::shared_ptr<const velox::RowType>& contentSchema,
       const std::vector<std::string>& names,
-      MetricsLogPtr log = nullptr,
-      bool fileColumnNamesReadAsLowerCase = false)
+      MetricsLogPtr log = nullptr)
       : log_{std::move(log)},
         schema_{schema},
         state_{names.empty() ? ReadState::kAll : ReadState::kPartial} {
-    acceptFilter(schema, contentSchema, names, false);
-    checkSelectColNonDuplicate(fileColumnNamesReadAsLowerCase);
+    acceptFilter(schema, contentSchema, names);
   }
 
   /**
@@ -109,28 +98,19 @@ class ColumnSelector {
       const std::shared_ptr<const velox::RowType>& schema,
       const std::vector<uint64_t>& ids,
       const bool filterByNodes = false,
-      const MetricsLogPtr& log = nullptr,
-      bool fileColumnNamesReadAsLowerCase = false)
-      : ColumnSelector(
-            schema,
-            schema,
-            ids,
-            filterByNodes,
-            log,
-            fileColumnNamesReadAsLowerCase) {}
+      const MetricsLogPtr& log = nullptr)
+      : ColumnSelector(schema, schema, ids, filterByNodes, log) {}
 
   explicit ColumnSelector(
       const std::shared_ptr<const velox::RowType>& schema,
       const std::shared_ptr<const velox::RowType>& contentSchema,
       const std::vector<uint64_t>& ids,
       const bool filterByNodes = false,
-      MetricsLogPtr log = nullptr,
-      bool fileColumnNamesReadAsLowerCase = false)
+      MetricsLogPtr log = nullptr)
       : log_{std::move(log)},
         schema_{schema},
         state_{ids.empty() ? ReadState::kAll : ReadState::kPartial} {
     acceptFilter(schema, contentSchema, ids, filterByNodes);
-    checkSelectColNonDuplicate(fileColumnNamesReadAsLowerCase);
   }
 
   // set a specific node to read state
@@ -320,23 +300,6 @@ class ColumnSelector {
 
   // get node ID list to be read
   std::vector<uint64_t> getNodeFilter() const;
-
-  void checkSelectColNonDuplicate(bool fileColumnNamesReadAsLowerCase) {
-    if (!fileColumnNamesReadAsLowerCase) {
-      return;
-    }
-    std::unordered_map<std::string, int> names;
-    for (auto node : nodes_) {
-      auto& name = node->getNode().name;
-      names[name]++;
-    }
-    for (auto filter : filter_) {
-      if (names[filter.name] > 1) {
-        VELOX_USER_FAIL(
-            "Found duplicate field(s) {} in read lowercase mode", filter.name);
-      }
-    }
-  }
 
   // accept filter
   template <typename T>

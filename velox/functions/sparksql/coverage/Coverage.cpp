@@ -19,7 +19,6 @@
 #include "velox/functions/CoverageUtil.h"
 #include "velox/functions/sparksql/Register.h"
 #include "velox/functions/sparksql/aggregates/Register.h"
-#include "velox/functions/sparksql/window/WindowFunctionsRegistration.h"
 
 DEFINE_bool(all, false, "Generate coverage map for all Spark functions");
 
@@ -33,9 +32,6 @@ int main(int argc, char** argv) {
 
   // Register Spark aggregate functions.
   functions::aggregate::sparksql::registerAggregateFunctions("");
-
-  // Register Spark window functions.
-  functions::window::sparksql::registerWindowFunctions("");
 
   if (FLAGS_all) {
     functions::printCoverageMapForAll(":spark");

@@ -42,15 +42,15 @@ void ScanState::updateRawState() {
 }
 
 SelectiveColumnReader::SelectiveColumnReader(
-    const TypePtr& requestedType,
+    std::shared_ptr<const dwio::common::TypeWithId> requestedType,
     dwio::common::FormatParams& params,
     velox::common::ScanSpec& scanSpec,
-    std::shared_ptr<const dwio::common::TypeWithId> type)
+    const TypePtr& type)
     : memoryPool_(params.pool()),
-      fileType_(type),
-      formatData_(params.toFormatData(type, scanSpec)),
+      nodeType_(requestedType),
+      formatData_(params.toFormatData(requestedType, scanSpec)),
       scanSpec_(&scanSpec),
-      requestedType_(requestedType) {}
+      type_{type} {}
 
 void SelectiveColumnReader::filterRowGroups(
     uint64_t rowGroupSize,
@@ -126,27 +126,22 @@ void SelectiveColumnReader::prepareNulls(
   simd::memset(rawResultNulls_, bits::kNotNullByte, resultNulls_->capacity());
 }
 
-const uint64_t* SelectiveColumnReader::shouldMoveNulls(RowSet rows) {
-  if (rows.size() == numValues_ || !anyNulls_) {
+bool SelectiveColumnReader::shouldMoveNulls(RowSet rows) {
+  if (rows.size() == numValues_) {
     // Nulls will only be moved if there is a selection on values. A cast
     // alone does not move nulls.
-    return nullptr;
+    return false;
   }
-  const uint64_t* moveFrom = rawResultNulls_;
-  if (returnReaderNulls_) {
-    if (!(resultNulls_ && resultNulls_->unique() &&
-          resultNulls_->capacity() >= rows.size() + simd::kPadding)) {
-      resultNulls_ = AlignedBuffer::allocate<bool>(
-          rows.size() + (simd::kPadding * 8), &memoryPool_);
-      rawResultNulls_ = resultNulls_->asMutable<uint64_t>();
-    }
-    moveFrom = nullsInReadRange_->as<uint64_t>();
-    bits::copyBits(moveFrom, 0, rawResultNulls_, 0, rows.size());
-    returnReaderNulls_ = false;
+  VELOX_CHECK(
+      !returnReaderNulls_,
+      "Do not return reader nulls if retrieving a subset of values");
+  if (anyNulls_) {
+    VELOX_CHECK(
+        resultNulls_ && resultNulls_->as<uint64_t>() == rawResultNulls_);
+    VELOX_CHECK_GT(resultNulls_->capacity() * 8, rows.size());
+    return true;
   }
-  VELOX_CHECK(resultNulls_ && resultNulls_->as<uint64_t>() == rawResultNulls_);
-  VELOX_CHECK_GT(resultNulls_->capacity() * 8, rows.size());
-  return moveFrom;
+  return false;
 }
 
 void SelectiveColumnReader::getIntValues(
@@ -154,7 +149,7 @@ void SelectiveColumnReader::getIntValues(
     const TypePtr& requestedType,
     VectorPtr* result) {
   switch (requestedType->kind()) {
-    case TypeKind::SMALLINT:
+    case TypeKind::SMALLINT: {
       switch (valueSize_) {
         case 8:
           getFlatValues<int64_t, int16_t>(rows, result, requestedType);
@@ -169,54 +164,47 @@ void SelectiveColumnReader::getIntValues(
           VELOX_FAIL("Unsupported value size: {}", valueSize_);
       }
       break;
-    case TypeKind::TINYINT:
-      switch (valueSize_) {
-        case 4:
-          getFlatValues<int32_t, int8_t>(rows, result, requestedType);
-          break;
-        case 2:
-          getFlatValues<int16_t, int8_t>(rows, result, requestedType);
-          break;
-        default:
-          VELOX_FAIL("Unsupported value size: {}", valueSize_);
-      }
-      break;
-    case TypeKind::INTEGER:
-      switch (valueSize_) {
-        case 8:
-          getFlatValues<int64_t, int32_t>(rows, result, requestedType);
-          break;
-        case 4:
-          getFlatValues<int32_t, int32_t>(rows, result, requestedType);
-          break;
-        case 2:
-          getFlatValues<int16_t, int32_t>(rows, result, requestedType);
-          break;
-        default:
-          VELOX_FAIL("Unsupported value size: {}", valueSize_);
-      }
-      break;
-    case TypeKind::HUGEINT:
-      getFlatValues<int128_t, int128_t>(rows, result, requestedType);
-      break;
-    case TypeKind::BIGINT:
-      switch (valueSize_) {
-        case 8:
-          getFlatValues<int64_t, int64_t>(rows, result, requestedType);
-          break;
-        case 4:
-          getFlatValues<int32_t, int64_t>(rows, result, requestedType);
-          break;
-        case 2:
-          getFlatValues<int16_t, int64_t>(rows, result, requestedType);
-          break;
-        default:
-          VELOX_FAIL("Unsupported value size: {}", valueSize_);
-      }
-      break;
-    default:
-      VELOX_FAIL(
-          "Not a valid type for integer reader: {}", requestedType->toString());
+      case TypeKind::INTEGER:
+        switch (valueSize_) {
+          case 8:
+            getFlatValues<int64_t, int32_t>(rows, result, requestedType);
+            break;
+          case 4:
+            getFlatValues<int32_t, int32_t>(rows, result, requestedType);
+            break;
+          case 2:
+            getFlatValues<int16_t, int32_t>(rows, result, requestedType);
+            break;
+          default:
+            VELOX_FAIL("Unsupported value size: {}", valueSize_);
+        }
+        break;
+      case TypeKind::DATE:
+        getFlatValues<Date, Date>(rows, result, requestedType);
+        break;
+      case TypeKind::HUGEINT:
+        getFlatValues<int128_t, int128_t>(rows, result, requestedType);
+        break;
+      case TypeKind::BIGINT:
+        switch (valueSize_) {
+          case 8:
+            getFlatValues<int64_t, int64_t>(rows, result, requestedType);
+            break;
+          case 4:
+            getFlatValues<int32_t, int64_t>(rows, result, requestedType);
+            break;
+          case 2:
+            getFlatValues<int16_t, int64_t>(rows, result, requestedType);
+            break;
+          default:
+            VELOX_FAIL("Unsupported value size: {}", valueSize_);
+        }
+        break;
+      default:
+        VELOX_FAIL(
+            "Not a valid type for integer reader: {}",
+            requestedType->toString());
+    }
   }
 }
 
@@ -247,10 +235,13 @@ void SelectiveColumnReader::getFlatValues<int8_t, bool>(
           ~simd::toBitMask(zero == xsimd::load_unaligned(rawBytes + i));
     }
   }
+  BufferPtr nulls = anyNulls_
+      ? (returnReaderNulls_ ? nullsInReadRange_ : resultNulls_)
+      : nullptr;
   *result = std::make_shared<FlatVector<bool>>(
       &memoryPool_,
       type,
-      resultNulls(),
+      nulls,
       numValues_,
       std::move(boolValues),
       std::move(stringBuffers_));
@@ -269,7 +260,7 @@ void SelectiveColumnReader::compactScalarValues<bool, bool>(
   auto rawBits = reinterpret_cast<uint64_t*>(rawValues_);
   vector_size_t rowIndex = 0;
   auto nextRow = rows[rowIndex];
-  auto* moveNullsFrom = shouldMoveNulls(rows);
+  bool moveNulls = shouldMoveNulls(rows);
   for (size_t i = 0; i < numValues_; i++) {
     if (outputRows_[i] < nextRow) {
       continue;
@@ -278,8 +269,9 @@ void SelectiveColumnReader::compactScalarValues<bool, bool>(
     VELOX_DCHECK(outputRows_[i] == nextRow);
 
     bits::setBit(rawBits, rowIndex, bits::isBitSet(rawBits, i));
-    if (moveNullsFrom && rowIndex != i) {
-      bits::setBit(rawResultNulls_, rowIndex, bits::isBitSet(moveNullsFrom, i));
+    if (moveNulls && rowIndex != i) {
+      bits::setBit(
+          rawResultNulls_, rowIndex, bits::isBitSet(rawResultNulls_, i));
     }
     if (!isFinal) {
       outputRows_[rowIndex] = nextRow;
@@ -298,11 +290,11 @@ void SelectiveColumnReader::compactScalarValues<bool, bool>(
 char* SelectiveColumnReader::copyStringValue(folly::StringPiece value) {
   uint64_t size = value.size();
   if (stringBuffers_.empty() || rawStringUsed_ + size > rawStringSize_) {
+    if (!stringBuffers_.empty()) {
+      stringBuffers_.back()->setSize(rawStringUsed_);
+    }
     auto bytes = std::max(size, kStringBufferSize);
     BufferPtr buffer = AlignedBuffer::allocate<char>(bytes, &memoryPool_);
-    // Use the preferred size instead of the requested one to improve memory
-    // efficiency.
-    buffer->setSize(buffer->capacity());
     stringBuffers_.push_back(buffer);
     rawStringBuffer_ = buffer->asMutable<char>();
     rawStringUsed_ = 0;
@@ -344,11 +336,6 @@ void SelectiveColumnReader::setNulls(BufferPtr resultNulls) {
 }
 
 void SelectiveColumnReader::resetFilterCaches() {
-  if (scanState_.filterCache.empty() && scanSpec_->hasFilter()) {
-    scanState_.filterCache.resize(std::max<int32_t>(
-        1, scanState_.dictionary.numValues + scanState_.dictionary2.numValues));
-    scanState_.updateRawState();
-  }
   if (!scanState_.filterCache.empty()) {
     simd::memset(
         scanState_.filterCache.data(),

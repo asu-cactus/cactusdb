@@ -20,7 +20,13 @@
 
 namespace facebook::velox::tests::utils {
 
-std::vector<std::string> iobufsToStrings(
-    const std::vector<folly::IOBuf>& iobufs);
+struct Result {
+  std::vector<std::string> buffers;
+  std::vector<ReadFile::Segment> segments;
+};
+
+Result getSegments(
+    std::vector<std::string> buffers,
+    const std::unordered_set<size_t>& skip = {});
 
 } // namespace facebook::velox::tests::utils

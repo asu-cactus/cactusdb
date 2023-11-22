@@ -27,11 +27,6 @@ struct ParseOptions {
   // Retain legacy behavior by default.
   bool parseDecimalAsDouble = true;
   bool parseIntegerAsBigint = true;
-
-  /// SQL functions could be registered with different prefixes by the user.
-  /// This parameter is the registered prefix of presto or spark functions,
-  /// which helps generate the correct Velox expression.
-  std::string functionPrefix = "";
 };
 
 std::shared_ptr<const core::IExpr> parseExpr(

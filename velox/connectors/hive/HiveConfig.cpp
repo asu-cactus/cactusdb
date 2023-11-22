@@ -41,24 +41,11 @@ stringToInsertExistingPartitionsBehavior(const std::string& strValue) {
 // static
 HiveConfig::InsertExistingPartitionsBehavior
 HiveConfig::insertExistingPartitionsBehavior(const Config* config) {
-  const auto behavior =
+  auto strBehavior =
       config->get<std::string>(kInsertExistingPartitionsBehavior);
-  return behavior.has_value()
-      ? stringToInsertExistingPartitionsBehavior(behavior.value())
+  return strBehavior.has_value()
+      ? stringToInsertExistingPartitionsBehavior(strBehavior.value())
       : InsertExistingPartitionsBehavior::kError;
-}
-
-// static
-std::string HiveConfig::insertExistingPartitionsBehaviorString(
-    InsertExistingPartitionsBehavior behavior) {
-  switch (behavior) {
-    case InsertExistingPartitionsBehavior::kError:
-      return "ERROR";
-    case InsertExistingPartitionsBehavior::kOverwrite:
-      return "OVERWRITE";
-    default:
-      return fmt::format("UNKNOWN BEHAVIOR {}", static_cast<int>(behavior));
-  }
 }
 
 // static
@@ -124,45 +111,4 @@ std::optional<std::string> HiveConfig::s3IAMRole(const Config* config) {
 std::string HiveConfig::s3IAMRoleSessionName(const Config* config) {
   return config->get(kS3IamRoleSessionName, std::string("velox-session"));
 }
-
-// static
-std::string HiveConfig::gcsEndpoint(const Config* config) {
-  return config->get<std::string>(kGCSEndpoint, std::string(""));
-}
-
-// static
-std::string HiveConfig::gcsScheme(const Config* config) {
-  return config->get<std::string>(kGCSScheme, std::string("https"));
-}
-
-// static
-std::string HiveConfig::gcsCredentials(const Config* config) {
-  return config->get<std::string>(kGCSCredentials, std::string(""));
-}
-
-// static.
-bool HiveConfig::isOrcUseColumnNames(const Config* config) {
-  return config->get<bool>(kOrcUseColumnNames, false);
-}
-
-// static.
-bool HiveConfig::isFileColumnNamesReadAsLowerCase(const Config* config) {
-  return config->get<bool>(kFileColumnNamesReadAsLowerCase, false);
-}
-
-// static.
-int64_t HiveConfig::maxCoalescedBytes(const Config* config) {
-  return config->get<int64_t>(kMaxCoalescedBytes, 128 << 20);
-}
-
-// static.
-int32_t HiveConfig::maxCoalescedDistanceBytes(const Config* config) {
-  return config->get<int32_t>(kMaxCoalescedDistanceBytes, 512 << 10);
-}
-
-// static.
-int32_t HiveConfig::numCacheFileHandles(const Config* config) {
-  return config->get<int32_t>(kNumCacheFileHandles, 20'000);
-}
-
 } // namespace facebook::velox::connector::hive

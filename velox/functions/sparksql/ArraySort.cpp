@@ -232,8 +232,7 @@ std::vector<std::shared_ptr<exec::FunctionSignature>> arraySortSignatures() {
 
 std::shared_ptr<exec::VectorFunction> makeArraySort(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
   VELOX_CHECK_EQ(inputArgs.size(), 1);
   // Nulls are considered largest.
   return std::make_shared<ArraySort>(/*ascending=*/true, /*nullsFirst=*/false);
@@ -260,8 +259,7 @@ std::vector<std::shared_ptr<exec::FunctionSignature>> sortArraySignatures() {
 
 std::shared_ptr<exec::VectorFunction> makeSortArray(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
   VELOX_CHECK(
       inputArgs.size() == 1 || inputArgs.size() == 2,
       "Invalid number of arguments {}, expected 1 or 2",

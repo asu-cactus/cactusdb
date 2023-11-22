@@ -31,8 +31,7 @@ class NNBuilder {
 
   enum Activation {
     RELU,    
-    SOFTMAX,
-    NONE   
+    SOFTMAX   
   };
 
   NNBuilder() {
@@ -132,58 +131,6 @@ class NNBuilder {
 
 
 
-  NNBuilder& convLayer(int num_filters, int* dims, float* weights, float* bias, Activation ac){
-
-    std::string conv_name = Convolute::getName() + std::to_string(function_count++);
-    std::string scal_add_name = VectorScalarAddition::getName() + std::to_string(function_count++);
-    std::string act_name = "";
-
-    exec::registerVectorFunction(
-        conv_name,
-        Convolute::signatures(),
-        std::make_unique<Convolute>(weights, dims)
-    );
-
-
-    exec::registerVectorFunction(
-        scal_add_name,
-        VectorScalarAddition::signatures(),
-        std::make_unique<VectorScalarAddition>(bias, num_filters)
-    );
-
-    if(ac == RELU){
-      act_name = Relu::getName() + std::to_string(function_count++);
-      exec::registerVectorFunction(
-        act_name,
-        Relu::signatures(),
-        std::make_unique<Relu>()
-     );
-    } else if (ac == SOFTMAX){
-      act_name = Softmax::getName() + std::to_string(function_count++);
-      exec::registerVectorFunction(
-        act_name,
-        Softmax::signatures(),
-        std::make_unique<Softmax>()
-     );
-    } 
-    if(act_name == "")
-      compute_string = fmt::format("{}({}({}))", scal_add_name, conv_name, compute_string);
-    else
-      compute_string = fmt::format("{}({}({}({})))", act_name, scal_add_name, conv_name, compute_string);
-
-    return *this;
-  }
-
-  NNBuilder& maxPoolLayer(int side, int height, int width) {
-    std::string max_pool_name = MaxPool::getName() + std::to_string(function_count++);
-    exec::registerVectorFunction(
-        max_pool_name,
-        MaxPool::signatures(),
-        std::make_unique<MaxPool>(side, height, width)
-    );
-    compute_string = fmt::format("{}({})", max_pool_name, compute_string);
-    return *this;
-  }
 
 
   private:
@@ -194,8 +141,4 @@ class NNBuilder {
     // in case the weights for each layer is stored in a separate file
     std::string weightsFile_;
     std::string biasFile_;
-
 };
-
-
-

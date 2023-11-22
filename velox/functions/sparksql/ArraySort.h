@@ -52,15 +52,13 @@ class ArraySort : public exec::VectorFunction {
 
 std::shared_ptr<exec::VectorFunction> makeArraySort(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config);
+    const std::vector<exec::VectorFunctionArg>& inputArgs);
 
 std::vector<std::shared_ptr<exec::FunctionSignature>> arraySortSignatures();
 
 std::shared_ptr<exec::VectorFunction> makeSortArray(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config);
+    const std::vector<exec::VectorFunctionArg>& inputArgs);
 
 std::vector<std::shared_ptr<exec::FunctionSignature>> sortArraySignatures();
 

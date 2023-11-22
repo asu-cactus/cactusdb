@@ -43,59 +43,34 @@ const AggregateFunctionEntry* FOLLY_NULLABLE
 getAggregateFunctionEntry(const std::string& name) {
   auto sanitizedName = sanitizeName(name);
 
-  return aggregateFunctions().withRLock(
-      [&](const auto& functionsMap) -> const AggregateFunctionEntry* {
-        auto it = functionsMap.find(sanitizedName);
-        if (it != functionsMap.end()) {
-          return &it->second;
-        }
-        return nullptr;
-      });
+  auto& functionsMap = aggregateFunctions();
+  auto it = functionsMap.find(sanitizedName);
+  if (it != functionsMap.end()) {
+    return &it->second;
+  }
+  return nullptr;
 }
 
-AggregateRegistrationResult registerAggregateFunction(
+bool registerAggregateFunction(
     const std::string& name,
     std::vector<std::shared_ptr<AggregateFunctionSignature>> signatures,
     AggregateFunctionFactory factory,
-    bool registerCompanionFunctions,
-    bool overwrite) {
+    bool registerCompanionFunctions) {
   auto sanitizedName = sanitizeName(name);
-  AggregateRegistrationResult registered;
 
-  if (overwrite) {
-    aggregateFunctions().withWLock([&](auto& aggregationFunctionMap) {
-      aggregationFunctionMap[sanitizedName] = {signatures, std::move(factory)};
-    });
-    registered.mainFunction = true;
-  } else {
-    auto inserted =
-        aggregateFunctions().withWLock([&](auto& aggregationFunctionMap) {
-          auto [_, inserted] = aggregationFunctionMap.insert(
-              {sanitizedName, {signatures, factory}});
-          return inserted;
-        });
-    registered.mainFunction = inserted;
-  }
+  aggregateFunctions()[sanitizedName] = {signatures, std::move(factory)};
 
   // Register the aggregate as a window function also.
   registerAggregateWindowFunction(sanitizedName);
 
   // Register companion function if needed.
   if (registerCompanionFunctions) {
-    registered.partialFunction =
-        CompanionFunctionsRegistrar::registerPartialFunction(
-            name, signatures, overwrite);
-    registered.mergeFunction =
-        CompanionFunctionsRegistrar::registerMergeFunction(
-            name, signatures, overwrite);
-    registered.extractFunction =
-        CompanionFunctionsRegistrar::registerExtractFunction(
-            name, signatures, overwrite);
-    registered.mergeExtractFunction =
-        CompanionFunctionsRegistrar::registerMergeExtractFunction(
-            name, signatures, overwrite);
+    CompanionFunctionsRegistrar::registerPartialFunction(name, signatures);
+    CompanionFunctionsRegistrar::registerMergeFunction(name, signatures);
+    CompanionFunctionsRegistrar::registerExtractFunction(name, signatures);
+    CompanionFunctionsRegistrar::registerMergeExtractFunction(name, signatures);
   }
-  return registered;
+  return true;
 }
 
 std::unordered_map<
@@ -106,12 +81,10 @@ getAggregateFunctionSignatures() {
       std::string,
       std::vector<std::shared_ptr<AggregateFunctionSignature>>>
       map;
-  exec::aggregateFunctions().withRLock([&](const auto& aggregateFunctions) {
-    for (const auto& aggregateFunction : aggregateFunctions) {
-      map[aggregateFunction.first] = aggregateFunction.second.signatures;
-    }
-  });
-
+  auto aggregateFunctions = exec::aggregateFunctions();
+  for (const auto& aggregateFunction : aggregateFunctions) {
+    map[aggregateFunction.first] = aggregateFunction.second.signatures;
+  }
   return map;
 }
 
@@ -230,11 +203,10 @@ std::unique_ptr<Aggregate> Aggregate::create(
     const std::string& name,
     core::AggregationNode::Step step,
     const std::vector<TypePtr>& argTypes,
-    const TypePtr& resultType,
-    const core::QueryConfig& config) {
+    const TypePtr& resultType) {
   // Lookup the function in the new registry first.
   if (auto func = getAggregateFunctionEntry(name)) {
-    return func->factory(step, argTypes, resultType, config);
+    return func->factory(step, argTypes, resultType);
   }
 
   VELOX_USER_FAIL("Aggregate function not registered: {}", name);
@@ -246,13 +218,13 @@ TypePtr Aggregate::intermediateType(
     const std::vector<TypePtr>& argTypes) {
   auto signatures = getAggregateFunctionSignatures(name);
   if (!signatures.has_value()) {
-    VELOX_USER_FAIL("Aggregate function not registered: {}", name);
+    VELOX_FAIL("Aggregate function '{}' not registered", name);
   }
   for (auto& signature : signatures.value()) {
     SignatureBinder binder(*signature, argTypes);
     if (binder.tryBind()) {
       auto type = binder.tryResolveType(signature->intermediateType());
-      VELOX_USER_CHECK(
+      VELOX_CHECK(
           type,
           "Cannot resolve intermediate type for aggregate function {}",
           toString(name, argTypes));
@@ -267,11 +239,15 @@ TypePtr Aggregate::intermediateType(
   VELOX_USER_FAIL(error.str());
 }
 
-void Aggregate::setLambdaExpressions(
-    std::vector<core::LambdaTypedExprPtr> lambdaExpressions,
-    std::shared_ptr<core::ExpressionEvaluator> expressionEvaluator) {
-  lambdaExpressions_ = std::move(lambdaExpressions);
-  expressionEvaluator_ = std::move(expressionEvaluator);
+int32_t Aggregate::combineAlignmentInternal(int32_t otherAlignment) const {
+  auto thisAlignment = accumulatorAlignmentSize();
+  VELOX_CHECK_EQ(
+      __builtin_popcount(thisAlignment), 1, "Alignment can only be power of 2");
+  VELOX_CHECK_EQ(
+      __builtin_popcount(otherAlignment),
+      1,
+      "Alignment can only be power of 2");
+  return std::max(thisAlignment, otherAlignment);
 }
 
 void Aggregate::setAllocatorInternal(HashStringAllocator* allocator) {

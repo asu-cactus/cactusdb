@@ -26,7 +26,6 @@ widthBucketArraySignature();
 
 std::shared_ptr<exec::VectorFunction> makeWidthBucketArray(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config);
+    const std::vector<exec::VectorFunctionArg>& inputArgs);
 
 } // namespace facebook::velox::functions

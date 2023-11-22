@@ -21,6 +21,7 @@
 
 #include "folly/Range.h"
 #include "velox/common/caching/ScanTracker.h"
+#include "velox/dwio/common/Common.h"
 #include "velox/dwio/common/Options.h"
 #include "velox/dwio/common/StreamIdentifier.h"
 #include "velox/dwio/dwrf/common/wrap/dwrf-proto-wrapper.h"
@@ -106,41 +107,32 @@ class EncodingKey {
     return INVALID;
   }
 
+ public:
   EncodingKey()
       : EncodingKey(dwio::common::MAX_UINT32, dwio::common::MAX_UINT32) {}
 
   /* implicit */ EncodingKey(uint32_t n, uint32_t s = 0)
-      : node_{n}, sequence_{s} {}
+      : node{n}, sequence{s} {}
+  uint32_t node;
+  uint32_t sequence;
 
   bool operator==(const EncodingKey& other) const {
-    return node_ == other.node_ && sequence_ == other.sequence_;
-  }
-
-  uint32_t node() const {
-    return node_;
-  }
-
-  uint32_t sequence() const {
-    return sequence_;
+    return node == other.node && sequence == other.sequence;
   }
 
   std::size_t hash() const {
-    return std::hash<uint32_t>()(node_) ^ std::hash<uint32_t>()(sequence_);
+    return std::hash<uint32_t>()(node) ^ std::hash<uint32_t>()(sequence);
   }
 
   bool valid() const {
-    return node_ != dwio::common::MAX_UINT32 && sequence_ >= 0;
+    return node != dwio::common::MAX_UINT32 && sequence >= 0;
   }
 
   std::string toString() const {
-    return fmt::format("[node={}, sequence={}]", node_, sequence_);
+    return fmt::format("[node={}, sequence={}]", node, sequence);
   }
 
   DwrfStreamIdentifier forKind(const proto::Stream_Kind kind) const;
-
- private:
-  uint32_t node_;
-  uint32_t sequence_;
 };
 
 struct EncodingKeyHash {
@@ -152,10 +144,11 @@ struct EncodingKeyHash {
 class DwrfStreamIdentifier : public dwio::common::StreamIdentifier {
  public:
   static const DwrfStreamIdentifier& getInvalid() {
-    static const DwrfStreamIdentifier kInvalidId;
-    return kInvalidId;
+    static const DwrfStreamIdentifier INVALID;
+    return INVALID;
   }
 
+ public:
   DwrfStreamIdentifier()
       : column_(dwio::common::MAX_UINT32), kind_(StreamKind_DATA) {}
 
@@ -216,8 +209,8 @@ class DwrfStreamIdentifier : public dwio::common::StreamIdentifier {
     return fmt::format(
         "[id={}, node={}, sequence={}, column={}, kind={}]",
         id_,
-        encodingKey_.node(),
-        encodingKey_.sequence(),
+        encodingKey_.node,
+        encodingKey_.sequence,
         column_,
         static_cast<uint32_t>(kind_));
   }

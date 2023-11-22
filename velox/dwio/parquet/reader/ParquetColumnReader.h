@@ -26,6 +26,7 @@ inline int32_t parquetSizeOfIntKind(TypeKind kind) {
     case TypeKind::TINYINT:
     case TypeKind::SMALLINT:
     case TypeKind::INTEGER:
+    case TypeKind::DATE:
       return 4;
     case TypeKind::BIGINT:
       return 8;
@@ -42,7 +43,6 @@ class ParquetColumnReader {
   /// Builds a reader tree producing 'dataType'. The metadata is in 'params'.
   /// The filters and pruning are in 'scanSpec'.
   static std::unique_ptr<dwio::common::SelectiveColumnReader> build(
-      const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
       const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
       ParquetParams& params,
       common::ScanSpec& scanSpec);

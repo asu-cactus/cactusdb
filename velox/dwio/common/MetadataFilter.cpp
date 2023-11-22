@@ -29,22 +29,20 @@ using LeafResults =
 
 struct MetadataFilter::Node {
   static std::unique_ptr<Node> fromExpression(
+      ScanSpec&,
       const core::ITypedExpr&,
       core::ExpressionEvaluator*,
       bool negated);
   virtual ~Node() = default;
-  virtual void addToScanSpec(ScanSpec&) const = 0;
   virtual uint64_t* eval(LeafResults&, int size) const = 0;
-  virtual std::string toString() const = 0;
 };
 
 class MetadataFilter::LeafNode : public Node {
  public:
-  LeafNode(Subfield&& field, std::unique_ptr<Filter> filter)
-      : field_(std::move(field)), filter_(std::move(filter)) {}
-
-  void addToScanSpec(ScanSpec& scanSpec) const override {
-    scanSpec.getOrCreateChild(field_)->addMetadataFilter(this, filter_.get());
+  LeafNode(ScanSpec& scanSpec, Subfield&& field, std::unique_ptr<Filter> filter)
+      : field_(std::move(field)) {
+    scanSpec.getOrCreateChild(field_)->addMetadataFilter(
+        this, std::move(filter));
   }
 
   uint64_t* eval(LeafResults& leafResults, int) const override {
@@ -58,13 +56,8 @@ class MetadataFilter::LeafNode : public Node {
     return field_;
   }
 
-  std::string toString() const override {
-    return field_.toString() + ":" + filter_->toString();
-  }
-
  private:
   Subfield field_;
-  std::unique_ptr<Filter> filter_;
 };
 
 struct MetadataFilter::AndNode : Node {
@@ -83,11 +76,6 @@ struct MetadataFilter::AndNode : Node {
   AndNode(std::unique_ptr<Node> lhs, std::unique_ptr<Node> rhs)
       : lhs_(std::move(lhs)), rhs_(std::move(rhs)) {}
 
-  void addToScanSpec(ScanSpec& scanSpec) const override {
-    lhs_->addToScanSpec(scanSpec);
-    rhs_->addToScanSpec(scanSpec);
-  }
-
   uint64_t* eval(LeafResults& leafResults, int size) const override {
     auto* l = lhs_->eval(leafResults, size);
     auto* r = rhs_->eval(leafResults, size);
@@ -99,10 +87,6 @@ struct MetadataFilter::AndNode : Node {
     }
     bits::orBits(l, r, 0, size);
     return l;
-  }
-
-  std::string toString() const override {
-    return "and(" + lhs_->toString() + "," + rhs_->toString() + ")";
   }
 
  private:
@@ -123,11 +107,6 @@ struct MetadataFilter::OrNode : Node {
   OrNode(std::unique_ptr<Node> lhs, std::unique_ptr<Node> rhs)
       : lhs_(std::move(lhs)), rhs_(std::move(rhs)) {}
 
-  void addToScanSpec(ScanSpec& scanSpec) const override {
-    lhs_->addToScanSpec(scanSpec);
-    rhs_->addToScanSpec(scanSpec);
-  }
-
   uint64_t* eval(LeafResults& leafResults, int size) const override {
     auto* l = lhs_->eval(leafResults, size);
     auto* r = rhs_->eval(leafResults, size);
@@ -136,10 +115,6 @@ struct MetadataFilter::OrNode : Node {
     }
     bits::andBits(l, r, 0, size);
     return l;
-  }
-
-  std::string toString() const override {
-    return "or(" + lhs_->toString() + "," + rhs_->toString() + ")";
   }
 
  private:
@@ -163,6 +138,7 @@ const core::CallTypedExpr* asCall(const core::ITypedExpr* expr) {
 } // namespace
 
 std::unique_ptr<MetadataFilter::Node> MetadataFilter::Node::fromExpression(
+    ScanSpec& scanSpec,
     const core::ITypedExpr& expr,
     core::ExpressionEvaluator* evaluator,
     bool negated) {
@@ -171,19 +147,19 @@ std::unique_ptr<MetadataFilter::Node> MetadataFilter::Node::fromExpression(
     return nullptr;
   }
   if (call->name() == "and") {
-    auto lhs = fromExpression(*call->inputs()[0], evaluator, negated);
-    auto rhs = fromExpression(*call->inputs()[1], evaluator, negated);
+    auto lhs = fromExpression(scanSpec, *call->inputs()[0], evaluator, negated);
+    auto rhs = fromExpression(scanSpec, *call->inputs()[1], evaluator, negated);
     return negated ? OrNode::create(std::move(lhs), std::move(rhs))
                    : AndNode::create(std::move(lhs), std::move(rhs));
   }
   if (call->name() == "or") {
-    auto lhs = fromExpression(*call->inputs()[0], evaluator, negated);
-    auto rhs = fromExpression(*call->inputs()[1], evaluator, negated);
+    auto lhs = fromExpression(scanSpec, *call->inputs()[0], evaluator, negated);
+    auto rhs = fromExpression(scanSpec, *call->inputs()[1], evaluator, negated);
     return negated ? AndNode::create(std::move(lhs), std::move(rhs))
                    : OrNode::create(std::move(lhs), std::move(rhs));
   }
   if (call->name() == "not") {
-    return fromExpression(*call->inputs()[0], evaluator, !negated);
+    return fromExpression(scanSpec, *call->inputs()[0], evaluator, !negated);
   }
   try {
     Subfield subfield;
@@ -192,11 +168,8 @@ std::unique_ptr<MetadataFilter::Node> MetadataFilter::Node::fromExpression(
     if (!filter) {
       return nullptr;
     }
-    VELOX_CHECK(
-        subfield.valid(),
-        "Invalid subfield from expression: {}",
-        expr.toString());
-    return std::make_unique<LeafNode>(std::move(subfield), std::move(filter));
+    return std::make_unique<LeafNode>(
+        scanSpec, std::move(subfield), std::move(filter));
   } catch (const VeloxException&) {
     LOG(WARNING) << "Fail to convert expression to metadata filter: "
                  << expr.toString();
@@ -208,15 +181,10 @@ MetadataFilter::MetadataFilter(
     ScanSpec& scanSpec,
     const core::ITypedExpr& expr,
     core::ExpressionEvaluator* evaluator)
-    : root_(Node::fromExpression(expr, evaluator, false)) {
-  if (root_) {
-    root_->addToScanSpec(scanSpec);
-  }
-}
+    : root_(Node::fromExpression(scanSpec, expr, evaluator, false)) {}
 
 void MetadataFilter::eval(
-    std::vector<std::pair<const LeafNode*, std::vector<uint64_t>>>&
-        leafNodeResults,
+    std::vector<std::pair<LeafNode*, std::vector<uint64_t>>>& leafNodeResults,
     std::vector<uint64_t>& finalResult) {
   if (!root_) {
     return;
@@ -237,10 +205,6 @@ void MetadataFilter::eval(
   if (auto* combined = root_->eval(leafResults, bitCount)) {
     bits::orBits(finalResult.data(), combined, 0, bitCount);
   }
-}
-
-std::string MetadataFilter::toString() const {
-  return !root_ ? "" : root_->toString();
 }
 
 } // namespace facebook::velox::common

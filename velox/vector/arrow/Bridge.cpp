@@ -216,7 +216,6 @@ const char* exportArrowFormatStr(
     formatBuffer = fmt::format("d:{},{}", precision, scale);
     return formatBuffer.c_str();
   }
-
   switch (type->kind()) {
     // Scalar types.
     case TypeKind::BOOLEAN:
@@ -226,9 +225,6 @@ const char* exportArrowFormatStr(
     case TypeKind::SMALLINT:
       return "s"; // int16
     case TypeKind::INTEGER:
-      if (type->isDate()) {
-        return "tdD";
-      }
       return "i"; // int32
     case TypeKind::BIGINT:
       return "l"; // int64
@@ -247,6 +243,8 @@ const char* exportArrowFormatStr(
       // TODO: need to figure out how we'll map this since in Velox we currently
       // store timestamps as two int64s (epoch in sec and nanos).
       return "ttn"; // time64 [nanoseconds]
+    case TypeKind::DATE:
+      return "tdD"; // date32[days]
     // Complex/nested types.
     case TypeKind::ARRAY:
       static_assert(sizeof(vector_size_t) == 4);
@@ -427,6 +425,7 @@ void exportFlat(
     case TypeKind::INTEGER:
     case TypeKind::BIGINT:
     case TypeKind::HUGEINT:
+    case TypeKind::DATE:
     case TypeKind::REAL:
     case TypeKind::DOUBLE:
       exportValues(vec, rows, out, pool, holder);
@@ -930,7 +929,8 @@ VectorPtr createStringFlatVector(
 
   std::vector<BufferPtr> stringViewBuffers;
   if (shouldAcquireStringBuffer) {
-    stringViewBuffers.emplace_back(wrapInBufferView(values, offsets[length]));
+    stringViewBuffers.emplace_back(
+        wrapInBufferView(values, offsets[length + 1]));
   }
 
   return std::make_shared<FlatVector<StringView>>(

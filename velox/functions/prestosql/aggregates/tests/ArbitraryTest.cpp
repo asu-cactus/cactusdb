@@ -48,16 +48,12 @@ TEST_F(ArbitraryTest, noNulls) {
       "arbitrary(c5)",
       "arbitrary(c6)"};
 
-  // We do not test with TableScan because having two input splits makes the
-  // result non-deterministic.
   // Global aggregation.
   testAggregations(
       vectors,
       {},
       aggregates,
-      "SELECT first(c1), first(c2), first(c3), first(c4), first(c5), first(c6) FROM tmp",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      "SELECT first(c1), first(c2), first(c3), first(c4), first(c5), first(c6) FROM tmp");
 
   // Group by aggregation.
   testAggregations(
@@ -67,9 +63,7 @@ TEST_F(ArbitraryTest, noNulls) {
       },
       {"p0"},
       aggregates,
-      "SELECT c0 % 10, first(c1), first(c2), first(c3), first(c4), first(c5), first(c6) FROM tmp GROUP BY 1",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      "SELECT c0 % 10, first(c1), first(c2), first(c3), first(c4), first(c5), first(c6) FROM tmp GROUP BY 1");
 
   // encodings: use filter to wrap aggregation inputs in a dictionary.
   testAggregations(
@@ -80,9 +74,7 @@ TEST_F(ArbitraryTest, noNulls) {
       },
       {"p0"},
       aggregates,
-      "SELECT c0 % 10, first(c1), first(c2), first(c3), first(c4), first(c5), first(c6) FROM tmp WHERE c0 % 2 = 0 GROUP BY 1",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      "SELECT c0 % 10, first(c1), first(c2), first(c3), first(c4), first(c5), first(c6) FROM tmp WHERE c0 % 2 = 0 GROUP BY 1");
 
   testAggregations(
       [&](PlanBuilder& builder) {
@@ -90,47 +82,39 @@ TEST_F(ArbitraryTest, noNulls) {
       },
       {},
       aggregates,
-      "SELECT first(c1), first(c2), first(c3), first(c4), first(c5), first(c6) FROM tmp WHERE c0 % 2 = 0",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      "SELECT first(c1), first(c2), first(c3), first(c4), first(c5), first(c6) FROM tmp WHERE c0 % 2 = 0");
 }
 
 TEST_F(ArbitraryTest, nulls) {
   auto vectors = {
-      makeRowVector(
-          {makeNullableFlatVector<int32_t>({1, 1, 2, 2, 3, 3}),
-           makeNullableFlatVector<int64_t>(
-               {std::nullopt, std::nullopt, std::nullopt, 4, std::nullopt, 5}),
-           makeNullableFlatVector<double>({
-               std::nullopt,
-               0.50,
-               std::nullopt,
-               std::nullopt,
-               0.25,
-               std::nullopt,
-           }),
-           makeNullConstant(TypeKind::UNKNOWN, 6)}),
+      makeRowVector({
+          makeNullableFlatVector<int32_t>({1, 1, 2, 2, 3, 3}),
+          makeNullableFlatVector<int64_t>(
+              {std::nullopt, std::nullopt, std::nullopt, 4, std::nullopt, 5}),
+          makeNullableFlatVector<double>({
+              std::nullopt,
+              0.50,
+              std::nullopt,
+              std::nullopt,
+              0.25,
+              std::nullopt,
+          }),
+      }),
   };
 
-  // We do not test with TableScan because having two input splits makes the
-  // result non-deterministic. Also, unknown type is not supported in Writer
-  // yet. Global aggregation.
+  // Global aggregation.
   testAggregations(
       vectors,
       {},
-      {"arbitrary(c1)", "arbitrary(c2)", "arbitrary(c3)"},
-      "SELECT * FROM( VALUES (4, 0.50, NULL)) AS t",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      {"arbitrary(c1)", "arbitrary(c2)"},
+      "SELECT * FROM( VALUES (4, 0.50)) AS t");
 
   // Group by aggregation.
   testAggregations(
       vectors,
       {"c0"},
-      {"arbitrary(c1)", "arbitrary(c2)", "arbitrary(c3)"},
-      "SELECT * FROM(VALUES (1, NULL, 0.50, NULL), (2, 4, NULL, NULL), (3, 5, 0.25, NULL)) AS t",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      {"arbitrary(c1)", "arbitrary(c2)"},
+      "SELECT * FROM(VALUES (1, NULL, 0.50), (2, 4, NULL), (3, 5, 0.25)) AS t");
 }
 
 TEST_F(ArbitraryTest, varchar) {
@@ -138,25 +122,19 @@ TEST_F(ArbitraryTest, varchar) {
   auto vectors = makeVectors(rowType, 1000, 10);
   createDuckDbTable(vectors);
 
-  // We do not test with TableScan because having two input splits makes the
-  // result non-deterministic.
   testAggregations(
       [&](PlanBuilder& builder) {
         builder.values(vectors).project({"c0 % 11", "c1"});
       },
       {"p0"},
       {"arbitrary(c1)"},
-      "SELECT c0 % 11, first(c1) FROM tmp WHERE c1 IS NOT NULL GROUP BY 1",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      "SELECT c0 % 11, first(c1) FROM tmp WHERE c1 IS NOT NULL GROUP BY 1");
 
   testAggregations(
       vectors,
       {},
       {"arbitrary(c1)"},
-      "SELECT first(c1) FROM tmp WHERE c1 IS NOT NULL",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      "SELECT first(c1) FROM tmp WHERE c1 IS NOT NULL");
 
   // encodings: use filter to wrap aggregation inputs in a dictionary.
   testAggregations(
@@ -165,9 +143,7 @@ TEST_F(ArbitraryTest, varchar) {
       },
       {"p0"},
       {"arbitrary(c1)"},
-      "SELECT c0 % 11, first(c1) FROM tmp WHERE c0 % 2 = 0 AND c1 IS NOT NULL GROUP BY 1",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      "SELECT c0 % 11, first(c1) FROM tmp WHERE c0 % 2 = 0 AND c1 IS NOT NULL GROUP BY 1");
 
   testAggregations(
       [&](PlanBuilder& builder) {
@@ -175,9 +151,7 @@ TEST_F(ArbitraryTest, varchar) {
       },
       {},
       {"arbitrary(c1)"},
-      "SELECT first(c1) FROM tmp WHERE c0 % 2 = 0 AND c1 IS NOT NULL",
-      /*config*/ {},
-      /*testWithTableScan*/ false);
+      "SELECT first(c1) FROM tmp WHERE c0 % 2 = 0 AND c1 IS NOT NULL");
 }
 
 TEST_F(ArbitraryTest, varcharConstAndNulls) {
@@ -307,15 +281,22 @@ TEST_F(ArbitraryTest, date) {
       // Grouping key.
       makeFlatVector<int64_t>({1, 1, 2, 2, 3, 3, 4, 4}),
       // Input values: constant within groups.
-      makeNullableFlatVector<int32_t>(
-          {125, 125, 126, 126, std::nullopt, std::nullopt, std::nullopt, 128},
-          DATE()),
+      makeNullableFlatVector<Date>(
+          {Date(125),
+           Date(125),
+           Date(126),
+           Date(126),
+           std::nullopt,
+           std::nullopt,
+           std::nullopt,
+           Date(128)}),
       makeConstant<Timestamp>(std::nullopt, 8),
   });
 
   auto expectedResult = makeRowVector({
       makeFlatVector<int64_t>({1, 2, 3, 4}),
-      makeNullableFlatVector<int32_t>({125, 126, std::nullopt, 128}, DATE()),
+      makeNullableFlatVector<Date>(
+          {Date(125), Date(126), std::nullopt, Date(128)}),
   });
 
   testAggregations({data}, {"c0"}, {"arbitrary(c1)"}, {expectedResult});
@@ -328,10 +309,10 @@ TEST_F(ArbitraryTest, date) {
 
   auto result = readSingleValue(plan);
   ASSERT_TRUE(!result.isNull());
-  ASSERT_EQ(result.kind(), TypeKind::INTEGER);
+  ASSERT_EQ(result.kind(), TypeKind::DATE);
 
-  auto date = result.value<int32_t>();
-  ASSERT_EQ(date, 125);
+  auto date = result.value<Date>();
+  ASSERT_EQ(date, Date(125));
 
   testAggregations({data}, {}, {"arbitrary(c2)"}, "SELECT null");
 }
