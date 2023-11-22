@@ -135,10 +135,6 @@ class VectorFuzzer {
     };
     TimestampPrecision timestampPrecision{TimestampPrecision::kNanoSeconds};
 
-    /// TODO: keeping the deprecated option for backwards compatibility. Will be
-    /// removed soon. For new code the option above.
-    bool useMicrosecondPrecisionTimestamp{false};
-
     /// If true, fuzz() will randomly generate lazy vectors and fuzzInputRow()
     /// will generate a raw vector with children that can randomly be lazy
     /// vectors. The generated lazy vectors can also have any number of
@@ -220,7 +216,12 @@ class VectorFuzzer {
 
   // Returns a "fuzzed" row vector with randomized data and nulls.
   RowVectorPtr fuzzRow(const RowTypePtr& rowType);
-  RowVectorPtr fuzzRow(const RowTypePtr& rowType, vector_size_t size);
+
+  // If allowTopLevelNulls is false, the top level row wont have nulls.
+  RowVectorPtr fuzzRow(
+      const RowTypePtr& rowType,
+      vector_size_t size,
+      bool allowTopLevelNulls = true);
 
   // Returns a RowVector based on the provided vectors, fuzzing its top-level
   // null buffer.
@@ -237,6 +238,10 @@ class VectorFuzzer {
   // elements.
   RowVectorPtr fuzzInputRow(const RowTypePtr& rowType);
 
+  /// Same as the function above, but all generated vectors are flat, i.e. no
+  /// constant or dictionary-encoded vectors at any level.
+  RowVectorPtr fuzzInputFlatRow(const RowTypePtr& rowType);
+
   // Generates a random type, including maps, vectors, and arrays. maxDepth
   // limits the maximum level of nesting for complex types. maxDepth <= 1 means
   // no complex types are allowed.
@@ -244,7 +249,11 @@ class VectorFuzzer {
   // There are no options to control type generation yet; these may be added in
   // the future.
   TypePtr randType(int maxDepth = 5);
+  TypePtr randType(const std::vector<TypePtr>& scalarTypes, int maxDepth = 5);
   RowTypePtr randRowType(int maxDepth = 5);
+  RowTypePtr randRowType(
+      const std::vector<TypePtr>& scalarTypes,
+      int maxDepth = 5);
 
   // Generates short decimal TypePtr with random precision and scale.
   inline TypePtr randShortDecimalType() {
@@ -259,10 +268,6 @@ class VectorFuzzer {
         randPrecisionScale(LongDecimalType::kMaxPrecision);
     return DECIMAL(precision, scale);
   }
-
-  // Generate a random non-floating-point primitive type to be used as join keys
-  // or group-by key for aggregations, etc.
-  TypePtr randScalarNonFloatingPointType();
 
   void reSeed(size_t seed) {
     rng_.seed(seed);
@@ -286,10 +291,12 @@ class VectorFuzzer {
   // Returns a copy of 'rowVector' but with the columns having indices listed in
   // 'columnsToWrapInLazy' wrapped in lazy encoding. Must only be used for input
   // row vectors where all children are non-null and non-lazy.
-  // 'columnsToWrapInLazy' should be a sorted list of column indices.
+  // 'columnsToWrapInLazy' can contain negative column indices that represent
+  // lazy vectors that should be preloaded before being fed to the evaluator.
+  // This list is sorted on the absolute value of the entries.
   static RowVectorPtr fuzzRowChildrenToLazy(
       RowVectorPtr rowVector,
-      const std::vector<column_index_t>& columnsToWrapInLazy);
+      const std::vector<int>& columnsToWrapInLazy);
 
   // Generate a random null buffer.
   BufferPtr fuzzNulls(vector_size_t size);
@@ -338,5 +345,23 @@ class VectorFuzzer {
   // evaluated, which can lead to inconsistent results across platforms.
   FuzzerGenerator rng_;
 };
+
+/// Generates a random type, including maps, vectors, and arrays. maxDepth
+/// limits the maximum level of nesting for complex types. maxDepth <= 1 means
+/// no complex types are allowed.
+TypePtr randType(FuzzerGenerator& rng, int maxDepth = 5);
+
+TypePtr randType(
+    FuzzerGenerator& rng,
+    const std::vector<TypePtr>& scalarTypes,
+    int maxDepth = 5);
+
+/// Generates a random ROW type.
+RowTypePtr randRowType(FuzzerGenerator& rng, int maxDepth = 5);
+
+RowTypePtr randRowType(
+    FuzzerGenerator& rng,
+    const std::vector<TypePtr>& scalarTypes,
+    int maxDepth = 5);
 
 } // namespace facebook::velox

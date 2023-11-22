@@ -280,21 +280,6 @@ VectorPtr BatchMaker::createVector<TypeKind::TIMESTAMP>(
 }
 
 template <>
-VectorPtr BatchMaker::createVector<TypeKind::DATE>(
-    const std::shared_ptr<const Type>& /* unused */,
-    size_t size,
-    MemoryPool& pool,
-    std::mt19937& gen,
-    std::function<bool(vector_size_t /*index*/)> isNullAt) {
-  return createScalar<Date>(
-      size,
-      gen,
-      [&gen]() { return Date(Random::rand32(gen)); },
-      pool,
-      isNullAt);
-}
-
-template <>
 VectorPtr BatchMaker::createVector<TypeKind::ROW>(
     const std::shared_ptr<const Type>& type,
     size_t size,
@@ -497,8 +482,16 @@ VectorPtr createBinaryMapKeys(
     }
   }
 
-  return std::make_shared<FlatVector<StringView>>(
+  auto temp = std::make_shared<FlatVector<StringView>>(
       &pool, type, BufferPtr(nullptr), totalKeys, values, std::move(buffers));
+  // Copy the data to defragment the buffers created above. Having 25K buffers
+  // times out tests due to consistency checks.
+  auto result = std::static_pointer_cast<FlatVector<StringView>>(
+      BaseVector::create(type, temp->size(), &pool));
+  for (auto i = 0; i < temp->size(); ++i) {
+    result->set(i, temp->valueAt(i));
+  }
+  return result;
 }
 
 VectorPtr createMapKeys(

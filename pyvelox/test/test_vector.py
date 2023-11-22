@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import unittest
-
+import pyarrow as pa
 import pyvelox.pyvelox as pv
+import unittest
 
 
 class TestVeloxVector(unittest.TestCase):
@@ -54,6 +54,36 @@ class TestVeloxVector(unittest.TestCase):
             pv.from_list([None, None, None])
         with self.assertRaises(ValueError):
             pv.from_list([])
+
+    def test_from_list_with_type(self):
+        list_a = [0, 1, 3]
+        a = pv.from_list(list_a, pv.BooleanType())
+        self.assertEqual(a.typeKind().name, "BOOLEAN")
+        for i in range(len(a)):
+            self.assertTrue(isinstance(a[i], bool))
+            self.assertEqual(a[i], bool(list_a[i]))
+        self.assertTrue(
+            isinstance(
+                pv.from_list([None, None, None], pv.VarcharType()), pv.BaseVector
+            )
+        )
+        empty_vector = pv.from_list([], pv.IntegerType())
+        self.assertTrue(isinstance(empty_vector, pv.BaseVector))
+        with self.assertRaises(IndexError):
+            a = empty_vector[0]
+        with self.assertRaises(RuntimeError):
+            a = pv.from_list(
+                [0, 1, 3], pv.VarcharType()
+            )  # Conversion not possible from int to varchar
+        list_b = [0.2, 1.2, 3.23]
+        b = pv.from_list(list_b, pv.RealType())
+        for i in range(len(list_b)):
+            self.assertNotAlmostEqual(list_b[i], b[i], places=17)
+
+        # dtype as a keyword argument
+        integerVector = pv.from_list([1, 3, 11], dtype=pv.IntegerType())
+        self.assertTrue(isinstance(integerVector, pv.BaseVector))
+        self.assertEqual(integerVector.typeKind().name, "INTEGER")
 
     def test_constant_encoding(self):
         ints = pv.constant_vector(1000, 10)
@@ -254,3 +284,70 @@ class TestVeloxVector(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             ints2.append(strs2)
+
+    def test_slice(self):
+        a = pv.from_list(list(range(0, 10)))
+
+        b = a.slice(2, 6)
+        self.assertEqual(len(b), 4)
+        for i in range(4):
+            self.assertEqual(b[i], i + 2)
+
+        with self.assertRaises(NotImplementedError):
+            c = a.slice(2, 6, 2)
+
+        d = a[3:6]
+        self.assertEqual(len(d), 3)
+        for i in range(3):
+            self.assertEqual(d[i], i + 3)
+
+        with self.assertRaises(NotImplementedError):
+            e = a[3:8:3]
+
+    def test_export_to_arrow(self):
+        test_cases = [
+            ([1, 2, 3], pa.int64()),
+            ([1.1, 2.2, 3.3], pa.float64()),
+            (["ab", "bc", "ca"], pa.string()),
+        ]
+        for data, expected_type in test_cases:
+            with self.subTest(data=data):
+                vector = pv.from_list(data)
+                array = pv.export_to_arrow(vector)
+
+                self.assertEqual(array.type, expected_type)
+                self.assertEqual(len(array), len(data))
+                self.assertListEqual(array.tolist(), data)
+
+    def test_import_from_arrow(self):
+        test_cases = [
+            ([11, 26, 31], pa.int64(), pv.IntegerType()),
+            ([0.1, 2.5, 3.9], pa.float64(), pv.DoubleType()),
+            (["az", "by", "cx"], pa.string(), pv.VarcharType()),
+        ]
+        for data, dtype, expected_type in test_cases:
+            with self.subTest(data=data):
+                array = pa.array(data, type=dtype)
+                velox_vector = pv.import_from_arrow(array)
+
+                self.assertEqual(velox_vector.size(), len(data))
+                self.assertTrue(velox_vector.dtype(), expected_type)
+                for i in range(0, len(data)):
+                    self.assertEqual(velox_vector[i], data[i])
+
+    def test_roundtrip_conversion(self):
+        test_cases = [
+            ([41, 92, 13], pv.IntegerType()),
+            ([17.19, 22.25, 13.3], pv.DoubleType()),
+            (["aa1", "bb2", "cc3"], pv.VarcharType()),
+        ]
+        for data, expected_type in test_cases:
+            with self.subTest(data=data):
+                vector = pv.from_list(data)
+                array = pv.export_to_arrow(vector)
+
+                velox_vector = pv.import_from_arrow(array)
+                self.assertEqual(velox_vector.size(), len(data))
+                self.assertTrue(velox_vector.dtype(), expected_type)
+                for i in range(0, len(data)):
+                    self.assertEqual(velox_vector[i], data[i])

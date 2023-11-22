@@ -15,6 +15,7 @@
  */
 
 #include "pyvelox.h"
+#include "conversion.h"
 #include "serde.h"
 #include "signatures.h"
 
@@ -146,6 +147,20 @@ static VectorPtr pyListToVector(
 
   return VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(
       variantsToFlatVector, first_kind, variants, pool);
+}
+
+static VectorPtr pyListToVector(
+    const py::list& list,
+    const facebook::velox::Type& dtype,
+    facebook::velox::memory::MemoryPool* pool) {
+  std::vector<velox::variant> variants;
+  variants.reserve(list.size());
+  for (auto item : list) {
+    variants.push_back(pyToVariant(item, dtype));
+  }
+
+  return VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(
+      variantsToFlatVector, dtype.kind(), variants, pool);
 }
 
 template <typename NativeType>
@@ -294,6 +309,7 @@ PYBIND11_MODULE(pyvelox, m) {
   addVeloxBindings(m);
   addSignatureBindings(m);
   addSerdeBindings(m);
+  addConversionBindings(m);
   m.attr("__version__") = "dev";
 }
 #endif
