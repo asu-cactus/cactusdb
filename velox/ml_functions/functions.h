@@ -1,15 +1,18 @@
+
+#pragma once
+
 #include "velox/expression/VectorFunction.h"
 #include <Eigen/Dense>
 #include <cblas.h>
 #include <chrono>
 #include "velox/exec/Task.h"
-// #define EIGEN_USE_BLAS
+
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
-// #define EIGEN_USE_BLAS
+
 
 /*
     TODO
@@ -73,8 +76,7 @@ public:
         float* input_values = input_elements->values()->asMutable<float>();
         int input_size = input_elements->size();
 
-        // Eigen::setNbThreads(1);
-        // std::cout << Eigen::nbThreads() << " mul"<< std::endl;
+
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
         
@@ -83,16 +85,24 @@ public:
         // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
         // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
-        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        //std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        // std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
-        std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
-        for (int i = 0; i < m.rows(); ++i) {
-            for (int j = 0; j < m.cols(); ++j) {
-                result[i][j] = m(i, j);
-            }
+        // std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
+        // for (int i = 0; i < m.rows(); ++i) {
+        //     for (int j = 0; j < m.cols(); ++j) {
+        //         result[i][j] = m(i, j);
+        //     }
+        // }
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < m.rows(); i++) {
+            std::vector<float> row(
+            m.row(i).data(),
+            m.row(i).data() + m.cols());
+            result.push_back(row);
+
         }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
@@ -128,107 +138,6 @@ private:
     
 };
 
-class MatrixMultiply_s: public MLFunction {
-public:
-    MatrixMultiply_s(int num_rows, int num_cols) {
-        dims.push_back(num_rows);
-        dims.push_back(num_cols);
-    }
-
-    void apply(
-        const SelectivityVector& rows,
-        std::vector<VectorPtr>& args,
-        const TypePtr& type,
-        exec::EvalCtx& context,
-        VectorPtr& output) const override {
-        
-        BaseVector::ensureWritable(rows, type, context.pool(), output);
-        VectorMaker maker{context.pool()};
- 
-        auto input_elements_w = args[1]->as<ArrayVector>()->elements();
-        float* input_values_w = input_elements_w->values()->asMutable<float>();
-
-        auto input_elements_v = args[0];
-        auto ss = args[0]->as<DictionaryVector<ComplexType>>();
-        auto ss2 = ss->valueVector();
-        auto ss3 = ss2->as<ArrayVector>()->elements();
-        float* input_values_v = ss3->values()->asMutable<float>();
-        // auto varrayVector = std::make_shared<ArrayVector<float>>();
-        const int elements_v_per_row = 196000;
-        const int elements_w_per_row = 200704;
-        std::vector<std::vector<float>> result(4, std::vector<float>(1024000));
-        for (int row = 0; row < ss->size(); ++row) {
-            auto innerIndex = ss->wrappedIndex(row);
-            float* current_v_row_ptr = input_values_v + (innerIndex * elements_v_per_row);
-            float* current_w_row_ptr = input_values_w + (row * elements_w_per_row);
-
-            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(current_v_row_ptr, 1000, dims[0]);//3*2
-            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(current_w_row_ptr, dims[0], dims[1]); //2*5
-            Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
-            for (int i = 0; i < m.rows(); ++i) {
-                for (int j = 0; j < m.cols(); ++j) {
-                    result[row][i * 1024 + j] = m(i, j);
-            }
-        }
-            // auto varray = ss2->valueAt(innerIndex);
-//   }         auto velement = varray->as<ArrayVector>()->elements();
-        }
-        // std::cout << "ss Results:" << ss->toString(2) << std::endl;
-        // // auto ss_vec = ss->wrappedVector();
-        // auto ss_0 = ss->valueAtFast(0);
-        // auto ss_1 = ss->valueAtFast(1);
-
-        // auto ss3 = ss2->as<ArrayVector>()->elements();
-        // auto ss3 = varrayVector->elements();
-
-
-
-
-        // Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, 3, dims[0]);
-        // Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); 
-        
-        
-        // std::cout << "Matrix shapes Matmul" << std::endl;
-        // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
-        // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
-
-        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        // Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
-        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        // std::cout << "Time difference (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
-        // //std::cout << m << std::endl;
-
-        // std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
-        // for (int i = 0; i < m.rows(); ++i) {
-        //     for (int j = 0; j < m.cols(); ++j) {
-        //         result[i][j] = m(i, j);
-        //     }
-        // }
-
-        output = maker.arrayVector<float>(result, REAL());
-    }
-
-    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-        return {exec::FunctionSignatureBuilder()
-                     .returnType("array(REAL)")
-                     .argumentType("array(REAL)")
-                     .argumentType("array(REAL)")
-                     .build()};
-    }
-
-    float* getTensor() const override {
-        return weights_;
-    }
-
-    static std::string getName() {
-        return "mat_mul_s";
-    };
-
-
-private:
-    float* weights_;
-    
-};
 
 class MatrixMultiply_b: public MLFunction {
 public:
@@ -297,7 +206,6 @@ private:
     float* weights_;
     
 };
-
 // there is no need to pass any parameter here since dimensions can be figured out from the input 
 // can the optimiser figure out the dimensions from the context?
 class MatrixAddition: public MLFunction {
@@ -309,6 +217,7 @@ public:
 
     MatrixAddition(std::string weightsFile, int num_cols) {
         weightsFile_ = weightsFile;
+
         dims.push_back(num_cols);
     }
 
@@ -323,20 +232,18 @@ public:
 
         auto input_elements = args[0]->as<ArrayVector>()->elements();
         float* input_values = input_elements->values()->asMutable<float>();
-        int input_size = input_elements->size();
-        // Eigen::setNbThreads(1);
-        // std::cout << Eigen::nbThreads() << " add"<< std::endl;
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, input_size/dims[0], dims[0]);
+
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, rows.size(), dims[0]);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, rows.size(), dims[0]);
         
         // std::cout << "Matrix shapes MatAdd" << std::endl;
         // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
         // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
 
 
-        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 + m2;
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         
         // std::cout << "Time difference for Mat Add(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         //std::cout << m << std::endl;
@@ -344,13 +251,21 @@ public:
         int result_size = m.size();
         float* data = m.data();
         
-        std::vector<std::vector<float>> result(input_size/dims[0], std::vector<float>(dims[0]));
-        for (int i = 0; i < input_size/dims[0]; ++i) {
-            for (int j = 0; j < dims[0]; ++j) {
-                result[i][j] = m(i,j);
-            }
+        // std::vector<std::vector<float>> result(rows.size(), std::vector<float>(dims[0]));
+        // for (int i = 0; i < rows.size(); ++i) {
+        //     for (int j = 0; j < dims[0]; ++j) {
+        //         result[i][j] = m(i,j);
+        //     }
+        // }
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < m.rows(); i++) {
+            std::vector<float> row(
+            m.row(i).data(),
+            m.row(i).data() + m.cols());
+            result.push_back(row);
         }
         VectorMaker maker{context.pool()};
+
         output = maker.arrayVector<float>(result, REAL());
     }
 
@@ -383,9 +298,86 @@ private:
 
 };
 
+
+// TODO: add future support to implement matrix addition in one class
+// matrix addition, matrix addition brodcast by row/col
+class MatrixVectorAddition: public MLFunction {
+public:
+    MatrixVectorAddition(float* weights, int num_cols) {
+        weights_ = weights;
+        dims.push_back(num_cols);
+    }
+
+    MatrixVectorAddition(std::string weightsFile, int num_cols) {
+        weightsFile_ = weightsFile;
+        dims.push_back(num_cols);
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, rows.size(), dims[0]);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, 1, dims[0]);
+
+        m1.rowwise() += m2.row(0);
+
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < m1.rows(); i++) {
+            std::vector<float> row(
+            m1.row(i).data(),
+            m1.row(i).data() + m1.cols());
+            result.push_back(row);
+        }
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(result, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    static std::string getName() {
+        return "mat_vector_add";
+    };
+
+    std::string getWeightsFile() {
+        return weightsFile_;
+    }
+
+    void setWeights(float* weights){
+        weights_ = weights;
+    }
+
+private:
+    float* weights_;
+    std::string weightsFile_;
+
+};
+
 class Relu: public MLFunction {
 public:
     Relu() {}
+
+
+    float static relu_function(float x) {
+        return (x > 0.0f) ? x : 0.0f;
+    }
 
     void apply(
         const SelectivityVector& rows,
@@ -403,13 +395,23 @@ public:
         int num_rows = args[0]->size();
         int num_cols = input_size / num_rows;
 
-        std::vector<std::vector<float>> result(num_rows, std::vector<float>(num_cols));
-        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        for (int i = 0; i < num_rows; ++i) {
-            for (int j = 0; j < num_cols; ++j) {
-                result[i][j] = std::max(0.0f, input_values[i*num_cols + j]);
-            }
+        
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < num_rows; i++) {
+            std::vector<float> rowResult(num_cols);
+            std::transform(input_values + i*num_cols, input_values + (i+1)*num_cols,
+            rowResult.data(), relu_function);
+            result.push_back(rowResult);
         }
+
+        // std::vector<std::vector<float>> result(num_rows, std::vector<float>(num_cols));
+        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+        // for (int i = 0; i < num_rows; ++i) {
+        //     for (int j = 0; j < num_cols; ++j) {
+        //         result[i][j] = std::max(0.0f, input_values[i*num_cols + j]);
+        //     }
+        // }
+
         // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         // std::cout << "Time difference for RELU(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
         VectorMaker maker{context.pool()};
@@ -452,17 +454,11 @@ public:
 
         int num_rows = args[0]->size();
         int num_cols = input_size / num_rows;
-        // auto n = Eigen::nbThreads( );
-        // std::cout << Eigen::nbThreads() << " "<< std::endl;
-        // Eigen::setNbThreads(1);
-        // std::cout << Eigen::nbThreads() << " sof"<< std::endl;
+        
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
-        // std::cout << m(1, 2) << " "<< std::endl;
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         Eigen::ArrayXXf exp = m.array().exp();
-        // std::cout << exp(1, 2) << " "<< std::endl;
         Eigen::ArrayXXf sum = exp.rowwise().sum();
-        // std::cout << sum(1) << " "<< std::endl;
         for (int i = 0; i < exp.rows(); i++) {
             exp.row(i) /= sum(i);
         }
@@ -511,11 +507,8 @@ public:
         const TypePtr& type,
         exec::EvalCtx& context,
         VectorPtr& output) const override {
-        std::cout << "run torchnn" << std::endl;
-        // std::cout << rows.size() << std::endl;
-        // torch::set_num_threads(30);
-        torch::set_num_threads(8);
-        // std::cout << torch::get_num_threads() << std::endl;
+
+
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         torch::nn::Linear dense1(dims[0], dims[1]);
         torch::nn::Linear dense2(dims[1],dims[2]);
@@ -542,23 +535,21 @@ public:
         torch::Tensor layer2_output = dense2->forward(reluOutput);
         torch::Tensor softmax_output = torch::nn::functional::softmax(layer2_output, 1);
         float* data = softmax_output.data_ptr<float>();
-        
+
 
         std::vector<std::vector<float>> results;
         for (int i = 0; i < rows.size(); ++i) {
-            std::vector<float> result;
-            for (int j = 0; j < dims[2]; ++j) {
-                result.push_back(data[i*dims[2] + j]);
-            }
+            // std::vector<float> result;
+            std::vector<float> result(data + i*dims[2], data+ (i+1)*dims[2]);
+            // for (int j = 0; j < dims[2]; ++j) {
+            //     result.push_back(data[i*dims[2] + j]);
+            // }
+
             results.push_back(result);
         }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(results, REAL());
-        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        // auto b = std::chrono::time_point_cast<std::chrono::microseconds>(begin).time_since_epoch().count() / 1000000.0;
-        // auto e = std::chrono::time_point_cast<std::chrono::microseconds>(end).time_since_epoch().count() / 1000000.0;
-        // std::cout << "Begin-end" << b << " " << e << std::endl;
-        // std::cout << "Time difference = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -619,10 +610,12 @@ public:
                 Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> input(input_values + s * input_size + c * input_channel_size, input_height, input_width);
                 // for every filter 
                 for(int f=0; f < dims[0]; f++){
+                    int filter_offset = f * output_height * output_width;
                     Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> kernel(weights_ + f * filter_size + c * filter_channel_size, dims[1], dims[2]);
                     for (int i = 0; i < output_height; ++i){
+                        int offset = filter_offset + i*output_width;
                         for (int j = 0; j < output_width; ++j) {
-                            results[s][f*output_height*output_width + i*output_width + j] += (input.block(i, j, dims[1], dims[2]).cwiseProduct(kernel)).sum();
+                            results[s][offset + j] += (input.block(i, j, dims[1], dims[2]).cwiseProduct(kernel)).sum();
                         }
                     }
                 }   
@@ -656,6 +649,84 @@ private:
     float* weights_;
     
 };
+
+class TorchConvolute: public MLFunction {
+public:
+    TorchConvolute(float* weights, int* dims_) {
+        weights_ = weights; 
+        for(int i=0; i < 6; i++)
+            dims.push_back(dims_[i]);
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();     
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+        
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+       
+        int input_height =  dims[4];
+        int input_width = dims[5];
+
+        int output_height = input_height - dims[1] + 1;
+        int output_width = input_width - dims[2] + 1;
+        
+        std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
+       
+        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}));
+        // torch::Tensor conv_weights = torch::tensor(weights_).view({dims[3], dims[0], dims[1], dims[2]});
+
+        // conv_layer->weight = torch::nn::parameter::Parameter (conv_weights);
+        torch::Tensor input_data = torch::from_blob(input_values, {rows.size(), dims[3], input_height, input_width});
+
+       
+        torch::Tensor output_data = conv_layer(input_data);
+        
+        float* data = output_data.data_ptr<float>();
+        
+        int row_size = output_height * output_width * dims[0];
+       
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result;
+            for (int j = 0; j < row_size; ++j) {
+                result.push_back(data[i*row_size + j]);
+            }
+            results.push_back(result);
+        }
+
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        //std::cout << "Time for conv2d (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    static std::string getName() {
+        return "torchconv2d";
+    };
+
+
+private:
+    float* weights_;
+    
+};
+
 
 class VectorScalarAddition: public MLFunction {
 
@@ -752,16 +823,6 @@ public:
                     }
                 }
             }
-        }
-
-        for(int i=0; i < 64; i++){
-
-            for(int j=0; j < 144; j++){
-                if(j % 12 == 0)
-                    std::cout << std::endl;
-                std::cout << results[0][i*144 + j];
-            }
-            std::cout << std::endl << "Next-----";
         }
 
 

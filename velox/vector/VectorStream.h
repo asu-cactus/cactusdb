@@ -35,17 +35,35 @@ class VectorSerializer {
  public:
   virtual ~VectorSerializer() = default;
 
+  /// Serialize a subset of rows in a vector.
   virtual void append(
       const RowVectorPtr& vector,
       const folly::Range<const IndexRange*>& ranges) = 0;
 
-  // Writes the contents to 'stream' in wire format
+  /// Serialize all rows in a vector.
+  void append(const RowVectorPtr& vector);
+
+  /// Returns the maximum serialized size of the data previously added via
+  /// 'append' methods. Can be used to allocate buffer of exact or maximum size
+  /// before calling 'flush'.
+  /// Returns the exact serialized size when data is not compressed.
+  /// Returns the maximum serialized size when data is compressed.
+  ///
+  /// Usage
+  /// append(vector, ranges);
+  /// size_t size = maxSerializedSize();
+  /// OutputStream* stream = allocateBuffer(size);
+  /// flush(stream);
+  virtual size_t maxSerializedSize() const = 0;
+
+  /// Write serialized data to 'stream'.
   virtual void flush(OutputStream* stream) = 0;
 };
 
 class VectorSerde {
  public:
   virtual ~VectorSerde() = default;
+
   // Lets the caller pass options to the Serde. This can be extended to add
   // custom options by each of its extended classes.
   struct Options {
@@ -97,8 +115,12 @@ VectorSerde* getNamedVectorSerde(std::string_view serdeName);
 
 class VectorStreamGroup : public StreamArena {
  public:
-  explicit VectorStreamGroup(memory::MemoryPool* FOLLY_NONNULL pool)
-      : StreamArena(pool) {}
+  /// If `serde` is not specified, fallback to the default registered.
+  explicit VectorStreamGroup(
+      memory::MemoryPool* FOLLY_NONNULL pool,
+      VectorSerde* serde = nullptr)
+      : StreamArena(pool),
+        serde_(serde != nullptr ? serde : getVectorSerde()) {}
 
   void createStreamTree(
       RowTypePtr type,
@@ -111,8 +133,10 @@ class VectorStreamGroup : public StreamArena {
       vector_size_t** sizes);
 
   void append(
-      RowVectorPtr vector,
+      const RowVectorPtr& vector,
       const folly::Range<const IndexRange*>& ranges);
+
+  void append(const RowVectorPtr& vector);
 
   // Writes the contents to 'stream' in wire format.
   void flush(OutputStream* stream);
@@ -127,6 +151,29 @@ class VectorStreamGroup : public StreamArena {
 
  private:
   std::unique_ptr<VectorSerializer> serializer_;
+  VectorSerde* serde_{nullptr};
 };
+
+/// Convenience function to serialize a single rowVector into an IOBuf using the
+/// registered serde object.
+folly::IOBuf rowVectorToIOBuf(
+    const RowVectorPtr& rowVector,
+    memory::MemoryPool& pool,
+    VectorSerde* serde = nullptr);
+
+/// Same as above but serializes up until row `rangeEnd`.
+folly::IOBuf rowVectorToIOBuf(
+    const RowVectorPtr& rowVector,
+    vector_size_t rangeEnd,
+    memory::MemoryPool& pool,
+    VectorSerde* serde = nullptr);
+
+/// Convenience function to deserialize an IOBuf into a rowVector. If `serde` is
+/// nullptr, use the default installed serializer.
+RowVectorPtr IOBufToRowVector(
+    const folly::IOBuf& ioBuf,
+    const RowTypePtr& outputType,
+    memory::MemoryPool& pool,
+    VectorSerde* serde = nullptr);
 
 } // namespace facebook::velox

@@ -19,8 +19,8 @@
 #include "velox/dwio/dwrf/test/OrcTest.h"
 #include "velox/dwio/dwrf/utils/ProtoUtils.h"
 #include "velox/dwio/dwrf/writer/WriterBase.h"
-#include "velox/dwio/type/fbhive/HiveTypeParser.h"
 #include "velox/type/Type.h"
+#include "velox/type/fbhive/HiveTypeParser.h"
 
 using namespace testing;
 using namespace facebook::velox::dwio::common;
@@ -28,9 +28,10 @@ using namespace facebook::velox::dwio::common::encryption::test;
 using namespace facebook::velox::dwrf;
 using namespace facebook::velox::dwrf::encryption;
 using namespace facebook::velox::memory;
+using facebook::velox::common::Region;
 
 using facebook::velox::RowType;
-using facebook::velox::dwio::type::fbhive::HiveTypeParser;
+using facebook::velox::type::fbhive::HiveTypeParser;
 
 class RecordingInputStream : public facebook::velox::InMemoryReadFile {
  public:
@@ -91,7 +92,13 @@ StripeStreamsImpl createAndLoadStripeStreams(
     const ColumnSelector& selector) {
   TestProvider indexProvider;
   StripeStreamsImpl streams{
-      stripeReader, selector, RowReaderOptions{}, 0, indexProvider, 0};
+      stripeReader,
+      selector,
+      RowReaderOptions{},
+      0,
+      StripeStreamsImpl::kUnknownStripeRows,
+      indexProvider,
+      0};
   enqueueReads(stripeReader, selector, 0, 0);
   streams.loadReadPlan();
   return streams;
@@ -109,7 +116,13 @@ TEST(StripeStream, planReads) {
   auto isPtr = is.get();
   auto readerBase = std::make_shared<ReaderBase>(
       *pool,
-      std::make_unique<BufferedInput>(std::move(is), *pool),
+      std::make_unique<BufferedInput>(
+          std::move(is),
+          *pool,
+          MetricsLog::voidLog(),
+          nullptr,
+          BufferedInput::kMaxMergeDistance,
+          true),
       std::make_unique<PostScript>(proto::PostScript{}),
       footer,
       nullptr);
@@ -140,7 +153,7 @@ TEST(StripeStream, planReads) {
           actual.cend(),
           0,
           [](uint64_t ac, const Region& r) { return ac + r.length; }),
-      1000500);
+      1000300);
 }
 
 TEST(StripeStream, filterSequences) {
@@ -234,7 +247,13 @@ TEST(StripeStream, zeroLength) {
   TestProvider indexProvider;
   ColumnSelector cs{std::dynamic_pointer_cast<const RowType>(type)};
   StripeStreamsImpl streams{
-      stripeReader, cs, RowReaderOptions{}, 0, indexProvider, 0};
+      stripeReader,
+      cs,
+      RowReaderOptions{},
+      0,
+      StripeStreamsImpl::kUnknownStripeRows,
+      indexProvider,
+      0};
   streams.loadReadPlan();
   auto const& actual = isPtr->getReads();
   EXPECT_EQ(actual.size(), 0);
@@ -242,7 +261,7 @@ TEST(StripeStream, zeroLength) {
   for (const auto& s : ss) {
     auto id = EncodingKey(std::get<0>(s))
                   .forKind(static_cast<proto::Stream_Kind>(std::get<1>(s)));
-    auto stream = streams.getStream(id, true);
+    auto stream = streams.getStream(id, {}, true);
     EXPECT_NE(stream, nullptr);
     const void* buf = nullptr;
     int32_t size = 1;
@@ -323,14 +342,14 @@ TEST(StripeStream, planReadsIndex) {
   EXPECT_EQ(
       ProtoUtils::readProto<proto::RowIndex>(
           streams.getStream(
-              EncodingKey(0).forKind(proto::Stream_Kind_ROW_INDEX), true))
+              EncodingKey(0).forKind(proto::Stream_Kind_ROW_INDEX), {}, true))
           ->entry(0)
           .positions(0),
       123);
   EXPECT_EQ(
       ProtoUtils::readProto<proto::RowIndex>(
           streams.getStream(
-              EncodingKey(1).forKind(proto::Stream_Kind_ROW_INDEX), true))
+              EncodingKey(1).forKind(proto::Stream_Kind_ROW_INDEX), {}, true))
           ->entry(0)
           .positions(0),
       123);
@@ -422,14 +441,22 @@ TEST(StripeStream, readEncryptedStreams) {
   ColumnSelector selector{readerBase->getSchema(), {1, 2, 4}, true};
   TestProvider provider;
   StripeStreamsImpl streams{
-      *stripeReader, selector, RowReaderOptions{}, 0, provider, 0};
+      *stripeReader,
+      selector,
+      RowReaderOptions{},
+      0,
+      StripeStreamsImpl::kUnknownStripeRows,
+      provider,
+      0};
 
   // make sure projected columns exist
   std::unordered_set<uint32_t> existed{1, 2, 4};
   for (uint32_t node = 1; node < 6; ++node) {
     EncodingKey ek{node};
     auto stream = streams.getStream(
-        DwrfStreamIdentifier{node, 0, 0, StreamKind::StreamKind_DATA}, false);
+        DwrfStreamIdentifier{node, 0, 0, StreamKind::StreamKind_DATA},
+        {},
+        false);
     if (existed.count(node)) {
       ASSERT_EQ(streams.getEncoding(ek).dictionarysize(), node + 1);
       ASSERT_NE(stream, nullptr);
@@ -495,13 +522,21 @@ TEST(StripeStream, schemaMismatch) {
       std::dynamic_pointer_cast<const RowType>(schema), {4, 5}, true};
   TestProvider provider;
   StripeStreamsImpl streams{
-      *stripeReader, selector, RowReaderOptions{}, 0, provider, 0};
+      *stripeReader,
+      selector,
+      RowReaderOptions{},
+      0,
+      StripeStreamsImpl::kUnknownStripeRows,
+      provider,
+      0};
 
   // make sure all columns exist. Node id of b and c in the file is 3, 4
   for (uint32_t node = 3; node < 4; ++node) {
     EncodingKey ek{node};
     auto stream = streams.getStream(
-        DwrfStreamIdentifier{node, 0, 0, StreamKind::StreamKind_DATA}, false);
+        DwrfStreamIdentifier{node, 0, 0, StreamKind::StreamKind_DATA},
+        {},
+        false);
     ASSERT_EQ(streams.getEncoding(ek).dictionarysize(), node + 1);
     ASSERT_NE(stream, nullptr);
   }
@@ -516,15 +551,16 @@ class TestStripeStreams : public StripeStreamsBase {
 
   const proto::ColumnEncoding& getEncoding(
       const EncodingKey& ek) const override {
-    return *getEncodingProxy(ek.node, ek.sequence);
+    return *getEncodingProxy(ek.node(), ek.sequence());
   }
 
   std::unique_ptr<SeekableInputStream> getStream(
       const DwrfStreamIdentifier& si,
+      std::string_view /* label */,
       bool throwIfNotFound) const override {
     return std::unique_ptr<SeekableInputStream>(getStreamProxy(
-        si.encodingKey().node,
-        si.encodingKey().sequence,
+        si.encodingKey().node(),
+        si.encodingKey().sequence(),
         static_cast<proto::Stream_Kind>(si.kind()),
         throwIfNotFound));
   }
@@ -545,6 +581,10 @@ class TestStripeStreams : public StripeStreamsBase {
 
   bool getUseVInts(const DwrfStreamIdentifier& /* unused */) const override {
     return true; // current tests all expect results from using vints
+  }
+
+  int64_t stripeRows() const override {
+    VELOX_UNSUPPORTED();
   }
 
   uint32_t rowsPerRowGroup() const override {
@@ -629,21 +669,23 @@ TEST(StripeStream, shareDictionary) {
       ss, getStreamProxy(2, Not(0), proto::Stream_Kind_DICTIONARY_DATA, _))
       .WillRepeatedly(Return(nullptr));
 
+  facebook::velox::memory::AllocationPool allocPool(pool.get());
+  StreamLabels labels(allocPool);
   std::vector<std::function<facebook::velox::BufferPtr()>> dictInits{};
   dictInits.push_back(
-      ss.getIntDictionaryInitializerForNode(EncodingKey{1, 0}, 8));
+      ss.getIntDictionaryInitializerForNode(EncodingKey{1, 0}, 8, labels));
   dictInits.push_back(
-      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 2}, 16));
+      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 2}, 16, labels));
   dictInits.push_back(
-      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 3}, 4));
+      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 3}, 4, labels));
   dictInits.push_back(
-      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 5}, 16));
+      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 5}, 16, labels));
   dictInits.push_back(
-      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 8}, 8));
+      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 8}, 8, labels));
   dictInits.push_back(
-      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 13}, 4));
+      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 13}, 4, labels));
   dictInits.push_back(
-      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 21}, 16));
+      ss.getIntDictionaryInitializerForNode(EncodingKey{2, 21}, 16, labels));
 
   auto dictCache = ss.getStripeDictionaryCache();
   // Maybe verify range is useful here.
