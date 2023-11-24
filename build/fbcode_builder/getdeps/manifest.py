@@ -17,6 +17,7 @@ from .builder import (
     MakeBuilder,
     NinjaBootstrap,
     NopBuilder,
+    OpenNSABuilder,
     OpenSSLBuilder,
     SqliteBuilder,
 )
@@ -74,7 +75,7 @@ SCHEMA = {
             "build_doc": OPTIONAL,
             "workspace_dir": OPTIONAL,
             "manifests_to_build": OPTIONAL,
-            # Where to write cargo config (defaults to build_dir/.cargo/config.toml)
+            # Where to write cargo config (defaults to build_dir/.cargo/config)
             "cargo_config_file": OPTIONAL,
         },
     },
@@ -579,6 +580,9 @@ class ManifestParser(object):
             return self.create_cargo_builder(
                 build_options, ctx, src_dir, build_dir, inst_dir, loader
             )
+
+        if builder == "OpenNSA":
+            return OpenNSABuilder(build_options, ctx, self, src_dir, inst_dir)
 
         raise KeyError("project %s has no known builder" % (self.name))
 

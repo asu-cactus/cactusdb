@@ -18,26 +18,24 @@
 
 namespace facebook::velox::exec::test {
 
-AggregateRegistrationResult registerDummyAggregateFunction(
+bool registerDummyAggregateFunction(
     const std::string& name,
-    const std::vector<AggregateFunctionSignaturePtr>& signatures,
-    bool overwrite) {
-  return registerAggregateFunction(
+    const std::vector<AggregateFunctionSignaturePtr>& signatures) {
+  registerAggregateFunction(
       name,
       signatures,
       [&](core::AggregationNode::Step step,
           const std::vector<TypePtr>& argTypes,
-          const TypePtr& resultType,
-          const core::QueryConfig& /*config*/)
-          -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr& resultType) -> std::unique_ptr<exec::Aggregate> {
         VELOX_CHECK_GE(argTypes.size(), 1);
         if (isPartialOutput(step)) {
           return std::make_unique<DummyDicitonaryFunction>(argTypes[0]);
         }
         return std::make_unique<DummyDicitonaryFunction>(resultType);
       },
-      /*registerCompanionFunctions*/ true,
-      overwrite);
+      /*registerCompanionFunctions*/ true);
+
+  return true;
 }
 
 } // namespace facebook::velox::exec::test

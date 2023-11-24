@@ -16,18 +16,11 @@
 
 #pragma once
 
-#include "velox/expression/Expr.h"
 #include "velox/expression/VectorFunction.h"
 #include "velox/type/Type.h"
 #include "velox/vector/NullsBuilder.h"
 
 namespace facebook::velox::functions {
-
-// Below functions return a stock instance of each of the possible errors in
-// SubscriptImpl
-const std::exception_ptr& zeroSubscriptError();
-const std::exception_ptr& badSubscriptError();
-const std::exception_ptr& negativeSubscriptError();
 
 /// Generic subscript/element_at implementation for both array and map data
 /// types.
@@ -45,7 +38,7 @@ template <
     bool nullOnNegativeIndices,
     bool allowOutOfBound,
     bool indexStartsAtOne>
-class SubscriptImpl : public exec::Subscript {
+class SubscriptImpl : public exec::VectorFunction {
  public:
   void apply(
       const SelectivityVector& rows,
@@ -85,13 +78,22 @@ class SubscriptImpl : public exec::Subscript {
     }
 
     // map(K,V), K -> V
-    signatures.push_back(exec::FunctionSignatureBuilder()
-                             .typeVariable("K")
-                             .typeVariable("V")
-                             .returnType("V")
-                             .argumentType("map(K,V)")
-                             .argumentType("K")
-                             .build());
+    const auto keyTypes = {
+        "tinyint",
+        "smallint",
+        "integer",
+        "bigint",
+        "real",
+        "double",
+        "varchar"};
+    for (const auto& keyType : keyTypes) {
+      signatures.push_back(exec::FunctionSignatureBuilder()
+                               .typeVariable("V")
+                               .returnType("V")
+                               .argumentType(fmt::format("map({},V)", keyType))
+                               .argumentType(keyType)
+                               .build());
+    }
 
     return signatures;
   }
@@ -130,11 +132,9 @@ class SubscriptImpl : public exec::Subscript {
     auto indexArg = args[1];
 
     // Ensure map key type and second argument are the same.
-    VELOX_CHECK(mapArg->type()->childAt(0)->equivalent(*indexArg->type()));
+    VELOX_CHECK_EQ(mapArg->type()->childAt(0), indexArg->type());
 
     switch (indexArg->typeKind()) {
-      case TypeKind::HUGEINT:
-        return applyMapTyped<int128_t>(rows, mapArg, indexArg, context);
       case TypeKind::BIGINT:
         return applyMapTyped<int64_t>(rows, mapArg, indexArg, context);
       case TypeKind::INTEGER:
@@ -147,17 +147,8 @@ class SubscriptImpl : public exec::Subscript {
         return applyMapTyped<float>(rows, mapArg, indexArg, context);
       case TypeKind::DOUBLE:
         return applyMapTyped<double>(rows, mapArg, indexArg, context);
-      case TypeKind::BOOLEAN:
-        return applyMapTyped<bool>(rows, mapArg, indexArg, context);
-      case TypeKind::TIMESTAMP:
-        return applyMapTyped<Timestamp>(rows, mapArg, indexArg, context);
       case TypeKind::VARCHAR:
-      case TypeKind::VARBINARY:
         return applyMapTyped<StringView>(rows, mapArg, indexArg, context);
-      case TypeKind::ARRAY:
-      case TypeKind::MAP:
-      case TypeKind::ROW:
-        return applyMapComplexType(rows, mapArg, indexArg, context);
       default:
         VELOX_UNSUPPORTED(
             "Unsupported map key type for element_at: {}",
@@ -195,20 +186,20 @@ class SubscriptImpl : public exec::Subscript {
 
     // Optimize for constant encoding case.
     if (decodedIndices->isConstantMapping()) {
+      vector_size_t adjustedIndex = -1;
       bool allFailed = false;
       // If index is invalid, capture the error and mark all rows as failed.
-      bool isZeroSubscriptError = false;
-      const auto adjustedIndex =
-          adjustIndex(decodedIndices->valueAt<I>(0), isZeroSubscriptError);
-      if (isZeroSubscriptError) {
-        context.setErrors(rows, zeroSubscriptError());
+      try {
+        adjustedIndex = adjustIndex(decodedIndices->valueAt<I>(0));
+      } catch (const std::exception& e) {
+        context.setErrors(rows, std::current_exception());
         allFailed = true;
       }
 
       if (!allFailed) {
-        rows.applyToSelected([&](auto row) {
-          const auto elementIndex = getIndex(
-              adjustedIndex, row, rawSizes, rawOffsets, arrayIndices, context);
+        context.applyToSelectedNoThrow(rows, [&](auto row) {
+          auto elementIndex =
+              getIndex(adjustedIndex, row, rawSizes, rawOffsets, arrayIndices);
           rawIndices[row] = elementIndex;
           if (elementIndex == -1) {
             nullsBuilder.setNull(row);
@@ -216,17 +207,10 @@ class SubscriptImpl : public exec::Subscript {
         });
       }
     } else {
-      rows.applyToSelected([&](auto row) {
-        const auto originalIndex = decodedIndices->valueAt<I>(row);
-        bool isZeroSubscriptError = false;
-        const auto adjustedIndex =
-            adjustIndex(originalIndex, isZeroSubscriptError);
-        if (isZeroSubscriptError) {
-          context.setError(row, zeroSubscriptError());
-          return;
-        }
-        const auto elementIndex = getIndex(
-            adjustedIndex, row, rawSizes, rawOffsets, arrayIndices, context);
+      context.applyToSelectedNoThrow(rows, [&](auto row) {
+        auto adjustedIndex = adjustIndex(decodedIndices->valueAt<I>(row));
+        auto elementIndex =
+            getIndex(adjustedIndex, row, rawSizes, rawOffsets, arrayIndices);
         rawIndices[row] = elementIndex;
         if (elementIndex == -1) {
           nullsBuilder.setNull(row);
@@ -248,12 +232,12 @@ class SubscriptImpl : public exec::Subscript {
   // Normalize indices from 1 or 0-based into always 0-based (according to
   // indexStartsAtOne template parameter - no-op if it's false).
   template <typename I>
-  vector_size_t adjustIndex(I index, bool& isZeroSubscriptError) const {
+  vector_size_t adjustIndex(I index) const {
     // If array indices start at 1.
     if constexpr (indexStartsAtOne) {
+      // If it's zero, throw.
       if (UNLIKELY(index == 0)) {
-        isZeroSubscriptError = true;
-        return 0;
+        VELOX_USER_FAIL("SQL array indices start at 1");
       }
 
       // If larger than zero, adjust it.
@@ -273,8 +257,7 @@ class SubscriptImpl : public exec::Subscript {
       vector_size_t row,
       const vector_size_t* rawSizes,
       const vector_size_t* rawOffsets,
-      const vector_size_t* indices,
-      exec::EvalCtx& context) const {
+      const vector_size_t* indices) const {
     auto arraySize = rawSizes[indices[row]];
 
     if (index < 0) {
@@ -286,8 +269,7 @@ class SubscriptImpl : public exec::Subscript {
           index += arraySize;
         }
       } else {
-        context.setError(row, negativeSubscriptError());
-        return -1;
+        VELOX_USER_FAIL("Array subscript is negative.");
       }
     }
 
@@ -296,9 +278,10 @@ class SubscriptImpl : public exec::Subscript {
       // If we allow it, return null.
       if constexpr (allowOutOfBound) {
         return -1;
-      } else {
-        context.setError(row, badSubscriptError());
-        return -1;
+      }
+      // Otherwise, throw.
+      else {
+        VELOX_USER_FAIL("Array subscript out of bounds.");
       }
     }
 
@@ -387,77 +370,6 @@ class SubscriptImpl : public exec::Subscript {
         processRow(row, searchKey);
       });
     }
-
-    // Subscript into empty maps always returns NULLs. Check added at the end to
-    // ensure user error checks for indices are not skipped.
-    if (baseMap->mapValues()->size() == 0) {
-      return BaseVector::createNullConstant(
-          baseMap->mapValues()->type(), rows.end(), context.pool());
-    }
-
-    return BaseVector::wrapInDictionary(
-        nullsBuilder.build(), indices, rows.end(), baseMap->mapValues());
-  }
-
-  VectorPtr applyMapComplexType(
-      const SelectivityVector& rows,
-      const VectorPtr& mapArg,
-      const VectorPtr& indexArg,
-      exec::EvalCtx& context) const {
-    auto* pool = context.pool();
-
-    // Use indices with the mapValues wrapped in a dictionary vector.
-    BufferPtr indices = allocateIndices(rows.end(), pool);
-    auto rawIndices = indices->asMutable<vector_size_t>();
-
-    // Create nulls for lazy initialization.
-    NullsBuilder nullsBuilder(rows.end(), pool);
-
-    // Get base MapVector.
-    exec::LocalDecodedVector mapHolder(context, *mapArg, rows);
-    auto decodedMap = mapHolder.get();
-    auto baseMap = decodedMap->base()->as<MapVector>();
-    auto mapIndices = decodedMap->indices();
-
-    // Get map keys.
-    auto mapKeys = baseMap->mapKeys();
-    exec::LocalSelectivityVector allElementRows(context, mapKeys->size());
-    allElementRows->setAll();
-    exec::LocalDecodedVector mapKeysHolder(context, *mapKeys, *allElementRows);
-    auto mapKeysDecoded = mapKeysHolder.get();
-    auto mapKeysBase = mapKeysDecoded->base();
-    auto mapKeysIndices = mapKeysDecoded->indices();
-
-    // Get index vector (second argument).
-    exec::LocalDecodedVector indexHolder(context, *indexArg, rows);
-    auto decodedIndices = indexHolder.get();
-    auto searchBase = decodedIndices->base();
-    auto searchIndices = decodedIndices->indices();
-
-    auto rawSizes = baseMap->rawSizes();
-    auto rawOffsets = baseMap->rawOffsets();
-
-    // Search the key in each row.
-    rows.applyToSelected([&](vector_size_t row) {
-      size_t mapIndex = mapIndices[row];
-      size_t size = rawSizes[mapIndex];
-      size_t offset = rawOffsets[mapIndex];
-
-      bool found = false;
-      auto searchIndex = searchIndices[row];
-      for (auto i = 0; i < size; i++) {
-        if (mapKeysBase->equalValueAt(
-                searchBase, mapKeysIndices[offset + i], searchIndex)) {
-          rawIndices[row] = offset + i;
-          found = true;
-          break;
-        }
-      }
-
-      if (!found) {
-        nullsBuilder.setNull(row);
-      };
-    });
 
     // Subscript into empty maps always returns NULLs. Check added at the end to
     // ensure user error checks for indices are not skipped.

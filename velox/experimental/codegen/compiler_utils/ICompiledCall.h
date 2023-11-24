@@ -61,9 +61,8 @@ class ICompiledCall : public core::CallTypedExpr {
     if (!name_.has_value()) {
       name_ = registerFunction();
     };
-    core::QueryConfig config({});
-    VELOX_CHECK_NOT_NULL(
-        exec::getVectorFunction(name_.value(), {}, {}, config));
+
+    VELOX_CHECK_NOT_NULL(exec::getVectorFunction(name_.value(), {}, {}));
     return name_.value();
   }
 

@@ -125,12 +125,10 @@ TEST_F(PlanFragmentTest, aggregationCanSpill) {
   std::vector<std::string> emptyAggregateNames{};
   std::vector<TypedExprPtr> aggregateInputs{
       std::make_shared<InputTypedExpr>(BIGINT())};
-  const std::vector<AggregationNode::Aggregate> aggregates{
-      {std::make_shared<core::CallTypedExpr>(BIGINT(), aggregateInputs, "sum"),
-       nullptr,
-       {},
-       {}}};
-  const std::vector<AggregationNode::Aggregate> emptyAggregates{};
+  const std::vector<CallTypedExprPtr> aggregates{
+      std::make_shared<core::CallTypedExpr>(BIGINT(), aggregateInputs, "sum")};
+  const std::vector<CallTypedExprPtr> emptyAggregates{};
+  const std::vector<FieldAccessTypedExprPtr> emptyAggregateMasks;
 
   struct {
     AggregationNode::Step aggregationStep;
@@ -181,6 +179,7 @@ TEST_F(PlanFragmentTest, aggregationCanSpill) {
         testData.hasPreAggregation ? preGroupingKeys : emptyPreGroupingKeys,
         testData.isDistinct ? emptyAggregateNames : aggregateNames,
         testData.isDistinct ? emptyAggregates : aggregates,
+        emptyAggregateMasks,
         false,
         valueNode_);
     auto queryCtx = getSpillQueryCtx(

@@ -207,7 +207,7 @@ class ChecksumAggregate : public exec::Aggregate {
   DecodedVector decodedIntermediate_;
 };
 
-exec::AggregateRegistrationResult registerChecksum(const std::string& name) {
+bool registerChecksum(const std::string& name) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures{
       exec::AggregateFunctionSignatureBuilder()
           .typeVariable("T")
@@ -217,15 +217,13 @@ exec::AggregateRegistrationResult registerChecksum(const std::string& name) {
           .build(),
   };
 
-  return exec::registerAggregateFunction(
+  exec::registerAggregateFunction(
       name,
       std::move(signatures),
       [&name](
           core::AggregationNode::Step step,
           const std::vector<TypePtr>& argTypes,
-          const TypePtr& /*resultType*/,
-          const core::QueryConfig& /*config*/)
-          -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr& /*resultType*/) -> std::unique_ptr<exec::Aggregate> {
         VELOX_CHECK_EQ(argTypes.size(), 1, "{} takes one argument", name);
 
         if (exec::isPartialOutput(step)) {
@@ -234,6 +232,8 @@ exec::AggregateRegistrationResult registerChecksum(const std::string& name) {
 
         return std::make_unique<ChecksumAggregate>(VARBINARY());
       });
+
+  return true;
 }
 
 } // namespace

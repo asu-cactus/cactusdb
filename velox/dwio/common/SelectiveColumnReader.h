@@ -20,7 +20,6 @@
 #include "velox/common/process/ProcessBase.h"
 #include "velox/dwio/common/ColumnSelector.h"
 #include "velox/dwio/common/FormatData.h"
-#include "velox/dwio/common/IntDecoder.h"
 #include "velox/dwio/common/Mutation.h"
 #include "velox/dwio/common/ScanSpec.h"
 #include "velox/type/Filter.h"
@@ -123,10 +122,10 @@ class SelectiveColumnReader {
   static constexpr uint64_t kStringBufferSize = 16 * 1024;
 
   SelectiveColumnReader(
-      const TypePtr& requestedType,
+      std::shared_ptr<const dwio::common::TypeWithId> requestedType,
       dwio::common::FormatParams& params,
       velox::common::ScanSpec& scanSpec,
-      std::shared_ptr<const dwio::common::TypeWithId> type);
+      const TypePtr& type);
 
   virtual ~SelectiveColumnReader() = default;
 
@@ -194,12 +193,12 @@ class SelectiveColumnReader {
     parentNullsRecordedTo_ = 0;
   }
 
-  const TypePtr& requestedType() const {
-    return requestedType_;
+  const TypePtr& type() const {
+    return type_;
   }
 
-  const TypeWithId& fileType() const {
-    return *fileType_;
+  const TypeWithId& nodeType() const {
+    return *nodeType_;
   }
 
   // The below functions are called from ColumnVisitor to fill the result set.
@@ -496,10 +495,9 @@ class SelectiveColumnReader {
   template <typename T, typename TVector>
   void upcastScalarValues(RowSet rows);
 
-  // Return the source null bits if compactScalarValues and upcastScalarValues
-  // should move null flags.  Return nullptr if nulls does not need to be moved.
-  // Checks consistency of nulls-related state.
-  const uint64_t* shouldMoveNulls(RowSet rows);
+  // Returns true if compactScalarValues and upcastScalarValues should
+  // move null flags. Checks consistency of nulls-related state.
+  bool shouldMoveNulls(RowSet rows);
 
   void addStringValue(folly::StringPiece value);
 
@@ -511,35 +509,10 @@ class SelectiveColumnReader {
     return false;
   }
 
-  template <typename Decoder, typename ColumnVisitor>
-  void decodeWithVisitor(
-      IntDecoder<Decoder::kIsSigned>* intDecoder,
-      ColumnVisitor& visitor) {
-    auto decoder = dynamic_cast<Decoder*>(intDecoder);
-    VELOX_CHECK(
-        decoder,
-        "Unexpected Decoder type, Expected: {}",
-        typeid(Decoder).name());
-    const uint64_t* nulls =
-        nullsInReadRange_ ? nullsInReadRange_->as<uint64_t>() : nullptr;
-    if (nulls) {
-      decoder->template readWithVisitor<true>(nulls, visitor);
-    } else {
-      decoder->template readWithVisitor<false>(nulls, visitor);
-    }
-  }
-
-  const BufferPtr& resultNulls() const {
-    static const BufferPtr kNullBuffer;
-    return !anyNulls_        ? kNullBuffer
-        : returnReaderNulls_ ? nullsInReadRange_
-                             : resultNulls_;
-  }
-
   memory::MemoryPool& memoryPool_;
 
-  // The file data type
-  std::shared_ptr<const dwio::common::TypeWithId> fileType_;
+  // Requested Velox type
+  std::shared_ptr<const dwio::common::TypeWithId> nodeType_;
 
   // Format specific state and functions.
   std::unique_ptr<dwio::common::FormatData> formatData_;
@@ -549,11 +522,10 @@ class SelectiveColumnReader {
   // run time based on adaptation. Owned by caller.
   velox::common::ScanSpec* FOLLY_NONNULL scanSpec_;
 
-  // The requested data type
-  TypePtr requestedType_;
+  // The file data type?
+  TypePtr type_;
 
-  // Row number after last read row, relative to the ORC stripe or Parquet
-  // Rowgroup start.
+  // Row number after last read row, relative to stripe start.
   vector_size_t readOffset_ = 0;
 
   // Number of parent nulls between 'readOffset_' and 'parentNullsRecordedTo_'.

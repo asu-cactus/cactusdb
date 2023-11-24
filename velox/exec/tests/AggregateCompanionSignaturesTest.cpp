@@ -39,14 +39,6 @@ struct TestCompanionSignatureMap {
 };
 
 class AggregateCompanionSignaturesTest : public testing::Test {
- public:
-  AggregateCompanionSignaturesTest() {
-    exec::aggregateFunctions().withWLock([&](auto& functionsMap) {
-      functionsMap.clear();
-      EXPECT_EQ(0, functionsMap.size());
-    });
-  }
-
  protected:
   void assertEqual(
       const std::vector<CompanionSignatureEntry>& actual,

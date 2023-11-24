@@ -118,6 +118,7 @@ std::shared_ptr<exec::VectorFunction> makeImpl(
     SCALAR_CASE(VARCHAR)
     SCALAR_CASE(VARBINARY)
     SCALAR_CASE(TIMESTAMP)
+    SCALAR_CASE(DATE)
 #undef SCALAR_CASE
     default:
       VELOX_NYI(
@@ -131,8 +132,7 @@ std::shared_ptr<exec::VectorFunction> makeImpl(
 
 std::shared_ptr<exec::VectorFunction> makeLeast(
     const std::string& functionName,
-    const std::vector<exec::VectorFunctionArg>& args,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& args) {
   return makeImpl<Less>(functionName, args);
 }
 
@@ -164,8 +164,7 @@ std::vector<std::shared_ptr<exec::FunctionSignature>> leastSignatures() {
 
 std::shared_ptr<exec::VectorFunction> makeGreatest(
     const std::string& functionName,
-    const std::vector<exec::VectorFunctionArg>& args,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& args) {
   return makeImpl<Greater>(functionName, args);
 }
 

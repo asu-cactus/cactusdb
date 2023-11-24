@@ -67,9 +67,8 @@ class DummyDicitonaryFunction : public exec::Aggregate {
       VectorPtr* /*result*/) override {}
 };
 
-AggregateRegistrationResult registerDummyAggregateFunction(
+bool registerDummyAggregateFunction(
     const std::string& name,
-    const std::vector<exec::AggregateFunctionSignaturePtr>& signatures,
-    bool overwrite = false);
+    const std::vector<exec::AggregateFunctionSignaturePtr>& signatures);
 
 } // namespace facebook::velox::exec::test

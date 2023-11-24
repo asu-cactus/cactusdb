@@ -116,13 +116,6 @@ struct resolver<Varbinary> {
 };
 
 template <>
-struct resolver<Date> {
-  using in_type = int32_t;
-  using null_free_in_type = in_type;
-  using out_type = int32_t;
-};
-
-template <>
 struct resolver<IntervalDayTime> {
   using in_type = int64_t;
   using null_free_in_type = in_type;

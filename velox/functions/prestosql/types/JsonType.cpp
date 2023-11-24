@@ -39,8 +39,7 @@ template <typename T, bool isMapKey = false>
 void generateJsonTyped(
     const SimpleVector<T>& input,
     int row,
-    std::string& result,
-    const TypePtr& type) {
+    std::string& result) {
   auto value = input.valueAt(row);
 
   if constexpr (std::is_same_v<T, StringView>) {
@@ -55,10 +54,9 @@ void generateJsonTyped(
 
     if constexpr (std::is_same_v<T, bool>) {
       result.append(value ? "true" : "false");
-    } else if constexpr (std::is_same_v<T, Timestamp>) {
+    } else if constexpr (
+        std::is_same_v<T, Date> || std::is_same_v<T, Timestamp>) {
       result.append(std::to_string(value));
-    } else if (type->isDate()) {
-      result.append(DATE()->toString(value));
     } else {
       folly::toAppend<std::string, T>(value, &result);
     }
@@ -91,7 +89,7 @@ void castToJson(
         flatResult.set(row, "null");
       } else {
         result.clear();
-        generateJsonTyped(*inputVector, row, result, input.type());
+        generateJsonTyped(*inputVector, row, result);
 
         flatResult.set(row, StringView{result});
       }
@@ -99,10 +97,10 @@ void castToJson(
   } else {
     context.applyToSelectedNoThrow(rows, [&](auto row) {
       if (inputVector->isNullAt(row)) {
-        VELOX_USER_FAIL("Map keys cannot be null.");
+        VELOX_FAIL("Map keys cannot be null.");
       } else {
         result.clear();
-        generateJsonTyped<T, true>(*inputVector, row, result, input.type());
+        generateJsonTyped<T, true>(*inputVector, row, result);
 
         flatResult.set(row, StringView{result});
       }
@@ -197,7 +195,7 @@ struct AsJson {
     if (isMapKey && decoded_->mayHaveNulls()) {
       context.applyToSelectedNoThrow(rows, [&](auto row) {
         if (decoded_->isNullAt(row)) {
-          VELOX_USER_FAIL("Cannot cast map with null keys to JSON.");
+          VELOX_FAIL("Cannot cast map with null keys to JSON.");
         }
       });
     }
@@ -499,10 +497,7 @@ FOLLY_ALWAYS_INLINE void castFromJsonTyped<TypeKind::VARCHAR>(
     const folly::dynamic& object,
     exec::GenericWriter& writer) {
   if (isJsonType(writer.type())) {
-    // Sort keys to match Presto's behavior.
-    folly::json::serialization_opts opts;
-    opts.sort_keys = true;
-    writer.castTo<Varchar>().append(folly::json::serialize(object, opts));
+    writer.castTo<Varchar>().append(toJson(object));
   } else if (object.isBool()) {
     writer.castTo<Varchar>().append(object.asBool() ? "true" : "false");
   } else {
@@ -709,7 +704,6 @@ void castFromJson(
       try {
         object = folly::parseJson(inputVector->valueAt(row));
       } catch (const std::exception& e) {
-        writer.commitNull();
         VELOX_USER_FAIL("Not a JSON input: {}", inputVector->valueAt(row));
       }
 
@@ -719,17 +713,12 @@ void castFromJson(
         try {
           castFromJsonTyped<kind>(object, writer.current());
         } catch (const VeloxException& ve) {
-          if (!ve.isUserError()) {
-            throw;
-          }
-          writer.commitNull();
           VELOX_USER_FAIL(
               "Cannot cast from Json value {} to {}: {}",
               inputVector->valueAt(row),
               result.type()->toString(),
               ve.message());
         } catch (const std::exception& e) {
-          writer.commitNull();
           VELOX_USER_FAIL(
               "Cannot cast from Json value {} to {}: {}",
               inputVector->valueAt(row),
@@ -768,6 +757,7 @@ bool JsonCastOperator::isSupportedFromType(const TypePtr& other) const {
 
   switch (other->kind()) {
     case TypeKind::UNKNOWN:
+    case TypeKind::DATE:
     case TypeKind::TIMESTAMP:
       return true;
     case TypeKind::ARRAY:
@@ -789,10 +779,6 @@ bool JsonCastOperator::isSupportedFromType(const TypePtr& other) const {
 }
 
 bool JsonCastOperator::isSupportedToType(const TypePtr& other) const {
-  if (other->isDate()) {
-    return false;
-  }
-
   if (isSupportedBasicType(other)) {
     return true;
   }

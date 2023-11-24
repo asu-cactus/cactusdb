@@ -20,19 +20,18 @@
 
 #include "folly/io/Cursor.h"
 #include "velox/common/file/File.h"
-#include "velox/common/file/Region.h"
 
 namespace facebook::velox::file::utils {
 
 // Iterable class that produces pairs of iterators pointing to the beginning and
 // end of the segments that are coalesced from the the input range, according to
 // the ShouldCoalesce condition
-template <typename RegionIter, typename ShouldCoalesce>
-class CoalesceRegions {
+template <typename SegmentIter, typename ShouldCoalesce>
+class CoalesceSegments {
  public:
   class Iter {
    public:
-    Iter(RegionIter begin, RegionIter end, ShouldCoalesce shouldCoalesce)
+    Iter(SegmentIter begin, SegmentIter end, ShouldCoalesce shouldCoalesce)
         : begin_{begin},
           end_{end},
           theEnd_{end},
@@ -48,7 +47,7 @@ class CoalesceRegions {
       return !(lhs == rhs);
     }
 
-    std::pair<RegionIter, RegionIter> operator*() const {
+    std::pair<SegmentIter, SegmentIter> operator*() const {
       return {begin_, end_};
     }
 
@@ -78,15 +77,15 @@ class CoalesceRegions {
       }
     }
 
-    RegionIter begin_;
-    RegionIter end_;
-    RegionIter theEnd_;
+    SegmentIter begin_;
+    SegmentIter end_;
+    SegmentIter theEnd_;
     ShouldCoalesce shouldCoalesce_;
   };
 
-  CoalesceRegions(
-      RegionIter begin,
-      RegionIter end,
+  CoalesceSegments(
+      SegmentIter begin,
+      SegmentIter end,
       ShouldCoalesce shouldCoalesce)
       : begin_{begin}, end_{end}, shouldCoalesce_(std::move(shouldCoalesce)) {}
 
@@ -99,8 +98,8 @@ class CoalesceRegions {
   }
 
  private:
-  RegionIter begin_;
-  RegionIter end_;
+  SegmentIter begin_;
+  SegmentIter end_;
   ShouldCoalesce shouldCoalesce_;
 };
 
@@ -109,56 +108,42 @@ class CoalesceIfDistanceLE {
   explicit CoalesceIfDistanceLE(uint64_t maxCoalescingDistance)
       : maxCoalescingDistance_(maxCoalescingDistance) {}
 
-  bool operator()(
-      const velox::common::Region& a,
-      const velox::common::Region& b) const;
+  bool operator()(const ReadFile::Segment& a, const ReadFile::Segment& b) const;
 
  private:
   uint64_t maxCoalescingDistance_;
 };
 
-template <typename RegionIter, typename OutputIter, typename Reader>
-class ReadToIOBufs {
+template <typename SegmentIter, typename Reader>
+class ReadToSegments {
  public:
-  ReadToIOBufs(
-      RegionIter begin,
-      RegionIter end,
-      OutputIter output,
-      Reader reader)
-      : begin_{begin}, end_{end}, output_{output}, reader_{std::move(reader)} {}
+  ReadToSegments(SegmentIter begin, SegmentIter end, Reader reader)
+      : begin_{begin}, end_{end}, reader_{std::move(reader)} {}
 
-  void operator()() {
+  void read() {
     if (begin_ == end_) {
       return;
     }
 
     auto fileOffset = begin_->offset;
     const auto last = std::prev(end_);
-    const auto readSize = last->offset + last->length - fileOffset;
+    const auto readSize = last->offset + last->buffer.size() - fileOffset;
     std::unique_ptr<folly::IOBuf> result = reader_(fileOffset, readSize);
 
     folly::io::Cursor cursor(result.get());
-    for (auto region = begin_; region != end_; ++region) {
-      if (fileOffset < region->offset) {
-        cursor.skip(region->offset - fileOffset);
-        fileOffset = region->offset;
+    for (auto segment = begin_; segment != end_; ++segment) {
+      if (fileOffset < segment->offset) {
+        cursor.skip(segment->offset - fileOffset);
+        fileOffset = segment->offset;
       }
-      // This clone won't copy the underlying buffer. It will just create an
-      // IOBuf pointing to the right section of the existing shared buffer
-      // of the original IOBuf. It can create a chained IOBuf if the original
-      // IOBuf is chained, and the length of the current read spreads to the
-      // next IOBuf in the chain.
-      folly::IOBuf buf;
-      cursor.clone(buf, region->length);
-      *output_++ = std::move(buf);
-      fileOffset += region->length;
+      cursor.pull(segment->buffer.data(), segment->buffer.size());
+      fileOffset += segment->buffer.size();
     }
   }
 
  private:
-  RegionIter begin_;
-  RegionIter end_;
-  OutputIter output_;
+  SegmentIter begin_;
+  SegmentIter end_;
   Reader reader_;
 };
 

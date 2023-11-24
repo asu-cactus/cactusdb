@@ -51,15 +51,14 @@ TEST_F(TypedExprSerDeTest, input) {
 }
 
 TEST_F(TypedExprSerDeTest, fieldAccess) {
-  std::shared_ptr<ITypedExpr> expression =
-      std::make_shared<FieldAccessTypedExpr>(BIGINT(), "a");
+  auto expression = std::make_shared<FieldAccessTypedExpr>(BIGINT(), "a");
   testSerde(expression);
 
-  expression = std::make_shared<DereferenceTypedExpr>(
+  expression = std::make_shared<FieldAccessTypedExpr>(
       VARCHAR(),
       std::make_shared<FieldAccessTypedExpr>(
           ROW({"a", "b"}, {VARCHAR(), BOOLEAN()}), "ab"),
-      0);
+      "a");
   testSerde(expression);
 }
 

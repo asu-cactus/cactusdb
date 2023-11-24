@@ -52,12 +52,10 @@ namespace facebook::velox::functions::sparksql {
 
 std::shared_ptr<exec::VectorFunction> makeRLike(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config);
+    const std::vector<exec::VectorFunctionArg>& inputArgs);
 
 std::shared_ptr<exec::VectorFunction> makeRegexExtract(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config);
+    const std::vector<exec::VectorFunctionArg>& inputArgs);
 
 } // namespace facebook::velox::functions::sparksql

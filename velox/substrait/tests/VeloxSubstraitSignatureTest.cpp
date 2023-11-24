@@ -31,7 +31,7 @@ class VeloxSubstraitSignatureTest : public ::testing::Test {
   }
 
   static std::string toSubstraitSignature(const TypePtr& type) {
-    return VeloxSubstraitSignature::toSubstraitSignature(type);
+    return VeloxSubstraitSignature::toSubstraitSignature(type->kind());
   }
 
   static std::string toSubstraitSignature(

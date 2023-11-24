@@ -11,26 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-add_executable(velox_aggregates_simple_aggregates_bm SimpleAggregates.cpp)
+add_executable(velox_aggregates_simple_aggregates_benchmarks
+               SimpleAggregates.cpp)
 
 target_link_libraries(
-  velox_aggregates_simple_aggregates_bm
-  velox_aggregates
-  velox_hive_connector
-  velox_functions_lib
-  velox_exec_test_lib
-  velox_functions_prestosql
-  velox_dwio_common_exception
-  velox_vector_fuzzer
-  velox_vector_test_lib
-  Folly::folly
-  ${FOLLY_BENCHMARK}
-  gflags::gflags)
-
-add_executable(velox_aggregates_reduce_agg_bm SimpleAggregates.cpp)
-
-target_link_libraries(
-  velox_aggregates_reduce_agg_bm
+  velox_aggregates_simple_aggregates_benchmarks
   velox_aggregates
   velox_hive_connector
   velox_functions_lib

@@ -85,8 +85,6 @@ class CompiledExpressionTransformVisitor {
           std::placeholders::_1,
           std::placeholders::_1,
           std::placeholders::_1,
-          std::placeholders::_1,
-          std::placeholders::_1,
           *ranges::begin(transformedChildren));
     };
 

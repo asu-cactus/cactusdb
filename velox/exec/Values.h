@@ -46,14 +46,6 @@ class Values : public SourceOperator {
     return current_;
   }
 
-  const std::vector<RowVectorPtr> values() const {
-    return values_;
-  }
-
-  int32_t roundsLeft() const {
-    return roundsLeft_;
-  }
-
  private:
   std::vector<RowVectorPtr> values_;
   int32_t current_ = 0;

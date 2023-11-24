@@ -19,7 +19,6 @@
 #include "velox/dwio/common/BufferedInput.h"
 
 using namespace facebook::velox::dwio::common;
-using facebook::velox::common::Region;
 using namespace ::testing;
 
 namespace {
@@ -42,7 +41,7 @@ class ReadFileMock : public ::facebook::velox::ReadFile {
   MOCK_METHOD(
       void,
       preadv,
-      (folly::Range<const Region*> regions, folly::Range<folly::IOBuf*> iobufs),
+      (const std::vector<Segment>& segments),
       (const, override));
 };
 
@@ -71,26 +70,25 @@ void expectPreadvs(
     std::vector<Region> reads) {
   EXPECT_CALL(file, getName()).WillRepeatedly(Return("mock_name"));
   EXPECT_CALL(file, size()).WillRepeatedly(Return(content.size()));
-  EXPECT_CALL(file, preadv(_, _))
+  EXPECT_CALL(file, preadv(_))
       .Times(1)
-      .WillOnce([content, reads](
-                    folly::Range<const Region*> regions,
-                    folly::Range<folly::IOBuf*> iobufs) {
-        ASSERT_EQ(regions.size(), reads.size());
+      .WillOnce([content,
+                 reads](const std::vector<::facebook::velox::ReadFile::Segment>&
+                            segments) {
+        ASSERT_EQ(segments.size(), reads.size());
         for (size_t i = 0; i < reads.size(); ++i) {
-          const auto& region = regions[i];
+          const auto& segment = segments[i];
           const auto& read = reads[i];
-          auto& iobuf = iobufs[i];
-          ASSERT_EQ(region.offset, read.offset);
-          ASSERT_EQ(region.length, read.length);
+          ASSERT_EQ(segment.offset, read.offset);
+          ASSERT_EQ(segment.buffer.size(), read.length);
           if (!read.label.empty()) {
-            EXPECT_EQ(read.label, region.label);
+            EXPECT_EQ(read.label, segment.label);
           }
-          ASSERT_LE(region.offset + region.length, content.size());
-          iobuf = folly::IOBuf(
-              folly::IOBuf::COPY_BUFFER,
-              content.data() + region.offset,
-              region.length);
+          ASSERT_LE(segment.offset + segment.buffer.size(), content.size());
+          memcpy(
+              segment.buffer.data(),
+              content.data() + segment.offset,
+              segment.buffer.size());
         }
       });
 }

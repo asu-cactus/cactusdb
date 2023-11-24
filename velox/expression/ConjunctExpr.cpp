@@ -75,19 +75,17 @@ void finalizeErrors(
   }
   // Pre-existing errors outside of initial active rows are preserved. Errors in
   // the initial active rows but not in the final active rows are cleared.
-  auto size =
-      std::min(std::min(rows.size(), activeRows.size()), errors->size());
-  for (auto i = 0; i < size; ++i) {
-    if (errors->isNullAt(i)) {
-      continue;
-    }
-    if (rows.isValid(i) && !activeRows.isValid(i)) {
-      errors->setNull(i, true);
-    }
-    if (throwOnError && !errors->isNullAt(i)) {
-      auto exceptionPtr =
-          std::static_pointer_cast<std::exception_ptr>(errors->valueAt(i));
-      std::rethrow_exception(*exceptionPtr);
+  int32_t numWords = bits::nwords(errors->size());
+  auto errorNulls = errors->mutableNulls(errors->size())->asMutable<uint64_t>();
+  for (int32_t i = 0; i < numWords; ++i) {
+    errorNulls[i] &= ~rows.asRange().bits()[i] | activeRows.asRange().bits()[i];
+    if (throwOnError && errorNulls[i]) {
+      int32_t errorIndex = i * 64 + __builtin_ctzll(errorNulls[i]);
+      if (errorIndex < errors->size() && errorIndex < rows.end()) {
+        auto exceptionPtr = std::static_pointer_cast<std::exception_ptr>(
+            errors->valueAt(errorIndex));
+        std::rethrow_exception(*exceptionPtr);
+      }
     }
   }
 }
@@ -104,7 +102,7 @@ void ConjunctExpr::evalSpecialForm(
   auto flatResult = result->asFlatVector<bool>();
   // clear nulls from the result for the active rows.
   if (flatResult->mayHaveNulls()) {
-    auto& nulls = flatResult->mutableNulls(rows.end());
+    auto nulls = flatResult->mutableNulls(rows.end());
     rows.clearNulls(nulls);
   }
   // Initialize result to all true for AND and all false for OR.
@@ -307,8 +305,7 @@ TypePtr ConjunctCallToSpecialForm::resolveType(
 ExprPtr ConjunctCallToSpecialForm::constructSpecialForm(
     const TypePtr& type,
     std::vector<ExprPtr>&& compiledChildren,
-    bool /* trackCpuUsage */,
-    const core::QueryConfig& /*config*/) {
+    bool /* trackCpuUsage */) {
   bool inputsSupportFlatNoNullsFastPath =
       Expr::allSupportFlatNoNullsFastPath(compiledChildren);
 

@@ -26,7 +26,9 @@ namespace facebook::velox::exec::test {
 
 namespace {
 int64_t toDate(std::string_view stringDate) {
-  return DATE()->toDays(stringDate);
+  Date date;
+  parseTo(stringDate, date);
+  return date.days();
 }
 
 /// DWRF does not support Date type and Varchar is used.
@@ -227,7 +229,7 @@ TpchPlan TpchQueryBuilder::getQ1Plan() const {
                "avg(l_extendedprice)",
                "avg(l_discount)",
                "count(0)"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .orderBy({"l_returnflag", "l_linestatus"}, false)
           .planNode();
@@ -311,7 +313,7 @@ TpchPlan TpchQueryBuilder::getQ3Plan() const {
           .partialAggregation(
               {"l_orderkey", "o_orderdate", "o_shippriority"},
               {"sum(part_revenue) as revenue"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .project({"l_orderkey", "revenue", "o_orderdate", "o_shippriority"})
           .orderBy({"revenue DESC", "o_orderdate"}, false)
@@ -439,7 +441,7 @@ TpchPlan TpchQueryBuilder::getQ5Plan() const {
               "",
               {"n_name", "part_revenue"})
           .partialAggregation({"n_name"}, {"sum(part_revenue) as revenue"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .orderBy({"revenue DESC"}, false)
           .project({"n_name", "revenue"})
@@ -480,7 +482,7 @@ TpchPlan TpchQueryBuilder::getQ6Plan() const {
                   .capturePlanNodeId(lineitemPlanNodeId)
                   .project({"l_extendedprice * l_discount"})
                   .partialAggregation({}, {"sum(p0)"})
-                  .localPartition(std::vector<std::string>{})
+                  .localPartition({})
                   .finalAggregation()
                   .planNode();
   TpchPlan context;
@@ -610,7 +612,7 @@ TpchPlan TpchQueryBuilder::getQ7Plan() const {
           .partialAggregation(
               {"supp_nation", "cust_nation", "l_year"},
               {"sum(part_revenue) as revenue"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .orderBy({"supp_nation", "cust_nation", "l_year"}, false)
           .planNode();
@@ -786,7 +788,7 @@ TpchPlan TpchQueryBuilder::getQ8Plan() const {
               {"o_year"},
               {"sum(brazil_volume) as volume_brazil",
                "sum(volume) as volume_all"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .orderBy({"o_year"}, false)
           .project({"o_year", "(volume_brazil / volume_all) as mkt_share"})
@@ -920,7 +922,7 @@ TpchPlan TpchQueryBuilder::getQ9Plan() const {
                "l_extendedprice * (1.0 - l_discount) - ps_supplycost * l_quantity AS amount"})
           .partialAggregation(
               {"nation", "o_year"}, {"sum(amount) AS sum_profit"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .orderBy({"nation", "o_year DESC"}, false)
           .planNode();
@@ -1035,7 +1037,7 @@ TpchPlan TpchQueryBuilder::getQ10Plan() const {
                        "c_phone",
                        "c_comment"},
                       {"sum(part_revenue) as revenue"})
-                  .localPartition(std::vector<std::string>{})
+                  .localPartition({})
                   .finalAggregation()
                   .orderBy({"revenue DESC"}, false)
                   .project(
@@ -1117,7 +1119,7 @@ TpchPlan TpchQueryBuilder::getQ12Plan() const {
               {"l_shipmode"},
               {"sum(high_line_count_partial) as high_line_count",
                "sum(low_line_count_partial) as low_line_count"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .orderBy({"l_shipmode"}, false)
           .planNode();
@@ -1167,9 +1169,10 @@ TpchPlan TpchQueryBuilder::getQ13Plan() const {
               "",
               {"c_custkey", "o_orderkey"},
               core::JoinType::kRight)
-          .partialAggregation({"c_custkey"}, {"count(o_orderkey) as c_count"})
-          .localPartition(std::vector<std::string>{})
-          .finalAggregation()
+          .partialAggregation({"c_custkey"}, {"count(o_orderkey) as pc_count"})
+          .localPartition({})
+          .finalAggregation(
+              {"c_custkey"}, {"count(pc_count) as c_count"}, {BIGINT()})
           .singleAggregation({"c_count"}, {"count(0) as custdist"})
           .orderBy({"custdist DESC", "c_count DESC"}, false)
           .planNode();
@@ -1231,7 +1234,7 @@ TpchPlan TpchQueryBuilder::getQ14Plan() const {
               {},
               {"sum(part_revenue) as total_revenue",
                "sum(filter_revenue) as total_promo_revenue"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .project(
               {"100.00 * total_promo_revenue/total_revenue as promo_revenue"})
@@ -1277,7 +1280,7 @@ TpchPlan TpchQueryBuilder::getQ15Plan() const {
                "l_extendedprice * (1.0 - l_discount) as part_revenue"})
           .partialAggregation(
               {"l_suppkey"}, {"sum(part_revenue) as total_revenue"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .singleAggregation({}, {"max(total_revenue) as max_revenue"})
           .planNode();
@@ -1295,7 +1298,7 @@ TpchPlan TpchQueryBuilder::getQ15Plan() const {
                "l_extendedprice * (1.0 - l_discount) as part_revenue"})
           .partialAggregation(
               {"supplier_no"}, {"sum(part_revenue) as total_revenue"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .hashJoin(
               {"total_revenue"},
@@ -1397,7 +1400,7 @@ TpchPlan TpchQueryBuilder::getQ16Plan() const {
           .partialAggregation(
               {"p_brand", "p_type", "p_size"},
               {"count(ps_suppkey) as supplier_cnt"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .orderBy({"supplier_cnt DESC", "p_brand", "p_type", "p_size"}, false)
           .planNode();
@@ -1474,7 +1477,7 @@ TpchPlan TpchQueryBuilder::getQ17Plan() const {
               "l_quantity < 0.2 * avg_",
               {"l_extendedprice"})
           .partialAggregation({}, {"sum(l_extendedprice) as partial_sum"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .project({"(partial_sum / 7.0) as avg_yearly"})
           .planNode();
@@ -1513,9 +1516,11 @@ TpchPlan TpchQueryBuilder::getQ18Plan() const {
       PlanBuilder(planNodeIdGenerator, pool_.get())
           .tableScan(kLineitem, lineitemSelectedRowType, lineitemFileColumns)
           .capturePlanNodeId(lineitemScanNodeId)
-          .partialAggregation({"l_orderkey"}, {"sum(l_quantity) AS quantity"})
+          .partialAggregation(
+              {"l_orderkey"}, {"sum(l_quantity) AS partial_sum"})
           .localPartition({"l_orderkey"})
-          .finalAggregation()
+          .finalAggregation(
+              {"l_orderkey"}, {"sum(partial_sum) AS quantity"}, {DOUBLE()})
           .filter("quantity > 300.0")
           .planNode();
 
@@ -1549,7 +1554,7 @@ TpchPlan TpchQueryBuilder::getQ18Plan() const {
                "o_orderdate",
                "o_totalprice",
                "quantity"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .orderBy({"o_totalprice DESC", "o_orderdate"}, false)
           .limit(0, 100, false)
           .planNode();
@@ -1625,7 +1630,7 @@ TpchPlan TpchQueryBuilder::getQ19Plan() const {
                       joinFilterExpr,
                       {"part_revenue"})
                   .partialAggregation({}, {"sum(part_revenue) as revenue"})
-                  .localPartition(std::vector<std::string>{})
+                  .localPartition({})
                   .finalAggregation()
                   .planNode();
 
@@ -1889,7 +1894,7 @@ TpchPlan TpchQueryBuilder::getQ21Plan() const {
               core::JoinType::kAnti,
               false /*nullAware*/)
           .partialAggregation({"s_name"}, {"count(1) as numwait"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .orderBy({"numwait DESC", "s_name"}, false)
           .limit(0, 100, false)
@@ -1945,7 +1950,7 @@ TpchPlan TpchQueryBuilder::getQ22Plan() const {
               phoneFilter)
           .capturePlanNodeId(customerScanNodeId)
           .partialAggregation({}, {"avg(c_acctbal) as avg_acctbal"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .planNode();
 
@@ -1974,7 +1979,7 @@ TpchPlan TpchQueryBuilder::getQ22Plan() const {
           .partialAggregation(
               {"country_code"},
               {"count(0) AS numcust", "sum(c_acctbal) AS totacctbal"})
-          .localPartition(std::vector<std::string>{})
+          .localPartition({})
           .finalAggregation()
           .orderBy({"country_code"}, false)
           .planNode();
@@ -2028,7 +2033,7 @@ TpchPlan TpchQueryBuilder::getIoMeterPlan(int columnPct) const {
                   .capturePlanNodeId(lineitemPlanNodeId)
                   .project(projectExprs)
                   .partialAggregation({}, aggregates)
-                  .localPartition(std::vector<std::string>{})
+                  .localPartition({})
                   .finalAggregation()
                   .planNode();
 

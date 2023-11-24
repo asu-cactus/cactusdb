@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 #include "velox/common/base/tests/GTestUtils.h"
-#include "velox/functions/lib/window/tests/WindowTestBase.h"
-#include "velox/functions/prestosql/window/WindowFunctionsRegistration.h"
+#include "velox/functions/prestosql/window/tests/WindowTestBase.h"
 
 using namespace facebook::velox::exec::test;
 
@@ -46,20 +45,9 @@ class AggregateWindowTestBase : public WindowTestBase {
   explicit AggregateWindowTestBase(const AggregateWindowTestParam& testParam)
       : function_(testParam.function), overClause_(testParam.overClause) {}
 
-  void SetUp() override {
-    WindowTestBase::SetUp();
-    window::prestosql::registerAllWindowFunctions();
-  }
-
   void testWindowFunction(const std::vector<RowVectorPtr>& vectors) {
-    testWindowFunction(vectors, kFrameClauses);
-  }
-
-  void testWindowFunction(
-      const std::vector<RowVectorPtr>& vectors,
-      const std::vector<std::string>& frameClauses) {
     WindowTestBase::testWindowFunction(
-        vectors, function_, {overClause_}, frameClauses);
+        vectors, function_, {overClause_}, kFrameClauses);
   }
 
   const std::string function_;
@@ -88,22 +76,27 @@ TEST_P(SimpleAggregatesTest, basic) {
   testWindowFunction({makeSimpleVector(10)});
 }
 
+// Tests function with a dataset with a single partition containing all the
+// rows.
+TEST_P(SimpleAggregatesTest, singlePartition) {
+  testWindowFunction({makeSinglePartitionVector(100)});
+}
+
 // Tests function with a dataset with a single partition but 2 input row
 // vectors.
-TEST_P(SimpleAggregatesTest, singlePartition) {
-  auto input = {makeSinglePartitionVector(50), makeSinglePartitionVector(40)};
-  testWindowFunction(input);
-  testWindowFunction(input, kEmptyFrameClauses);
+TEST_P(SimpleAggregatesTest, multiInput) {
+  testWindowFunction(
+      {makeSinglePartitionVector(250), makeSinglePartitionVector(50)});
 }
 
 // Tests function with a dataset where all partitions have a single row.
 TEST_P(SimpleAggregatesTest, singleRowPartitions) {
-  testWindowFunction({makeSingleRowPartitionsVector(40)});
+  testWindowFunction({makeSingleRowPartitionsVector(50)});
 }
 
 // Tests function with a randomly generated input dataset.
 TEST_P(SimpleAggregatesTest, randomInput) {
-  testWindowFunction({makeRandomInputVector(25)});
+  testWindowFunction({makeRandomInputVector(50)});
 }
 
 // Instantiate all the above tests for each combination of aggregate function

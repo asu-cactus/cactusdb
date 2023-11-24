@@ -22,6 +22,7 @@ target_link_libraries(
   velox_dwio_common
   velox_dwio_common_exception
   velox_dwio_parquet_reader
+  velox_dwio_type_fbhive
   velox_dwio_common_test_utils
   velox_hive_connector
   velox_exception
@@ -30,7 +31,6 @@ target_link_libraries(
   velox_serialization
   velox_encode
   velox_type
-  velox_type_fbhive
   velox_caching
   velox_vector_test_lib
   Folly::folly

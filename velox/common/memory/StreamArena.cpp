@@ -21,53 +21,42 @@ namespace facebook::velox {
 StreamArena::StreamArena(memory::MemoryPool* pool) : pool_(pool) {}
 
 void StreamArena::newRange(int32_t bytes, ByteRange* range) {
-  VELOX_CHECK_GT(bytes, 0, "StreamArena::newRange can't be zero length");
-  const memory::MachinePageCount numPages =
-      memory::AllocationTraits::numPages(bytes);
-  // If new range 'bytes' is larger than the largest class page size, then we
-  // allocate a large chunk of contiguous memory for this range.
-  if (numPages > pool_->largestSizeClass()) {
-    memory::ContiguousAllocation largeAllocation;
-    pool_->allocateContiguous(numPages, largeAllocation);
-    range->buffer = largeAllocation.data();
-    range->size = largeAllocation.size();
-    range->position = 0;
-    size_ += range->size;
-    largeAllocations_.push_back(std::move(largeAllocation));
-    return;
-  }
-
-  const int32_t numRuns = allocation_.numRuns();
+  VELOX_CHECK_GT(bytes, 0);
+  memory::MachinePageCount numPages =
+      bits::roundUp(bytes, memory::AllocationTraits::kPageSize) /
+      memory::AllocationTraits::kPageSize;
+  int32_t numRuns = allocation_.numRuns();
   if (currentRun_ >= numRuns) {
-    if (numRuns > 0) {
+    if (numRuns) {
       allocations_.push_back(
           std::make_unique<memory::Allocation>(std::move(allocation_)));
     }
     pool_->allocateNonContiguous(
         std::max(allocationQuantum_, numPages), allocation_);
     currentRun_ = 0;
-    currentOffset_ = 0;
+    currentPage_ = 0;
     size_ += allocation_.byteSize();
   }
   auto run = allocation_.runAt(currentRun_);
-  range->buffer = run.data() + currentOffset_;
-  const int32_t availableBytes = run.numBytes() - currentOffset_;
-  range->size = std::min(bytes, availableBytes);
+  int32_t available = run.numPages() - currentPage_;
+  range->buffer =
+      run.data() + memory::AllocationTraits::kPageSize * currentPage_;
+  range->size = std::min<int32_t>(numPages, available) *
+      memory::AllocationTraits::kPageSize;
   range->position = 0;
-  currentOffset_ += range->size;
-  VELOX_DCHECK_LE(currentOffset_, run.numBytes());
-  if (currentOffset_ == run.numBytes()) {
+  currentPage_ += std::min<int32_t>(available, numPages);
+  if (currentPage_ == run.numPages()) {
     ++currentRun_;
-    ++currentOffset_ = 0;
+    currentPage_ = 0;
   }
 }
 
 void StreamArena::newTinyRange(int32_t bytes, ByteRange* range) {
-  VELOX_CHECK_GT(bytes, 0, "StreamArena::newTinyRange can't be zero length");
   tinyRanges_.emplace_back();
   tinyRanges_.back().resize(bytes);
   range->position = 0;
   range->buffer = reinterpret_cast<uint8_t*>(tinyRanges_.back().data());
   range->size = bytes;
 }
+
 } // namespace facebook::velox

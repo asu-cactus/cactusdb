@@ -417,8 +417,7 @@ std::shared_ptr<exec::VectorFunction> createTypedArraysIntersectExcept(
 
 std::shared_ptr<exec::VectorFunction> createArrayIntersect(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
   validateMatchingArrayTypes(inputArgs, name, 2);
   auto elementType = inputArgs.front().type->childAt(0);
 
@@ -431,8 +430,7 @@ std::shared_ptr<exec::VectorFunction> createArrayIntersect(
 
 std::shared_ptr<exec::VectorFunction> createArrayExcept(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
   validateMatchingArrayTypes(inputArgs, name, 2);
   auto elementType = inputArgs.front().type->childAt(0);
 
@@ -477,8 +475,7 @@ const std::shared_ptr<exec::VectorFunction> createTypedArraysOverlap(
 
 std::shared_ptr<exec::VectorFunction> createArraysOverlapFunction(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
   validateMatchingArrayTypes(inputArgs, name, 2);
   auto elementType = inputArgs.front().type->childAt(0);
 
