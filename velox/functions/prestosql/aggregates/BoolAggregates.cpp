@@ -178,7 +178,7 @@ class BoolOrAggregate final : public BoolAndOrAggregate {
 };
 
 template <class T>
-exec::AggregateRegistrationResult registerBool(const std::string& name) {
+bool registerBool(const std::string& name) {
   // TODO Fix signature to match Presto.
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures = {
       exec::AggregateFunctionSignatureBuilder()
@@ -187,15 +187,14 @@ exec::AggregateRegistrationResult registerBool(const std::string& name) {
           .argumentType("boolean")
           .build()};
 
-  return exec::registerAggregateFunction(
+  exec::registerAggregateFunction(
       name,
       std::move(signatures),
       [name](
           core::AggregationNode::Step step,
           const std::vector<TypePtr>& argTypes,
-          const TypePtr& /*resultType*/,
-          const core::QueryConfig& /*config*/)
-          -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr&
+          /*resultType*/) -> std::unique_ptr<exec::Aggregate> {
         VELOX_CHECK_EQ(argTypes.size(), 1, "{} takes only one argument", name);
         auto inputType = argTypes[0];
         VELOX_CHECK_EQ(
@@ -206,6 +205,7 @@ exec::AggregateRegistrationResult registerBool(const std::string& name) {
             inputType->kindName());
         return std::make_unique<T>();
       });
+  return true;
 }
 
 } // namespace

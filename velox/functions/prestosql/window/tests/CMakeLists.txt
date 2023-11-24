@@ -16,7 +16,6 @@ set(CMAKE_WINDOW_TEST_LINK_LIBRARIES
     velox_core
     velox_exec
     velox_exec_test_lib
-    velox_functions_window_test_lib
     velox_vector_fuzzer
     velox_vector_test_lib
     velox_window
@@ -24,7 +23,7 @@ set(CMAKE_WINDOW_TEST_LINK_LIBRARIES
     gtest
     gtest_main)
 
-set(CMAKE_WINDOW_TEST_MAIN_FILES Main.cpp)
+set(CMAKE_WINDOW_TEST_MAIN_FILES Main.cpp WindowTestBase.cpp)
 
 add_executable(velox_windows_rank_test NtileTest.cpp RankTest.cpp
                                        ${CMAKE_WINDOW_TEST_MAIN_FILES})
@@ -37,7 +36,7 @@ add_test(
 target_link_libraries(velox_windows_rank_test
                       ${CMAKE_WINDOW_TEST_LINK_LIBRARIES})
 
-add_executable(velox_windows_value_test NthValueTest.cpp LeadLagTest.cpp
+add_executable(velox_windows_value_test NthValueTest.cpp
                                         ${CMAKE_WINDOW_TEST_MAIN_FILES})
 
 add_test(

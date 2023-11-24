@@ -62,12 +62,12 @@ class IsWritableVectorTest : public testing::Test {
       ASSERT_FALSE(BaseVector::isVectorWritable(vector));
     }
 
-    // Make buffer multiply-referenced so it's no longer be mutable.
-    auto copy = buffer;
+    // Set buffer to no longer be mutable.
+    buffer->setIsMutable(false);
     ASSERT_TRUE(vector->isNullsWritable());
     ASSERT_FALSE(BaseVector::isVectorWritable(vector));
 
-    copy = nullptr;
+    buffer->setIsMutable(true);
 
     // Make sure nothing gets left unwritable.
     ASSERT_TRUE(vector->isNullsWritable());

@@ -19,7 +19,9 @@
 
 namespace facebook::velox::connector::hive {
 
-std::vector<std::pair<std::string, std::string>> extractPartitionKeyValues(
+/// Make the partition name in the Hive style, with the partition values at row.
+/// Partition name is in the format of key1=value1/key2=value2/...
+std::string makePartitionName(
     const RowVectorPtr& partitionsVector,
     vector_size_t row);
 

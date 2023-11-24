@@ -61,6 +61,7 @@ bool TestValue::enabled() {
   return false;
 }
 void TestValue::clear(const std::string& injectionPoint) {}
+void TestValue::adjust(const std::string& injectionPoint, void* testData) {}
 #endif
 
 } // namespace facebook::velox::common::testutil

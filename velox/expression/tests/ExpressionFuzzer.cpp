@@ -62,11 +62,6 @@ DEFINE_bool(
     "Retry failed expressions by wrapping it using a try() statement.");
 
 DEFINE_bool(
-    find_minimal_subexpression,
-    false,
-    "Automatically seeks minimum failed subexpression on result mismatch");
-
-DEFINE_bool(
     disable_constant_folding,
     false,
     "Disable constant-folding in the common evaluation path.");
@@ -180,11 +175,10 @@ bool isDeterministic(
   try {
     if (auto vectorFunctionSignatures =
             exec::getVectorFunctionSignatures(functionName)) {
-      core::QueryConfig config({});
       for (const auto& signature : *vectorFunctionSignatures) {
         if (exec::SignatureBinder(*signature, argTypes).tryBind()) {
           if (auto vectorFunction =
-                  exec::getVectorFunction(functionName, argTypes, {}, config)) {
+                  exec::getVectorFunction(functionName, argTypes, {})) {
             return vectorFunction->isDeterministic();
           }
         }
@@ -287,7 +281,7 @@ bool isSupportedSignature(const exec::FunctionSignature& signature) {
   // Not supporting lambda functions, or functions using decimal and
   // timestamp with time zone types.
   return !(
-      useTypeName(signature, "opaque") || useTypeName(signature, "function") ||
+      useTypeName(signature, "function") ||
       useTypeName(signature, "long_decimal") ||
       useTypeName(signature, "short_decimal") ||
       useTypeName(signature, "decimal") ||
@@ -298,19 +292,15 @@ bool isSupportedSignature(const exec::FunctionSignature& signature) {
 }
 
 // Randomly pick columns from the input row vector to wrap in lazy.
-// Negative column indices represent lazy vectors that have been preloaded
-// before feeding them to the evaluator. This list is sorted on the absolute
-// value of the entries.
-std::vector<int> generateLazyColumnIds(
+std::vector<column_index_t> generateLazyColumnIds(
     const RowVectorPtr& rowVector,
     VectorFuzzer& vectorFuzzer) {
-  std::vector<int> columnsToWrapInLazy;
+  std::vector<column_index_t> columnsToWrapInLazy;
   if (FLAGS_lazy_vector_generation_ratio > 0) {
-    for (int idx = 0; idx < rowVector->childrenSize(); idx++) {
+    for (column_index_t idx = 0; idx < rowVector->childrenSize(); idx++) {
       VELOX_CHECK_NOT_NULL(rowVector->childAt(idx));
       if (vectorFuzzer.coinToss(FLAGS_lazy_vector_generation_ratio)) {
-        columnsToWrapInLazy.push_back(
-            vectorFuzzer.coinToss(0.8) ? idx : -1 * idx);
+        columnsToWrapInLazy.push_back(idx);
       }
     }
   }
@@ -856,8 +846,8 @@ core::TypedExprPtr ExpressionFuzzer::generateExpression(
     }
   }
   if (!expression) {
-    VLOG(1) << "Couldn't find a proper function to return '"
-            << returnType->toString() << "'. Returning a constant instead.";
+    LOG(INFO) << "Couldn't find a proper function to return '"
+              << returnType->toString() << "'. Returning a constant instead.";
     return generateArgConstant(returnType);
   }
   expressionBank_.insert(expression);
@@ -1231,38 +1221,23 @@ void ExpressionFuzzer::retryWithTry(
     std::vector<core::TypedExprPtr> plans,
     const RowVectorPtr& rowVector,
     const VectorPtr& resultVector,
-    const std::vector<int>& columnsToWrapInLazy) {
+    const std::vector<column_index_t>& columnsToWrapInLazy) {
   // Wrap each expression tree with 'try'.
   std::vector<core::TypedExprPtr> tryPlans;
   for (auto& plan : plans) {
     tryPlans.push_back(std::make_shared<core::CallTypedExpr>(
         plan->type(), std::vector<core::TypedExprPtr>{plan}, "try"));
   }
-
-  RowVectorPtr tryResult;
-
   // The function throws if anything goes wrong.
-  try {
-    tryResult =
-        verifier_
-            .verify(
-                tryPlans,
-                rowVector,
-                resultVector ? BaseVector::copy(*resultVector) : nullptr,
-                false, // canThrow
-                columnsToWrapInLazy)
-            .result;
-  } catch (const std::exception& e) {
-    if (FLAGS_find_minimal_subexpression) {
-      computeMinimumSubExpression(
-          {&execCtx_, {false, ""}},
-          vectorFuzzer_,
-          plans,
-          rowVector,
-          columnsToWrapInLazy);
-    }
-    throw;
-  }
+  auto tryResult =
+      verifier_
+          .verify(
+              tryPlans,
+              rowVector,
+              resultVector ? BaseVector::copy(*resultVector) : nullptr,
+              false, // canThrow
+              columnsToWrapInLazy)
+          .result;
 
   // Re-evaluate the original expression on rows that didn't produce an
   // error (i.e. returned non-NULL results when evaluated with TRY).
@@ -1274,26 +1249,14 @@ void ExpressionFuzzer::retryWithTry(
     LOG(INFO) << "Retrying original expression on " << noErrorRowVector->size()
               << " rows without errors";
 
-    try {
-      verifier_.verify(
-          plans,
-          noErrorRowVector,
-          resultVector ? BaseVector::copy(*resultVector)
-                             ->slice(0, noErrorRowVector->size())
-                       : nullptr,
-          false, // canThrow
-          columnsToWrapInLazy);
-    } catch (const std::exception& e) {
-      if (FLAGS_find_minimal_subexpression) {
-        computeMinimumSubExpression(
-            {&execCtx_, {false, ""}},
-            vectorFuzzer_,
-            plans,
-            noErrorRowVector,
-            columnsToWrapInLazy);
-      }
-      throw;
-    }
+    verifier_.verify(
+        plans,
+        noErrorRowVector,
+        resultVector ? BaseVector::copy(*resultVector)
+                           ->slice(0, noErrorRowVector->size())
+                     : nullptr,
+        false, // canThrow
+        columnsToWrapInLazy);
   }
 }
 
@@ -1327,24 +1290,12 @@ void ExpressionFuzzer::go() {
     auto resultVectors = generateResultVectors(plans);
     ResultOrError result;
 
-    try {
-      result = verifier_.verify(
-          plans,
-          rowVector,
-          resultVectors ? BaseVector::copy(*resultVectors) : nullptr,
-          true, // canThrow
-          columnsToWrapInLazy);
-    } catch (const std::exception& e) {
-      if (FLAGS_find_minimal_subexpression) {
-        computeMinimumSubExpression(
-            {&execCtx_, {false, ""}},
-            vectorFuzzer_,
-            plans,
-            rowVector,
-            columnsToWrapInLazy);
-      }
-      throw;
-    }
+    result = verifier_.verify(
+        plans,
+        rowVector,
+        resultVectors ? BaseVector::copy(*resultVectors) : nullptr,
+        true, // canThrow
+        columnsToWrapInLazy);
 
     // If both paths threw compatible exceptions, we add a try() function to
     // the expression's root and execute it again. This time the expression

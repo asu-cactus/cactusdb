@@ -19,26 +19,26 @@
 namespace facebook::velox::dwio::common {
 
 void SelectiveByteRleColumnReader::getValues(RowSet rows, VectorPtr* result) {
-  switch (requestedType_->kind()) {
+  switch (nodeType_->type->kind()) {
     case TypeKind::BOOLEAN:
-      getFlatValues<int8_t, bool>(rows, result, requestedType_);
+      getFlatValues<int8_t, bool>(rows, result, nodeType_->type);
       break;
     case TypeKind::TINYINT:
-      getFlatValues<int8_t, int8_t>(rows, result, requestedType_);
+      getFlatValues<int8_t, int8_t>(rows, result, nodeType_->type);
       break;
     case TypeKind::SMALLINT:
-      getFlatValues<int8_t, int16_t>(rows, result, requestedType_);
+      getFlatValues<int8_t, int16_t>(rows, result, nodeType_->type);
       break;
     case TypeKind::INTEGER:
-      getFlatValues<int8_t, int32_t>(rows, result, requestedType_);
+      getFlatValues<int8_t, int32_t>(rows, result, nodeType_->type);
       break;
     case TypeKind::BIGINT:
-      getFlatValues<int8_t, int64_t>(rows, result, requestedType_);
+      getFlatValues<int8_t, int64_t>(rows, result, nodeType_->type);
       break;
     default:
       VELOX_FAIL(
           "Result type not supported in ByteRLE encoding: {}",
-          requestedType_->toString());
+          nodeType_->type->toString());
   }
 }
 

@@ -35,11 +35,11 @@ namespace {
 // Specifies an encoding for generating test data. Multiple encodings can be
 // nested. The first element of a list of  EncodingOptions gives the base
 // encoding, either FLAT or CONSTANT. Subsequent elements add a wrapper, e.g.
-// DICTIONARY or CONSTANT.
+// DICTIONARY, SEQUENCE or CONSTANT.
 struct EncodingOptions {
   const VectorEncoding::Simple encoding;
 
-  // Specifies the count of values for a FLAT or DICTIONARY.
+  // Specifies the count of values for a FLAT, DICTIONARY or SEQUENCE.
   const int32_t cardinality;
 
   // Specifies the frequency of nulls added by a DICTIONARY wrapper. 0 means
@@ -69,6 +69,10 @@ struct EncodingOptions {
         cardinality,
         -1,
         std::move(indices)};
+  }
+
+  static EncodingOptions sequence(int32_t runLength) {
+    return {VectorEncoding::Simple::SEQUENCE, runLength, -1};
   }
 
   static EncodingOptions constant(int32_t cardinality, int32_t index) {
@@ -163,11 +167,19 @@ class ExprEncodingsTest
         {EncodingOptions::flat(100), EncodingOptions::constant(kTestSize, 7)});
     testEncodings_.push_back(
         {EncodingOptions::flat(100),
+         EncodingOptions::sequence(10),
+         EncodingOptions::dictionary(kTestSize, 6)});
+    testEncodings_.push_back(
+        {EncodingOptions::flat(100),
          EncodingOptions::dictionary(kTestSize, 6)});
     // A dictionary that masks everything as null.
     testEncodings_.push_back(
         {EncodingOptions::flat(100),
          EncodingOptions::dictionary(kTestSize, 1)});
+    testEncodings_.push_back(
+        {EncodingOptions::flat(100),
+         EncodingOptions::dictionary(1000, 0),
+         EncodingOptions::sequence(10)});
   }
 
   core::TypedExprPtr parseExpression(
@@ -259,6 +271,26 @@ class ExprEncodingsTest
           reference = newReference;
           break;
         }
+        case VectorEncoding::Simple::SEQUENCE: {
+          VELOX_CHECK(current, "Sequence must be non-leaf");
+          BufferPtr sizes;
+          int runLength = cardinality;
+          int currentSize = current->size();
+          std::vector<std::optional<T>> newReference(runLength * currentSize);
+          sizes = AlignedBuffer::allocate<vector_size_t>(
+              currentSize, execCtx_->pool());
+          auto rawSizes = sizes->asMutable<vector_size_t>();
+          for (auto index = 0; index < currentSize; index++) {
+            rawSizes[index] = runLength;
+            for (int i = 0; i < runLength; ++i) {
+              newReference[index * runLength + i] = reference[index];
+            }
+          }
+          reference = newReference;
+          current = BaseVector::wrapInSequence(
+              sizes, runLength * currentSize, std::move(current));
+          break;
+        }
         default:; // nothing to do
       }
     }
@@ -336,6 +368,7 @@ class ExprEncodingsTest
       auto encoding = currentVector->encoding();
       out << encoding;
       if (encoding != VectorEncoding::Simple::DICTIONARY &&
+          encoding != VectorEncoding::Simple::SEQUENCE &&
           encoding != VectorEncoding::Simple::CONSTANT) {
         break;
       }
@@ -590,7 +623,7 @@ INSTANTIATE_TEST_SUITE_P(
     ExprEncodingsTest,
     ExprEncodingsTest,
     testing::Combine(
-        testing::Range(0, 7),
-        testing::Range(0, 7),
+        testing::Range(0, 9),
+        testing::Range(0, 9),
         testing::Bool()));
 } // namespace facebook::velox::test

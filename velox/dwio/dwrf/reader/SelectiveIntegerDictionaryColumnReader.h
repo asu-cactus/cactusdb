@@ -17,7 +17,6 @@
 #pragma once
 
 #include "velox/dwio/common/SelectiveIntegerColumnReader.h"
-#include "velox/dwio/dwrf/common/DecoderUtil.h"
 #include "velox/dwio/dwrf/reader/DwrfData.h"
 
 namespace facebook::velox::dwrf {
@@ -29,13 +28,13 @@ class SelectiveIntegerDictionaryColumnReader
 
   SelectiveIntegerDictionaryColumnReader(
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
-      std::shared_ptr<const dwio::common::TypeWithId> dataType,
+      const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
       DwrfParams& params,
       common::ScanSpec& scanSpec,
       uint32_t numBytes);
 
   void seekToRowGroup(uint32_t index) override {
-    SelectiveIntegerColumnReader::seekToRowGroup(index);
+    SelectiveColumnReader::seekToRowGroup(index);
     auto positionsProvider = formatData_->seekToRowGroup(index);
     if (inDictionaryReader_) {
       inDictionaryReader_->seekToRowGroup(positionsProvider);
@@ -69,13 +68,16 @@ template <typename ColumnVisitor>
 void SelectiveIntegerDictionaryColumnReader::readWithVisitor(
     RowSet rows,
     ColumnVisitor visitor) {
+  vector_size_t numRows = rows.back() + 1;
+  VELOX_CHECK_EQ(rleVersion_, RleVersion_1);
   auto dictVisitor = visitor.toDictionaryColumnVisitor();
-  if (rleVersion_ == RleVersion_1) {
-    decodeWithVisitor<velox::dwrf::RleDecoderV1<false>>(
-        dataReader_.get(), dictVisitor);
+  auto reader = reinterpret_cast<RleDecoderV1<false>*>(dataReader_.get());
+  if (nullsInReadRange_) {
+    reader->readWithVisitor<true>(
+        nullsInReadRange_->as<uint64_t>(), dictVisitor);
   } else {
-    decodeWithVisitor<velox::dwrf::RleDecoderV2<false>>(
-        dataReader_.get(), dictVisitor);
+    reader->readWithVisitor<false>(nullptr, dictVisitor);
   }
+  readOffset_ += numRows;
 }
 } // namespace facebook::velox::dwrf

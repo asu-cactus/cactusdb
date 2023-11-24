@@ -20,8 +20,7 @@
 #include "velox/expression/CoalesceExpr.h"
 #include "velox/expression/ConjunctExpr.h"
 #include "velox/expression/ConstantExpr.h"
-#include "velox/expression/RegisterSpecialForm.h"
-#include "velox/expression/SpecialFormRegistry.h"
+#include "velox/expression/FunctionCallToSpecialForm.h"
 #include "velox/expression/SwitchExpr.h"
 #include "velox/expression/TryExpr.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
@@ -32,13 +31,7 @@ using namespace facebook::velox::exec;
 using namespace facebook::velox::test;
 
 class FunctionCallToSpecialFormTest : public testing::Test,
-                                      public VectorTestBase {
- protected:
-  static void SetUpTestCase() {
-    registerFunctionCallToSpecialForms();
-  }
-  const core::QueryConfig config_{{}};
-};
+                                      public VectorTestBase {};
 
 TEST_F(FunctionCallToSpecialFormTest, andCall) {
   ASSERT_TRUE(isFunctionCallToSpecialFormRegistered("and"));
@@ -53,8 +46,7 @@ TEST_F(FunctionCallToSpecialFormTest, andCall) {
            vectorMaker_.constantVector<bool>({true})),
        std::make_shared<ConstantExpr>(
            vectorMaker_.constantVector<bool>({false}))},
-      false,
-      config_);
+      false);
   ASSERT_EQ(typeid(*specialForm), typeid(const ConjunctExpr&));
 }
 
@@ -68,8 +60,7 @@ TEST_F(FunctionCallToSpecialFormTest, castCall) {
       DOUBLE(),
       {std::make_shared<ConstantExpr>(
           vectorMaker_.constantVector<int32_t>({0}))},
-      false,
-      config_);
+      false);
   ASSERT_EQ(typeid(*specialForm), typeid(const CastExpr&));
 }
 
@@ -84,8 +75,7 @@ TEST_F(FunctionCallToSpecialFormTest, coalesceCall) {
       INTEGER(),
       {std::make_shared<ConstantExpr>(
           vectorMaker_.constantVector<int32_t>({0}))},
-      false,
-      config_);
+      false);
   ASSERT_EQ(typeid(*specialForm), typeid(const CoalesceExpr&));
 }
 
@@ -105,8 +95,7 @@ TEST_F(FunctionCallToSpecialFormTest, ifCall) {
            vectorMaker_.constantVector<int32_t>({0})),
        std::make_shared<ConstantExpr>(
            vectorMaker_.constantVector<int32_t>({1}))},
-      false,
-      config_);
+      false);
   ASSERT_EQ(typeid(*specialForm), typeid(const SwitchExpr&));
 }
 
@@ -123,8 +112,7 @@ TEST_F(FunctionCallToSpecialFormTest, orCall) {
            vectorMaker_.constantVector<bool>({true})),
        std::make_shared<ConstantExpr>(
            vectorMaker_.constantVector<bool>({false}))},
-      false,
-      config_);
+      false);
   ASSERT_EQ(typeid(*specialForm), typeid(const ConjunctExpr&));
 }
 
@@ -148,8 +136,7 @@ TEST_F(FunctionCallToSpecialFormTest, switchCall) {
            vectorMaker_.constantVector<int32_t>({1})),
        std::make_shared<ConstantExpr>(
            vectorMaker_.constantVector<int32_t>({2}))},
-      false,
-      config_);
+      false);
   ASSERT_EQ(typeid(*specialForm), typeid(const SwitchExpr&));
 }
 
@@ -164,8 +151,7 @@ TEST_F(FunctionCallToSpecialFormTest, tryCall) {
       INTEGER(),
       {std::make_shared<ConstantExpr>(
           vectorMaker_.constantVector<int32_t>({0}))},
-      false,
-      config_);
+      false);
   ASSERT_EQ(typeid(*specialForm), typeid(const TryExpr&));
 }
 
@@ -180,7 +166,6 @@ TEST_F(FunctionCallToSpecialFormTest, notASpecialForm) {
       INTEGER(),
       {std::make_shared<ConstantExpr>(
           vectorMaker_.constantVector<int32_t>({0}))},
-      false,
-      config_);
+      false);
   ASSERT_EQ(specialForm, nullptr);
 }

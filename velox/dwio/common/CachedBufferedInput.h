@@ -21,11 +21,11 @@
 #include "velox/common/caching/FileGroupStats.h"
 #include "velox/common/caching/ScanTracker.h"
 #include "velox/common/caching/SsdCache.h"
-#include "velox/common/io/IoStatistics.h"
-#include "velox/common/io/Options.h"
 #include "velox/dwio/common/BufferedInput.h"
 #include "velox/dwio/common/CacheInputStream.h"
 #include "velox/dwio/common/InputStream.h"
+#include "velox/dwio/common/IoStatistics.h"
+#include "velox/dwio/common/Options.h"
 
 DECLARE_int32(cache_load_quantum);
 
@@ -58,6 +58,7 @@ class CachedBufferedInput : public BufferedInput {
  public:
   CachedBufferedInput(
       std::shared_ptr<ReadFile> readFile,
+      memory::MemoryPool& pool,
       const MetricsLogPtr& metricsLog,
       uint64_t fileNum,
       cache::AsyncDataCache* FOLLY_NONNULL cache,
@@ -65,11 +66,9 @@ class CachedBufferedInput : public BufferedInput {
       uint64_t groupId,
       std::shared_ptr<IoStatistics> ioStats,
       folly::Executor* FOLLY_NULLABLE executor,
-      const io::ReaderOptions& readerOptions)
-      : BufferedInput(
-            std::move(readFile),
-            readerOptions.getMemoryPool(),
-            metricsLog),
+      int32_t loadQuantum,
+      int32_t maxCoalesceDistance)
+      : BufferedInput(std::move(readFile), pool, metricsLog),
         cache_(cache),
         fileNum_(fileNum),
         tracker_(std::move(tracker)),
@@ -77,18 +76,21 @@ class CachedBufferedInput : public BufferedInput {
         ioStats_(std::move(ioStats)),
         executor_(executor),
         fileSize_(input_->getLength()),
-        options_(readerOptions) {}
+        loadQuantum_(loadQuantum),
+        maxCoalesceDistance_(maxCoalesceDistance) {}
 
   CachedBufferedInput(
       std::shared_ptr<ReadFileInputStream> input,
+      memory::MemoryPool& pool,
       uint64_t fileNum,
       cache::AsyncDataCache* FOLLY_NONNULL cache,
       std::shared_ptr<cache::ScanTracker> tracker,
       uint64_t groupId,
       std::shared_ptr<IoStatistics> ioStats,
       folly::Executor* FOLLY_NULLABLE executor,
-      const io::ReaderOptions& readerOptions)
-      : BufferedInput(std::move(input), readerOptions.getMemoryPool()),
+      int32_t loadQuantum,
+      int32_t maxCoalesceDistance)
+      : BufferedInput(std::move(input), pool),
         cache_(cache),
         fileNum_(fileNum),
         tracker_(std::move(tracker)),
@@ -96,7 +98,8 @@ class CachedBufferedInput : public BufferedInput {
         ioStats_(std::move(ioStats)),
         executor_(executor),
         fileSize_(input_->getLength()),
-        options_(readerOptions) {}
+        loadQuantum_(loadQuantum),
+        maxCoalesceDistance_(maxCoalesceDistance) {}
 
   ~CachedBufferedInput() override {
     for (auto& load : allCoalescedLoads_) {
@@ -105,7 +108,7 @@ class CachedBufferedInput : public BufferedInput {
   }
 
   std::unique_ptr<SeekableInputStream> enqueue(
-      velox::common::Region region,
+      Region region,
       const StreamIdentifier* FOLLY_NULLABLE si) override;
 
   void load(const LogType) override;
@@ -117,7 +120,7 @@ class CachedBufferedInput : public BufferedInput {
 
   /// Schedules load of 'region' on 'executor_'. Fails silently if no memory or
   /// if shouldPreload() is false.
-  bool prefetch(velox::common::Region region);
+  bool prefetch(Region region);
 
   bool shouldPreload(int32_t numPages = 0) override;
 
@@ -135,13 +138,15 @@ class CachedBufferedInput : public BufferedInput {
   virtual std::unique_ptr<BufferedInput> clone() const override {
     return std::make_unique<CachedBufferedInput>(
         input_,
+        pool_,
         fileNum_,
         cache_,
         tracker_,
         groupId_,
         ioStats_,
         executor_,
-        options_);
+        loadQuantum_,
+        maxCoalesceDistance_);
   }
 
   cache::AsyncDataCache* FOLLY_NONNULL cache() const {
@@ -195,8 +200,9 @@ class CachedBufferedInput : public BufferedInput {
   std::vector<std::shared_ptr<cache::CoalescedLoad>> allCoalescedLoads_;
 
   const uint64_t fileSize_;
+  const int32_t loadQuantum_;
+  const int32_t maxCoalesceDistance_;
   int64_t prefetchSize_{0};
-  io::ReaderOptions options_;
 };
 
 } // namespace facebook::velox::dwio::common

@@ -15,7 +15,6 @@
  */
 
 #include "velox/dwio/dwrf/reader/SelectiveStructColumnReader.h"
-#include "folly/Conv.h"
 #include "velox/dwio/common/ColumnLoader.h"
 #include "velox/dwio/dwrf/reader/SelectiveDwrfReader.h"
 
@@ -27,15 +26,13 @@ SelectiveStructColumnReader::SelectiveStructColumnReader(
     const std::shared_ptr<const TypeWithId>& requestedType,
     const std::shared_ptr<const TypeWithId>& dataType,
     DwrfParams& params,
-    common::ScanSpec& scanSpec,
-    bool isRoot)
+    common::ScanSpec& scanSpec)
     : SelectiveStructColumnReaderBase(
           requestedType,
           dataType,
           params,
-          scanSpec,
-          isRoot) {
-  EncodingKey encodingKey{fileType_->id(), params.flatMapContext().sequence};
+          scanSpec) {
+  EncodingKey encodingKey{nodeType_->id, params.flatMapContext().sequence};
   auto& stripe = params.stripeStreams();
   auto encoding = static_cast<int64_t>(stripe.getEncoding(encodingKey).kind());
   DWIO_ENSURE_EQ(
@@ -50,23 +47,19 @@ SelectiveStructColumnReader::SelectiveStructColumnReader(
   auto& childSpecs = scanSpec.stableChildren();
   for (auto i = 0; i < childSpecs.size(); ++i) {
     auto childSpec = childSpecs[i];
-    if (isChildConstant(*childSpec)) {
-      childSpec->setSubscript(kConstantChildSpecSubscript);
+    if (childSpec->isConstant()) {
       continue;
     }
-    auto childDataType = fileType_->childByName(childSpec->fieldName());
+    auto childDataType = nodeType_->childByName(childSpec->fieldName());
     auto childRequestedType =
         requestedType_->childByName(childSpec->fieldName());
-    auto labels = params.streamLabels().append(folly::to<std::string>(i));
     auto childParams = DwrfParams(
         stripe,
-        labels,
-        params.runtimeStatistics(),
         FlatMapContext{
-            .sequence = encodingKey.sequence(),
+            .sequence = encodingKey.sequence,
             .inMapDecoder = nullptr,
             .keySelectionCallback = nullptr});
-    VELOX_CHECK(cs.shouldReadNode(childRequestedType->id()));
+    VELOX_CHECK(cs.shouldReadNode(childDataType->id));
     addChild(SelectiveDwrfReader::build(
         childRequestedType, childDataType, childParams, *childSpec));
     childSpec->setSubscript(children_.size() - 1);

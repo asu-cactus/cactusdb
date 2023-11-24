@@ -24,25 +24,25 @@ namespace facebook::velox::parquet {
 class IntegerColumnReader : public dwio::common::SelectiveIntegerColumnReader {
  public:
   IntegerColumnReader(
-      const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
-      std::shared_ptr<const dwio::common::TypeWithId> dataType,
+      std::shared_ptr<const dwio::common::TypeWithId> requestedType,
+      const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
       ParquetParams& params,
       common::ScanSpec& scanSpec)
       : SelectiveIntegerColumnReader(
-            requestedType->type(),
+            std::move(requestedType),
             params,
             scanSpec,
-            std::move(dataType)) {}
+            dataType->type) {}
 
   bool hasBulkPath() const override {
-    return !this->fileType().type()->isLongDecimal() &&
-        ((this->fileType().type()->isShortDecimal())
+    return !this->type()->isLongDecimal() &&
+        ((this->type()->isShortDecimal())
              ? formatData_->as<ParquetData>().hasDictionary()
              : true);
   }
 
   void seekToRowGroup(uint32_t index) override {
-    SelectiveIntegerColumnReader::seekToRowGroup(index);
+    SelectiveColumnReader::seekToRowGroup(index);
     scanState().clear();
     readOffset_ = 0;
     formatData_->as<ParquetData>().seekToRowGroup(index);
@@ -59,18 +59,18 @@ class IntegerColumnReader : public dwio::common::SelectiveIntegerColumnReader {
       const uint64_t* /*incomingNulls*/) override {
     auto& data = formatData_->as<ParquetData>();
     VELOX_WIDTH_DISPATCH(
-        parquetSizeOfIntKind(fileType_->type()->kind()),
+        parquetSizeOfIntKind(type_->kind()),
         prepareRead,
         offset,
         rows,
         nullptr);
     readCommon<IntegerColumnReader>(rows);
-    readOffset_ += rows.back() + 1;
   }
 
   template <typename ColumnVisitor>
   void readWithVisitor(RowSet rows, ColumnVisitor visitor) {
     formatData_->as<ParquetData>().readWithVisitor(visitor);
+    readOffset_ += rows.back() + 1;
   }
 };
 

@@ -248,35 +248,38 @@ void VeloxToSubstraitPlanConvertor::toSubstrait(
   // Two cases: 1. aggregateMasksSize = 0, aggregatesSize > aggregateMasksSize.
   // 2. aggregateMasksSize != 0, aggregatesSize = aggregateMasksSize.
   auto aggregates = aggregateNode->aggregates();
+  auto aggregateMasks = aggregateNode->aggregateMasks();
   int64_t aggregatesSize = aggregates.size();
+  int64_t aggregateMasksSize = aggregateMasks.size();
+  VELOX_CHECK_GE(aggregatesSize, aggregateMasksSize);
 
   for (int64_t i = 0; i < aggregatesSize; i++) {
-    const auto& aggregate = aggregates.at(i);
-
     ::substrait::AggregateRel_Measure* aggMeasures =
         aggregateRel->add_measures();
 
+    auto aggMaskExpr = aggregateMasks.at(i);
     // Set substrait filter.
     ::substrait::Expression* aggFilter = aggMeasures->mutable_filter();
-    if (const auto& mask = aggregate.mask) {
+    if (aggMaskExpr.get()) {
       aggFilter->mutable_selection()->MergeFrom(
-          exprConvertor_->toSubstraitExpr(arena, mask, inputType));
+          exprConvertor_->toSubstraitExpr(arena, aggMaskExpr, inputType));
     } else {
       // Set null.
       aggFilter = nullptr;
     }
 
     // Process measure, eg:sum(a).
+    const auto& aggregatesExpr = aggregates.at(i);
     ::substrait::AggregateFunction* aggFunction =
         aggMeasures->mutable_measure();
 
     // Aggregation function name.
-    const auto& funName = aggregate.call->name();
+    const auto& funName = aggregatesExpr->name();
     // set aggFunction args.
 
     std::vector<TypePtr> arguments;
-    arguments.reserve(aggregate.call->inputs().size());
-    for (const auto& expr : aggregate.call->inputs()) {
+    arguments.reserve(aggregatesExpr->inputs().size());
+    for (const auto& expr : aggregatesExpr->inputs()) {
       // If the expr is CallTypedExpr, people need to do project firstly.
       if (auto aggregatesExprInput =
               std::dynamic_pointer_cast<const core::CallTypedExpr>(expr)) {
@@ -295,7 +298,7 @@ void VeloxToSubstraitPlanConvertor::toSubstrait(
     aggFunction->set_function_reference(referenceNumber);
 
     aggFunction->mutable_output_type()->MergeFrom(
-        typeConvertor_->toSubstraitType(arena, aggregate.call->type()));
+        typeConvertor_->toSubstraitType(arena, aggregatesExpr->type()));
 
     // Set substrait aggregate Function phase.
     aggFunction->set_phase(toAggregationPhase(aggregateNode->step()));

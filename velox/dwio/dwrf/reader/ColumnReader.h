@@ -19,11 +19,10 @@
 #include "velox/common/memory/Memory.h"
 #include "velox/dwio/common/ColumnSelector.h"
 #include "velox/dwio/common/TypeWithId.h"
-#include "velox/dwio/common/compression/Compression.h"
 #include "velox/dwio/dwrf/common/ByteRLE.h"
+#include "velox/dwio/dwrf/common/Compression.h"
 #include "velox/dwio/dwrf/common/wrap/dwrf-proto-wrapper.h"
 #include "velox/dwio/dwrf/reader/EncodingContext.h"
-#include "velox/dwio/dwrf/reader/StreamLabels.h"
 #include "velox/dwio/dwrf/reader/StripeStream.h"
 #include "velox/vector/BaseVector.h"
 
@@ -68,7 +67,6 @@ class ColumnReader {
   ColumnReader(
       std::shared_ptr<const dwio::common::TypeWithId> nodeId,
       StripeStreams& stripe,
-      const StreamLabels& streamLabels,
       FlatMapContext flatMapContext = {});
 
   virtual ~ColumnReader() = default;
@@ -113,7 +111,6 @@ class ColumnReader {
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
       const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
       StripeStreams& stripe,
-      const StreamLabels& streamLabels,
       FlatMapContext flatMapContext = {});
 };
 
@@ -124,14 +121,9 @@ class ColumnReaderFactory {
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
       const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
       StripeStreams& stripe,
-      const StreamLabels& streamLabels,
       FlatMapContext flatMapContext = {}) {
     return ColumnReader::build(
-        requestedType,
-        dataType,
-        stripe,
-        streamLabels,
-        std::move(flatMapContext));
+        requestedType, dataType, stripe, std::move(flatMapContext));
   }
 
   static ColumnReaderFactory* baseFactory();

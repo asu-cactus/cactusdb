@@ -27,9 +27,6 @@
 
 namespace facebook::velox::dwrf {
 
-using dwio::common::BufferedOutputStream;
-using dwio::common::PositionRecorder;
-
 template <bool isSigned>
 class RleEncoderV1 : public IntEncoder<isSigned> {
  public:
@@ -313,8 +310,7 @@ class RleDecoderV1 : public dwio::common::IntDecoder<isSigned> {
           toSkip = visitor.process(value, atEnd);
           value += delta;
         } else {
-          value =
-              dwio::common::IntDecoder<isSigned>::template readInt<int64_t>();
+          value = dwio::common::IntDecoder<isSigned>::readLong();
           toSkip = visitor.process(value, atEnd);
         }
         --remainingValues;
@@ -507,7 +503,7 @@ class RleDecoderV1 : public dwio::common::IntDecoder<isSigned> {
       remainingValues = static_cast<uint64_t>(ch) + RLE_MINIMUM_REPEAT;
       repeating = true;
       delta = dwio::common::IntDecoder<isSigned>::readByte();
-      value = dwio::common::IntDecoder<isSigned>::template readInt<int64_t>();
+      value = dwio::common::IntDecoder<isSigned>::readLong();
     }
   }
 

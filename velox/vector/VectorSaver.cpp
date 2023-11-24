@@ -539,15 +539,11 @@ class LoadedVectorShim : public VectorLoader {
  public:
   explicit LoadedVectorShim(VectorPtr vector) : vector_(vector) {}
 
-  void loadInternal(
-      RowSet /*rowSet*/,
-      ValueHook* /*hook*/,
-      vector_size_t resultSize,
-      VectorPtr* result) override {
+  void loadInternal(RowSet /*rowSet*/, ValueHook* /*hook*/, VectorPtr* result)
+      override {
     VELOX_CHECK(
         vector_ != nullptr, "This lazy vector should not have been loaded.");
     *result = vector_;
-    VELOX_CHECK_EQ((*result)->size(), resultSize);
   }
 
  private:
@@ -733,9 +729,6 @@ void saveStdVectorToFile(const std::vector<T>& list, const char* filePath) {
 template void saveStdVectorToFile<column_index_t>(
     const std::vector<column_index_t>& list,
     const char* filePath);
-template void saveStdVectorToFile<int>(
-    const std::vector<int>& list,
-    const char* filePath);
 
 template <typename T>
 std::vector<T> restoreStdVectorFromFile(const char* filePath) {
@@ -750,7 +743,6 @@ std::vector<T> restoreStdVectorFromFile(const char* filePath) {
 
 template std::vector<column_index_t> restoreStdVectorFromFile<column_index_t>(
     const char* filePath);
-template std::vector<int> restoreStdVectorFromFile<int>(const char* filePath);
 
 void saveSelectivityVector(const SelectivityVector& rows, std::ostream& out) {
   auto range = rows.asRange();

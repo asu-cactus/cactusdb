@@ -18,6 +18,7 @@
 #include <chrono>
 #include <optional>
 #include "velox/external/date/date.h"
+#include "velox/type/Date.h"
 #include "velox/type/Timestamp.h"
 #include "velox/type/TimestampConversion.h"
 
@@ -42,20 +43,25 @@ FOLLY_ALWAYS_INLINE std::optional<Timestamp> fromUnixtime(double unixtime) {
   static const int64_t kMax = std::numeric_limits<int64_t>::max();
   static const int64_t kMin = std::numeric_limits<int64_t>::min();
 
+  static const Timestamp kMaxTimestamp(
+      kMax / 1000, kMax % 1000 * kNanosecondsInMillisecond);
+  static const Timestamp kMinTimestamp(
+      kMin / 1000 - 1, (kMin % 1000 + 1000) * kNanosecondsInMillisecond);
+
   // On some compilers if we cast kMax to a double, we can get a number larger
   // than 'kMax'. This will allow 'unixtime' values > 'kMax'. The workaround
   // here is to use uint64_t to represent ('kMax' + 1), which can be represented
   // exactly as double. We then check if the difference with 'unixtime' <= 1.
   if (UNLIKELY((static_cast<uint64_t>(kMax) + 1) - unixtime <= 1)) {
-    return Timestamp::maxMillis();
+    return kMaxTimestamp;
   }
 
   if (UNLIKELY(unixtime <= kMin)) {
-    return Timestamp::minMillis();
+    return kMinTimestamp;
   }
 
   if (UNLIKELY(std::isinf(unixtime))) {
-    return unixtime < 0 ? Timestamp::minMillis() : Timestamp::maxMillis();
+    return unixtime < 0 ? kMinTimestamp : kMaxTimestamp;
   }
 
   auto seconds = std::floor(unixtime);
@@ -70,7 +76,6 @@ enum class DateTimeUnit {
   kMinute,
   kHour,
   kDay,
-  kWeek,
   kMonth,
   kQuarter,
   kYear
@@ -92,15 +97,14 @@ enum class DateTimeUnit {
 // 2020-02-29 + (1 year) = 2021-02-28
 // 2021-02-28 - (1 year) = 2020-02-28
 FOLLY_ALWAYS_INLINE
-int32_t
-addToDate(const int32_t input, const DateTimeUnit unit, const int32_t value) {
+Date addToDate(const Date& date, const DateTimeUnit unit, const int32_t value) {
   // TODO(gaoge): Handle overflow and underflow with 64-bit representation
   if (value == 0) {
-    return input;
+    return date;
   }
 
-  const std::chrono::time_point<std::chrono::system_clock, date::days> inDate{
-      date::days(input)};
+  const std::chrono::time_point<std::chrono::system_clock, date::days> inDate(
+      date::days(date.days()));
   std::chrono::time_point<std::chrono::system_clock, date::days> outDate;
 
   if (unit == DateTimeUnit::kDay) {
@@ -125,7 +129,7 @@ addToDate(const int32_t input, const DateTimeUnit unit, const int32_t value) {
     outDate = date::sys_days{outCalDate};
   }
 
-  return outDate.time_since_epoch().count();
+  return Date(outDate.time_since_epoch().count());
 }
 
 FOLLY_ALWAYS_INLINE Timestamp addToTimestamp(
@@ -150,12 +154,12 @@ FOLLY_ALWAYS_INLINE Timestamp addToTimestamp(
     case DateTimeUnit::kQuarter:
     case DateTimeUnit::kMonth:
     case DateTimeUnit::kDay: {
-      const int32_t inDate =
+      const Date inDate(
           std::chrono::duration_cast<date::days>(inTimestamp.time_since_epoch())
-              .count();
-      const int32_t outDate = addToDate(inDate, unit, value);
+              .count());
+      const Date outDate = addToDate(inDate, unit, value);
 
-      outTimestamp = inTimestamp + date::days(outDate - inDate);
+      outTimestamp = inTimestamp + date::days(outDate.days() - inDate.days());
       break;
     }
     case DateTimeUnit::kHour: {
@@ -298,17 +302,14 @@ FOLLY_ALWAYS_INLINE int64_t diffTimestamp(
 }
 
 FOLLY_ALWAYS_INLINE
-int64_t diffDate(
-    const DateTimeUnit unit,
-    const int32_t fromDate,
-    const int32_t toDate) {
+int64_t
+diffDate(const DateTimeUnit unit, const Date& fromDate, const Date& toDate) {
   if (fromDate == toDate) {
     return 0;
   }
   return diffTimestamp(
       unit,
-      // prevent overflow
-      Timestamp((int64_t)fromDate * util::kSecsPerDay, 0),
-      Timestamp((int64_t)toDate * util::kSecsPerDay, 0));
+      Timestamp(fromDate.days() * util::kSecsPerDay, 0),
+      Timestamp(toDate.days() * util::kSecsPerDay, 0));
 }
 } // namespace facebook::velox::functions

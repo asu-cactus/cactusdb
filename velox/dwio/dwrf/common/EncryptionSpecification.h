@@ -60,22 +60,22 @@ class EncryptionSpecification {
 
   EncryptionSpecification& withRootEncryptionProperties(
       const std::shared_ptr<
-          const dwio::common::encryption::EncryptionProperties>& props);
+          const dwio::common::encryption::EncryptionProperties>& props) {
+    DWIO_ENSURE(props.get(), "props is required");
+    DWIO_ENSURE(
+        fieldSpecs_.empty(),
+        "only one of encryption properties and encrypted fields is allowed");
+    rootProps_ = props;
+    return *this;
+  }
 
   EncryptionSpecification& withEncryptedField(
-      const FieldEncryptionSpecification& spec);
-
-  dwio::common::encryption::EncryptionProvider providerType() const {
-    return providerType_;
-  }
-
-  const std::shared_ptr<const dwio::common::encryption::EncryptionProperties>&
-  rootProps() const {
-    return rootProps_;
-  }
-
-  const std::vector<FieldEncryptionSpecification>& fieldSpecs() const {
-    return fieldSpecs_;
+      const FieldEncryptionSpecification& spec) {
+    DWIO_ENSURE(
+        !rootProps_.get(),
+        "only one of encryption properties and encrypted fields is allowed");
+    fieldSpecs_.push_back(spec);
+    return *this;
   }
 
  private:
@@ -83,6 +83,8 @@ class EncryptionSpecification {
   std::shared_ptr<const dwio::common::encryption::EncryptionProperties>
       rootProps_;
   std::vector<FieldEncryptionSpecification> fieldSpecs_;
+
+  friend class EncryptionHandler;
 };
 
 } // namespace facebook::velox::dwrf::encryption

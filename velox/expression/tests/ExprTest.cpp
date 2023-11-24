@@ -14,11 +14,9 @@
  * limitations under the License.
  */
 
-#include <cstdint>
 #include <exception>
 #include <fstream>
 #include <stdexcept>
-#include <vector>
 #include "glog/logging.h"
 #include "gtest/gtest.h"
 
@@ -26,23 +24,22 @@
 
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/expression/CoalesceExpr.h"
 #include "velox/expression/ConjunctExpr.h"
 #include "velox/expression/ConstantExpr.h"
-#include "velox/expression/SwitchExpr.h"
 #include "velox/functions/Udf.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/functions/prestosql/tests/utils/FunctionBaseTest.h"
+
 #include "velox/parse/Expressions.h"
 #include "velox/parse/ExpressionsParser.h"
 #include "velox/parse/TypeResolver.h"
-#include "velox/vector/SelectivityVector.h"
 #include "velox/vector/VectorSaver.h"
 #include "velox/vector/tests/TestingAlwaysThrowsFunction.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
-namespace facebook::velox::test {
-namespace {
+using namespace facebook::velox;
+using namespace facebook::velox::test;
+
 class ExprTest : public testing::Test, public VectorTestBase {
  protected:
   void SetUp() override {
@@ -78,20 +75,13 @@ class ExprTest : public testing::Test, public VectorTestBase {
     return parsed;
   }
 
-  // T can be ExprSet or ExprSetSimplified.
-  template <typename T = exec::ExprSet>
-  std::unique_ptr<T> compileExpression(const core::TypedExprPtr& expr) {
-    std::vector<core::TypedExprPtr> expressions = {expr};
-    return std::make_unique<T>(std::move(expressions), execCtx_.get());
-  }
-
-  // T can be ExprSet or ExprSetSimplified.
   template <typename T = exec::ExprSet>
   std::unique_ptr<T> compileExpression(
       const std::string& expr,
       const RowTypePtr& rowType) {
-    auto parsedExpression = parseExpression(expr, rowType);
-    return compileExpression<T>(parsedExpression);
+    std::vector<core::TypedExprPtr> expressions = {
+        parseExpression(expr, rowType)};
+    return std::make_unique<T>(std::move(expressions), execCtx_.get());
   }
 
   std::unique_ptr<exec::ExprSet> compileMultiple(
@@ -119,17 +109,14 @@ class ExprTest : public testing::Test, public VectorTestBase {
 
   std::vector<VectorPtr> evaluateMultiple(
       const std::vector<std::string>& texts,
-      const RowVectorPtr& input,
-      const std::optional<SelectivityVector>& rows = std::nullopt) {
+      const RowVectorPtr& input) {
     auto exprSet = compileMultiple(texts, asRowType(input->type()));
 
     exec::EvalCtx context(execCtx_.get(), exprSet.get(), input.get());
+
+    SelectivityVector rows(input->size());
     std::vector<VectorPtr> result(texts.size());
-    if (rows.has_value()) {
-      exprSet->eval(*rows, context, result);
-    } else {
-      exprSet->eval(SelectivityVector{input->size()}, context, result);
-    }
+    exprSet->eval(rows, context, result);
     return result;
   }
 
@@ -182,25 +169,6 @@ class ExprTest : public testing::Test, public VectorTestBase {
     std::vector<VectorPtr> result(1);
     exprSet->eval(rows, context, result);
     return result[0];
-  }
-
-  template <typename T = exec::ExprSet>
-  void evalWithEmptyRows(
-      const std::string& expr,
-      const RowVectorPtr& input,
-      VectorPtr& result,
-      const VectorPtr& expected) {
-    parse::ParseOptions options;
-    auto untyped = parse::parseExpr(expr, options);
-    auto typedExpr = core::Expressions::inferTypes(
-        untyped, asRowType(input->type()), pool());
-
-    SelectivityVector rows{input->size(), false};
-    T exprSet({typedExpr}, execCtx_.get());
-    exec::EvalCtx evalCtx(execCtx_.get(), &exprSet, input.get());
-    std::vector<VectorPtr> results{result};
-    exprSet.eval(rows, evalCtx, results);
-    assertEqualVectors(result, expected);
   }
 
   template <typename T = ComplexType>
@@ -408,20 +376,7 @@ class ExprTest : public testing::Test, public VectorTestBase {
   parse::ParseOptions options_;
 };
 
-class ParameterizedExprTest : public ExprTest,
-                              public testing::WithParamInterface<bool> {
- public:
-  ParameterizedExprTest() {
-    std::unordered_map<std::string, std::string> configData(
-        {{core::QueryConfig::kEnableExpressionEvaluationCache,
-          GetParam() ? "true" : "false"}});
-    queryCtx_ = std::make_shared<core::QueryCtx>(
-        nullptr, core::QueryConfig(std::move(configData)));
-    execCtx_ = std::make_unique<core::ExecCtx>(pool_.get(), queryCtx_.get());
-  }
-};
-
-TEST_P(ParameterizedExprTest, moreEncodings) {
+TEST_F(ExprTest, moreEncodings) {
   const vector_size_t size = 1'000;
   std::vector<std::string> fruits = {"apple", "pear", "grapes", "pineapple"};
   VectorPtr a = makeFlatVector<int64_t>(size, [](auto row) { return row; });
@@ -449,7 +404,7 @@ TEST_P(ParameterizedExprTest, moreEncodings) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, reorder) {
+TEST_F(ExprTest, reorder) {
   constexpr int32_t kTestSize = 20'000;
 
   auto data = makeRowVector(
@@ -475,7 +430,7 @@ TEST_P(ParameterizedExprTest, reorder) {
   }
 }
 
-TEST_P(ParameterizedExprTest, constant) {
+TEST_F(ExprTest, constant) {
   auto exprSet = compileExpression("1 + 2 + 3 + 4", ROW({}));
   auto constExpr = dynamic_cast<exec::ConstantExpr*>(exprSet->expr(0).get());
   ASSERT_NE(constExpr, nullptr);
@@ -493,7 +448,7 @@ TEST_P(ParameterizedExprTest, constant) {
 
 // Tests that the eval does the right thing when it receives a NULL
 // ConstantVector.
-TEST_P(ParameterizedExprTest, constantNull) {
+TEST_F(ExprTest, constantNull) {
   // Need to manually build the expression since our eval doesn't support type
   // promotion, to upgrade the UNKOWN type generated by the NULL constant.
   auto inputExpr =
@@ -530,7 +485,7 @@ TEST_P(ParameterizedExprTest, constantNull) {
 
 // Tests that exprCompiler throws if there's a return type mismatch between what
 // the user specific in ConstantTypedExpr, and the available signatures.
-TEST_P(ParameterizedExprTest, validateReturnType) {
+TEST_F(ExprTest, validateReturnType) {
   auto inputExpr =
       std::make_shared<core::FieldAccessTypedExpr>(INTEGER(), "c0");
 
@@ -563,7 +518,7 @@ struct NoArgFunction {
 };
 } // namespace
 
-TEST_P(ParameterizedExprTest, constantFolding) {
+TEST_F(ExprTest, constantFolding) {
   auto typedExpr = parseExpression("1 + 2", ROW({}));
 
   auto extractConstant = [](exec::Expr* expr) {
@@ -610,7 +565,7 @@ TEST_P(ParameterizedExprTest, constantFolding) {
   }
 }
 
-TEST_P(ParameterizedExprTest, constantArray) {
+TEST_F(ExprTest, constantArray) {
   auto a = makeArrayVector<int32_t>(
       10, [](auto /*row*/) { return 5; }, [](auto row) { return row * 3; });
   auto b = makeArrayVector<int64_t>(
@@ -634,7 +589,7 @@ TEST_P(ParameterizedExprTest, constantArray) {
   ASSERT_TRUE(b->equalValueAt(result[1].get(), 5, 0));
 }
 
-TEST_P(ParameterizedExprTest, constantComplexNull) {
+TEST_F(ExprTest, constantComplexNull) {
   std::vector<core::TypedExprPtr> expressions = {
       std::make_shared<const core::ConstantTypedExpr>(
           ARRAY(BIGINT()), variant::null(TypeKind::ARRAY)),
@@ -666,7 +621,7 @@ TEST_P(ParameterizedExprTest, constantComplexNull) {
   ASSERT_TRUE(result[2]->as<ConstantVector<ComplexType>>()->isNullAt(0));
 }
 
-TEST_P(ParameterizedExprTest, constantScalarEquals) {
+TEST_F(ExprTest, constantScalarEquals) {
   auto a = makeFlatVector<int32_t>(10, [](auto row) { return row; });
   auto b = makeFlatVector<int32_t>(10, [](auto row) { return row; });
   auto c = makeFlatVector<int64_t>(10, [](auto row) { return row; });
@@ -680,7 +635,7 @@ TEST_P(ParameterizedExprTest, constantScalarEquals) {
       *makeConstantExpr<int32_t>(a, 3) == *makeConstantExpr<int32_t>(b, 4));
 }
 
-TEST_P(ParameterizedExprTest, constantComplexEquals) {
+TEST_F(ExprTest, constantComplexEquals) {
   auto testConstantEquals =
       // a and b should be equal but distinct vectors.
       // a and c should be vectors with equal values but different types (e.g.
@@ -778,7 +733,7 @@ class PlusConstantFunction : public exec::VectorFunction {
 
 } // namespace
 
-TEST_P(ParameterizedExprTest, dictionaryAndConstantOverLazy) {
+TEST_F(ExprTest, dictionaryAndConstantOverLazy) {
   exec::registerVectorFunction(
       "plus5",
       PlusConstantFunction::signatures(),
@@ -829,7 +784,7 @@ TEST_P(ParameterizedExprTest, dictionaryAndConstantOverLazy) {
 
 // Test evaluating single-argument vector function on a non-zero row of
 // constant vector.
-TEST_P(ParameterizedExprTest, vectorFunctionOnConstantInput) {
+TEST_F(ExprTest, vectorFunctionOnConstantInput) {
   exec::registerVectorFunction(
       "plus5",
       PlusConstantFunction::signatures(),
@@ -894,7 +849,7 @@ class PlusRandomIntegerFunction : public exec::VectorFunction {
 
 // Test evaluating single-argument non-deterministic vector function on
 // constant vector. The function must be called on each row, not just one.
-TEST_P(ParameterizedExprTest, nonDeterministicVectorFunctionOnConstantInput) {
+TEST_F(ExprTest, nonDeterministicVectorFunctionOnConstantInput) {
   exec::registerVectorFunction(
       "plus_random",
       PlusRandomIntegerFunction::signatures(),
@@ -912,7 +867,7 @@ TEST_P(ParameterizedExprTest, nonDeterministicVectorFunctionOnConstantInput) {
 }
 
 // Verify constant folding doesn't apply to non-deterministic functions.
-TEST_P(ParameterizedExprTest, nonDeterministicConstantFolding) {
+TEST_F(ExprTest, nonDeterministicConstantFolding) {
   exec::registerVectorFunction(
       "plus_random",
       PlusRandomIntegerFunction::signatures(),
@@ -929,7 +884,7 @@ TEST_P(ParameterizedExprTest, nonDeterministicConstantFolding) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, shortCircuit) {
+TEST_F(ExprTest, shortCircuit) {
   vector_size_t size = 4;
 
   auto a = makeConstant(10, size);
@@ -964,7 +919,7 @@ TEST_P(ParameterizedExprTest, shortCircuit) {
 //
 // Currently, this case doesn't work properly, hence, peeling disables CSE
 // optimizations.
-TEST_P(ParameterizedExprTest, cseEncodings) {
+TEST_F(ExprTest, cseEncodings) {
   auto a = makeFlatVector<int32_t>({1, 2, 3, 4, 5});
 
   auto indices = makeIndices({0, 0, 0, 1, 1});
@@ -1025,7 +980,7 @@ class AddSuffixFunction : public exec::VectorFunction {
 // calculating additional rows on second evaluation. This could happen if CSE
 // is a function that uses EvalCtx::moveOrCopyResult which relies on
 // isFinalSelection flag.
-TEST_P(ParameterizedExprTest, csePartialEvaluation) {
+TEST_F(ExprTest, csePartialEvaluation) {
   exec::registerVectorFunction(
       "add_suffix",
       AddSuffixFunction::signatures(),
@@ -1067,7 +1022,7 @@ TEST_P(ParameterizedExprTest, csePartialEvaluation) {
   EXPECT_EQ(4, stats.at("add_suffix").numProcessedRows);
 }
 
-TEST_P(ParameterizedExprTest, csePartialEvaluationWithEncodings) {
+TEST_F(ExprTest, csePartialEvaluationWithEncodings) {
   auto data = makeRowVector(
       {wrapInDictionary(
            makeIndicesInReverse(5),
@@ -1119,7 +1074,7 @@ TEST_P(ParameterizedExprTest, csePartialEvaluationWithEncodings) {
 
 // Checks that vector function registry overwrites if multiple registry
 // attempts are made for the same functions.
-TEST_P(ParameterizedExprTest, overwriteInRegistry) {
+TEST_F(ExprTest, overwriteInRegistry) {
   exec::VectorFunctionMetadata metadata;
   auto inserted = exec::registerVectorFunction(
       "plus5",
@@ -1128,9 +1083,8 @@ TEST_P(ParameterizedExprTest, overwriteInRegistry) {
       metadata,
       true);
   ASSERT_TRUE(inserted);
-  core::QueryConfig config({});
-  auto vectorFunction =
-      exec::getVectorFunction("plus5", {INTEGER()}, {}, config);
+
+  auto vectorFunction = exec::getVectorFunction("plus5", {INTEGER()}, {});
   ASSERT_TRUE(vectorFunction != nullptr);
 
   inserted = exec::registerVectorFunction(
@@ -1141,8 +1095,7 @@ TEST_P(ParameterizedExprTest, overwriteInRegistry) {
       true);
   ASSERT_TRUE(inserted);
 
-  auto vectorFunction2 =
-      exec::getVectorFunction("plus5", {INTEGER()}, {}, config);
+  auto vectorFunction2 = exec::getVectorFunction("plus5", {INTEGER()}, {});
 
   ASSERT_TRUE(vectorFunction2 != nullptr);
   ASSERT_TRUE(vectorFunction != vectorFunction2);
@@ -1165,9 +1118,7 @@ TEST_F(ExprTest, keepInRegistry) {
 
   ASSERT_TRUE(inserted);
 
-  core::QueryConfig config({});
-  auto vectorFunction =
-      exec::getVectorFunction("NonExistingFunction", {}, {}, config);
+  auto vectorFunction = exec::getVectorFunction("NonExistingFunction", {}, {});
 
   inserted = exec::registerVectorFunction(
       "NonExistingFunction",
@@ -1177,11 +1128,10 @@ TEST_F(ExprTest, keepInRegistry) {
       false);
   ASSERT_FALSE(inserted);
   ASSERT_EQ(
-      vectorFunction,
-      exec::getVectorFunction("NonExistingFunction", {}, {}, config));
+      vectorFunction, exec::getVectorFunction("NonExistingFunction", {}, {}));
 }
 
-TEST_P(ParameterizedExprTest, lazyVectors) {
+TEST_F(ExprTest, lazyVectors) {
   vector_size_t size = 1'000;
 
   // Make LazyVector with no nulls
@@ -1208,7 +1158,7 @@ TEST_P(ParameterizedExprTest, lazyVectors) {
 }
 
 // Tests that lazy vectors are not loaded unnecessarily.
-TEST_P(ParameterizedExprTest, lazyLoading) {
+TEST_F(ExprTest, lazyLoading) {
   const vector_size_t size = 1'000;
   VectorPtr vector =
       makeFlatVector<int64_t>(size, [](auto row) { return row % 5; });
@@ -1256,7 +1206,7 @@ TEST_P(ParameterizedExprTest, lazyLoading) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, selectiveLazyLoadingAnd) {
+TEST_F(ExprTest, selectiveLazyLoadingAnd) {
   const vector_size_t size = 1'000;
 
   // Evaluate AND expression on 3 lazy vectors and verify that each
@@ -1285,7 +1235,7 @@ TEST_P(ParameterizedExprTest, selectiveLazyLoadingAnd) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, selectiveLazyLoadingOr) {
+TEST_F(ExprTest, selectiveLazyLoadingOr) {
   const vector_size_t size = 1'000;
 
   // Evaluate OR expression. Columns under OR must be loaded for "all" rows
@@ -1307,7 +1257,7 @@ TEST_P(ParameterizedExprTest, selectiveLazyLoadingOr) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, lazyVectorAccessTwiceWithDifferentRows) {
+TEST_F(ExprTest, lazyVectorAccessTwiceWithDifferentRows) {
   const vector_size_t size = 4;
 
   auto c0 = makeNullableFlatVector<int64_t>({1, 1, 1, std::nullopt});
@@ -1335,7 +1285,7 @@ TEST_P(ParameterizedExprTest, lazyVectorAccessTwiceWithDifferentRows) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, lazyVectorAccessTwiceInDifferentExpressions) {
+TEST_F(ExprTest, lazyVectorAccessTwiceInDifferentExpressions) {
   const vector_size_t size = 1'000;
 
   // Fields referenced by multiple expressions will load lazy vector
@@ -1375,7 +1325,7 @@ TEST_P(ParameterizedExprTest, lazyVectorAccessTwiceInDifferentExpressions) {
   assertEqualVectors(expected, result[1]);
 }
 
-TEST_P(ParameterizedExprTest, selectiveLazyLoadingIf) {
+TEST_F(ExprTest, selectiveLazyLoadingIf) {
   const vector_size_t size = 1'000;
 
   // Evaluate IF expression. Columns under IF must be loaded for "all" rows
@@ -1437,9 +1387,9 @@ class StatefulVectorFunction : public exec::VectorFunction {
 };
 } // namespace
 
-TEST_P(ParameterizedExprTest, statefulVectorFunctions) {
+TEST_F(ExprTest, statefulVectorFunctions) {
   exec::registerStatefulVectorFunction(
-      "TEST_Function",
+      "test_function",
       StatefulVectorFunction::signatures(),
       exec::makeVectorFunctionFactory<StatefulVectorFunction>());
 
@@ -1450,7 +1400,7 @@ TEST_P(ParameterizedExprTest, statefulVectorFunctions) {
   auto row = makeRowVector({a, b});
 
   {
-    auto result = evaluate("TEST_Function(c0)", row);
+    auto result = evaluate("test_function(c0)", row);
 
     auto expected =
         makeFlatVector<int32_t>(size, [](auto /*row*/) { return 1; });
@@ -1458,7 +1408,7 @@ TEST_P(ParameterizedExprTest, statefulVectorFunctions) {
   }
 
   {
-    auto result = evaluate("TEST_Function(c0, c1)", row);
+    auto result = evaluate("test_function(c0, c1)", row);
 
     auto expected =
         makeFlatVector<int32_t>(size, [](auto /*row*/) { return 2; });
@@ -1530,7 +1480,7 @@ bool registerTestUDFs() {
   return once;
 }
 
-TEST_P(ParameterizedExprTest, opaque) {
+TEST_F(ExprTest, opaque) {
   registerTestUDFs();
 
   static constexpr vector_size_t kRows = 100;
@@ -1597,7 +1547,7 @@ TEST_P(ParameterizedExprTest, opaque) {
   EXPECT_EQ(OpaqueState::destructed, 1);
 }
 
-TEST_P(ParameterizedExprTest, switchExpr) {
+TEST_F(ExprTest, switchExpr) {
   vector_size_t size = 1'000;
   auto vector = makeRowVector(
       {makeFlatVector<int32_t>(size, [](auto row) { return row; }),
@@ -1709,7 +1659,7 @@ TEST_P(ParameterizedExprTest, switchExpr) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, swithExprSanityChecks) {
+TEST_F(ExprTest, swithExprSanityChecks) {
   auto vector = makeRowVector({makeFlatVector<int32_t>({1, 2, 3})});
 
   // Then clauses have different types.
@@ -1740,7 +1690,7 @@ TEST_P(ParameterizedExprTest, swithExprSanityChecks) {
       "Expected ROW<c1:UNKNOWN,c2:BIGINT>, but got ROW<c1:BIGINT,c2:UNKNOWN>.");
 }
 
-TEST_P(ParameterizedExprTest, switchExprWithNull) {
+TEST_F(ExprTest, switchExprWithNull) {
   vector_size_t size = 1'000;
   // Build an input with c0 column having nulls at odd row index.
   auto vector = makeRowVector(
@@ -1764,7 +1714,7 @@ TEST_P(ParameterizedExprTest, switchExprWithNull) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, ifWithConstant) {
+TEST_F(ExprTest, ifWithConstant) {
   vector_size_t size = 4;
 
   auto a = makeFlatVector<int32_t>({-1, -2, -3, -4});
@@ -1774,75 +1724,10 @@ TEST_P(ParameterizedExprTest, ifWithConstant) {
   EXPECT_EQ(true, result->as<ConstantVector<bool>>()->valueAt(0));
 }
 
-// Make sure that switch do set nulls for rows that are not evaluated by the
-// switch due to a throw.
-TEST_P(ParameterizedExprTest, switchSetNullsForThrowIndices) {
-  // Build an input with c0 column having nulls at odd row index.
-  registerFunction<TestingAlwaysThrowsFunction, bool, int64_t>(
-      {"always_throws"});
-  registerFunction<TestingThrowsAtOddFunction, bool, int64_t>({"throw_at_odd"});
-
-  auto eval = [&](const std::string& input, auto inputRow) {
-    // Evaluate an expression in a no throw context without using try
-    // expression to verify that the switch sets the nulls. If we use try, try
-    // will add the nulls and we won't be able to check that the switch adds
-    // nulls.
-    auto exprSet = compileMultiple({input}, asRowType(inputRow->type()));
-    exec::EvalCtx context(execCtx_.get(), exprSet.get(), inputRow.get());
-    *context.mutableThrowOnError() = false;
-    std::vector<VectorPtr> results;
-    SelectivityVector rows(inputRow->size());
-    exprSet->eval(rows, context, results);
-    return results[0];
-  };
-
-  // All null.
-  {
-    auto input = vectorMaker_.flatVector<int64_t>({1, 2, 3, 4, 5});
-    auto result =
-        eval("if (always_throws(c0), 7, 1)", vectorMaker_.rowVector({input}));
-    for (int i = 0; i < input->size(); i++) {
-      EXPECT_TRUE(result->isNullAt(i));
-    }
-  }
-  {
-    auto input = vectorMaker_.flatVector<int64_t>({1, 1, 1, 4, 4});
-    auto result = eval(
-        "if(always_throws(c0), row_constructor(1,2), row_constructor(1,2))",
-        vectorMaker_.rowVector({input}));
-    EXPECT_EQ(result->size(), input->size());
-    for (int i = 0; i < input->size(); i++) {
-      EXPECT_TRUE(result->isNullAt(i)) << "index: " << i;
-    }
-  }
-
-  // Null at odd.
-  {
-    auto input = vectorMaker_.flatVector<int64_t>({1, 2, 3, 4, 5});
-    auto result =
-        eval("if(throw_at_odd(c0), 7, 1)", vectorMaker_.rowVector({input}));
-    EXPECT_EQ(result->size(), input->size());
-    for (int i = 0; i < input->size(); i++) {
-      EXPECT_EQ(result->isNullAt(i), input->valueAt(i) % 2);
-    }
-  }
-
-  {
-    auto input = vectorMaker_.flatVector<int64_t>({1, 1, 1, 4, 4});
-    auto result = eval(
-        "if(throw_at_odd(c0), array_constructor(1,2), array_constructor(1,2))",
-        vectorMaker_.rowVector({input}));
-    EXPECT_EQ(result->size(), input->size());
-    for (int i = 0; i < input->size(); i++) {
-      EXPECT_EQ(result->isNullAt(i), input->valueAt(i) % 2);
-    }
-  }
-}
-
 namespace {
 // Testing functions for generating intermediate results in different
 // encodings. The test case passes vectors to these and these
-// functions make constant/dictionary vectors from their arguments
+// functions make constant/dictionary/sequence vectors from their arguments
 
 // Returns the first value of the argument vector wrapped as a constant.
 class TestingConstantFunction : public exec::VectorFunction {
@@ -1902,6 +1787,37 @@ class TestingDictionaryFunction : public exec::VectorFunction {
   }
 };
 
+// Takes a vector  of values and a vector of integer run lengths.
+// Wraps the values in a SequenceVector with the run lengths.
+
+class TestingSequenceFunction : public exec::VectorFunction {
+ public:
+  bool isDefaultNullBehavior() const override {
+    return false;
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& /* outputType */,
+      exec::EvalCtx& context,
+      VectorPtr& result) const override {
+    VELOX_CHECK(rows.isAllSelected());
+    auto lengths = args[1]->as<FlatVector<int32_t>>()->values();
+    result = BaseVector::wrapInSequence(lengths, rows.size(), args[0]);
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    // T, integer -> T
+    return {exec::FunctionSignatureBuilder()
+                .typeVariable("T")
+                .returnType("T")
+                .argumentType("T")
+                .argumentType("integer")
+                .build()};
+  }
+};
+
 // Single-argument deterministic functions always receive their argument
 // vector as flat or constant.
 class TestingSingleArgDeterministicFunction : public exec::VectorFunction {
@@ -1940,15 +1856,21 @@ VELOX_DECLARE_VECTOR_FUNCTION(
     std::make_unique<TestingDictionaryFunction>());
 
 VELOX_DECLARE_VECTOR_FUNCTION(
+    udf_testing_sequence,
+    TestingSequenceFunction::signatures(),
+    std::make_unique<TestingSequenceFunction>());
+
+VELOX_DECLARE_VECTOR_FUNCTION(
     udf_testing_single_arg_deterministic,
     TestingSingleArgDeterministicFunction::signatures(),
     std::make_unique<TestingSingleArgDeterministicFunction>());
 
-TEST_P(ParameterizedExprTest, peelArgs) {
+TEST_F(ExprTest, peelArgs) {
   constexpr int32_t kSize = 100;
   constexpr int32_t kDistinct = 10;
   VELOX_REGISTER_VECTOR_FUNCTION(udf_testing_constant, "testing_constant");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_testing_dictionary, "testing_dictionary");
+  VELOX_REGISTER_VECTOR_FUNCTION(udf_testing_sequence, "testing_sequence");
   VELOX_REGISTER_VECTOR_FUNCTION(
       udf_testing_single_arg_deterministic, "testing_single_arg_deterministic");
 
@@ -1983,6 +1905,16 @@ TEST_P(ParameterizedExprTest, peelArgs) {
   expected32 = makeFlatVector<int32_t>(kSize, [&](int32_t row) {
     return 1 + distinctSource[indicesSource[row]];
   });
+  assertEqualVectors(expected32, result);
+
+  auto lengths = makeFlatVector<int32_t>(lengthSource);
+  result = evaluate(
+      "testing_constant(c0) + testing_sequence(c1, c2)",
+      makeRowVector({allOnes, distincts, lengths}));
+  expected32 = makeFlatVector<int32_t>(kSize, [&](int32_t row) {
+    return 1 + distinctSource[row / (kSize / kDistinct)];
+  });
+
   assertEqualVectors(expected32, result);
 
   // dictionary and single-argument deterministic
@@ -2027,7 +1959,7 @@ VELOX_DECLARE_VECTOR_FUNCTION(
     NullArrayFunction::signatures(),
     std::make_unique<NullArrayFunction>());
 
-TEST_P(ParameterizedExprTest, complexNullOutput) {
+TEST_F(ExprTest, complexNullOutput) {
   VELOX_REGISTER_VECTOR_FUNCTION(udf_null_array, "null_array");
 
   auto row = makeRowVector({makeAllNullFlatVector<int64_t>(1)});
@@ -2041,7 +1973,7 @@ TEST_P(ParameterizedExprTest, complexNullOutput) {
   assertEqualVectors(expectedResults, resultForNulls);
 }
 
-TEST_P(ParameterizedExprTest, rewriteInputs) {
+TEST_F(ExprTest, rewriteInputs) {
   // rewrite one field
   {
     auto alpha =
@@ -2097,7 +2029,7 @@ TEST_P(ParameterizedExprTest, rewriteInputs) {
   }
 }
 
-TEST_P(ParameterizedExprTest, memo) {
+TEST_F(ExprTest, memo) {
   auto base = makeArrayVector<int64_t>(
       1'000,
       [](auto row) { return row % 5 + 1; },
@@ -2134,7 +2066,7 @@ TEST_P(ParameterizedExprTest, memo) {
 // produce null Expr::dictionaryCache_, which leads to a crash in evaluation
 // of subsequent rows. We have fixed that issue with condition and this test
 // is for that.
-TEST_P(ParameterizedExprTest, memoNulls) {
+TEST_F(ExprTest, memoNulls) {
   // Generate 5 rows with null string and 5 with a string.
   auto base = makeFlatVector<StringView>(
       10, [](vector_size_t /*row*/) { return StringView("abcdefg"); });
@@ -2170,7 +2102,7 @@ TEST_P(ParameterizedExprTest, memoNulls) {
 // and applyRows and rows are distinct SelectivityVectors.  This test ensures
 // we're using applyRows and rows in the right places, if not we should see a
 // SIGSEGV.
-TEST_P(ParameterizedExprTest, peelNulls) {
+TEST_F(ExprTest, peelNulls) {
   // Generate 5 distinct values for the c0 column.
   auto c0 = makeFlatVector<StringView>(5, [](vector_size_t row) {
     std::string val = "abcdefg";
@@ -2214,7 +2146,7 @@ TEST_P(ParameterizedExprTest, peelNulls) {
   assertEqualVectors(expectedResult, result);
 }
 
-TEST_P(ParameterizedExprTest, peelLazyDictionaryOverConstant) {
+TEST_F(ExprTest, peelLazyDictionaryOverConstant) {
   auto c0 = makeFlatVector<int64_t>(5, [](vector_size_t row) { return row; });
   auto c0Indices = makeIndices(5, [](auto row) { return row; });
   auto c1 = makeFlatVector<int64_t>(5, [](auto row) { return row; });
@@ -2229,7 +2161,7 @@ TEST_P(ParameterizedExprTest, peelLazyDictionaryOverConstant) {
   assertEqualVectors(c0, result);
 }
 
-TEST_P(ParameterizedExprTest, accessNested) {
+TEST_F(ExprTest, accessNested) {
   // Construct row(row(row(integer))) vector.
   auto base = makeFlatVector<int32_t>({1, 2, 3, 4, 5});
   auto level1 = makeRowVector({base});
@@ -2245,7 +2177,7 @@ TEST_P(ParameterizedExprTest, accessNested) {
   assertEqualVectors(base, result);
 }
 
-TEST_P(ParameterizedExprTest, accessNestedNull) {
+TEST_F(ExprTest, accessNestedNull) {
   // Construct row(row(row(integer))) vector.
   auto base = makeFlatVector<int32_t>({1, 2, 3, 4, 5});
   auto level1 = makeRowVector({base});
@@ -2260,7 +2192,7 @@ TEST_P(ParameterizedExprTest, accessNestedNull) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, accessNestedDictionaryEncoding) {
+TEST_F(ExprTest, accessNestedDictionaryEncoding) {
   // Construct row(row(row(integer))) vector.
   auto base = makeFlatVector<int32_t>({1, 2, 3, 4, 5});
 
@@ -2276,7 +2208,7 @@ TEST_P(ParameterizedExprTest, accessNestedDictionaryEncoding) {
   assertEqualVectors(makeFlatVector<int32_t>({5, 4, 3, 2, 1}), result);
 }
 
-TEST_P(ParameterizedExprTest, accessNestedConstantEncoding) {
+TEST_F(ExprTest, accessNestedConstantEncoding) {
   // Construct row(row(row(integer))) vector.
   VectorPtr base = makeFlatVector<int32_t>({1, 2, 3, 4, 5});
   // Wrap base in constant.
@@ -2291,47 +2223,45 @@ TEST_P(ParameterizedExprTest, accessNestedConstantEncoding) {
   assertEqualVectors(makeConstant(3, 5), result);
 }
 
-TEST_P(ParameterizedExprTest, testEmptyVectors) {
+TEST_F(ExprTest, testEmptyVectors) {
   auto a = makeFlatVector<int32_t>({});
   auto result = evaluate("c0 + c0", makeRowVector({a, a}));
   assertEqualVectors(a, result);
 }
 
-TEST_P(ParameterizedExprTest, subsetOfDictOverLazy) {
+TEST_F(ExprTest, subsetOfDictOverLazy) {
   // We have dictionaries over LazyVector. We load for some indices in
   // the top dictionary. The intermediate dictionaries refer to
   // non-loaded items in the base of the LazyVector, including indices
-  // past its end. We check that end result is a valid vector.
-
-  auto makeLoaded = [&]() {
-    return makeFlatVector<int32_t>(100, [](auto row) { return row; });
-  };
-
+  // past its end. We check that we end up with one level of
+  // dictionary and no dictionaries that are invalid by through
+  // referring to uninitialized/nonexistent positions.
+  auto base = makeFlatVector<int32_t>(100, [](auto row) { return row; });
   auto lazy = std::make_shared<LazyVector>(
       execCtx_->pool(),
       INTEGER(),
       1000,
       std::make_unique<test::SimpleVectorLoader>(
-          [&](auto /*size*/) { return makeLoaded(); }));
+          [base](auto /*size*/) { return base; }));
   auto row = makeRowVector({BaseVector::wrapInDictionary(
       nullptr,
       makeIndices(100, [](auto row) { return row; }),
       100,
+
       BaseVector::wrapInDictionary(
           nullptr,
           makeIndices(1000, [](auto row) { return row; }),
           1000,
           lazy))});
 
+  // We expect a single level of dictionary.
   auto result = evaluate("c0", row);
-  assertEqualVectors(result, makeLoaded());
-  // The loader will ensure that the loaded vector size is 1000.
-  auto base =
-      result->as<DictionaryVector<int32_t>>()->valueVector()->loadedVector();
-  EXPECT_EQ(base->size(), 1000);
+  EXPECT_EQ(result->encoding(), VectorEncoding::Simple::DICTIONARY);
+  EXPECT_EQ(result->valueVector()->encoding(), VectorEncoding::Simple::FLAT);
+  assertEqualVectors(result, base);
 }
 
-TEST_P(ParameterizedExprTest, peeledConstant) {
+TEST_F(ExprTest, peeledConstant) {
   constexpr int32_t kSubsetSize = 80;
   constexpr int32_t kBaseSize = 160;
   auto indices = makeIndices(kSubsetSize, [](auto row) { return row * 2; });
@@ -2354,27 +2284,12 @@ TEST_P(ParameterizedExprTest, peeledConstant) {
   }
 }
 
-namespace {
-// In general simple functions should not throw runtime errors but only user
-// errors, since runtime errors are not suppressed with try. This is needed for
-// the unit test.
-template <typename T>
-struct ThrowRuntimeError {
-  template <typename TResult, typename TInput>
-  FOLLY_ALWAYS_INLINE void call(TResult&, const TInput&) {
-    // Throw runtime error,
-    VELOX_FAIL();
-  }
-};
-} // namespace
-
-TEST_P(ParameterizedExprTest, exceptionContext) {
+TEST_F(ExprTest, exceptionContext) {
   auto data = makeRowVector({
       makeFlatVector<int32_t>({1, 2, 3}),
       makeFlatVector<int32_t>({1, 2, 3}),
   });
 
-  registerFunction<ThrowRuntimeError, int32_t, int32_t>({"runtime_error"});
   registerFunction<TestingAlwaysThrowsFunction, int32_t, int32_t>(
       {"always_throws"});
 
@@ -2416,12 +2331,12 @@ TEST_P(ParameterizedExprTest, exceptionContext) {
       tempDirectory->path;
 
   try {
-    evaluate("runtime_error(c0) + c1", data);
+    evaluate("always_throws(c0) + c1", data);
     FAIL() << "Expected an exception";
   } catch (const VeloxException& e) {
-    ASSERT_EQ("runtime_error(c0)", e.context());
+    ASSERT_EQ("always_throws(c0)", e.context());
     ASSERT_EQ(
-        "plus(runtime_error(c0), c1)", trimInputPath(e.topLevelContext()));
+        "plus(always_throws(c0), c1)", trimInputPath(e.topLevelContext()));
     verifyDataAndSqlPaths(e, data);
   }
 
@@ -2506,7 +2421,7 @@ struct AlwaysThrowsStdExceptionFunction {
 } // namespace
 
 /// Verify exception context for the case when function throws std::exception.
-TEST_P(ParameterizedExprTest, stdExceptionContext) {
+TEST_F(ExprTest, stdExceptionContext) {
   auto data = makeFlatVector<int64_t>({1, 2, 3});
 
   registerFunction<AlwaysThrowsStdExceptionFunction, int64_t, int64_t>(
@@ -2530,7 +2445,7 @@ TEST_P(ParameterizedExprTest, stdExceptionContext) {
 }
 
 /// Verify the output of ConstantExpr::toString().
-TEST_P(ParameterizedExprTest, constantToString) {
+TEST_F(ExprTest, constantToString) {
   auto arrayVector =
       makeNullableArrayVector<float>({{1.2, 3.4, std::nullopt, 5.6}});
 
@@ -2548,37 +2463,7 @@ TEST_P(ParameterizedExprTest, constantToString) {
       exprSet.exprs()[2]->toString());
 }
 
-TEST_P(ParameterizedExprTest, fieldAccessToString) {
-  auto rowType =
-      ROW({"a", "b"},
-          {BIGINT(), ROW({"c", "d"}, {DOUBLE(), ROW({"e"}, {VARCHAR()})})});
-
-  exec::ExprSet exprSet(
-      {std::make_shared<core::FieldAccessTypedExpr>(BIGINT(), "a"),
-       std::make_shared<core::FieldAccessTypedExpr>(
-           DOUBLE(),
-           std::make_shared<core::FieldAccessTypedExpr>(
-               ROW({"c", "d"}, {DOUBLE(), ROW({"e"}, {VARCHAR()})}), "b"),
-           "c"),
-       std::make_shared<core::FieldAccessTypedExpr>(
-           VARCHAR(),
-           std::make_shared<core::FieldAccessTypedExpr>(
-               ROW({"e"}, {VARCHAR()}),
-               std::make_shared<core::FieldAccessTypedExpr>(
-                   ROW({"c", "d"}, {DOUBLE(), ROW({"e"}, {VARCHAR()})}), "b"),
-               "d"),
-           "e")},
-      execCtx_.get());
-
-  ASSERT_EQ("a", exprSet.exprs()[0]->toString());
-  ASSERT_EQ("a", exprSet.exprs()[0]->toString(/*recursive*/ false));
-  ASSERT_EQ("(b).c", exprSet.exprs()[1]->toString());
-  ASSERT_EQ("c", exprSet.exprs()[1]->toString(/*recursive*/ false));
-  ASSERT_EQ("((b).d).e", exprSet.exprs()[2]->toString());
-  ASSERT_EQ("e", exprSet.exprs()[2]->toString(/*recursive*/ false));
-}
-
-TEST_P(ParameterizedExprTest, constantToSql) {
+TEST_F(ExprTest, constantToSql) {
   auto toSql = [&](const variant& value, const TypePtr& type = nullptr) {
     exec::ExprSet exprSet({makeConstantExpr(value, type)}, execCtx_.get());
     auto sql = exprSet.expr(0)->toSql();
@@ -2613,8 +2498,8 @@ TEST_P(ParameterizedExprTest, constantToSql) {
   ASSERT_EQ(toSql(2134456LL), "'2134456'::BIGINT");
   ASSERT_EQ(toSql(variant::null(TypeKind::BIGINT)), "NULL::BIGINT");
 
-  ASSERT_EQ(toSql(18'506, DATE()), "'2020-09-01'::DATE");
-  ASSERT_EQ(toSql(variant::null(TypeKind::INTEGER), DATE()), "NULL::DATE");
+  ASSERT_EQ(toSql(Date(18'506)), "'2020-09-01'::DATE");
+  ASSERT_EQ(toSql(variant::null(TypeKind::DATE)), "NULL::DATE");
 
   ASSERT_EQ(
       toSql(Timestamp(123'456, 123'000)),
@@ -2696,7 +2581,7 @@ TEST_P(ParameterizedExprTest, constantToSql) {
       "NULL::STRUCT(a BOOLEAN, b DOUBLE)");
 }
 
-TEST_P(ParameterizedExprTest, toSql) {
+TEST_F(ExprTest, toSql) {
   auto rowType =
       ROW({"a", "b", "c.d", "e", "f"},
           {INTEGER(),
@@ -2755,11 +2640,6 @@ TEST_P(ParameterizedExprTest, toSql) {
 
   // Function without inputs.
   testToSql("pi()", rowType);
-
-  // Field dereference.
-  rowType = ROW({"o"}, {ROW({"i"}, {std::move(rowType)})});
-  testToSql("o.i", rowType);
-  testToSql("(o).i.e", rowType);
 }
 
 namespace {
@@ -2822,7 +2702,7 @@ class LastRowNullFunc : public exec::VectorFunction {
 };
 } // namespace
 
-TEST_P(ParameterizedExprTest, dictionaryResizedInAddNulls) {
+TEST_F(ExprTest, dictionaryResizedInAddNulls) {
   exec::registerVectorFunction(
       "dict_wrap",
       WrapInDictionaryFunc::signatures(),
@@ -2847,7 +2727,7 @@ TEST_P(ParameterizedExprTest, dictionaryResizedInAddNulls) {
   assertEqualVectors(expected, evalResult);
 }
 
-TEST_P(ParameterizedExprTest, tryWithConstantFailure) {
+TEST_F(ExprTest, tryWithConstantFailure) {
   // This test verifies the behavior of constant peeling on a function wrapped
   // in a TRY.  Specifically the case when the UDF executed on the peeled
   // vector throws an exception on the constant value.
@@ -2874,23 +2754,23 @@ TEST_P(ParameterizedExprTest, tryWithConstantFailure) {
   assertEqualVectors(expectedResult, evalResult);
 }
 
-TEST_P(ParameterizedExprTest, castExceptionContext) {
+TEST_F(ExprTest, castExceptionContext) {
   assertError(
       "cast(c0 as bigint)",
       makeFlatVector<std::string>({"1a"}),
       "cast((c0) as BIGINT)",
       "Same as context.",
-      "Cannot cast VARCHAR '1a' to BIGINT. Non-whitespace character found after end of conversion: \"a\"");
+      "Failed to cast from VARCHAR to BIGINT: 1a. Non-whitespace character found after end of conversion: \"a\"");
 
   assertError(
       "cast(c0 as timestamp)",
       makeFlatVector(std::vector<int8_t>{1}),
       "cast((c0) as TIMESTAMP)",
       "Same as context.",
-      "Cannot cast TINYINT '1' to TIMESTAMP. Conversion to Timestamp is not supported");
+      "Failed to cast from TINYINT to TIMESTAMP: 1. Conversion to Timestamp is not supported");
 }
 
-TEST_P(ParameterizedExprTest, switchExceptionContext) {
+TEST_F(ExprTest, switchExceptionContext) {
   assertError(
       "case c0 when 7 then c0 / 0 else 0 end",
       makeFlatVector(std::vector<int64_t>{7}),
@@ -2899,7 +2779,7 @@ TEST_P(ParameterizedExprTest, switchExceptionContext) {
       "division by zero");
 }
 
-TEST_P(ParameterizedExprTest, conjunctExceptionContext) {
+TEST_F(ExprTest, conjunctExceptionContext) {
   auto data = makeFlatVector<int64_t>(20, [](auto row) { return row; });
 
   assertError(
@@ -2910,7 +2790,7 @@ TEST_P(ParameterizedExprTest, conjunctExceptionContext) {
       "division by zero");
 }
 
-TEST_P(ParameterizedExprTest, lambdaExceptionContext) {
+TEST_F(ExprTest, lambdaExceptionContext) {
   auto array = makeArrayVector<int64_t>(
       10, [](auto /*row*/) { return 5; }, [](auto row) { return row * 3; });
 
@@ -2923,7 +2803,7 @@ TEST_P(ParameterizedExprTest, lambdaExceptionContext) {
 }
 
 /// Verify that null inputs result in exceptions, not crashes.
-TEST_P(ParameterizedExprTest, invalidInputs) {
+TEST_F(ExprTest, invalidInputs) {
   auto rowType = ROW({"a"}, {BIGINT()});
   auto exprSet = compileExpression("a + 5", rowType);
 
@@ -2941,7 +2821,7 @@ TEST_P(ParameterizedExprTest, invalidInputs) {
       VeloxRuntimeError);
 }
 
-TEST_P(ParameterizedExprTest, lambdaWithRowField) {
+TEST_F(ExprTest, lambdaWithRowField) {
   auto array = makeArrayVector<int64_t>(
       10, [](auto /*row*/) { return 5; }, [](auto row) { return row * 3; });
   auto row = makeRowVector(
@@ -2957,7 +2837,7 @@ TEST_P(ParameterizedExprTest, lambdaWithRowField) {
   assertEqualVectors(array, evalResult);
 }
 
-TEST_P(ParameterizedExprTest, flatNoNullsFastPath) {
+TEST_F(ExprTest, flatNoNullsFastPath) {
   auto data = makeRowVector(
       {"a", "b", "c", "d"},
       {
@@ -3062,7 +2942,7 @@ TEST_P(ParameterizedExprTest, flatNoNullsFastPath) {
   ASSERT_FALSE(exprSet->exprs()[0]->supportsFlatNoNullsFastPath());
 }
 
-TEST_P(ParameterizedExprTest, commonSubExpressionWithEncodedInput) {
+TEST_F(ExprTest, commonSubExpressionWithEncodedInput) {
   // This test case does a sanity check of the code path that re-uses
   // precomputed results for common sub-expressions.
   auto data = makeRowVector(
@@ -3121,7 +3001,7 @@ TEST_P(ParameterizedExprTest, commonSubExpressionWithEncodedInput) {
   assertEqualVectors(expectedResults, results);
 }
 
-TEST_P(ParameterizedExprTest, preservePartialResultsWithEncodedInput) {
+TEST_F(ExprTest, preservePartialResultsWithEncodedInput) {
   // This test verifies that partially populated results are preserved when the
   // input contains an encoded vector. We do this by using an if statement where
   // partial results are passed between its children expressions based on the
@@ -3147,7 +3027,7 @@ TEST_P(ParameterizedExprTest, preservePartialResultsWithEncodedInput) {
 // translated set of rows now contains row numbers > N, hence, constant input
 // needs to be resized, otherwise, accessing rows numbers > N will cause an
 // error.
-TEST_P(ParameterizedExprTest, peelIntermediateResults) {
+TEST_F(ExprTest, peelIntermediateResults) {
   auto data = makeRowVector({makeArrayVector<int32_t>({
       {0, 1, 2, 3, 4, 5, 6, 7},
       {0, 1, 2, 33, 4, 5, 6, 7, 8},
@@ -3175,7 +3055,7 @@ TEST_P(ParameterizedExprTest, peelIntermediateResults) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, peelWithDefaultNull) {
+TEST_F(ExprTest, peelWithDefaultNull) {
   // dict vector is [null, "b", null, "a", null, null].
   auto base =
       makeNullableFlatVector<StringView>({"a"_sv, "b"_sv, std::nullopt});
@@ -3194,7 +3074,7 @@ TEST_P(ParameterizedExprTest, peelWithDefaultNull) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, addNulls) {
+TEST_F(ExprTest, addNulls) {
   const vector_size_t kSize = 6;
   SelectivityVector rows{kSize + 1};
   rows.setValid(kSize, false);
@@ -3215,7 +3095,7 @@ TEST_P(ParameterizedExprTest, addNulls) {
   // Test vector that is nullptr.
   {
     VectorPtr vector;
-    exec::EvalCtx::addNulls(rows, rawNulls, context, BIGINT(), vector);
+    exec::Expr::addNulls(rows, rawNulls, context, BIGINT(), vector);
     ASSERT_NE(vector, nullptr);
     checkConstantResult(vector);
   }
@@ -3224,7 +3104,7 @@ TEST_P(ParameterizedExprTest, addNulls) {
   // referenced.
   {
     auto vector = makeNullConstant(TypeKind::BIGINT, kSize - 1);
-    exec::EvalCtx::addNulls(rows, rawNulls, context, BIGINT(), vector);
+    exec::Expr::addNulls(rows, rawNulls, context, BIGINT(), vector);
     checkConstantResult(vector);
   }
 
@@ -3233,7 +3113,7 @@ TEST_P(ParameterizedExprTest, addNulls) {
   {
     auto vector = makeNullConstant(TypeKind::BIGINT, kSize - 1);
     auto another = vector;
-    exec::EvalCtx::addNulls(rows, rawNulls, context, BIGINT(), vector);
+    exec::Expr::addNulls(rows, rawNulls, context, BIGINT(), vector);
     ASSERT_EQ(another->size(), kSize - 1);
     checkConstantResult(vector);
   }
@@ -3241,7 +3121,7 @@ TEST_P(ParameterizedExprTest, addNulls) {
   // Test vector that is a non-null constant vector.
   {
     auto vector = makeConstant<int64_t>(100, kSize - 1);
-    exec::EvalCtx::addNulls(rows, rawNulls, context, BIGINT(), vector);
+    exec::Expr::addNulls(rows, rawNulls, context, BIGINT(), vector);
     ASSERT_TRUE(vector->isFlatEncoding());
     ASSERT_EQ(vector->size(), kSize);
     for (auto i = 0; i < kSize - 1; ++i) {
@@ -3265,7 +3145,7 @@ TEST_P(ParameterizedExprTest, addNulls) {
     VectorPtr vector =
         makeFlatVector<int64_t>(kSize - 1, [](auto row) { return row; });
     auto another = vector;
-    exec::EvalCtx::addNulls(rows, rawNulls, context, BIGINT(), vector);
+    exec::Expr::addNulls(rows, rawNulls, context, BIGINT(), vector);
 
     ASSERT_EQ(another->size(), kSize - 1);
     checkResult(vector);
@@ -3275,7 +3155,7 @@ TEST_P(ParameterizedExprTest, addNulls) {
   {
     VectorPtr vector =
         makeFlatVector<int64_t>(kSize - 1, [](auto row) { return row; });
-    exec::EvalCtx::addNulls(rows, rawNulls, context, BIGINT(), vector);
+    exec::Expr::addNulls(rows, rawNulls, context, BIGINT(), vector);
 
     checkResult(vector);
   }
@@ -3288,7 +3168,7 @@ TEST_P(ParameterizedExprTest, addNulls) {
         makeFlatVector<int64_t>(kSize, [](auto row) { return row; });
     auto slicedVector = vector->slice(0, kSize - 1);
     ASSERT_FALSE(slicedVector->values()->isMutable());
-    exec::EvalCtx::addNulls(rows, rawNulls, context, BIGINT(), slicedVector);
+    exec::Expr::addNulls(rows, rawNulls, context, BIGINT(), slicedVector);
 
     checkResult(slicedVector);
   }
@@ -3307,9 +3187,8 @@ TEST_P(ParameterizedExprTest, addNulls) {
         nullptr,
         kSize,
         std::vector<VectorPtr>({a, b}));
-    row->setNull(kSize - 1, true);
     VectorPtr result = row;
-    exec::EvalCtx::addNulls(rows, rawNulls, context, row->type(), result);
+    exec::Expr::addNulls(rows, rawNulls, context, row->type(), result);
     ASSERT_NE(result.get(), row.get());
     ASSERT_EQ(result->size(), kSize);
     for (int i = 0; i < kSize - 1; ++i) {
@@ -3331,55 +3210,13 @@ TEST_P(ParameterizedExprTest, addNulls) {
     // Vector of size 2 using only the first two indices of sharedIndices.
     auto wrappedVectorSmaller = BaseVector::wrapInDictionary(
         nullptr, sharedIndices, 2, makeFlatVector<int64_t>({1, 2, 3}));
-    exec::EvalCtx::addNulls(
+    exec::Expr::addNulls(
         SelectivityVector(3),
         rawNulls,
         context,
         BIGINT(),
         wrappedVectorSmaller);
     EXPECT_EQ(mutableIndices[2], 1);
-  }
-
-  // Verify that when adding nulls to a RowVector outside of its initial size,
-  // we ensure that newly added rows outside of the initial size that are not
-  // marked as null are still accessible.
-  // The function expects an input vector of size 3 and adds a null at idx 5.
-  auto testRowWithPartialSelection = [&](VectorPtr& rowVector) {
-    ASSERT_EQ(rowVector->size(), 3);
-    SelectivityVector localRows(5, false);
-
-    // We do not set null to row three.
-    localRows.setValid(4, true);
-    localRows.updateBounds();
-    exec::EvalCtx::addNulls(
-        localRows, nullptr, context, rowVector->type(), rowVector);
-    ASSERT_EQ(rowVector->size(), 5);
-
-    rowVector->validate();
-    ASSERT_TRUE(rowVector->isNullAt(3));
-  };
-
-  {
-    // Test row vector with partial selection.
-    VectorPtr rowVector = makeRowVector({makeFlatVector<int32_t>({0, 1, 2})});
-    testRowWithPartialSelection(rowVector);
-  }
-
-  {
-    // Test constant row vector with partial selection.
-    VectorPtr rowVector =
-        makeRowVector({makeFlatVector<int32_t>(std::vector<int32_t>{0})});
-    auto constant = BaseVector::wrapInConstant(3, 0, rowVector);
-    testRowWithPartialSelection(constant);
-  }
-
-  {
-    // Test dictionary row vector with partial selection.
-    VectorPtr rowVector =
-        makeRowVector({makeFlatVector<int32_t>(std::vector<int32_t>{0})});
-    auto dictionary = BaseVector::wrapInDictionary(
-        nullptr, makeIndices({0, 0, 0}), 3, rowVector);
-    testRowWithPartialSelection(dictionary);
   }
 }
 
@@ -3402,7 +3239,7 @@ class NoOpVectorFunction : public exec::VectorFunction {
 };
 } // namespace
 
-TEST_P(ParameterizedExprTest, applyFunctionNoResult) {
+TEST_F(ExprTest, applyFunctionNoResult) {
   auto data = makeRowVector({
       makeFlatVector<int32_t>({1, 2, 3}),
   });
@@ -3435,7 +3272,7 @@ TEST_P(ParameterizedExprTest, applyFunctionNoResult) {
       "Function neither returned results nor threw exception.");
 }
 
-TEST_P(ParameterizedExprTest, mapKeysAndValues) {
+TEST_F(ExprTest, mapKeysAndValues) {
   // Verify that the right size of maps and keys arrays are created. This is
   // done by executing eval with a selectivity vector larger than the size of
   // the input map but with the extra trailing rows marked invalid. Finally, if
@@ -3463,7 +3300,7 @@ TEST_P(ParameterizedExprTest, mapKeysAndValues) {
   ASSERT_NO_THROW(exprSet->eval(rows, context, result));
 }
 
-TEST_P(ParameterizedExprTest, maskErrorByNull) {
+TEST_F(ExprTest, maskErrorByNull) {
   // Checks that errors in arguments of null-propagating functions are ignored
   // for rows with at least one null.
   auto data = makeRowVector(
@@ -3541,7 +3378,7 @@ TEST_P(ParameterizedExprTest, maskErrorByNull) {
 
 /// Test recursive constant peeling: in general expression evaluation first,
 /// then in cast.
-TEST_P(ParameterizedExprTest, constantWrap) {
+TEST_F(ExprTest, constantWrap) {
   auto data = makeRowVector({
       makeNullableFlatVector<int64_t>({std::nullopt, 1, 25, 3}),
       makeConstant("5", 4),
@@ -3552,7 +3389,7 @@ TEST_P(ParameterizedExprTest, constantWrap) {
       makeNullableFlatVector<bool>({std::nullopt, true, false, true}), result);
 }
 
-TEST_P(ParameterizedExprTest, stdExceptionInVectorFunction) {
+TEST_F(ExprTest, stdExceptionInVectorFunction) {
   exec::registerVectorFunction(
       "always_throws_vector_function",
       TestingAlwaysThrowsVectorFunction::signatures(),
@@ -3571,7 +3408,7 @@ TEST_P(ParameterizedExprTest, stdExceptionInVectorFunction) {
       TestingAlwaysThrowsVectorFunction::kStdErrorMessage);
 }
 
-TEST_P(ParameterizedExprTest, cseUnderTry) {
+TEST_F(ExprTest, cseUnderTry) {
   auto input = makeRowVector({
       makeNullableFlatVector<int8_t>({31, 3, 31, 31, 2, std::nullopt}),
   });
@@ -3611,7 +3448,7 @@ TEST_P(ParameterizedExprTest, cseUnderTry) {
       result);
 }
 
-TEST_P(ParameterizedExprTest, conjunctUnderTry) {
+TEST_F(ExprTest, conjunctUnderTry) {
   auto input = makeRowVector({
       makeFlatVector<StringView>({"a"_sv, "b"_sv}),
       makeFlatVector<bool>({true, true}),
@@ -3628,27 +3465,9 @@ TEST_P(ParameterizedExprTest, conjunctUnderTry) {
   auto expected =
       BaseVector::createNullConstant(ARRAY(BOOLEAN()), input->size(), pool());
   assertEqualVectors(expected, result);
-
-  // Test conjunct in switch in coalesce where there are errors came from
-  // coalesce at rows 50--99 while conjunct is evlauated on rows 31--49.
-  // Conjunct should not clear the errors from coalesce.
-  input = makeRowVector({
-      makeFlatVector<int64_t>(
-          100, [](auto row) { return row; }, [](auto row) { return row < 50; }),
-      makeFlatVector<bool>(100, [](auto row) { return row > 30; }),
-      makeFlatVector<bool>(100, [](auto row) { return row > 20; }),
-      makeConstant<int64_t>(0, 100),
-  });
-
-  result = evaluate("try(coalesce(c0 / c3 > 0, switch(c1, c1 or c2)))", input);
-  expected = makeFlatVector<bool>(
-      100,
-      [](auto /*row*/) { return true; },
-      [](auto row) { return row >= 50 || row <= 30; });
-  assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, flatNoNullsFastPathWithCse) {
+TEST_F(ExprTest, flatNoNullsFastPathWithCse) {
   // Test CSE with flat-no-nulls fast path.
   auto input = makeRowVector({
       makeFlatVector<int64_t>({1, 2, 3, 4, 5}),
@@ -3671,7 +3490,7 @@ TEST_P(ParameterizedExprTest, flatNoNullsFastPathWithCse) {
   EXPECT_EQ(5, stats.at("plus").numProcessedRows);
 }
 
-TEST_P(ParameterizedExprTest, cseOverLazyDictionary) {
+TEST_F(ExprTest, cseOverLazyDictionary) {
   auto input = makeRowVector({
       makeConstant<int64_t>(10, 5),
       std::make_shared<LazyVector>(
@@ -3697,7 +3516,7 @@ TEST_P(ParameterizedExprTest, cseOverLazyDictionary) {
   assertEqualVectors(expected, result);
 }
 
-TEST_P(ParameterizedExprTest, cseOverConstant) {
+TEST_F(ExprTest, cseOverConstant) {
   auto input = makeRowVector({
       makeConstant<int64_t>(123, 5),
       makeConstant<int64_t>(-11, 5),
@@ -3712,7 +3531,7 @@ TEST_P(ParameterizedExprTest, cseOverConstant) {
   EXPECT_EQ(5, stats.at("plus").numProcessedRows);
 }
 
-TEST_P(ParameterizedExprTest, cseOverDictionary) {
+TEST_F(ExprTest, cseOverDictionary) {
   auto indices = makeIndicesInReverse(5);
   auto input = makeRowVector({
       wrapInDictionary(indices, makeFlatVector<int64_t>({1, 2, 3, 4, 5})),
@@ -3735,7 +3554,7 @@ TEST_P(ParameterizedExprTest, cseOverDictionary) {
   EXPECT_EQ(5, stats.at("plus").numProcessedRows);
 }
 
-TEST_P(ParameterizedExprTest, cseOverDictionaryOverConstant) {
+TEST_F(ExprTest, cseOverDictionaryOverConstant) {
   auto indices = makeIndicesInReverse(5);
   auto input = makeRowVector({
       wrapInDictionary(indices, makeFlatVector<int64_t>({1, 2, 3, 4, 5})),
@@ -3758,7 +3577,7 @@ TEST_P(ParameterizedExprTest, cseOverDictionaryOverConstant) {
   EXPECT_EQ(5, stats.at("plus").numProcessedRows);
 }
 
-TEST_P(ParameterizedExprTest, cseOverDictionaryAcrossMultipleExpressions) {
+TEST_F(ExprTest, cseOverDictionaryAcrossMultipleExpressions) {
   // This test verifies that CSE across multiple expressions are evaluated
   // correctly, that is, make sure peeling is done before attempting to re-use
   // computed results from CSE.
@@ -3829,7 +3648,7 @@ TEST_P(ParameterizedExprTest, cseOverDictionaryAcrossMultipleExpressions) {
   }
 }
 
-TEST_P(ParameterizedExprTest, smallerWrappedBaseVector) {
+TEST_F(ExprTest, smallerWrappedBaseVector) {
   // This test verifies that in the case that wrapping the
   // result of a peeledResult (i.e result which is computed after
   // peeling input) results in a smaller result than baseVector,
@@ -3884,7 +3703,7 @@ TEST_P(ParameterizedExprTest, smallerWrappedBaseVector) {
       result[0]);
 }
 
-TEST_P(ParameterizedExprTest, nullPropagation) {
+TEST_F(ExprTest, nullPropagation) {
   auto singleString = parseExpression(
       "substr(c0, 1, if (length(c0) > 2, length(c0) - 1, 0))",
       ROW({"c0"}, {VARCHAR()}));
@@ -3893,17 +3712,9 @@ TEST_P(ParameterizedExprTest, nullPropagation) {
       ROW({"c0", "c1"}, {VARCHAR(), VARCHAR()}));
   EXPECT_TRUE(propagatesNulls(singleString));
   EXPECT_FALSE(propagatesNulls(twoStrings));
-
-  // Try will call propagateNulls on its child, that should not
-  // redo the computation.
-  auto switchInTry = parseExpression(
-      "try(switch(subscript(c0, array_min(c1)), FALSE, FALSE,"
-      "FALSE, is_null('6338838335202944843'::BIGINT)))",
-      ROW({"c0", "c1"}, {ARRAY({BOOLEAN()}), ARRAY({BIGINT()})}));
-  EXPECT_FALSE(propagatesNulls(switchInTry));
 }
 
-TEST_P(ParameterizedExprTest, peelingWithSmallerConstantInput) {
+TEST_F(ExprTest, peelingWithSmallerConstantInput) {
   // This test ensures that when a dictionary-encoded vector is peeled together
   // with a constant vector whose size is smaller than the corresponding
   // selected rows of the dictionary base vector, the subsequent evaluation on
@@ -3922,7 +3733,7 @@ TEST_P(ParameterizedExprTest, peelingWithSmallerConstantInput) {
   assertEqualVectors(c1, result);
 }
 
-TEST_P(ParameterizedExprTest, ifWithLazyNulls) {
+TEST_F(ExprTest, ifWithLazyNulls) {
   // Makes a null-propagating switch. Evaluates it so that null propagation
   // masks out errors.
   constexpr int32_t kSize = 100;
@@ -4023,7 +3834,7 @@ TEST_F(ExprTest, commonSubExpressionWithPeeling) {
   }
 }
 
-TEST_P(ParameterizedExprTest, dictionaryOverLoadedLazy) {
+TEST_F(ExprTest, dictionaryOverLoadedLazy) {
   // This test verifies a corner case where peeling does not go past a loaded
   // lazy layer which caused wrong set of inputs being passed to shared
   // sub-expressions evaluation.
@@ -4075,7 +3886,7 @@ TEST_P(ParameterizedExprTest, dictionaryOverLoadedLazy) {
   assertEqualVectors(result[1], resultFromLazy);
 }
 
-TEST_P(ParameterizedExprTest, dictionaryResizeWithIndicesReset) {
+TEST_F(ExprTest, dictionaryResizeWithIndicesReset) {
   // This test verifies a fuzzer failure that was due to resizeDictionary not
   // initializing indices of new rows to 0.
   auto indices = makeIndices({0, 0, 4, 4, 0});
@@ -4090,323 +3901,3 @@ TEST_P(ParameterizedExprTest, dictionaryResizeWithIndicesReset) {
   auto expected = makeNullableFlatVector<int64_t>({2, 2, 1});
   assertEqualVectors(expected, result);
 }
-
-TEST_P(ParameterizedExprTest, noSelectedRows) {
-  VectorPtr result = makeFlatVector<int64_t>({7, 8, 9});
-  auto expected = makeFlatVector<int64_t>({7, 8, 9});
-
-  // Test evalFlatNoNulls code path.
-  {
-    auto input = makeRowVector(
-        {makeFlatVector<int64_t>({1, 2, 3}),
-         makeFlatVector<int64_t>({4, 5, 6})});
-    evalWithEmptyRows("c0 + c1", input, result, expected);
-  }
-
-  // Test regular evaluation path.
-  {
-    auto input = makeRowVector(
-        {makeNullableFlatVector<int64_t>({1, std::nullopt, 3}),
-         makeNullableFlatVector<int64_t>({std::nullopt, 5, 6})});
-    evalWithEmptyRows("c0 + c1", input, result, expected);
-  }
-
-  // Test simplified evaluation path.
-  {
-    auto input = makeRowVector(
-        {makeNullableFlatVector<int64_t>({1, std::nullopt, 3}),
-         makeNullableFlatVector<int64_t>({std::nullopt, 5, 6})});
-    evalWithEmptyRows<exec::ExprSetSimplified>(
-        "c0 + c1", input, result, expected);
-  }
-}
-
-TEST_P(ParameterizedExprTest, multiplyReferencedConstantField) {
-  auto data = makeRowVector(
-      {makeFlatVector<bool>({true, false, true, false}),
-       makeConstantArray<int64_t>(4, {1, 2, 3})});
-
-  auto result = evaluate("if(c0, c1, c1)", data);
-  auto expected = makeConstantArray<int64_t>(4, {1, 2, 3});
-  assertEqualVectors(expected, result);
-}
-
-TEST_P(ParameterizedExprTest, dereference) {
-  // Make a vector of Row<Row<int64_t>> where the middle-layer has dictionary
-  // over constant encoding. Evaluate nested dereference c0.d0.f0 on it so that
-  // the outer dereference expression (i.e., dereference of f0) receive
-  // dictionary-encoded input without peeling.
-  auto child = makeFlatVector<int64_t>({1, 2});
-  auto d0 = makeRowVector({"f0"}, {child});
-  auto constantD0 = BaseVector::wrapInConstant(6, 0, d0);
-  auto indices = makeIndices({0, 1, 2, 3, 4, 5});
-  auto nulls = makeNulls(6, [](auto row) { return row == 5; });
-  auto dictionaryD0 =
-      BaseVector::wrapInDictionary(nulls, indices, 6, constantD0);
-  auto c0 = makeRowVector({"d0"}, {dictionaryD0});
-  auto input = makeRowVector({"c0"}, {c0});
-
-  // Skip row 4 during evaluation. FieldReference should not have errors dealing
-  // with this situation.
-  SelectivityVector rows(input->size(), true);
-  rows.setValid(4, false);
-  rows.updateBounds();
-
-  auto results = evaluateMultiple({"(c0).d0.f0"}, input, rows);
-  BaseVector::flattenVector(results[0]);
-  auto flatResult = results[0]->asFlatVector<int64_t>();
-  EXPECT_EQ(flatResult->valueAt(0), 1);
-  EXPECT_EQ(flatResult->valueAt(1), 1);
-  EXPECT_EQ(flatResult->valueAt(2), 1);
-  EXPECT_EQ(flatResult->valueAt(3), 1);
-  EXPECT_TRUE(flatResult->isNullAt(5));
-
-  // Test dereferencing a field vector that is shorter than the struct. Evaluate
-  // nested dereference so that the outer dereference expression receives
-  // constant-encoded input.
-  auto rowType = ROW({"f0"}, {BIGINT()});
-  constantD0 = BaseVector::createNullConstant(rowType, 6, pool());
-  c0 = makeRowVector({"d0"}, {constantD0});
-  auto result = evaluate("(c0).d0.f0", makeRowVector({c0}));
-  auto expected = makeNullConstant(TypeKind::BIGINT, 6);
-  assertEqualVectors(expected, result);
-}
-
-TEST_P(ParameterizedExprTest, inputFreeFieldReferenceMetaData) {
-  auto exprSet = compileExpression("c0", {ROW({"c0"}, {INTEGER()})});
-  auto expr = exprSet->expr(0);
-  EXPECT_EQ(expr->distinctFields().size(), 1);
-  EXPECT_EQ((void*)expr->distinctFields()[0], expr.get());
-
-  EXPECT_TRUE(expr->propagatesNulls());
-  EXPECT_TRUE(expr->isDeterministic());
-}
-
-TEST_P(ParameterizedExprTest, extractSubfields) {
-  auto rowType = ROW({
-      {"c0",
-       ARRAY(ROW({
-           {"c0c0", MAP(BIGINT(), BIGINT())},
-           {"c0c1", MAP(VARCHAR(), BIGINT())},
-       }))},
-      {"c1", ARRAY(BIGINT())},
-      {"c2", ARRAY(ARRAY(BIGINT()))},
-      {"c3", BIGINT()},
-  });
-  auto validate = [&](const std::string& expr,
-                      const std::vector<std::string>& expected) {
-    SCOPED_TRACE(expr);
-    auto exprSet = compileExpression(expr, rowType);
-    std::vector<std::string> actual;
-    for (auto& subfield : exprSet->expr(0)->extractSubfields()) {
-      actual.push_back(subfield.toString());
-    }
-    std::sort(actual.begin(), actual.end());
-    auto newEnd = std::unique(actual.begin(), actual.end());
-    actual.erase(newEnd, actual.end());
-    ASSERT_EQ(actual, expected);
-  };
-  validate("c0[1].c0c0[0] > c1[1]", {"c0[1].c0c0[0]", "c1[1]"});
-  validate("c0[1].c0c1['foo'] > 0", {"c0[1].c0c1[\"foo\"]"});
-  validate("c0[1].c0c0[c1[1]] > 0", {"c0[1].c0c0", "c1[1]"});
-  validate("element_at(c1, -1)", {"c1"});
-  validate("transform(c0, x -> x.c0c0[0] + c1[1])", {"c0", "c1[1]"});
-  validate("transform(c0, c1 -> c1.c0c0[0])", {"c0"});
-  validate("reduce(c1, 0, (c0, c3) -> c0 + c3, c2 -> c2)", {"c1"});
-  validate("reduce(c1, 0, (c0, c3) -> c0 + c3, c2 -> c2) + c3", {"c1", "c3"});
-  validate(
-      "transform(c2, c0 -> reduce(c0, 0, (c0, c2) -> c0 + c2, c0 -> c0 + c1[1]) + c0[1])",
-      {"c1[1]", "c2"});
-}
-auto makeRow = [](const std::string& fieldName) {
-  return fmt::format(
-      "cast(row_constructor(1) as struct({} BOOLEAN))", fieldName);
-};
-
-TEST_P(ParameterizedExprTest, extractSubfieldsWithDereference) {
-  // Tests extracting subfields from expressions using DeferenceTypedExpr to
-  // access fields without the field names initialized (all empty string).  In
-  // this case, the field's parent should be extracted.
-  std::vector<core::TypedExprPtr> expr = {
-      std::make_shared<core::DereferenceTypedExpr>(
-          REAL(),
-          std::make_shared<core::FieldAccessTypedExpr>(
-              ROW({{"", DOUBLE()}, {"", REAL()}, {"", BIGINT()}}),
-              std::make_shared<core::InputTypedExpr>(ROW(
-                  {{"c0",
-                    ROW({{"", DOUBLE()}, {"", REAL()}, {"", BIGINT()}})}})),
-              "c0"),
-          1)};
-
-  auto exprSet =
-      std::make_unique<exec::ExprSet>(std::move(expr), execCtx_.get());
-  auto subfields = exprSet->expr(0)->extractSubfields();
-
-  ASSERT_EQ(subfields.size(), 1);
-  ASSERT_EQ(subfields[0].toString(), "c0");
-}
-
-TEST_P(ParameterizedExprTest, lazyHandlingByDereference) {
-  // Ensure FieldReference handles an input which has an encoding over a lazy
-  // vector. Trying to access the inner flat vector of an input in the form
-  // Row(Dict(Lazy(Row(Flat)))) will ensure an intermediate FieldReference
-  // expression in the tree recieves an input of the form Dict(Lazy(Row(Flat))).
-  auto base = makeRowVector(
-      {makeNullableFlatVector<int32_t>({1, std::nullopt, 3, 4, 5})});
-  VectorPtr col1 = std::make_shared<LazyVector>(
-      execCtx_->pool(),
-      base->type(),
-      5,
-      std::make_unique<test::SimpleVectorLoader>(
-          [base](auto /*size*/) { return base; }));
-  auto indices = makeIndicesInReverse(5);
-  col1 = wrapInDictionary(indices, 5, col1);
-  col1 = makeRowVector({col1});
-  auto result = evaluate("(c0).c0.c0", makeRowVector({col1}));
-}
-
-TEST_P(ParameterizedExprTest, switchRowInputTypesAreTheSame) {
-  assertErrorSimplified(
-      fmt::format("switch(c0, {},  {})", makeRow("f1"), makeRow("f2")),
-      makeFlatVector<bool>(1),
-      "Else clause of a SWITCH statement must have the same type as 'then' clauses. Expected ROW<f1:BOOLEAN>, but got ROW<f2:BOOLEAN>.");
-
-  assertErrorSimplified(
-      fmt::format("if(c0, {},  {})", makeRow("f1"), makeRow("f2")),
-      {makeFlatVector<bool>(1)},
-      "Else clause of a SWITCH statement must have the same type as 'then' clauses. Expected ROW<f1:BOOLEAN>, but got ROW<f2:BOOLEAN>.");
-
-  {
-    auto condition = compileExpression("c0", {ROW({"c0"}, {BOOLEAN()})});
-    auto thenBranch = compileExpression(makeRow("f1"), {});
-    auto elseBranch = compileExpression(makeRow("f1"), {});
-    try {
-      exec::SwitchExpr switchExpr(
-          ROW({"c0"}, {BOOLEAN()}),
-          {condition->expr(0), thenBranch->expr(0), elseBranch->expr(0)},
-          false);
-      EXPECT_TRUE(false) << "Expected an error";
-    } catch (VeloxException& e) {
-      EXPECT_EQ(
-          "Switch expression type different than then clause. Expected ROW<f1:BOOLEAN> but got Actual ROW<c0:BOOLEAN>.",
-          e.message());
-    }
-  }
-}
-
-TEST_P(ParameterizedExprTest, coalesceRowInputTypesAreTheSame) {
-  auto makeRow = [](const std::string& fieldName) {
-    return fmt::format(
-        "cast(row_constructor(1) as struct({} BOOLEAN))", fieldName);
-  };
-
-  assertErrorSimplified(
-      fmt::format("coalesce({},  {})", makeRow("f1"), makeRow("f2")),
-      makeFlatVector<bool>(1),
-      "Inputs to coalesce must have the same type. Expected ROW<f1:BOOLEAN>, but got ROW<f2:BOOLEAN>.");
-
-  {
-    auto expr1 = compileExpression(makeRow("f1"), {});
-    auto expr2 = compileExpression(makeRow("f1"), {});
-    try {
-      exec::CoalesceExpr coalesceExpr(
-          ROW({"c0"}, {BOOLEAN()}), {expr1->expr(0), expr2->expr(0)}, false);
-      EXPECT_TRUE(false) << "Expected an error";
-    } catch (VeloxException& e) {
-      EXPECT_EQ(
-          "Coalesce expression type different than its inputs. Expected ROW<f1:BOOLEAN> but got Actual ROW<c0:BOOLEAN>.",
-          e.message());
-    }
-  }
-
-  {
-    // Check that operator==() of CallTypedExpr, FieldAccessTypedExpr,
-    // ConcatTypedExpr, and LambdaTypedExpr returns false when result types are
-    // different.
-    auto call1 = std::make_shared<const core::CallTypedExpr>(
-        ROW({"row_field0"}, {BIGINT()}),
-        std::vector<core::TypedExprPtr>{
-            std::make_shared<const core::FieldAccessTypedExpr>(BIGINT(), "c0")},
-        "foo");
-    auto call2 = std::make_shared<const core::CallTypedExpr>(
-        ROW({""}, {BIGINT()}),
-        std::vector<core::TypedExprPtr>{
-            std::make_shared<const core::FieldAccessTypedExpr>(BIGINT(), "c0")},
-        "foo");
-    ASSERT_FALSE(*call1 == *call2);
-
-    auto fieldAccess1 = std::make_shared<const core::FieldAccessTypedExpr>(
-        ROW({"row_field0"}, {BIGINT()}), "c0");
-    auto fieldAccess2 = std::make_shared<const core::FieldAccessTypedExpr>(
-        ROW({""}, {BIGINT()}), "c0");
-    ASSERT_FALSE(*fieldAccess1 == *fieldAccess2);
-
-    auto concat1 = std::make_shared<const core::ConcatTypedExpr>(
-        std::vector<std::string>{"row_field0"},
-        std::vector<core::TypedExprPtr>{
-            std::make_shared<const core::FieldAccessTypedExpr>(
-                BIGINT(), "c0")});
-    auto concat2 = std::make_shared<const core::ConcatTypedExpr>(
-        std::vector<std::string>{""},
-        std::vector<core::TypedExprPtr>{
-            std::make_shared<const core::FieldAccessTypedExpr>(
-                BIGINT(), "c0")});
-    ASSERT_FALSE(*concat1 == *concat2);
-
-    auto lambda1 = std::make_shared<const core::LambdaTypedExpr>(
-        ROW({"c0"}, {BIGINT()}), call1);
-    auto lambda2 = std::make_shared<const core::LambdaTypedExpr>(
-        ROW({"c0"}, {BIGINT()}), call2);
-    ASSERT_FALSE(*lambda1 == *lambda2);
-  }
-
-  {
-    // cast(concat(c0) as row(row_field0)).row_field0 + coalesce(c1,
-    // concat(c0)).row_field0. The result type of the first concat is
-    // Row<"":bigint> while the result type of the second concat is
-    // Row<"row_field0":bigint>. This is a valid expression, so the expression
-    // compilation should not throw in this situation.
-    core::TypedExprPtr concat = std::make_shared<const core::ConcatTypedExpr>(
-        std::vector<std::string>{"row_field0"},
-        std::vector<core::TypedExprPtr>{
-            std::make_shared<const core::FieldAccessTypedExpr>(
-                BIGINT(), "c0")});
-    core::TypedExprPtr coalesce = std::make_shared<const core::CallTypedExpr>(
-        ROW({"row_field0"}, {BIGINT()}),
-        std::vector<core::TypedExprPtr>{
-            std::make_shared<const core::FieldAccessTypedExpr>(
-                ROW({"row_field0"}, {BIGINT()}), "c1"),
-            concat},
-        "coalesce");
-    core::TypedExprPtr dereference =
-        std::make_shared<const core::FieldAccessTypedExpr>(
-            BIGINT(), coalesce, "row_field0");
-    core::TypedExprPtr concat2 = std::make_shared<const core::ConcatTypedExpr>(
-        std::vector<std::string>{""},
-        std::vector<core::TypedExprPtr>{
-            std::make_shared<const core::FieldAccessTypedExpr>(
-                BIGINT(), "c0")});
-    ASSERT_FALSE(*concat == *concat2);
-    core::TypedExprPtr cast = std::make_shared<const core::CallTypedExpr>(
-        ROW({"row_field0"}, {BIGINT()}),
-        std::vector<core::TypedExprPtr>{concat2},
-        "cast");
-    core::TypedExprPtr dereference2 =
-        std::make_shared<const core::FieldAccessTypedExpr>(
-            BIGINT(), cast, "row_field0");
-    core::TypedExprPtr plus = std::make_shared<const core::CallTypedExpr>(
-        BIGINT(),
-        std::vector<core::TypedExprPtr>{dereference2, dereference},
-        "plus");
-
-    ASSERT_NO_THROW(compileExpression(plus));
-  }
-}
-
-VELOX_INSTANTIATE_TEST_SUITE_P(
-    ExprTest,
-    ParameterizedExprTest,
-    testing::ValuesIn({false, true}));
-
-} // namespace
-} // namespace facebook::velox::test

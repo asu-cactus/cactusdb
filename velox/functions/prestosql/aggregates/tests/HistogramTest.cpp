@@ -166,14 +166,16 @@ TEST_F(HistogramTest, groupByDate) {
 
   auto vector1 = makeFlatVector<int32_t>(
       num, [](vector_size_t row) { return row % 3; }, nullEvery(4));
-  auto vector2 = makeFlatVector<int32_t>(
-      num, [](vector_size_t row) { return row % 2; }, nullEvery(5), DATE());
+  auto vector2 = makeFlatVector<Date>(
+      num, [](vector_size_t row) { return Date{row % 2}; }, nullEvery(5));
 
   auto expected = makeRowVector(
       {makeNullableFlatVector<int32_t>({std::nullopt, 0, 1, 2}),
-       makeMapVector<int32_t, int64_t>(
-           {{{{0}, 2}}, {{{0}, 1}, {{1}, 2}}, {{{1}, 2}}, {{{0}, 1}}},
-           MAP(DATE(), BIGINT()))});
+       makeMapVector<Date, int64_t>(
+           {{{Date{0}, 2}},
+            {{Date{0}, 1}, {Date{1}, 2}},
+            {{Date{1}, 2}},
+            {{Date{0}, 1}}})});
 
   testHistogram("histogram(c1)", {"c0"}, vector1, vector2, expected);
 }
@@ -189,25 +191,7 @@ TEST_F(HistogramTest, groupByInterval) {
   testHistogramWithDuck(vector1, vector2);
 }
 
-TEST_F(HistogramTest, groupByString) {
-  std::vector<std::string> strings = {
-      "grapes",
-      "oranges",
-      "sweet fruits: apple",
-      "sweet fruits: banana",
-      "sweet fruits: papaya",
-  };
-
-  auto keys = makeFlatVector<int16_t>(
-      1'000, [](auto row) { return row % 17; }, nullEvery(19));
-  auto data = makeFlatVector<StringView>(
-      1'000,
-      [&](auto row) { return StringView(strings[row % strings.size()]); },
-      nullEvery(11));
-  testGlobalHistogramWithDuck(data);
-}
-
-TEST_F(HistogramTest, globalInteger) {
+TEST_F(HistogramTest, globalGroupByInteger) {
   vector_size_t num = 29;
   auto vector = makeFlatVector<int32_t>(
       num, [](vector_size_t row) { return row % 5; }, nullEvery(7));
@@ -215,7 +199,7 @@ TEST_F(HistogramTest, globalInteger) {
   testGlobalHistogramWithDuck(vector);
 }
 
-TEST_F(HistogramTest, globalDouble) {
+TEST_F(HistogramTest, globalGroupByDouble) {
   vector_size_t num = 29;
   auto vector = makeFlatVector<double>(
       num, [](vector_size_t row) { return row % 5 + 0.05; }, nullEvery(7));
@@ -223,14 +207,14 @@ TEST_F(HistogramTest, globalDouble) {
   testGlobalHistogramWithDuck(vector);
 }
 
-TEST_F(HistogramTest, globalBoolean) {
+TEST_F(HistogramTest, globalGroupByBoolean) {
   auto vector = makeFlatVector<bool>(
       1'000, [](vector_size_t row) { return row % 5 == 2; }, nullEvery(7));
 
   testGlobalHistogramWithDuck(vector);
 }
 
-TEST_F(HistogramTest, globalTimestamp) {
+TEST_F(HistogramTest, globalGroupByTimestamp) {
   vector_size_t num = 10;
   auto vector = makeFlatVector<Timestamp>(
       num,
@@ -248,63 +232,27 @@ TEST_F(HistogramTest, globalTimestamp) {
   testHistogram("histogram(c1)", {}, vector, vector, expected);
 }
 
-TEST_F(HistogramTest, globalDate) {
+TEST_F(HistogramTest, globalGroupByDate) {
   vector_size_t num = 10;
-  auto vector = makeFlatVector<int32_t>(
-      num, [](vector_size_t row) { return row % 4; }, nullEvery(7), DATE());
+  auto vector = makeFlatVector<Date>(
+      num, [](vector_size_t row) { return Date{row % 4}; }, nullEvery(7));
 
-  auto expected = makeRowVector({makeMapVector<int32_t, int64_t>(
-      {{{{0}, 2}, {{1}, 3}, {{2}, 2}, {{3}, 1}}}, MAP(DATE(), BIGINT()))});
+  auto expected = makeRowVector({makeMapVector<Date, int64_t>(
+      {{{Date{0}, 2}, {Date{1}, 3}, {Date{2}, 2}, {Date{3}, 1}}})});
 
   testHistogram("histogram(c1)", {}, vector, vector, expected);
 }
 
-TEST_F(HistogramTest, globalInterval) {
+TEST_F(HistogramTest, globalGroupByInterval) {
   auto vector = makeFlatVector<int64_t>(
       1'000, [](auto row) { return row; }, nullEvery(7), INTERVAL_DAY_TIME());
 
   testGlobalHistogramWithDuck(vector);
 }
 
-TEST_F(HistogramTest, globalEmpty) {
+TEST_F(HistogramTest, globalGroupByEmpty) {
   auto vector = makeFlatVector<int32_t>({});
   testGlobalHistogramWithDuck(vector);
-}
-
-TEST_F(HistogramTest, globalString) {
-  std::vector<std::string> strings = {
-      "grapes",
-      "oranges",
-      "sweet fruits: apple",
-      "sweet fruits: banana",
-      "sweet fruits: papaya",
-  };
-
-  auto data = makeFlatVector<StringView>(1'000, [&](auto row) {
-    return StringView(strings[row % strings.size()]);
-  });
-  testGlobalHistogramWithDuck(data);
-
-  // Some nulls.
-  data = makeFlatVector<StringView>(
-      1'000,
-      [&](auto row) { return StringView(strings[row % strings.size()]); },
-      nullEvery(7));
-  testGlobalHistogramWithDuck(data);
-
-  // All nulls.
-  testGlobalHistogramWithDuck(makeAllNullFlatVector<StringView>(1'000));
-
-  // Lots of unique strings.
-  std::string scratch;
-  data = makeFlatVector<StringView>(
-      1'000,
-      [&](auto row) {
-        scratch = std::string(50 + row, 'A' + (row % 11));
-        return StringView(scratch);
-      },
-      nullEvery(7));
-  testGlobalHistogramWithDuck(data);
 }
 
 } // namespace

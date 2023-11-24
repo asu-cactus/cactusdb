@@ -92,3 +92,4 @@ cmake_install_deps snappy -DSNAPPY_BUILD_TESTS=OFF
 cmake_install_deps fmt -DFMT_TEST=OFF
 
 dnf clean all
+

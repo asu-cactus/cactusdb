@@ -43,14 +43,14 @@ class ExprCallable : public Callable {
 
   void apply(
       const SelectivityVector& rows,
-      const SelectivityVector* validRowsInReusedResult,
+      const SelectivityVector& finalSelection,
       const BufferPtr& wrapCapture,
       EvalCtx* context,
       const std::vector<VectorPtr>& args,
       const BufferPtr& elementToTopLevelRows,
       VectorPtr* result) override {
     auto row = createRowVector(context, wrapCapture, args, rows.end());
-    EvalCtx lambdaCtx = createLambdaCtx(context, row, validRowsInReusedResult);
+    EvalCtx lambdaCtx = createLambdaCtx(context, row, finalSelection);
     ScopedVarSetter throwOnError(
         lambdaCtx.mutableThrowOnError(), context->throwOnError());
     body_->eval(rows, lambdaCtx, *result);
@@ -59,14 +59,14 @@ class ExprCallable : public Callable {
 
   void applyNoThrow(
       const SelectivityVector& rows,
-      const SelectivityVector* validRowsInReusedResult,
+      const SelectivityVector& finalSelection,
       const BufferPtr& wrapCapture,
       EvalCtx* context,
       const std::vector<VectorPtr>& args,
       ErrorVectorPtr& elementErrors,
       VectorPtr* result) override {
     auto row = createRowVector(context, wrapCapture, args, rows.end());
-    EvalCtx lambdaCtx = createLambdaCtx(context, row, validRowsInReusedResult);
+    EvalCtx lambdaCtx = createLambdaCtx(context, row, finalSelection);
     ScopedVarSetter throwOnError(lambdaCtx.mutableThrowOnError(), false);
     body_->eval(rows, lambdaCtx, *result);
     lambdaCtx.swapErrors(elementErrors);
@@ -76,11 +76,11 @@ class ExprCallable : public Callable {
   EvalCtx createLambdaCtx(
       EvalCtx* context,
       std::shared_ptr<RowVector>& row,
-      const SelectivityVector* validRowsInReusedResult) {
+      const SelectivityVector& finalSelection) {
     EvalCtx lambdaCtx{context->execCtx(), context->exprSet(), row.get()};
-    if (validRowsInReusedResult != nullptr) {
+    if (!context->isFinalSelection()) {
       *lambdaCtx.mutableIsFinalSelection() = false;
-      *lambdaCtx.mutableFinalSelection() = validRowsInReusedResult;
+      *lambdaCtx.mutableFinalSelection() = &finalSelection;
     }
     return lambdaCtx;
   }
@@ -108,7 +108,6 @@ class ExprCallable : public Callable {
     std::vector<VectorPtr> allVectors = args;
     for (auto index = args.size(); index < capture_->childrenSize(); ++index) {
       auto values = capture_->childAt(index);
-      VELOX_DCHECK(!isLazyNotLoaded(*values));
       if (wrapCapture) {
         values = BaseVector::wrapInDictionary(
             BufferPtr(nullptr), wrapCapture, size, values);
@@ -182,10 +181,6 @@ void LambdaExpr::evalSpecialForm(
   std::vector<VectorPtr> values(typeWithCapture_->size());
   for (auto i = 0; i < captureChannels_.size(); ++i) {
     assert(!values.empty());
-    // Ensure all captured fields are loaded.
-    const auto& rowsToLoad =
-        context.isFinalSelection() ? rows : *context.finalSelection();
-    context.ensureFieldLoaded(captureChannels_[i], rowsToLoad);
     values[signature_->size() + i] = context.getField(captureChannels_[i]);
   }
   auto capture = std::make_shared<RowVector>(
@@ -227,20 +222,4 @@ void LambdaExpr::makeTypeWithCapture(EvalCtx& context) {
         ROW(std::move(parameterNames), std::move(parameterTypes));
   }
 }
-
-void LambdaExpr::extractSubfieldsImpl(
-    folly::F14FastMap<std::string, int32_t>* shadowedNames,
-    std::vector<common::Subfield>* subfields) const {
-  for (auto& name : signature_->names()) {
-    (*shadowedNames)[name]++;
-  }
-  body_->extractSubfieldsImpl(shadowedNames, subfields);
-  for (auto& name : signature_->names()) {
-    auto it = shadowedNames->find(name);
-    if (--it->second == 0) {
-      shadowedNames->erase(it);
-    }
-  }
-}
-
 } // namespace facebook::velox::exec

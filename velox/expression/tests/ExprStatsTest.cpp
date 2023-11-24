@@ -171,8 +171,7 @@ class TestListener : public exec::ExprSetListener {
 
   void onError(
       const SelectivityVector& rows,
-      const ::facebook::velox::ErrorVector& errors,
-      const std::string& /*queryId*/) override {
+      const ::facebook::velox::ErrorVector& errors) override {
     rows.applyToSelected([&](auto row) {
       exceptionCount_++;
 
@@ -417,14 +416,6 @@ TEST_F(ExprStatsTest, errorLog) {
   evaluate(*exprSet, data);
   ASSERT_EQ(4, listener->exceptionCount());
   ASSERT_EQ(4, exceptions.size());
-  ASSERT_TRUE(
-      exceptions[0].find("Error Code: INVALID_ARGUMENT") != std::string::npos);
-  ASSERT_TRUE(
-      exceptions[1].find("Error Code: INVALID_ARGUMENT") != std::string::npos);
-  ASSERT_TRUE(
-      exceptions[2].find("Error Code: ARITHMETIC_ERROR") != std::string::npos);
-  ASSERT_TRUE(
-      exceptions[3].find("Error Code: ARITHMETIC_ERROR") != std::string::npos);
 
   // Test with no error.
   listener->reset();

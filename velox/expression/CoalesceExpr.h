@@ -34,11 +34,11 @@ class CoalesceExpr : public SpecialForm {
       EvalCtx& context,
       VectorPtr& result) override;
 
- private:
-  void computePropagatesNulls() override {
-    propagatesNulls_ = false;
+  bool propagatesNulls() const override {
+    return false;
   }
 
+ private:
   static TypePtr resolveType(const std::vector<TypePtr>& argTypes);
 
   friend class CoalesceCallToSpecialForm;
@@ -51,8 +51,7 @@ class CoalesceCallToSpecialForm : public FunctionCallToSpecialForm {
   ExprPtr constructSpecialForm(
       const TypePtr& type,
       std::vector<ExprPtr>&& compiledChildren,
-      bool trackCpuUsage,
-      const core::QueryConfig& config) override;
+      bool trackCpuUsage) override;
 };
 
 } // namespace facebook::velox::exec

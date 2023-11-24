@@ -203,8 +203,7 @@ class ArraySumFunction : public exec::VectorFunction {
 // Create function.
 std::shared_ptr<exec::VectorFunction> create(
     const std::string& /* name */,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
   auto elementType = inputArgs.front().type->childAt(0);
 
   switch (elementType->kind()) {

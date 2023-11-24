@@ -16,7 +16,6 @@
 #pragma once
 
 #include "velox/functions/Registerer.h"
-#include "velox/functions/prestosql/types/TimestampWithTimeZoneType.h"
 
 namespace facebook::velox::functions {
 namespace {
@@ -63,8 +62,6 @@ void registerNonSimdizableScalar(const std::vector<std::string>& aliases) {
   registerFunction<T, TReturn, bool, bool>(aliases);
   registerFunction<T, TReturn, Timestamp, Timestamp>(aliases);
   registerFunction<T, TReturn, Date, Date>(aliases);
-  registerFunction<T, TReturn, TimestampWithTimezone, TimestampWithTimezone>(
-      aliases);
 }
 
 template <template <class> class T>

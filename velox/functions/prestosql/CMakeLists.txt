@@ -22,7 +22,7 @@ add_library(
   ArrayDistinct.cpp
   ArrayDuplicates.cpp
   ArrayIntersectExcept.cpp
-  ArrayAndMapMatch.cpp
+  ArrayMatch.cpp
   ArrayPosition.cpp
   ArrayShuffle.cpp
   ArraySort.cpp
@@ -31,7 +31,6 @@ add_library(
   DecimalVectorFunctions.cpp
   ElementAt.cpp
   FilterFunctions.cpp
-  FindFirst.cpp
   FromUnixTime.cpp
   FromUtf8.cpp
   GreatestLeast.cpp
@@ -39,7 +38,6 @@ add_library(
   JsonFunctions.cpp
   Map.cpp
   MapEntries.cpp
-  MapFromEntries.cpp
   MapKeysAndValues.cpp
   MapZipWith.cpp
   Not.cpp
@@ -48,7 +46,6 @@ add_library(
   Reverse.cpp
   RowFunction.cpp
   Sequence.cpp
-  SimpleComparisonMatcher.cpp
   Slice.cpp
   Split.cpp
   StringFunctions.cpp

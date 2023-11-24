@@ -14,56 +14,14 @@
  * limitations under the License.
  */
 
-#include "velox/common/file/FileSystems.h"
 #include "velox/dwio/common/InputStream.h"
-#include "velox/exec/tests/utils/TempFilePath.h"
 
 #include <string_view>
-#include "folly/io/Cursor.h"
 
 #include "gtest/gtest.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::dwio::common;
-using facebook::velox::common::Region;
-
-class ReadFileInputStreamTest : public testing::Test {
- protected:
-  void SetUp() {
-    filesystems::registerLocalFileSystem();
-  }
-};
-
-TEST_F(ReadFileInputStreamTest, LocalReadFile) {
-  auto tempFile = ::exec::test::TempFilePath::create();
-  const auto& filename = tempFile->path;
-  remove(filename.c_str());
-  {
-    LocalWriteFile writeFile(filename);
-    for (int i = 0; i < 1027; ++i)
-      writeFile.append("abc");
-    ASSERT_EQ(writeFile.size(), static_cast<uint64_t>(3081));
-  }
-
-  auto readFile = std::make_shared<LocalReadFile>(filename);
-  ASSERT_EQ(static_cast<uint64_t>(3081), readFile->size());
-
-  auto readStream =
-      std::make_shared<facebook::velox::dwio::common::ReadFileInputStream>(
-          readFile);
-  std::vector<Region> regions;
-  for (int i = 0; i < 3081; i += 3) {
-    regions.push_back(
-        Region(static_cast<uint64_t>(i), static_cast<uint64_t>(1)));
-  }
-  ASSERT_GT(regions.size(), IOV_MAX);
-
-  std::vector<folly::Range<char*>> buffers;
-  std::vector<folly::IOBuf> iobufs(regions.size());
-
-  readStream->vread(regions, {iobufs.data(), iobufs.size()}, LogType::TEST);
-  remove(filename.c_str());
-}
 
 TEST(ReadFileInputStream, SimpleUsage) {
   std::string fileData;
@@ -87,7 +45,7 @@ TEST(ReadFileInputStream, SimpleUsage) {
   ASSERT_EQ(read_value, "aaaaabbbbbccccc");
 }
 
-TEST(ReadFileInputStream, VReadIOBufs) {
+TEST(ReadFileInputStream, VRead) {
   std::string fileData;
   {
     InMemoryWriteFile writeFile(&fileData);
@@ -98,18 +56,17 @@ TEST(ReadFileInputStream, VReadIOBufs) {
   auto readFile = std::make_shared<InMemoryReadFile>(fileData);
   ReadFileInputStream inputStream(readFile);
   ASSERT_EQ(inputStream.getLength(), 15);
-  std::vector<Region> regions = {{0, 6}, {9, 5}};
-  std::vector<folly::IOBuf> iobufs(regions.size());
-  inputStream.vread(regions, {iobufs.data(), iobufs.size()}, LogType::STREAM);
-  std::vector<std::string> result;
-  std::transform(
-      iobufs.cbegin(),
-      iobufs.cend(),
-      std::back_inserter(result),
-      [](const auto& iobuf) {
-        folly::io::Cursor cursor(&iobuf);
-        return cursor.readFixedString(cursor.totalLength());
-      });
-  std::vector<std::string> expected = {"aaaaab", "bcccc"};
-  EXPECT_EQ(result, expected);
+  auto buf1 = std::make_unique<char[]>(5);
+  auto buf2 = std::make_unique<char[]>(5);
+  std::vector<void*> buffers;
+  buffers.emplace_back(buf1.get());
+  buffers.emplace_back(buf2.get());
+  std::vector<Region> regions;
+  regions.emplace_back(0, 5);
+  regions.emplace_back(10, 5);
+  inputStream.vread(buffers, regions, LogType::STREAM);
+  std::string_view read_value(buf1.get(), 5);
+  ASSERT_EQ(read_value, "aaaaa");
+  read_value = {buf2.get(), 5};
+  ASSERT_EQ(read_value, "ccccc");
 }

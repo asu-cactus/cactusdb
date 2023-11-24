@@ -232,8 +232,11 @@ lengthUnicode(const char* inputBuffer, size_t bufferLength) {
 
 /// Returns the start byte index of the Nth instance of subString in
 /// string. Search starts from startPosition. Positions start with 0. If not
-/// found, -1 is returned. To facilitate finding overlapping strings, the
-/// nextStartPosition is incremented by 1
+/// found, -1 is returned.
+/// stringPosition for Unicode uses this by first finding the byte index of
+/// substring and then computing the length of substring[0, byteIndex). This is
+/// safe because in UTF8 a char can not be a subset of another char (in bytes
+/// representation).
 static int64_t findNthInstanceByteIndexFromStart(
     const std::string_view& string,
     const std::string_view subString,
@@ -258,13 +261,12 @@ static int64_t findNthInstanceByteIndexFromStart(
 
   // Find next occurrence
   return findNthInstanceByteIndexFromStart(
-      string, subString, instance - 1, byteIndex + 1);
+      string, subString, instance - 1, byteIndex + subString.size());
 }
 
 /// Returns the start byte index of the Nth instance of subString in
 /// string from the end. Search starts from endPosition. Positions start with 0.
-/// If not found, -1 is returned. To facilitate finding overlapping strings, the
-/// nextStartPosition is incremented by 1
+/// If not found, -1 is returned.
 inline int64_t findNthInstanceByteIndexFromEnd(
     const std::string_view string,
     const std::string_view subString,
@@ -397,8 +399,6 @@ inline static size_t replace(
 /// Given a utf8 string, a starting position and length returns the
 /// corresponding underlying byte range [startByteIndex, endByteIndex).
 /// Byte indicies starts from 0, UTF8 character positions starts from 1.
-/// If a bad unicode byte is encountered, then we skip that bad byte and
-/// count that as one codepoint.
 template <bool isAscii>
 static inline std::pair<size_t, size_t>
 getByteRange(const char* str, size_t startCharPosition, size_t length) {
@@ -415,16 +415,14 @@ getByteRange(const char* str, size_t startCharPosition, size_t length) {
 
     // Find startByteIndex
     for (auto i = 0; i < startCharPosition - 1; i++) {
-      auto increment = utf8proc_char_length(&str[nextCharOffset]);
-      nextCharOffset += UNLIKELY(increment < 0) ? 1 : increment;
+      nextCharOffset += utf8proc_char_length(&str[nextCharOffset]);
     }
 
     startByteIndex = nextCharOffset;
 
     // Find endByteIndex
     for (auto i = 0; i < length; i++) {
-      auto increment = utf8proc_char_length(&str[nextCharOffset]);
-      nextCharOffset += UNLIKELY(increment < 0) ? 1 : increment;
+      nextCharOffset += utf8proc_char_length(&str[nextCharOffset]);
     }
 
     return std::make_pair(startByteIndex, nextCharOffset);

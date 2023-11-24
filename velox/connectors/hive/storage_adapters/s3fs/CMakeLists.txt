@@ -14,18 +14,11 @@
 
 # for generated headers
 
-add_library(velox_s3fs RegisterS3FileSystem.cpp)
-if(VELOX_ENABLE_S3)
-  target_sources(velox_s3fs PRIVATE S3FileSystem.cpp S3Util.cpp)
+add_library(velox_s3fs S3FileSystem.cpp S3Util.cpp)
+target_include_directories(velox_s3fs PUBLIC ${AWSSDK_INCLUDE_DIRS})
+target_link_libraries(velox_s3fs Folly::folly ${AWSSDK_LIBRARIES})
 
-  target_include_directories(velox_s3fs PUBLIC ${AWSSDK_INCLUDE_DIRS})
-  target_link_libraries(velox_s3fs velox_dwio_common_exception Folly::folly
-                        ${AWSSDK_LIBRARIES} xsimd)
-
-  if(${VELOX_BUILD_TESTING})
-    add_subdirectory(tests)
-  endif()
-  if(${VELOX_ENABLE_BENCHMARKS})
-    add_subdirectory(benchmark)
-  endif()
+if(${VELOX_BUILD_TESTING})
+  add_subdirectory(tests)
+  add_subdirectory(benchmark)
 endif()

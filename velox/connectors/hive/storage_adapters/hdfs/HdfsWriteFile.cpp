@@ -39,12 +39,6 @@ HdfsWriteFile::HdfsWriteFile(
       std::string(hdfsGetLastError()));
 }
 
-HdfsWriteFile::~HdfsWriteFile() {
-  if (hdfsFile_) {
-    close();
-  }
-}
-
 void HdfsWriteFile::close() {
   int success = hdfsCloseFile(hdfsClient_, hdfsFile_);
   VELOX_CHECK_EQ(
@@ -84,10 +78,7 @@ void HdfsWriteFile::append(std::string_view data) {
 
 uint64_t HdfsWriteFile::size() const {
   auto fileInfo = hdfsGetPathInfo(hdfsClient_, filePath_.c_str());
-  uint64_t size = fileInfo->mSize;
-  // should call hdfsFreeFileInfo to avoid memory leak
-  hdfsFreeFileInfo(fileInfo, 1);
-  return size;
+  return fileInfo->mSize;
 }
 
 } // namespace facebook::velox

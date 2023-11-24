@@ -50,42 +50,37 @@ T singleValue(const VectorPtr& vector) {
   return simpleVector->valueAt(0);
 }
 
+const core::FieldAccessTypedExpr* asField(
+    const core::ITypedExpr* expr,
+    int index) {
+  return dynamic_cast<const core::FieldAccessTypedExpr*>(
+      expr->inputs()[index].get());
+}
+
 const core::CallTypedExpr* asCall(const core::ITypedExpr* expr) {
   return dynamic_cast<const core::CallTypedExpr*>(expr);
 }
 
-bool toSubfield(const core::ITypedExpr* field, common::Subfield& subfield) {
+bool toSubfield(
+    const core::FieldAccessTypedExpr* field,
+    common::Subfield& subfield) {
   std::vector<std::unique_ptr<common::Subfield::PathElement>> path;
   for (auto* current = field;;) {
-    if (auto* fieldAccess =
-            dynamic_cast<const core::FieldAccessTypedExpr*>(current)) {
-      path.push_back(
-          std::make_unique<common::Subfield::NestedField>(fieldAccess->name()));
-    } else if (
-        auto* dereference =
-            dynamic_cast<const core::DereferenceTypedExpr*>(current)) {
-      const auto& name = dereference->name();
-      // When the field name is empty string, it typically means that the field
-      // name was not set in the parent type.
-      if (name == "") {
-        return false;
-      }
-      path.push_back(std::make_unique<common::Subfield::NestedField>(name));
-    } else if (!dynamic_cast<const core::InputTypedExpr*>(current)) {
-      return false;
-    } else {
-      break;
-    }
-
+    path.push_back(
+        std::make_unique<common::Subfield::NestedField>(current->name()));
     if (current->inputs().empty()) {
       break;
     }
     if (current->inputs().size() != 1) {
       return false;
     }
-    current = current->inputs()[0].get();
+    auto* parent = current->inputs()[0].get();
+    current = dynamic_cast<const core::FieldAccessTypedExpr*>(parent);
     if (!current) {
-      return false;
+      if (!dynamic_cast<const core::InputTypedExpr*>(parent)) {
+        return false;
+      }
+      break;
     }
   }
   std::reverse(path.begin(), path.end());
@@ -156,16 +151,14 @@ std::unique_ptr<common::Filter> makeLessThanOrEqualFilter(
       return lessThanOrEqual(singleValue<int32_t>(upper));
     case TypeKind::BIGINT:
       return lessThanOrEqual(singleValue<int64_t>(upper));
-    case TypeKind::HUGEINT:
-      return lessThanOrEqualHugeint(singleValue<int128_t>(upper));
     case TypeKind::DOUBLE:
       return lessThanOrEqualDouble(singleValue<double>(upper));
     case TypeKind::REAL:
       return lessThanOrEqualFloat(singleValue<float>(upper));
     case TypeKind::VARCHAR:
       return lessThanOrEqual(singleValue<StringView>(upper));
-    case TypeKind::TIMESTAMP:
-      return lessThanOrEqual(singleValue<Timestamp>(upper));
+    case TypeKind::DATE:
+      return lessThanOrEqual(singleValue<Date>(upper).days());
     default:
       return nullptr;
   }
@@ -187,16 +180,14 @@ std::unique_ptr<common::Filter> makeLessThanFilter(
       return lessThan(singleValue<int32_t>(upper));
     case TypeKind::BIGINT:
       return lessThan(singleValue<int64_t>(upper));
-    case TypeKind::HUGEINT:
-      return lessThanHugeint(singleValue<int128_t>(upper));
     case TypeKind::DOUBLE:
       return lessThanDouble(singleValue<double>(upper));
     case TypeKind::REAL:
       return lessThanFloat(singleValue<float>(upper));
     case TypeKind::VARCHAR:
       return lessThan(singleValue<StringView>(upper));
-    case TypeKind::TIMESTAMP:
-      return lessThan(singleValue<Timestamp>(upper));
+    case TypeKind::DATE:
+      return lessThan(singleValue<Date>(upper).days());
     default:
       return nullptr;
   }
@@ -218,16 +209,14 @@ std::unique_ptr<common::Filter> makeGreaterThanOrEqualFilter(
       return greaterThanOrEqual(singleValue<int32_t>(lower));
     case TypeKind::BIGINT:
       return greaterThanOrEqual(singleValue<int64_t>(lower));
-    case TypeKind::HUGEINT:
-      return greaterThanOrEqualHugeint(singleValue<int128_t>(lower));
     case TypeKind::DOUBLE:
       return greaterThanOrEqualDouble(singleValue<double>(lower));
     case TypeKind::REAL:
       return greaterThanOrEqualFloat(singleValue<float>(lower));
     case TypeKind::VARCHAR:
       return greaterThanOrEqual(singleValue<StringView>(lower));
-    case TypeKind::TIMESTAMP:
-      return greaterThanOrEqual(singleValue<Timestamp>(lower));
+    case TypeKind::DATE:
+      return greaterThanOrEqual(singleValue<Date>(lower).days());
     default:
       return nullptr;
   }
@@ -249,16 +238,14 @@ std::unique_ptr<common::Filter> makeGreaterThanFilter(
       return greaterThan(singleValue<int32_t>(lower));
     case TypeKind::BIGINT:
       return greaterThan(singleValue<int64_t>(lower));
-    case TypeKind::HUGEINT:
-      return greaterThanHugeint(singleValue<int128_t>(lower));
     case TypeKind::DOUBLE:
       return greaterThanDouble(singleValue<double>(lower));
     case TypeKind::REAL:
       return greaterThanFloat(singleValue<float>(lower));
     case TypeKind::VARCHAR:
       return greaterThan(singleValue<StringView>(lower));
-    case TypeKind::TIMESTAMP:
-      return greaterThan(singleValue<Timestamp>(lower));
+    case TypeKind::DATE:
+      return greaterThan(singleValue<Date>(lower).days());
     default:
       return nullptr;
   }
@@ -282,12 +269,10 @@ std::unique_ptr<common::Filter> makeEqualFilter(
       return equal(singleValue<int32_t>(value));
     case TypeKind::BIGINT:
       return equal(singleValue<int64_t>(value));
-    case TypeKind::HUGEINT:
-      return equalHugeint(singleValue<int128_t>(value));
     case TypeKind::VARCHAR:
       return equal(singleValue<StringView>(value));
-    case TypeKind::TIMESTAMP:
-      return equal(singleValue<Timestamp>(value));
+    case TypeKind::DATE:
+      return equal(singleValue<Date>(value).days());
     default:
       return nullptr;
   }
@@ -330,8 +315,6 @@ std::unique_ptr<common::Filter> makeNotEqualFilter(
     ranges.emplace_back(std::unique_ptr<common::BigintRange>(greaterRange));
 
     return std::make_unique<common::BigintMultiRange>(std::move(ranges), false);
-  } else if (value->typeKind() == TypeKind::HUGEINT) {
-    VELOX_NYI();
   } else {
     std::vector<std::unique_ptr<common::Filter>> filters;
     filters.emplace_back(std::move(lessThanFilter));
@@ -415,12 +398,6 @@ std::unique_ptr<common::Filter> makeBetweenFilter(
     return nullptr;
   }
   switch (lower->typeKind()) {
-    case TypeKind::INTEGER:
-      if (negated) {
-        return notBetween(
-            singleValue<int32_t>(lower), singleValue<int32_t>(upper));
-      }
-      return between(singleValue<int32_t>(lower), singleValue<int32_t>(upper));
     case TypeKind::BIGINT:
       if (negated) {
         return notBetween(
@@ -436,6 +413,13 @@ std::unique_ptr<common::Filter> makeBetweenFilter(
       return negated
           ? nullptr
           : betweenFloat(singleValue<float>(lower), singleValue<float>(upper));
+    case TypeKind::DATE:
+      if (negated) {
+        return notBetween(
+            singleValue<Date>(lower).days(), singleValue<Date>(upper).days());
+      }
+      return between(
+          singleValue<Date>(lower).days(), singleValue<Date>(upper).days());
     case TypeKind::VARCHAR:
       if (negated) {
         return notBetween(
@@ -443,11 +427,6 @@ std::unique_ptr<common::Filter> makeBetweenFilter(
       }
       return between(
           singleValue<StringView>(lower), singleValue<StringView>(upper));
-    case TypeKind::TIMESTAMP:
-      return negated
-          ? nullptr
-          : between(
-                singleValue<Timestamp>(lower), singleValue<Timestamp>(upper));
     default:
       return nullptr;
   }
@@ -460,58 +439,71 @@ std::unique_ptr<common::Filter> leafCallToSubfieldFilter(
     common::Subfield& subfield,
     core::ExpressionEvaluator* evaluator,
     bool negated) {
-  if (call.inputs().empty()) {
-    return nullptr;
-  }
-
-  const auto* leftSide = call.inputs()[0].get();
-
   if (call.name() == "eq") {
-    if (toSubfield(leftSide, subfield)) {
-      return negated ? makeNotEqualFilter(call.inputs()[1], evaluator)
-                     : makeEqualFilter(call.inputs()[1], evaluator);
+    if (auto field = asField(&call, 0)) {
+      if (toSubfield(field, subfield)) {
+        return negated ? makeNotEqualFilter(call.inputs()[1], evaluator)
+                       : makeEqualFilter(call.inputs()[1], evaluator);
+      }
     }
   } else if (call.name() == "neq") {
-    if (toSubfield(leftSide, subfield)) {
-      return negated ? makeEqualFilter(call.inputs()[1], evaluator)
-                     : makeNotEqualFilter(call.inputs()[1], evaluator);
+    if (auto field = asField(&call, 0)) {
+      if (toSubfield(field, subfield)) {
+        return negated ? makeEqualFilter(call.inputs()[1], evaluator)
+                       : makeNotEqualFilter(call.inputs()[1], evaluator);
+      }
     }
   } else if (call.name() == "lte") {
-    if (toSubfield(leftSide, subfield)) {
-      return negated ? makeGreaterThanFilter(call.inputs()[1], evaluator)
-                     : makeLessThanOrEqualFilter(call.inputs()[1], evaluator);
+    if (auto field = asField(&call, 0)) {
+      if (toSubfield(field, subfield)) {
+        return negated ? makeGreaterThanFilter(call.inputs()[1], evaluator)
+                       : makeLessThanOrEqualFilter(call.inputs()[1], evaluator);
+      }
     }
   } else if (call.name() == "lt") {
-    if (toSubfield(leftSide, subfield)) {
-      return negated ? makeGreaterThanOrEqualFilter(call.inputs()[1], evaluator)
-                     : makeLessThanFilter(call.inputs()[1], evaluator);
+    if (auto field = asField(&call, 0)) {
+      if (toSubfield(field, subfield)) {
+        return negated
+            ? makeGreaterThanOrEqualFilter(call.inputs()[1], evaluator)
+            : makeLessThanFilter(call.inputs()[1], evaluator);
+      }
     }
   } else if (call.name() == "gte") {
-    if (toSubfield(leftSide, subfield)) {
-      return negated
-          ? makeLessThanFilter(call.inputs()[1], evaluator)
-          : makeGreaterThanOrEqualFilter(call.inputs()[1], evaluator);
+    if (auto field = asField(&call, 0)) {
+      if (toSubfield(field, subfield)) {
+        return negated
+            ? makeLessThanFilter(call.inputs()[1], evaluator)
+            : makeGreaterThanOrEqualFilter(call.inputs()[1], evaluator);
+      }
     }
   } else if (call.name() == "gt") {
-    if (toSubfield(leftSide, subfield)) {
-      return negated ? makeLessThanOrEqualFilter(call.inputs()[1], evaluator)
-                     : makeGreaterThanFilter(call.inputs()[1], evaluator);
+    if (auto field = asField(&call, 0)) {
+      if (toSubfield(field, subfield)) {
+        return negated ? makeLessThanOrEqualFilter(call.inputs()[1], evaluator)
+                       : makeGreaterThanFilter(call.inputs()[1], evaluator);
+      }
     }
   } else if (call.name() == "between") {
-    if (toSubfield(leftSide, subfield)) {
-      return makeBetweenFilter(
-          call.inputs()[1], call.inputs()[2], evaluator, negated);
+    if (auto field = asField(&call, 0)) {
+      if (toSubfield(field, subfield)) {
+        return makeBetweenFilter(
+            call.inputs()[1], call.inputs()[2], evaluator, negated);
+      }
     }
   } else if (call.name() == "in") {
-    if (toSubfield(leftSide, subfield)) {
-      return makeInFilter(call.inputs()[1], evaluator, negated);
+    if (auto field = asField(&call, 0)) {
+      if (toSubfield(field, subfield)) {
+        return makeInFilter(call.inputs()[1], evaluator, negated);
+      }
     }
   } else if (call.name() == "is_null") {
-    if (toSubfield(leftSide, subfield)) {
-      if (negated) {
-        return isNotNull();
+    if (auto field = asField(&call, 0)) {
+      if (toSubfield(field, subfield)) {
+        if (negated) {
+          return isNotNull();
+        }
+        return isNull();
       }
-      return isNull();
     }
   }
   return nullptr;

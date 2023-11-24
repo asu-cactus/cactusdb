@@ -15,10 +15,7 @@
  */
 
 #include "velox/dwio/dwrf/reader/FlatMapColumnReader.h"
-#include <folly/Conv.h>
-#include <folly/container/F14Set.h>
 #include <folly/json.h>
-
 #include "velox/common/base/BitUtil.h"
 #include "velox/dwio/common/FlatMapHelper.h"
 
@@ -68,7 +65,7 @@ KeyPredicate<T> prepareKeyPredicate(
     const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
     StripeStreams& stripe) {
   auto& cs = stripe.getColumnSelector();
-  const auto expr = cs.getNode(requestedType->id())->getNode().expression;
+  const auto expr = cs.getNode(requestedType->id)->getNode().expression;
   return dwio::common::flatmap::prepareKeyPredicate<T>(expr);
 }
 
@@ -78,13 +75,17 @@ uint32_t visitUniqueStreamsOfNode(
     StripeStreams& stripe,
     std::function<void(const StreamInformation&)> visitor) {
   const auto dataValueType = dataType->childAt(1);
-  folly::F14FastSet<size_t> processed;
+  std::unordered_set<size_t> processed;
 
   auto streams = stripe.visitStreamsOfNode(
-      dataValueType->id(), [&](const StreamInformation& stream) {
+      dataValueType->id, [&](const StreamInformation& stream) {
         auto sequence = stream.getSequence();
         // No need to load shared dictionary stream here.
-        if (sequence == 0 || processed.count(sequence)) {
+        if (sequence == 0) {
+          return;
+        }
+        // if this branch (sequence) is in the node list already
+        if (processed.count(sequence)) {
           return;
         }
         processed.insert(sequence);
@@ -111,7 +112,6 @@ std::vector<std::unique_ptr<KeyNode<T>>> getKeyNodesFiltered(
     const std::shared_ptr<const TypeWithId>& requestedType,
     const std::shared_ptr<const TypeWithId>& dataType,
     StripeStreams& stripe,
-    const StreamLabels& streamLabels,
     memory::MemoryPool& memoryPool,
     FlatMapContext& flatMapContext) {
   std::vector<std::unique_ptr<KeyNode<T>>> keyNodes;
@@ -121,7 +121,7 @@ std::vector<std::unique_ptr<KeyNode<T>>> getKeyNodesFiltered(
 
   const auto requestedValueType = requestedType->childAt(1);
   const auto dataValueType = dataType->childAt(1);
-  folly::F14FastSet<size_t> processed;
+  std::unordered_set<size_t> processed;
 
   // load all sub streams
   // fetch reader, in map bitmap and key object.
@@ -129,12 +129,16 @@ std::vector<std::unique_ptr<KeyNode<T>>> getKeyNodesFiltered(
       dataType, stripe, [&](const StreamInformation& stream) {
         auto sequence = stream.getSequence();
         // No need to load shared dictionary stream here.
-        if (sequence == 0 || processed.count(sequence)) {
+        if (sequence == 0) {
+          return;
+        }
+        // if this branch (sequence) is in the node list already
+        if (processed.count(sequence)) {
           return;
         }
         processed.insert(sequence);
 
-        EncodingKey seqEk(dataValueType->id(), sequence);
+        EncodingKey seqEk(dataValueType->id, sequence);
         const auto& keyInfo = stripe.getEncoding(seqEk).key();
         auto key = extractKey<T>(keyInfo);
         // if key filter not passed through read schema
@@ -143,9 +147,8 @@ std::vector<std::unique_ptr<KeyNode<T>>> getKeyNodesFiltered(
         }
 
         // fetch reader, in map bitmap and key object.
-        auto labels = streamLabels.append(folly::to<std::string>(key.get()));
-        auto inMap = stripe.getStream(
-            seqEk.forKind(proto::Stream_Kind_IN_MAP), labels.label(), true);
+        auto inMap =
+            stripe.getStream(seqEk.forKind(proto::Stream_Kind_IN_MAP), true);
         DWIO_ENSURE_NOT_NULL(inMap, "In map stream is required");
         // build seekable
         auto inMapDecoder = createBooleanRleDecoder(std::move(inMap), seqEk);
@@ -154,7 +157,6 @@ std::vector<std::unique_ptr<KeyNode<T>>> getKeyNodesFiltered(
             requestedValueType,
             dataValueType,
             stripe,
-            labels,
             FlatMapContext{
                 .sequence = sequence,
                 .inMapDecoder = inMapDecoder.get(),
@@ -174,7 +176,7 @@ std::vector<std::unique_ptr<KeyNode<T>>> getKeyNodesFiltered(
   triggerKeySelectionNotification(flatMapContext, keySelectionStats);
 
   VLOG(1) << "[Flat-Map] Initialized a flat-map column reader for node "
-          << dataType->id() << ", keys=" << keyNodes.size()
+          << dataType->id << ", keys=" << keyNodes.size()
           << ", streams=" << streams;
   return keyNodes;
 }
@@ -207,12 +209,11 @@ FlatMapColumnReader<T>::FlatMapColumnReader(
     const std::shared_ptr<const TypeWithId>& requestedType,
     const std::shared_ptr<const TypeWithId>& dataType,
     StripeStreams& stripe,
-    const StreamLabels& streamLabels,
     FlatMapContext flatMapContext)
-    : ColumnReader(dataType, stripe, streamLabels, std::move(flatMapContext)),
+    : ColumnReader(dataType, stripe, std::move(flatMapContext)),
       requestedType_{requestedType},
       returnFlatVector_{stripe.getRowReaderOptions().getReturnFlatVector()} {
-  DWIO_ENSURE_EQ(nodeType_->id(), dataType->id());
+  DWIO_ENSURE_EQ(nodeType_->id, dataType->id);
 
   const auto keyPredicate = prepareKeyPredicate<T>(requestedType, stripe);
 
@@ -221,7 +222,6 @@ FlatMapColumnReader<T>::FlatMapColumnReader(
       requestedType,
       dataType,
       stripe,
-      streamLabels,
       memoryPool_,
       flatMapContext_);
 
@@ -253,7 +253,7 @@ void FlatMapColumnReader<T>::initKeysVector(
   initializeFlatVector<T>(
       vector,
       memoryPool_,
-      requestedType_->type()->asMap().keyType(),
+      requestedType_->type->asMap().keyType(),
       size,
       false);
   vector->resize(size, false);
@@ -271,18 +271,6 @@ void FlatMapColumnReader<StringView>::initKeysVector(
       false,
       std::vector<BufferPtr>{stringKeyBuffer_->getBuffer()});
   vector->resize(size, false);
-}
-
-// When read-string-as-row flag is on, string readers produce ROW(BIGINT,
-// BIGINT) type instead of VARCHAR or VARBINARY. In these cases,
-// requestedType_->type is not the right type of the final vector.
-const std::shared_ptr<const Type> getMapType(
-    const VectorPtr& keysVector,
-    const VectorPtr& valuesVector,
-    const std::shared_ptr<const Type> backupType) {
-  return (keysVector == nullptr || valuesVector == nullptr)
-      ? backupType
-      : MAP(keysVector->type(), valuesVector->type());
 }
 
 template <typename T>
@@ -308,9 +296,9 @@ void FlatMapColumnReader<T>::next(
   const auto* nullsPtr = nulls ? nulls->as<uint64_t>() : nullptr;
   uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
-  // Release extra references of keys and values vectors as well as nulls,
-  // offsets and lengths buffers.
-  result.reset();
+  if (mapVector) {
+    detail::resetIfNotWritable(result, offsets, lengths);
+  }
 
   if (!offsets) {
     offsets = AlignedBuffer::allocate<vector_size_t>(numValues, &memoryPool_);
@@ -342,30 +330,10 @@ void FlatMapColumnReader<T>::next(
     }
   }
 
-  if (nodeBatches.empty()) {
-    auto* offsetsPtr = offsets->asMutable<vector_size_t>();
-    auto* lengthsPtr = lengths->asMutable<vector_size_t>();
-    std::fill(offsetsPtr, offsetsPtr + numValues, 0);
-    std::fill(lengthsPtr, lengthsPtr + numValues, 0);
-
-    // todo: refactor this method to reduce branching
-    result = std::make_shared<MapVector>(
-        &memoryPool_,
-        getMapType(keysVector, valuesVector, requestedType_->type()),
-        std::move(nulls),
-        numValues,
-        std::move(offsets),
-        std::move(lengths),
-        nullptr,
-        nullptr,
-        nullCount);
-    return;
-  }
-
   size_t startIndices[nodeBatches.size()];
   size_t nodeIndices[nodeBatches.size()];
 
-  auto& mapValueType = requestedType_->type()->asMap().valueType();
+  auto& mapValueType = requestedType_->type->asMap().valueType();
   if (totalChildren > 0) {
     size_t childOffset = 0;
     for (size_t i = 0; i < nodeBatches.size(); i++) {
@@ -433,7 +401,12 @@ void FlatMapColumnReader<T>::next(
         nullptr, indices, totalChildren, std::move(valuesVector));
   }
 
-  auto mapType = getMapType(keysVector, valuesVector, requestedType_->type());
+  // When read-string-as-row flag is on, string readers produce ROW(BIGINT,
+  // BIGINT) type instead of VARCHAR or VARBINARY. In these cases,
+  // requestedType_->type is not the right type of the final vector.
+  auto mapType = (keysVector == nullptr || valuesVector == nullptr)
+      ? requestedType_->type
+      : MAP(keysVector->type(), valuesVector->type());
 
   // TODO Reuse
   result = std::make_shared<MapVector>(
@@ -497,7 +470,7 @@ void KeyNode<T>::loadAsChild(
 }
 
 template <typename T>
-const uint64_t* KeyNode<T>::mergeNulls(
+const uint64_t* FOLLY_NULLABLE KeyNode<T>::mergeNulls(
     uint64_t numValues,
     BufferPtr& mergedNulls,
     uint64_t nonNullMaps,
@@ -528,9 +501,8 @@ const uint64_t* KeyNode<T>::mergeNulls(
 }
 
 template <typename T>
-uint64_t* KeyNode<T>::ensureNullBuffer(
-    uint64_t numValues,
-    BufferPtr& mergedNulls) {
+uint64_t* FOLLY_NULLABLE
+KeyNode<T>::ensureNullBuffer(uint64_t numValues, BufferPtr& mergedNulls) {
   const auto numBytes = bits::nbytes(numValues);
   if (!mergedNulls || mergedNulls->capacity() < numBytes) {
     mergedNulls = AlignedBuffer::allocate<bool>(numValues, &memoryPool_);
@@ -539,9 +511,8 @@ uint64_t* KeyNode<T>::ensureNullBuffer(
 }
 
 template <typename T>
-const uint64_t* KeyNode<T>::getAllNulls(
-    uint64_t numValues,
-    BufferPtr& mergedNulls) {
+const uint64_t* FOLLY_NULLABLE
+KeyNode<T>::getAllNulls(uint64_t numValues, BufferPtr& mergedNulls) {
   auto* result = ensureNullBuffer(numValues, mergedNulls);
   for (uint64_t i = 0; i < numValues; ++i) {
     bits::setNull(result, i, true);
@@ -569,7 +540,6 @@ std::vector<std::unique_ptr<KeyNode<T>>> getKeyNodesForStructEncoding(
     const std::shared_ptr<const TypeWithId>& requestedType,
     const std::shared_ptr<const TypeWithId>& dataType,
     StripeStreams& stripe,
-    const StreamLabels& streamLabels,
     memory::MemoryPool& memoryPool,
     FlatMapContext& flatMapContext) {
   // `KeyNode` is ordered based on the projection. So if [3, 2, 1] is
@@ -583,13 +553,12 @@ std::vector<std::unique_ptr<KeyNode<T>>> getKeyNodesForStructEncoding(
       requestedType,
       dataType,
       stripe,
-      streamLabels,
       memoryPool,
       flatMapContext);
 
   const auto& mapColumnIdAsStruct =
       stripe.getRowReaderOptions().getMapColumnIdAsStruct();
-  auto it = mapColumnIdAsStruct.find(requestedType->id());
+  auto it = mapColumnIdAsStruct.find(requestedType->id);
   DWIO_ENSURE(it != mapColumnIdAsStruct.end());
 
   return rearrangeKeyNodesAsProjectedOrder<T>(availableKeyNodes, it->second);
@@ -600,25 +569,19 @@ FlatMapStructEncodingColumnReader<T>::FlatMapStructEncodingColumnReader(
     const std::shared_ptr<const TypeWithId>& requestedType,
     const std::shared_ptr<const TypeWithId>& dataType,
     StripeStreams& stripe,
-    const StreamLabels& streamLabels,
     FlatMapContext flatMapContext)
-    : ColumnReader(
-          requestedType,
-          stripe,
-          streamLabels,
-          std::move(flatMapContext)),
+    : ColumnReader(requestedType, stripe, std::move(flatMapContext)),
       requestedType_{requestedType},
       keyNodes_{getKeyNodesForStructEncoding<T>(
           requestedType,
           dataType,
           stripe,
-          streamLabels,
           memoryPool_,
           flatMapContext_)},
       nullColumnReader_{std::make_unique<NullColumnReader>(
           stripe,
-          requestedType_->type()->asMap().valueType())} {
-  DWIO_ENSURE_EQ(nodeType_->id(), dataType->id());
+          requestedType_->type->asMap().valueType())} {
+  DWIO_ENSURE_EQ(nodeType_->id, dataType->id);
   DWIO_ENSURE(!keyNodes_.empty()); // "For struct encoding, keys to project must
                                    // be configured.";
 }
@@ -642,7 +605,7 @@ template <typename T>
 void FlatMapStructEncodingColumnReader<T>::next(
     uint64_t numValues,
     VectorPtr& result,
-    const uint64_t* incomingNulls) {
+    const uint64_t* FOLLY_NULLABLE incomingNulls) {
   auto rowVector = detail::resetIfWrongVectorType<RowVector>(result);
   std::vector<VectorPtr> children;
   if (rowVector) {
@@ -688,7 +651,7 @@ void FlatMapStructEncodingColumnReader<T>::next(
         &memoryPool_,
         ROW(std::vector<std::string>(keyNodes_.size()),
             std::vector<std::shared_ptr<const Type>>(
-                keyNodes_.size(), requestedType_->type()->asMap().valueType())),
+                keyNodes_.size(), requestedType_->type->asMap().valueType())),
         nulls,
         numValues,
         std::move(children),
@@ -699,7 +662,7 @@ void FlatMapStructEncodingColumnReader<T>::next(
 inline bool isRequiringStructEncoding(
     const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
     const dwio::common::RowReaderOptions& rowOptions) {
-  return rowOptions.getMapColumnIdAsStruct().count(requestedType->id()) > 0;
+  return rowOptions.getMapColumnIdAsStruct().count(requestedType->id) > 0;
 }
 
 template <typename T>
@@ -707,22 +670,13 @@ std::unique_ptr<ColumnReader> createFlatMapColumnReader(
     const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
     const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
     StripeStreams& stripe,
-    const StreamLabels& streamLabels,
     FlatMapContext flatMapContext) {
   if (isRequiringStructEncoding(requestedType, stripe.getRowReaderOptions())) {
     return std::make_unique<FlatMapStructEncodingColumnReader<T>>(
-        requestedType,
-        dataType,
-        stripe,
-        streamLabels,
-        std::move(flatMapContext));
+        requestedType, dataType, stripe, std::move(flatMapContext));
   } else {
     return std::make_unique<FlatMapColumnReader<T>>(
-        requestedType,
-        dataType,
-        stripe,
-        streamLabels,
-        std::move(flatMapContext));
+        requestedType, dataType, stripe, std::move(flatMapContext));
   }
 }
 
@@ -730,48 +684,27 @@ std::unique_ptr<ColumnReader> createFlatMapColumnReader(
     const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
     const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
     StripeStreams& stripe,
-    const StreamLabels& streamLabels,
     FlatMapContext flatMapContext) {
   // create flat map column reader based on key type
-  const auto kind = dataType->childAt(0)->type()->kind();
+  const auto kind = dataType->childAt(0)->type->kind();
 
   switch (kind) {
     case TypeKind::TINYINT:
       return createFlatMapColumnReader<int8_t>(
-          requestedType,
-          dataType,
-          stripe,
-          streamLabels,
-          std::move(flatMapContext));
+          requestedType, dataType, stripe, std::move(flatMapContext));
     case TypeKind::SMALLINT:
       return createFlatMapColumnReader<int16_t>(
-          requestedType,
-          dataType,
-          stripe,
-          streamLabels,
-          std::move(flatMapContext));
+          requestedType, dataType, stripe, std::move(flatMapContext));
     case TypeKind::INTEGER:
       return createFlatMapColumnReader<int32_t>(
-          requestedType,
-          dataType,
-          stripe,
-          streamLabels,
-          std::move(flatMapContext));
+          requestedType, dataType, stripe, std::move(flatMapContext));
     case TypeKind::BIGINT:
       return createFlatMapColumnReader<int64_t>(
-          requestedType,
-          dataType,
-          stripe,
-          streamLabels,
-          std::move(flatMapContext));
+          requestedType, dataType, stripe, std::move(flatMapContext));
     case TypeKind::VARBINARY:
     case TypeKind::VARCHAR:
       return createFlatMapColumnReader<StringView>(
-          requestedType,
-          dataType,
-          stripe,
-          streamLabels,
-          std::move(flatMapContext));
+          requestedType, dataType, stripe, std::move(flatMapContext));
     default:
       DWIO_RAISE("Not supported key type: ", kind);
   }

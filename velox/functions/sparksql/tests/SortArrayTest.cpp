@@ -127,12 +127,12 @@ TEST_F(SortArrayTest, timestamp) {
 }
 
 TEST_F(SortArrayTest, date) {
-  auto input = makeNullableArrayVector(dateInput(), ARRAY(DATE()));
+  auto input = makeNullableArrayVector(dateInput());
   auto expected = dateAscNullSmallest();
   testSortArray(
       input,
-      makeNullableArrayVector(expected, ARRAY(DATE())),
-      makeNullableArrayVector(reverseNested(expected), ARRAY(DATE())));
+      makeNullableArrayVector(expected),
+      makeNullableArrayVector(reverseNested(expected)));
 }
 
 TEST_F(SortArrayTest, bool) {

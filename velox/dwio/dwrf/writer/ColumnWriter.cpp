@@ -56,11 +56,11 @@ class ByteRleColumnWriter : public BaseColumnWriter {
   ByteRleColumnWriter(
       WriterContext& context,
       const TypeWithId& type,
-      uint32_t sequence,
-      const std::function<std::unique_ptr<ByteRleEncoder>(
-          std::unique_ptr<BufferedOutputStream>)>& factory,
+      const uint32_t sequence,
+      std::function<std::unique_ptr<ByteRleEncoder>(
+          std::unique_ptr<BufferedOutputStream>)> factory,
       std::function<void(IndexBuilder&)> onRecordPosition)
-      : BaseColumnWriter{context, type, sequence, std::move(onRecordPosition)},
+      : BaseColumnWriter{context, type, sequence, onRecordPosition},
         data_{factory(newStream(StreamKind::StreamKind_DATA))} {
     reset();
   }
@@ -201,8 +201,8 @@ class IntegerColumnWriter : public BaseColumnWriter {
         inDictionary_{nullptr},
         dictEncoder_{context.getIntDictionaryEncoder<T>(
             EncodingKey{
-                type.id(),
-                context.shareFlatMapDictionaries() ? 0 : sequence},
+                type.id,
+                context.shareFlatMapDictionaries ? 0 : sequence},
             getMemoryPool(MemoryUsageCategory::DICTIONARY),
             getMemoryPool(MemoryUsageCategory::GENERAL))},
         rows_{getMemoryPool(MemoryUsageCategory::GENERAL)},
@@ -220,7 +220,7 @@ class IntegerColumnWriter : public BaseColumnWriter {
       // around this problem but has messier code organization.
       suppressStream(
           StreamKind::StreamKind_DICTIONARY_DATA,
-          context_.shareFlatMapDictionaries() ? 0 : sequence_);
+          context_.shareFlatMapDictionaries ? 0 : sequence_);
       initStreamWriters(useDictionaryEncoding_);
     }
     reset();
@@ -354,7 +354,7 @@ class IntegerColumnWriter : public BaseColumnWriter {
     // around this problem but has messier code organization.
     suppressStream(
         StreamKind::StreamKind_DICTIONARY_DATA,
-        context_.shareFlatMapDictionaries() ? 0 : sequence_);
+        context_.shareFlatMapDictionaries ? 0 : sequence_);
     dictEncoder_.clear();
     rows_.clear();
     strideOffsets_.clear();
@@ -1259,8 +1259,7 @@ void StringColumnWriter::populateDictionaryEncodingStreams() {
                 ++strideDictSize;
               }
             }
-            inDictWriter.close();
-            VELOX_CHECK_EQ(strideDictSize, strideDictKeyCount);
+            DWIO_ENSURE_EQ(strideDictSize, strideDictKeyCount);
           }
 
           // StrideDictKey can be empty, when all keys for stride are in
@@ -1273,13 +1272,11 @@ void StringColumnWriter::populateDictionaryEncodingStreams() {
                   strideDictionaryDataLength_->add(
                       buf, common::Ranges::of(0, size), nullptr);
                 });
-
             for (size_t i = 0; i < strideDictKeyCount; ++i) {
               auto val = dictEncoder_.getKey(sortedStrideDictKeyIndexBuffer[i]);
               strideDictionaryData_->write(val.data(), val.size());
               strideLengthWriter.add(val.size());
             }
-            strideLengthWriter.close();
           }
         }
 
@@ -1318,13 +1315,11 @@ void StringColumnWriter::convertToDirectEncoding() {
             [&](auto buf, auto size) {
               dataDirectLength_->add(buf, common::Ranges::of(0, size), nullptr);
             });
-
         for (size_t i = start; i != end; ++i) {
           auto key = dictEncoder_.getKey(rows_[i]);
           dataDirect_->write(key.data(), key.size());
           lengthWriter.add(key.size());
         }
-        lengthWriter.close();
       };
 
   populateStrides(
@@ -1377,7 +1372,7 @@ uint64_t FloatColumnWriter<T>::write(
   uint64_t nullCount = 0;
   if (slice->encoding() == VectorEncoding::Simple::FLAT) {
     auto flatVector = slice->asFlatVector<T>();
-    VELOX_CHECK_NOT_NULL(flatVector, "unexpected vector type");
+    DWIO_ENSURE(flatVector, "unexpected vector type");
     writeNulls(slice, ranges);
     auto nulls = slice->rawNulls();
     auto data = flatVector->rawValues();
@@ -1403,7 +1398,6 @@ uint64_t FloatColumnWriter<T>::write(
           processRow(pos);
         }
       }
-      writer.close();
     } else {
       for (auto& pos : ranges) {
         statsBuilder.addValues(data[pos]);
@@ -1426,6 +1420,7 @@ uint64_t FloatColumnWriter<T>::write(
         [&](auto buf, auto size) {
           data_.write(reinterpret_cast<const char*>(buf), size * sizeof(T));
         });
+
     auto processRow = [&](size_t pos) {
       auto val = decodedVector.template valueAt<T>(pos);
       writer.add(val);
@@ -1445,7 +1440,6 @@ uint64_t FloatColumnWriter<T>::write(
         processRow(pos);
       }
     }
-    writer.close();
   }
 
   uint64_t rawSize = (ranges.size() - nullCount) * sizeof(T);
@@ -1881,8 +1875,6 @@ uint64_t MapColumnWriter::write(
     auto begin = offsets[pos];
     auto end = begin + lengths[pos];
     if (end > begin) {
-      DWIO_ENSURE_LE(end, mapSlice->mapKeys()->size());
-      DWIO_ENSURE_LE(end, mapSlice->mapValues()->size());
       childRanges.add(begin, end);
     }
     nonNullLengths.unsafeAppend(end - begin);
@@ -1944,6 +1936,7 @@ uint64_t MapColumnWriter::write(
 
   uint64_t rawSize = 0;
   if (childRanges.size()) {
+    DWIO_ENSURE_EQ(mapSlice->mapKeys()->size(), mapSlice->mapValues()->size());
     rawSize += children_.at(0)->write(mapSlice->mapKeys(), childRanges);
     rawSize += children_.at(1)->write(mapSlice->mapValues(), childRanges);
   }
@@ -1962,45 +1955,40 @@ uint64_t MapColumnWriter::write(
 std::unique_ptr<BaseColumnWriter> BaseColumnWriter::create(
     WriterContext& context,
     const TypeWithId& type,
-    uint32_t sequence,
+    const uint32_t sequence,
     std::function<void(IndexBuilder&)> onRecordPosition) {
-  const auto flatMapEnabled = context.getConfig(Config::FLATTEN_MAP) &&
-      type.parent() != nullptr && (type.parent()->id() == 0);
-  bool isFlatMapColumn{false};
-  if (flatMapEnabled) {
-    const auto& flatMapCols = context.getConfig(Config::MAP_FLAT_COLS);
-    isFlatMapColumn =
-        std::find(flatMapCols.begin(), flatMapCols.end(), type.column()) !=
-        flatMapCols.end();
-  }
+  const auto flatMapEnabled = context.getConfig(Config::FLATTEN_MAP);
+  const auto& flatMapCols = context.getConfig(Config::MAP_FLAT_COLS);
 
   // When flat map is enabled, all columns provided in the MAP_FLAT_COLS config,
   // must be of MAP type. We only check top level columns (columns which are
   // direct children of the root node).
-  if (flatMapEnabled) {
-    if (isFlatMapColumn && type.type()->kind() != TypeKind::MAP) {
+  if (flatMapEnabled && type.parent != nullptr && type.parent->id == 0) {
+    if (type.type->kind() != TypeKind::MAP &&
+        std::find(flatMapCols.begin(), flatMapCols.end(), type.column) !=
+            flatMapCols.end()) {
       DWIO_RAISE(fmt::format(
           "MAP_FLAT_COLS contains column {}, but the root type of this column is {}."
           " Column root types must be of type MAP",
-          type.column(),
-          mapTypeKindToName(type.type()->kind())));
+          type.column,
+          mapTypeKindToName(type.type->kind())));
     }
     const auto structColumnKeys =
         context.getConfig(Config::MAP_FLAT_COLS_STRUCT_KEYS);
     if (!structColumnKeys.empty()) {
-      DWIO_ENSURE_EQ(
-          type.parent()->size(),
-          structColumnKeys.size(),
+      DWIO_ENSURE(
+          type.parent->size() == structColumnKeys.size(),
           "MAP_FLAT_COLS_STRUCT_KEYS size must match number of columns.");
-      if (!structColumnKeys[type.column()].empty()) {
+      if (!structColumnKeys[type.column].empty()) {
         DWIO_ENSURE(
-            isFlatMapColumn,
+            std::find(flatMapCols.begin(), flatMapCols.end(), type.column) !=
+                flatMapCols.end(),
             "Struct input found in MAP_FLAT_COLS_STRUCT_KEYS. Column must also be in MAP_FLAT_COLS.");
       }
     }
   }
 
-  switch (type.type()->kind()) {
+  switch (type.type->kind()) {
     case TypeKind::BOOLEAN:
       return std::make_unique<ByteRleColumnWriter<bool>>(
           context, type, sequence, &createBooleanRleEncoder, onRecordPosition);
@@ -2045,8 +2033,11 @@ std::unique_ptr<BaseColumnWriter> BaseColumnWriter::create(
 
       // We only flatten maps which are direct children of the root node.
       // All other (nested) maps are treated as regular maps.
-      if (isFlatMapColumn) {
-        DWIO_ENSURE(onRecordPosition == nullptr, "unexpected flat map nesting");
+      if (type.parent != nullptr && type.parent->id == 0 &&
+          context.getConfig(Config::FLATTEN_MAP) &&
+          std::find(flatMapCols.begin(), flatMapCols.end(), type.column) !=
+              flatMapCols.end()) {
+        DWIO_ENSURE(!onRecordPosition, "unexpected flat map nesting");
         return FlatMapColumnWriter<TypeKind::INVALID>::create(
             context, type, sequence);
       }
@@ -2064,7 +2055,8 @@ std::unique_ptr<BaseColumnWriter> BaseColumnWriter::create(
       return ret;
     }
     default:
-      DWIO_RAISE("not supported yet ", mapTypeKindToName(type.type()->kind()));
+      DWIO_RAISE("not supported yet ", mapTypeKindToName(type.type->kind()));
   }
 }
+
 } // namespace facebook::velox::dwrf

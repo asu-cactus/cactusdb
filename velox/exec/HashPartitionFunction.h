@@ -21,12 +21,6 @@
 
 namespace facebook::velox::exec {
 
-/// Calculates partition number for each row of the specified vector using a
-/// hash function. The constructor with hashBitRange parameter requires both
-/// hashBitRange and keyChannels to be non-empty. The constructor with
-/// numPartitions allows the keyChannels argument to be empty. If keyChannels is
-/// empty, then the resulting partition number of partition() will always be
-/// zero.
 class HashPartitionFunction : public core::PartitionFunction {
  public:
   HashPartitionFunction(
@@ -43,9 +37,8 @@ class HashPartitionFunction : public core::PartitionFunction {
 
   ~HashPartitionFunction() override = default;
 
-  std::optional<uint32_t> partition(
-      const RowVector& input,
-      std::vector<uint32_t>& partitions) override;
+  void partition(const RowVector& input, std::vector<uint32_t>& partitions)
+      override;
 
   int numPartitions() const {
     return numPartitions_;

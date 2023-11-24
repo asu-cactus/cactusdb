@@ -76,6 +76,8 @@ class AggregateCompanionFunctionBase : public Aggregate {
       uint8_t nullMask,
       int32_t rowSizeOffset) override final;
 
+  int32_t combineAlignmentInternal(int32_t otherAlignment) const override final;
+
   void setAllocatorInternal(HashStringAllocator* allocator) override final;
 
   void clearInternal() override final;
@@ -149,7 +151,7 @@ struct AggregateCompanionAdapter {
     int32_t setOffset() const;
 
     char** allocateGroups(
-        memory::AllocationPool& allocationPool,
+        AllocationPool& allocationPool,
         const SelectivityVector& rows,
         uint64_t offsetInGroup) const;
 
@@ -167,49 +169,32 @@ struct AggregateCompanionAdapter {
 
 class CompanionFunctionsRegistrar {
  public:
-  // Register the partial companion function for an aggregation function of
-  // `name` and `signatures`. When there is already a function of the same name,
-  // if `overwrite` is true, the registration is replaced. Otherwise, return
-  // false without overwriting the registry.
   static bool registerPartialFunction(
       const std::string& name,
-      const std::vector<AggregateFunctionSignaturePtr>& signatures,
-      bool overwrite = false);
+      const std::vector<AggregateFunctionSignaturePtr>& signatures);
 
-  // When there is already a function of the same name as the merge companion
-  // function, if `overwrite` is true, the registration is replaced. Otherwise,
-  // return false without overwriting the registry.
   static bool registerMergeFunction(
       const std::string& name,
-      const std::vector<AggregateFunctionSignaturePtr>& signatures,
-      bool overwrite = false);
+      const std::vector<AggregateFunctionSignaturePtr>& signatures);
 
   // If there are multiple signatures of the original aggregation function
   // with the same intermediate type, register extract functions with suffix
   // of their result types in the function names for each of them. Otherwise,
   // register one extract function of all supported signatures. The result
   // type of the original aggregation function is required to be resolveable
-  // given its intermediate type. When there is already a function of the same
-  // name as the extract companion function, if `overwrite` is true, the
-  // registration is replaced. Otherwise, return false without overwriting the
-  // registry.
+  // given its intermediate type.
   static bool registerExtractFunction(
       const std::string& originalName,
-      const std::vector<AggregateFunctionSignaturePtr>& signatures,
-      bool overwrite = false);
+      const std::vector<AggregateFunctionSignaturePtr>& signatures);
 
   // Similar to registerExtractFunction(), the result type of the original
   // aggregation function is required to be resolveable given its intermediate
   // type. If there are multiple signatures of the original aggregation function
   // with the same intermediate type, register merge-extract functions with
-  // suffix of their result types in the function names for each of them. When
-  // there is already a function of the same name as the merge-extract companion
-  // function, if `overwrite` is true, the registration is replaced. Otherwise,
-  // return false without overwriting the registry.
+  // suffix of their result types in the function names for each of them.
   static bool registerMergeExtractFunction(
       const std::string& name,
-      const std::vector<AggregateFunctionSignaturePtr>& signatures,
-      bool overwrite = false);
+      const std::vector<AggregateFunctionSignaturePtr>& signatures);
 
  private:
   // Register a vector function {originalName}_extract_{suffixOfResultType}
@@ -217,13 +202,11 @@ class CompanionFunctionsRegistrar {
   // the orignal agregate function.
   static bool registerExtractFunctionWithSuffix(
       const std::string& originalName,
-      const std::vector<AggregateFunctionSignaturePtr>& signatures,
-      bool overwrite);
+      const std::vector<AggregateFunctionSignaturePtr>& signatures);
 
   static bool registerMergeExtractFunctionWithSuffix(
       const std::string& name,
-      const std::vector<AggregateFunctionSignaturePtr>& signatures,
-      bool overwrite);
+      const std::vector<AggregateFunctionSignaturePtr>& signatures);
 };
 
 } // namespace facebook::velox::exec

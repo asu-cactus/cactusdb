@@ -413,10 +413,6 @@ class ColumnVisitor {
     }
   }
 
-  ExtractValues extractValues() const {
-    return values_;
-  }
-
   HookType& hook() {
     return values_.hook();
   }
@@ -708,9 +704,9 @@ class DictionaryColumnVisitor
             values),
         state_(reader->scanState().rawState),
         width_(
-            reader->fileType().type()->kind() == TypeKind::BIGINT        ? 8
-                : reader->fileType().type()->kind() == TypeKind::INTEGER ? 4
-                                                                         : 2) {}
+            reader->type()->kind() == TypeKind::BIGINT        ? 8
+                : reader->type()->kind() == TypeKind::INTEGER ? 4
+                                                              : 2) {}
 
   FOLLY_ALWAYS_INLINE bool isInDict() {
     if (inDict()) {

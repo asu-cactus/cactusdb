@@ -103,7 +103,6 @@ class LocalFileSystem : public FileSystem {
       VELOX_USER_FAIL(
           "Failed to delete file {} with errno {}", file, strerror(errno));
     }
-    VLOG(1) << "LocalFileSystem::remove " << path;
   }
 
   void rename(
@@ -129,8 +128,6 @@ class LocalFileSystem : public FileSystem {
           newFile,
           folly::errnoStr(errno));
     }
-    VLOG(1) << "LocalFileSystem::rename oldFile: " << oldFile
-            << ", newFile:" << newFile;
   }
 
   bool exists(std::string_view path) override {
@@ -158,7 +155,6 @@ class LocalFileSystem : public FileSystem {
         path,
         ec,
         ec.message());
-    VLOG(1) << "LocalFileSystem::mkdir " << path;
   }
 
   void rmdir(std::string_view path) override {
@@ -171,7 +167,6 @@ class LocalFileSystem : public FileSystem {
         path,
         ec,
         ec.message());
-    VLOG(1) << "LocalFileSystem::rmdir " << path;
   }
 
   static std::function<bool(std::string_view)> schemeMatcher() {

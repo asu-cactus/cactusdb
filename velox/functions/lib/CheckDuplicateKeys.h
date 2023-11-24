@@ -21,8 +21,7 @@
 namespace facebook::velox::functions {
 
 /// Check map keys for duplicates. Mark rows with duplicate keys as 'failed' in
-/// the 'context'. Rows with null keys should not be passed to this function and
-/// should have been removed from rows.
+/// the 'context'.
 void checkDuplicateKeys(
     const MapVectorPtr& mapVector,
     const SelectivityVector& rows,

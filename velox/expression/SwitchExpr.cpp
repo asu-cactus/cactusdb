@@ -48,22 +48,19 @@ SwitchExpr::SwitchExpr(
       [](const ExprPtr& expr) { return expr->type(); });
 
   // Apply type checking.
-  auto typeExpected = resolveType(inputTypes);
-  VELOX_CHECK(
-      *typeExpected == *this->type(),
-      "Switch expression type different than then clause. Expected {} but got Actual {}.",
-      typeExpected->toString(),
-      this->type()->toString());
+  resolveType(inputTypes);
 }
 
 void SwitchExpr::evalSpecialForm(
     const SelectivityVector& rows,
     EvalCtx& context,
-    VectorPtr& finalResult) {
-  VectorPtr localResult;
+    VectorPtr& result) {
   LocalSelectivityVector remainingRows(context, rows);
 
   LocalSelectivityVector thenRows(context);
+
+  VectorPtr condition;
+  const uint64_t* values;
 
   // SWITCH: fix finalSelection at "rows" unless already fixed
   ScopedFinalSelectionSetter scopedFinalSelectionSetter(context, &rows);
@@ -71,37 +68,28 @@ void SwitchExpr::evalSpecialForm(
     // If propagates nulls, we load lazies before conditions so that we can
     // avoid errors for null rows. Null propagation is on only if all thens and
     // else load access the same vectors, so there is no extra loading.
+    DecodedVector decoded;
     auto& remaining = *remainingRows.get();
-    for (auto* field : distinctFields_) {
+    for (const auto& field : distinctFields_) {
       context.ensureFieldLoaded(field->index(context), remaining);
       const auto& vector = context.getField(field->index(context));
       if (vector->mayHaveNulls()) {
-        LocalDecodedVector decoded(context, *vector, remaining);
-        addNulls(remaining, decoded->nulls(), context, localResult);
+        decoded.decode(*vector, remaining);
+        addNulls(remaining, decoded.nulls(), context, type(), result);
         remaining.deselectNulls(
-            decoded->nulls(), remaining.begin(), remaining.end());
+            decoded.nulls(), remaining.begin(), remaining.end());
       }
     }
   }
-
-  VectorPtr condition;
-  const uint64_t* values;
-
   for (auto i = 0; i < numCases_; i++) {
-    context.releaseVector(condition);
-
     if (!remainingRows.get()->hasSelections()) {
       break;
     }
-
     // evaluate the case condition
     inputs_[2 * i]->eval(*remainingRows.get(), context, condition);
 
     if (context.errors()) {
       context.deselectErrors(*remainingRows);
-      if (!remainingRows->hasSelections()) {
-        break;
-      }
     }
 
     const auto booleanMix = getFlatBool(
@@ -113,26 +101,26 @@ void SwitchExpr::evalSpecialForm(
         true,
         &values,
         nullptr);
+    context.releaseVector(condition);
     switch (booleanMix) {
       case BooleanMix::kAllTrue:
-        inputs_[2 * i + 1]->eval(*remainingRows.get(), context, localResult);
+        inputs_[2 * i + 1]->eval(*remainingRows.get(), context, result);
         remainingRows->clearAll();
         continue;
       case BooleanMix::kAllNull:
       case BooleanMix::kAllFalse:
         continue;
       default: {
-        thenRows.get(remainingRows->end(), false);
         bits::andBits(
-            thenRows.get()->asMutableRange().bits(),
+            thenRows.get(rows.end(), false)->asMutableRange().bits(),
             remainingRows.get()->asRange().bits(),
             values,
             0,
-            remainingRows->end());
+            rows.end());
         thenRows.get()->updateBounds();
 
         if (thenRows.get()->hasSelections()) {
-          inputs_[2 * i + 1]->eval(*thenRows.get(), context, localResult);
+          inputs_[2 * i + 1]->eval(*thenRows.get(), context, result);
           remainingRows.get()->deselect(*thenRows.get());
         }
       }
@@ -142,38 +130,30 @@ void SwitchExpr::evalSpecialForm(
   // Evaluate the "else" clause.
   if (remainingRows.get()->hasSelections()) {
     if (hasElseClause_) {
-      inputs_.back()->eval(*remainingRows.get(), context, localResult);
+      inputs_.back()->eval(*remainingRows.get(), context, result);
     } else {
-      context.ensureWritable(*remainingRows.get(), type(), localResult);
+      context.ensureWritable(*remainingRows.get(), type(), result);
 
       // fill in nulls for remainingRows
       remainingRows.get()->applyToSelected(
-          [&](auto row) { localResult->setNull(row, true); });
+          [&](auto row) { result->setNull(row, true); });
     }
   }
-
-  // Some rows may have not been evaluated by any then or else clause because
-  // a condition threw an error on these rows. We set those to nulls to make
-  // sure the result vector is addressable at those indices.
-  if (context.errors()) {
-    // TODO: Fix decoding function vector issue #6269.
-    if (type()->kind() != TypeKind::FUNCTION) {
+  // Some rows may have not been evaluated by any then or else clause because a
+  // condition threw an error on these rows. We make sure the result vector has
+  // at least the size of rows.end().
+  if (context.errors() && (!result || result->size() < rows.end())) {
+    if (result && result->isConstantEncoding() && result.unique()) {
+      result->resize(rows.end());
+    } else {
       LocalSelectivityVector nonErrorRows(context, rows);
       context.deselectErrors(*nonErrorRows);
-      addNulls(rows, nonErrorRows->asRange().bits(), context, localResult);
+      addNulls(rows, nonErrorRows->asRange().bits(), context, result);
     }
   }
-  // TODO: Fix evaluate lambda expression return vector of size 0 issue #6270.
-  if (type()->kind() != TypeKind::FUNCTION) {
-    VELOX_CHECK(localResult && localResult->size() >= rows.end());
-  }
-
-  context.moveOrCopyResult(localResult, rows, finalResult);
 }
 
-// This is safe to call only after all metadata is computed for input
-// expressions.
-void SwitchExpr::computePropagatesNulls() {
+bool SwitchExpr::propagatesNulls() const {
   // The "switch" expression propagates nulls when all of the following
   // conditions are met:
   // - All "then" clauses and optional "else" clause propagate nulls.
@@ -182,8 +162,7 @@ void SwitchExpr::computePropagatesNulls() {
 
   for (auto i = 0; i < numCases_; i += 2) {
     if (!inputs_[i + 1]->propagatesNulls()) {
-      propagatesNulls_ = false;
-      return;
+      return false;
     }
   }
 
@@ -192,29 +171,25 @@ void SwitchExpr::computePropagatesNulls() {
     const auto& condition = inputs_[i * 2];
     const auto& thenClause = inputs_[i * 2 + 1];
     if (!Expr::isSameFields(firstThenFields, thenClause->distinctFields())) {
-      propagatesNulls_ = false;
-      return;
+      return false;
     }
 
     if (!Expr::isSubsetOfFields(condition->distinctFields(), firstThenFields)) {
-      propagatesNulls_ = false;
-      return;
+      return false;
     }
   }
 
   if (hasElseClause_) {
     const auto& elseClause = inputs_.back();
     if (!elseClause->propagatesNulls()) {
-      propagatesNulls_ = false;
-      return;
+      return false;
     }
     if (!Expr::isSameFields(firstThenFields, elseClause->distinctFields())) {
-      propagatesNulls_ = false;
-      return;
+      return false;
     }
   }
 
-  propagatesNulls_ = true;
+  return true;
 }
 
 // static
@@ -243,7 +218,7 @@ TypePtr SwitchExpr::resolveType(const std::vector<TypePtr>& argTypes) {
         "Condition of  SWITCH statement is not bool");
 
     VELOX_CHECK(
-        *thenType == *expressionType,
+        thenType->equivalent(*expressionType),
         "All then clauses of a SWITCH statement must have the same type. "
         "Expected {}, but got {}.",
         expressionType->toString(),
@@ -256,7 +231,7 @@ TypePtr SwitchExpr::resolveType(const std::vector<TypePtr>& argTypes) {
     auto& elseClauseType = argTypes.back();
 
     VELOX_CHECK(
-        *elseClauseType == *expressionType,
+        elseClauseType->equivalent(*expressionType),
         "Else clause of a SWITCH statement must have the same type as 'then' clauses. "
         "Expected {}, but got {}.",
         expressionType->toString(),
@@ -274,8 +249,7 @@ TypePtr SwitchCallToSpecialForm::resolveType(
 ExprPtr SwitchCallToSpecialForm::constructSpecialForm(
     const TypePtr& type,
     std::vector<ExprPtr>&& compiledChildren,
-    bool /* trackCpuUsage */,
-    const core::QueryConfig& /*config*/) {
+    bool /* trackCpuUsage */) {
   bool inputsSupportFlatNoNullsFastPath =
       Expr::allSupportFlatNoNullsFastPath(compiledChildren);
   return std::make_shared<SwitchExpr>(

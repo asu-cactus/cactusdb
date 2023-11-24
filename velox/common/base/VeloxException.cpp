@@ -33,11 +33,6 @@ std::exception_ptr toVeloxException(const std::exception_ptr& exceptionPtr) {
   }
 }
 
-int64_t& threadNumVeloxThrow() {
-  thread_local int64_t numThrow;
-  return numThrow;
-}
-
 ExceptionContext& getExceptionContext() {
   thread_local ExceptionContext context;
   return context;
@@ -99,7 +94,6 @@ VeloxException::VeloxException(
     const std::exception_ptr& e,
     std::string_view message,
     std::string_view errorSource,
-    std::string_view errorCode,
     bool isRetriable,
     Type exceptionType,
     std::string_view exceptionName)
@@ -112,7 +106,7 @@ VeloxException::VeloxException(
         state.failingExpression = "";
         state.message = message;
         state.errorSource = errorSource;
-        state.errorCode = errorCode;
+        state.errorCode = "";
         state.context = getExceptionContext().message(exceptionType);
         state.topLevelContext =
             getTopLevelExceptionContextString(exceptionType, state.context);

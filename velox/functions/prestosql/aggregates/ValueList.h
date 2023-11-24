@@ -18,7 +18,6 @@
 
 #include "velox/common/memory/HashStringAllocator.h"
 #include "velox/exec/Aggregate.h"
-#include "velox/expression/ComplexViewTypes.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/DecodedVector.h"
 
@@ -33,18 +32,6 @@ class ValueList {
       const DecodedVector& decoded,
       vector_size_t index,
       HashStringAllocator* allocator);
-
-  template <typename T>
-  void appendValue(
-      const exec::OptionalAccessor<Generic<T>>& value,
-      HashStringAllocator* allocator) {
-    if (!value.has_value()) {
-      appendNull(allocator);
-    } else {
-      VELOX_DCHECK(!value->isNull());
-      appendNonNull(*value->base(), value->decodedIndex(), allocator);
-    }
-  }
 
   void appendRange(
       const VectorPtr& vector,
@@ -104,6 +91,9 @@ class ValueList {
   // 'Data' allocation (potentially multi-part)
   HashStringAllocator::Header* dataBegin_{nullptr};
   HashStringAllocator::Position dataCurrent_{nullptr, nullptr};
+
+  // Total bytes written.
+  uint64_t totalBytes_{0};
 
   // Number of values added, including nulls.
   uint32_t size_{0};
