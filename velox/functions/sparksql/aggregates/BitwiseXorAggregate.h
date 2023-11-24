@@ -18,11 +18,8 @@
 
 #include <string>
 
-#include "velox/exec/AggregateUtil.h"
-
 namespace facebook::velox::functions::aggregate::sparksql {
 
-exec::AggregateRegistrationResult registerBitwiseXorAggregate(
-    const std::string& name);
+bool registerBitwiseXorAggregate(const std::string& name);
 
 } // namespace facebook::velox::functions::aggregate::sparksql

@@ -15,7 +15,6 @@
  */
 #pragma once
 
-#include <bitset>
 #include <cmath>
 #include <limits>
 #include <system_error>
@@ -46,7 +45,7 @@ struct RemainderFunction {
 };
 
 template <typename T>
-struct PModIntFunction {
+struct PModFunction {
   template <typename TInput>
   FOLLY_ALWAYS_INLINE bool call(TInput& result, const TInput a, const TInput n)
 #if defined(__has_feature)
@@ -62,20 +61,6 @@ struct PModIntFunction {
     }
 
     result = (r > 0) ? r : (r + n) % n;
-    return true;
-  }
-};
-
-template <typename T>
-struct PModFloatFunction {
-  template <typename TInput>
-  FOLLY_ALWAYS_INLINE bool
-  call(TInput& result, const TInput a, const TInput n) {
-    if (UNLIKELY(n == (TInput)0)) {
-      return false;
-    }
-    TInput r = fmod(a, n);
-    result = (r > 0) ? r : fmod(r + n, n);
     return true;
   }
 };
@@ -206,78 +191,4 @@ struct CscFunction {
   }
 };
 
-template <typename T>
-struct CoshFunction {
-  template <typename TInput>
-  FOLLY_ALWAYS_INLINE void call(TInput& result, TInput a) {
-    result = std::cosh(a);
-  }
-};
-
-template <typename T>
-struct ToBinaryStringFunction {
-  VELOX_DEFINE_FUNCTION_TYPES(T);
-
-  FOLLY_ALWAYS_INLINE
-  void call(out_type<Varchar>& result, const arg_type<int64_t>& input) {
-    auto str = std::bitset<64>(input).to_string();
-    str.erase(0, std::min(str.find_first_not_of('0'), str.size() - 1));
-    result = str;
-  }
-};
-
-template <typename T>
-struct SinhFunction {
-  template <typename TInput>
-  FOLLY_ALWAYS_INLINE void call(TInput& result, TInput a) {
-    result = std::sinh(a);
-  }
-};
-
-template <typename T>
-struct HypotFunction {
-  FOLLY_ALWAYS_INLINE void call(double& result, double a, double b) {
-    result = std::hypot(a, b);
-  }
-};
-
-template <typename T>
-struct Log2Function {
-  FOLLY_ALWAYS_INLINE bool call(double& result, double a) {
-    if (a <= 0.0) {
-      return false;
-    }
-    result = std::log2(a);
-    return true;
-  }
-};
-
-template <typename T>
-struct Log1pFunction {
-  FOLLY_ALWAYS_INLINE bool call(double& result, double a) {
-    if (a <= -1) {
-      return false;
-    }
-    result = std::log1p(a);
-    return true;
-  }
-};
-
-template <typename T>
-struct CotFunction {
-  FOLLY_ALWAYS_INLINE void call(double& result, double a) {
-    result = 1 / std::tan(a);
-  }
-};
-
-template <typename T>
-struct Log10Function {
-  FOLLY_ALWAYS_INLINE bool call(double& result, double a) {
-    if (a <= 0.0) {
-      return false;
-    }
-    result = std::log10(a);
-    return true;
-  }
-};
 } // namespace facebook::velox::functions::sparksql

@@ -24,23 +24,21 @@ SelectiveStringDirectColumnReader::SelectiveStringDirectColumnReader(
     const std::shared_ptr<const dwio::common::TypeWithId>& nodeType,
     DwrfParams& params,
     common::ScanSpec& scanSpec)
-    : SelectiveColumnReader(nodeType->type(), params, scanSpec, nodeType) {
-  EncodingKey encodingKey{nodeType->id(), params.flatMapContext().sequence};
+    : SelectiveColumnReader(nodeType, params, scanSpec, nodeType->type) {
+  EncodingKey encodingKey{nodeType->id, params.flatMapContext().sequence};
   auto& stripe = params.stripeStreams();
   RleVersion rleVersion =
       convertRleVersion(stripe.getEncoding(encodingKey).kind());
   auto lenId = encodingKey.forKind(proto::Stream_Kind_LENGTH);
   bool lenVInts = stripe.getUseVInts(lenId);
   lengthDecoder_ = createRleDecoder</*isSigned*/ false>(
-      stripe.getStream(lenId, params.streamLabels().label(), true),
+      stripe.getStream(lenId, true),
       rleVersion,
       memoryPool_,
       lenVInts,
       dwio::common::INT_BYTE_SIZE);
-  blobStream_ = stripe.getStream(
-      encodingKey.forKind(proto::Stream_Kind_DATA),
-      params.streamLabels().label(),
-      true);
+  blobStream_ =
+      stripe.getStream(encodingKey.forKind(proto::Stream_Kind_DATA), true);
 }
 
 uint64_t SelectiveStringDirectColumnReader::skip(uint64_t numValues) {
@@ -314,6 +312,7 @@ template <typename TVisitor>
 void SelectiveStringDirectColumnReader::readWithVisitor(
     RowSet rows,
     TVisitor visitor) {
+  vector_size_t numRows = rows.back() + 1;
   int32_t current = visitor.start();
   constexpr bool isExtract =
       std::is_same_v<typename TVisitor::FilterType, common::AlwaysTrue> &&
@@ -345,6 +344,7 @@ void SelectiveStringDirectColumnReader::readWithVisitor(
       extractSparse(rows.data(), rows.size());
     }
     numValues_ = rows.size();
+    readOffset_ += numRows;
     return;
   }
 
@@ -358,6 +358,7 @@ void SelectiveStringDirectColumnReader::readWithVisitor(
   } else {
     decode<false, TVisitor>(nullptr, visitor);
   }
+  readOffset_ += numRows;
 }
 
 template <typename TFilter, bool isDense, typename ExtractValues>
@@ -421,14 +422,11 @@ void SelectiveStringDirectColumnReader::read(
   prepareRead<folly::StringPiece>(offset, rows, incomingNulls);
   bool isDense = rows.back() == rows.size() - 1;
 
-  auto numRows = rows.back() + 1;
-  auto numNulls = nullsInReadRange_
-      ? BaseVector::countNulls(nullsInReadRange_, 0, numRows)
-      : 0;
-  dwio::common::ensureCapacity<int32_t>(
-      lengths_, numRows - numNulls, &memoryPool_);
-  lengthDecoder_->nextLengths(
-      lengths_->asMutable<int32_t>(), numRows - numNulls);
+  auto end = rows.back() + 1;
+  auto numNulls =
+      nullsInReadRange_ ? BaseVector::countNulls(nullsInReadRange_, 0, end) : 0;
+  dwio::common::ensureCapacity<int32_t>(lengths_, end - numNulls, &memoryPool_);
+  lengthDecoder_->nextLengths(lengths_->asMutable<int32_t>(), end - numNulls);
   rawLengths_ = lengths_->as<uint32_t>();
   lengthIndex_ = 0;
   if (scanSpec_->keepValues()) {
@@ -444,14 +442,14 @@ void SelectiveStringDirectColumnReader::read(
             rows,
             dwio::common::ExtractToGenericHook(scanSpec_->valueHook()));
       }
+      return;
+    }
+    if (isDense) {
+      processFilter<true>(
+          scanSpec_->filter(), rows, dwio::common::ExtractToReader(this));
     } else {
-      if (isDense) {
-        processFilter<true>(
-            scanSpec_->filter(), rows, dwio::common::ExtractToReader(this));
-      } else {
-        processFilter<false>(
-            scanSpec_->filter(), rows, dwio::common::ExtractToReader(this));
-      }
+      processFilter<false>(
+          scanSpec_->filter(), rows, dwio::common::ExtractToReader(this));
     }
   } else {
     if (isDense) {
@@ -462,8 +460,6 @@ void SelectiveStringDirectColumnReader::read(
           scanSpec_->filter(), rows, dwio::common::DropValues());
     }
   }
-
-  readOffset_ += numRows;
 }
 
 } // namespace facebook::velox::dwrf

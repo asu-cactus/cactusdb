@@ -232,10 +232,16 @@ class ConcatFunction : public exec::VectorFunction {
     });
 
     // Allocate a string buffer.
-    auto rawBuffer = flatResult->getRawStringBufferWithSpace(totalResultBytes);
+    auto buffer = flatResult->getBufferWithSpace(totalResultBytes);
+    // getBufferWithSpace() may return a buffer that already has content, so we
+    // only use the space after that.
+    auto rawBuffer = buffer->asMutable<char>() + buffer->size();
+    buffer->setSize(buffer->size() + totalResultBytes);
+
     size_t offset = 0;
     rows.applyToSelected([&](int row) {
       const char* start = rawBuffer + offset;
+
       size_t combinedSize = 0;
       for (int i = 0; i < numArgs; i++) {
         StringView value;
@@ -445,9 +451,7 @@ VELOX_DECLARE_STATEFUL_VECTOR_FUNCTION_WITH_METADATA(
     udf_concat,
     ConcatFunction::signatures(),
     ConcatFunction::metadata(),
-    [](const auto& name,
-       const auto& inputs,
-       const core::QueryConfig& /*config*/) {
+    [](const auto& name, const auto& inputs) {
       return std::make_unique<ConcatFunction>(name, inputs);
     });
 

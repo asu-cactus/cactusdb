@@ -415,10 +415,9 @@ struct ToIEEE754Bits64 {
   FOLLY_ALWAYS_INLINE void call(
       out_type<Varbinary>& result,
       const arg_type<double>& input) {
-    static constexpr auto kTypeLength = sizeof(int64_t);
-    auto value = folly::Endian::big(input);
-    result.setNoCopy(
-        StringView(reinterpret_cast<const char*>(&value), kTypeLength));
+    result.resize(64);
+    bits::toString((const uint64_t*)&input, 0, 64, result.data());
+    std::reverse(result.data(), result.data() + 64);
   }
 };
 

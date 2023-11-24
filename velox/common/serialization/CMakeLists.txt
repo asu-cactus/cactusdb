@@ -14,8 +14,7 @@
 
 add_library(velox_serialization DeserializationRegistry.cpp)
 
-target_link_libraries(velox_serialization PUBLIC velox_exception Folly::folly
-                                                 glog::glog)
+target_link_libraries(velox_serialization velox_exception)
 
 if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)

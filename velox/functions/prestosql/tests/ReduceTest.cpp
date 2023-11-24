@@ -125,22 +125,20 @@ TEST_F(ReduceTest, finalSelection) {
       "reduce(c0, 10, (s, x) -> s + x, s -> row_constructor(s)))",
       input);
 
-  auto expectedResult = makeRowVector(
-      {makeFlatVector<int64_t>(
-          size,
-          [](auto row) -> int64_t {
-            if (row < 100) {
-              return row;
-            } else {
-              int64_t sum = 10;
-              for (auto i = 0; i < row % 5; i++) {
-                sum += row + i;
-              }
-              return sum;
-            }
-          },
-          nullEvery(11))},
-      nullEvery(11));
+  auto expectedResult = makeRowVector({makeFlatVector<int64_t>(
+      size,
+      [](auto row) -> int64_t {
+        if (row < 100) {
+          return row;
+        } else {
+          int64_t sum = 10;
+          for (auto i = 0; i < row % 5; i++) {
+            sum += row + i;
+          }
+          return sum;
+        }
+      },
+      nullEvery(11))});
   assertEqualVectors(expectedResult, result);
 }
 
@@ -181,64 +179,4 @@ TEST_F(ReduceTest, try) {
   expectedResult =
       makeNullableFlatVector<int64_t>({std::nullopt, std::nullopt, 0});
   assertEqualVectors(expectedResult, result);
-}
-
-TEST_F(ReduceTest, finalSelectionLargerThanInput) {
-  // Verify that final selection is not passed on to lambda. Here, 'reduce' is a
-  // CSE, the conjunct ensures that row 2 is only evaluated in the first case,
-  // so when row needs to be evaluated the CSE sets the final selection to both
-  // rows and calls 'reduce'. The 'slice' inside reduce generates an array of
-  // size 1 so if final selection is passed on to the lambda it will fail while
-  // attempting to peel which uses final selection to generate peels.
-  auto input = makeRowVector({
-      makeArrayVector<int64_t>({
-          {1, 2, -2, -1, 5},
-          {1, 2, -2, -1, 9},
-      }),
-  });
-  auto result = evaluate(
-      "case "
-      "   when (c0[5] > 6) AND "
-      "     (reduce(slice(c0, 1, 4), 0, (s, x) -> s + x, s -> s) = 0) then 1 "
-      "   when (reduce(slice(c0, 1, 4), 0, (s, x) -> s + x, s -> s) = 0) then 2 "
-      "   else 3 "
-      "end",
-      input);
-
-  assertEqualVectors(makeFlatVector<int64_t>({2, 1}), result);
-}
-
-TEST_F(ReduceTest, nullArray) {
-  // Verify that NULL array is not passed on to lambda as it should be handled
-  // differently from array with null element.
-  // Case 1:  covers leading, middle and trailing nulls (intermediate result can
-  // be smaller than input vector)
-  auto arrayVector = makeArrayVectorFromJson<int64_t>(
-      {"null", "[1, null]", "null", "[null, 2]", "[1, 2, 3]", "null"});
-  auto data = makeRowVector({arrayVector});
-  auto result = evaluate(
-      "reduce(c0, 0, (s, x) -> s + x, s -> coalesce(s, 0) * 10)", data);
-  assertEqualVectors(
-      makeNullableFlatVector<int64_t>(
-          {std::nullopt, 0, std::nullopt, 0, 60, std::nullopt}),
-      result);
-
-  // Case 2: Where intermediate result is a constant vector by making the final
-  // reduce step output a constant.
-  auto singleValueArrayVector =
-      makeArrayVectorFromJson<int64_t>({"null", "[1, 2, 3]", "null"});
-  result = evaluate(
-      "reduce(c0, 0, (s, x) -> s + x, s -> 10)",
-      makeRowVector({singleValueArrayVector}));
-  assertEqualVectors(
-      makeNullableFlatVector<int64_t>({std::nullopt, 10, std::nullopt}),
-      result);
-
-  // Case 3: Where intermediate result is null
-  auto allNullsArrayVector = makeArrayVectorFromJson<int64_t>({"null", "null"});
-  result = evaluate(
-      "reduce(c0, 0, (s, x) -> s + x, s -> coalesce(s, 0) * 10)",
-      makeRowVector({allNullsArrayVector}));
-  assertEqualVectors(
-      makeNullableFlatVector<int64_t>({std::nullopt, std::nullopt}), result);
 }

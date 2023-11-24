@@ -35,15 +35,15 @@ PageReader* FOLLY_NULLABLE readLeafRepDefs(
     return pageReader;
   }
   PageReader* pageReader = nullptr;
-  auto& type = *reinterpret_cast<const ParquetTypeWithId*>(&reader->fileType());
-  if (type.type()->kind() == TypeKind::ARRAY) {
+  auto& type = *reinterpret_cast<const ParquetTypeWithId*>(&reader->nodeType());
+  if (type.type->kind() == TypeKind::ARRAY) {
     pageReader = readLeafRepDefs(children[0], numTop, true);
     auto list = dynamic_cast<ListColumnReader*>(reader);
     assert(list);
     list->setLengthsFromRepDefs(*pageReader);
     return pageReader;
   }
-  if (type.type()->kind() == TypeKind::MAP) {
+  if (type.type->kind() == TypeKind::MAP) {
     pageReader = readLeafRepDefs(children[0], numTop, true);
     readLeafRepDefs(children[1], numTop, false);
     auto map = dynamic_cast<MapColumnReader*>(reader);
@@ -70,11 +70,11 @@ void skipUnreadLengthsAndNulls(dwio::common::SelectiveColumnReader& reader) {
   if (children.empty()) {
     return;
   }
-  if (reader.fileType().type()->kind() == TypeKind::ARRAY) {
+  if (reader.type()->kind() == TypeKind::ARRAY) {
     reinterpret_cast<ListColumnReader*>(&reader)->skipUnreadLengths();
-  } else if (reader.fileType().type()->kind() == TypeKind::ROW) {
+  } else if (reader.type()->kind() == TypeKind::ROW) {
     reinterpret_cast<StructColumnReader*>(&reader)->seekToEndOfPresetNulls();
-  } else if (reader.fileType().type()->kind() == TypeKind::MAP) {
+  } else if (reader.type()->kind() == TypeKind::MAP) {
     reinterpret_cast<MapColumnReader*>(&reader)->skipUnreadLengths();
   } else {
     VELOX_UNREACHABLE();
@@ -87,7 +87,8 @@ void enqueueChildren(
     dwio::common::BufferedInput& input) {
   auto children = reader->children();
   if (children.empty()) {
-    return reader->formatData().as<ParquetData>().enqueueRowGroup(index, input);
+    reader->formatData().as<ParquetData>().enqueueRowGroup(index, input);
+    return;
   }
   for (auto* child : children) {
     enqueueChildren(child, index, input);
@@ -99,32 +100,30 @@ void ensureRepDefs(
     dwio::common::SelectiveColumnReader& reader,
     int32_t numTop) {
   auto& nodeType =
-      *reinterpret_cast<const ParquetTypeWithId*>(&reader.fileType());
+      *reinterpret_cast<const ParquetTypeWithId*>(&reader.nodeType());
   // Check that this is a direct child of the root struct.
-  if (nodeType.parent() && !nodeType.parent()->parent()) {
+  if (nodeType.parent && !nodeType.parent->parent) {
     skipUnreadLengthsAndNulls(reader);
     readLeafRepDefs(&reader, numTop, true);
   }
 }
 
 MapColumnReader::MapColumnReader(
-    const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
-    const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
+    std::shared_ptr<const dwio::common::TypeWithId> requestedType,
     ParquetParams& params,
     common::ScanSpec& scanSpec)
     : dwio::common::SelectiveMapColumnReader(
           requestedType,
-          dataType,
+          requestedType,
           params,
           scanSpec) {
-  DWIO_ENSURE_EQ(fileType_->id(), dataType->id(), "working on the same node");
   auto& keyChildType = requestedType->childAt(0);
   auto& elementChildType = requestedType->childAt(1);
-  keyReader_ = ParquetColumnReader::build(
-      keyChildType, fileType_->childAt(0), params, *scanSpec.children()[0]);
+  keyReader_ =
+      ParquetColumnReader::build(keyChildType, params, *scanSpec.children()[0]);
   elementReader_ = ParquetColumnReader::build(
-      elementChildType, fileType_->childAt(1), params, *scanSpec.children()[1]);
-  reinterpret_cast<const ParquetTypeWithId*>(dataType.get())
+      elementChildType, params, *scanSpec.children()[1]);
+  reinterpret_cast<const ParquetTypeWithId*>(requestedType.get())
       ->makeLevelInfo(levelInfo_);
   children_ = {keyReader_.get(), elementReader_.get()};
 }
@@ -136,7 +135,7 @@ void MapColumnReader::enqueueRowGroup(
 }
 
 void MapColumnReader::seekToRowGroup(uint32_t index) {
-  SelectiveMapColumnReader::seekToRowGroup(index);
+  SelectiveColumnReader::seekToRowGroup(index);
   readOffset_ = 0;
   childTargetReadOffset_ = 0;
   BufferPtr noBuffer;
@@ -188,7 +187,7 @@ void MapColumnReader::read(
   ensureRepDefs(*this, offset + rows.back() + 1 - readOffset_);
   if (offset > readOffset_) {
     // There is no page reader on this level so cannot call skipNullsOnly on it.
-    if (fileType().parent() && !fileType().parent()->parent()) {
+    if (nodeType().parent && !nodeType().parent->parent) {
       skip(offset - readOffset_);
     }
     readOffset_ = offset;
@@ -218,19 +217,18 @@ void MapColumnReader::filterRowGroups(
 }
 
 ListColumnReader::ListColumnReader(
-    const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
-    const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
+    std::shared_ptr<const dwio::common::TypeWithId> requestedType,
     ParquetParams& params,
     common::ScanSpec& scanSpec)
     : dwio::common::SelectiveListColumnReader(
           requestedType,
-          dataType,
+          requestedType,
           params,
           scanSpec) {
   auto& childType = requestedType->childAt(0);
-  child_ = ParquetColumnReader::build(
-      childType, fileType_->childAt(0), params, *scanSpec.children()[0]);
-  reinterpret_cast<const ParquetTypeWithId*>(dataType.get())
+  child_ =
+      ParquetColumnReader::build(childType, params, *scanSpec.children()[0]);
+  reinterpret_cast<const ParquetTypeWithId*>(requestedType.get())
       ->makeLevelInfo(levelInfo_);
   children_ = {child_.get()};
 }
@@ -242,7 +240,7 @@ void ListColumnReader::enqueueRowGroup(
 }
 
 void ListColumnReader::seekToRowGroup(uint32_t index) {
-  SelectiveListColumnReader::seekToRowGroup(index);
+  SelectiveColumnReader::seekToRowGroup(index);
   readOffset_ = 0;
   childTargetReadOffset_ = 0;
   BufferPtr noBuffer;
@@ -292,7 +290,7 @@ void ListColumnReader::read(
   ensureRepDefs(*this, offset + rows.back() + 1 - readOffset_);
   if (offset > readOffset_) {
     // There is no page reader on this level so cannot call skipNullsOnly on it.
-    if (fileType().parent() && !fileType().parent()->parent()) {
+    if (nodeType().parent && !nodeType().parent->parent) {
       skip(offset - readOffset_);
     }
     readOffset_ = offset;

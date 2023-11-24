@@ -32,8 +32,6 @@ class HashProbe : public Operator {
       DriverCtx* driverCtx,
       const std::shared_ptr<const core::HashJoinNode>& hashJoinNode);
 
-  void initialize() override;
-
   bool needsInput() const override {
     if (state_ == ProbeOperatorState::kFinish || noMoreInput_ ||
         noMoreSpillInput_ || input_ != nullptr) {
@@ -66,7 +64,7 @@ class HashProbe : public Operator {
     return false;
   }
 
-  void abort() override;
+  void close() override;
 
   void clearDynamicFilters() override;
 
@@ -220,8 +218,6 @@ class HashProbe : public Operator {
   // next hash table from the spilled data.
   void noMoreInputInternal();
 
-  void recordSpillStats();
-
   // Returns the index of the 'match' column in the output for semi project
   // joins.
   VectorPtr& matchColumn() const {
@@ -300,14 +296,6 @@ class HashProbe : public Operator {
   // Indicates whether there was no input. Used for right semi join project.
   bool noInput_{true};
 
-  // Indicates whether to skip probe input data processing or not. It only
-  // applies for a specific set of join types (see skipProbeOnEmptyBuild()), and
-  // the build table is empty and the probe input is read from non-spilled
-  // source. This ensures the hash probe operator keeps running until all the
-  // probe input from the sources have been processed. It prevents the exchange
-  // hanging problem at the producer side caused by the early query finish.
-  bool skipInput_{false};
-
   // Indicates whether there are rows with null join keys on the build
   // side. Used by anti and left semi project join.
   bool buildSideHasNullKeys_{false};
@@ -382,73 +370,26 @@ class HashProbe : public Operator {
     template <typename TOnMiss>
     void advance(vector_size_t row, bool passed, TOnMiss onMiss) {
       if (currentRow != row) {
-        // Check if 'currentRow' is the same input row as the last missed row
-        // from a previous output batch.  If so finishIteration will call
-        // onMiss.
-        if (currentRow != -1 && !currentRowPassed &&
-            (!lastMissedRow || currentRow != lastMissedRow)) {
+        if (currentRow != -1 && !currentRowPassed) {
           onMiss(currentRow);
         }
         currentRow = row;
         currentRowPassed = false;
       }
-
       if (passed) {
-        // lastMissedRow can only be a row that has never passed the filter.  If
-        // it passes there's no need to continue carrying it forward.
-        if (lastMissedRow && currentRow == lastMissedRow) {
-          lastMissedRow.reset();
-        }
-
         currentRowPassed = true;
       }
     }
 
-    // Invoked at the end of one output batch processing. 'end' is set to true
-    // at the end of processing an input batch. 'freeOutputRows' is the number
-    // of rows that can still be written to the output batch.
+    // Called when all rows from the current input batch were processed.
     template <typename TOnMiss>
-    void
-    finishIteration(TOnMiss onMiss, bool endOfData, size_t freeOutputRows) {
-      if (endOfData) {
-        if (!currentRowPassed && currentRow != -1) {
-          // If we're at the end of the input batch and the current row hasn't
-          // passed the filter, it never will, process it as a miss.
-          // We're guaranteed to have space, at least the last row was never
-          // written out since it was a miss.
-          VELOX_CHECK_GE(freeOutputRows, 0);
-          onMiss(currentRow);
-          freeOutputRows--;
-        }
-
-        // We no longer need to carry the current row since we already called
-        // onMiss on it.
-        if (lastMissedRow && currentRow == lastMissedRow) {
-          lastMissedRow.reset();
-        }
-
-        currentRow = -1;
-        currentRowPassed = false;
+    void finish(TOnMiss onMiss) {
+      if (!currentRowPassed) {
+        onMiss(currentRow);
       }
 
-      // If there's space left in the output batch, write out the last missed
-      // row.
-      if (lastMissedRow && currentRow != lastMissedRow && freeOutputRows > 0) {
-        onMiss(*lastMissedRow);
-        lastMissedRow.reset();
-      }
-
-      // If the current row hasn't passed the filter, we need to carry it
-      // forward in case it never passes the filter.
-      if (!currentRowPassed && currentRow != -1) {
-        lastMissedRow = currentRow;
-      }
-    }
-
-    // Returns if we're carrying forward a missed input row. Notably, if this is
-    // true, we're not yet done processing the input batch.
-    bool hasLastMissedRow() {
-      return lastMissedRow.has_value();
+      currentRow = -1;
+      currentRowPassed = false;
     }
 
    private:
@@ -457,13 +398,6 @@ class HashProbe : public Operator {
 
     // True if currentRow has a match.
     bool currentRowPassed{false};
-
-    // If set, it points to the last missed (input) row carried over from
-    // previous output batch processing. The last missed row is either written
-    // as a passed row if the same input row has a hit in the next output batch
-    // processed or written to the first output batch which has space at
-    // the end if it never has a hit.
-    std::optional<vector_size_t> lastMissedRow;
   };
 
   // For left semi join filter with extra filter, de-duplicates probe side rows
@@ -610,6 +544,9 @@ class HashProbe : public Operator {
   // previously spilled data. It is used to read the probe inputs from the
   // corresponding spilled data on disk.
   std::unique_ptr<UnorderedStreamReader<BatchStream>> spillInputReader_;
+
+  // Used to read the probe inputs from 'spillInputReader_'.
+  RowVectorPtr spillInput_;
 
   // Sets to true after read all the probe inputs from 'spillInputReader_'.
   bool noMoreSpillInput_{false};

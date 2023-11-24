@@ -19,7 +19,6 @@ add_executable(
   BitConcatenationTest.cpp
   BitPackDecoderTest.cpp
   ChainedBufferTests.cpp
-  ColumnSelectorTests.cpp
   DataBufferTests.cpp
   DecoderUtilTest.cpp
   LocalFileSinkTest.cpp
@@ -28,6 +27,7 @@ add_executable(
   ReadFileInputStreamTests.cpp
   RetryTests.cpp
   TestBufferedInput.cpp
+  TestColumnSelector.cpp
   TypeTests.cpp)
 add_test(velox_dwio_common_test velox_dwio_common_test)
 target_link_libraries(
@@ -76,8 +76,11 @@ if(VELOX_ENABLE_ARROW)
   add_executable(velox_dwio_common_bitpack_decoder_benchmark
                  BitPackDecoderBenchmark.cpp)
 
-  target_compile_options(velox_dwio_common_bitpack_decoder_benchmark
-                         PRIVATE -Wno-deprecated-declarations)
+  # The duckdb include on BitPackDecoderTest.cpp triggers this error in gcc.
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(velox_dwio_common_bitpack_decoder_benchmark
+                           PRIVATE -Wno-deprecated-declarations)
+  endif()
 
   target_link_libraries(
     velox_dwio_common_bitpack_decoder_benchmark velox_dwio_common arrow duckdb

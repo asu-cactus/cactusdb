@@ -115,7 +115,17 @@ int main(int argc, char** argv) {
   auto writerPlanFragment =
       exec::test::PlanBuilder()
           .values({rowVector})
-          .tableWrite("targetDirectory", dwio::common::FileFormat::DWRF)
+          .tableWrite(
+              inputRowType->names(),
+              std::make_shared<core::InsertTableHandle>(
+                  kHiveConnectorId,
+                  HiveConnectorTestBase::makeHiveInsertTableHandle(
+                      inputRowType->names(),
+                      inputRowType->children(),
+                      {},
+                      HiveConnectorTestBase::makeLocationHandle(
+                          tempDir->path))),
+              connector::CommitStrategy::kNoCommit)
           .planFragment();
 
   std::shared_ptr<folly::Executor> executor(

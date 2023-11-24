@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "velox/expression/RegisterSpecialForm.h"
 #include "velox/functions/Registerer.h"
 #include "velox/functions/lib/IsNull.h"
 #include "velox/functions/prestosql/Cardinality.h"
@@ -22,7 +21,6 @@ namespace facebook::velox::functions {
 
 // Special form functions don't have any prefix.
 void registerAllSpecialFormGeneralFunctions() {
-  exec::registerFunctionCallToSpecialForms();
   VELOX_REGISTER_VECTOR_FUNCTION(udf_in, "in");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_concat_row, "row_constructor");
   registerIsNullFunction("is_null");

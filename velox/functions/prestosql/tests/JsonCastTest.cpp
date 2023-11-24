@@ -45,7 +45,7 @@ class JsonCastTest : public functions::test::CastBaseTest {
     auto expectedVector =
         makeNullableFlatVector<JsonNativeType>(expected, JSON());
 
-    testCast(fromType, JSON(), arrayVector, expectedVector);
+    testCast<JsonNativeType>(fromType, JSON(), arrayVector, expectedVector);
   }
 
   template <typename TKey, typename TValue>
@@ -57,7 +57,7 @@ class JsonCastTest : public functions::test::CastBaseTest {
     auto expectedVector =
         makeNullableFlatVector<JsonNativeType>(expected, JSON());
 
-    testCast(fromType, JSON(), mapVector, expectedVector);
+    testCast<JsonNativeType>(fromType, JSON(), mapVector, expectedVector);
   }
 
   template <typename TChild1, typename TChild2, typename TChild3>
@@ -78,7 +78,7 @@ class JsonCastTest : public functions::test::CastBaseTest {
     auto expectedVector =
         makeNullableFlatVector<JsonNativeType>(expected, JSON());
 
-    testCast(fromType, JSON(), rowVector, expectedVector);
+    testCast<JsonNativeType>(fromType, JSON(), rowVector, expectedVector);
   }
 
   // Populates offsets and sizes buffers for making array and map vectors.
@@ -288,12 +288,12 @@ TEST_F(JsonCastTest, fromDouble) {
 }
 
 TEST_F(JsonCastTest, fromDate) {
-  testCast<int32_t, JsonNativeType>(
+  testCast<Date, JsonNativeType>(
       DATE(),
       JSON(),
       {0, 1000, -10000, std::nullopt},
       {"1970-01-01"_sv, "1972-09-27"_sv, "1942-08-16"_sv, std::nullopt});
-  testCast<int32_t, JsonNativeType>(
+  testCast<Date, JsonNativeType>(
       DATE(),
       JSON(),
       {std::nullopt, std::nullopt, std::nullopt, std::nullopt},
@@ -323,7 +323,8 @@ TEST_F(JsonCastTest, fromUnknown) {
   auto input = makeFlatUnknownVector(3);
   auto expected = makeNullableFlatVector<JsonNativeType>(
       {std::nullopt, std::nullopt, std::nullopt}, JSON());
-  evaluateAndVerify(UNKNOWN(), JSON(), makeRowVector({input}), expected);
+  evaluateAndVerify<JsonNativeType>(
+      UNKNOWN(), JSON(), makeRowVector({input}), expected);
 }
 
 TEST_F(JsonCastTest, fromArray) {
@@ -344,7 +345,7 @@ TEST_F(JsonCastTest, fromArray) {
       ARRAY(UNKNOWN()));
   auto arrayOfUnknownElementsExpected = makeNullableFlatVector<JsonNativeType>(
       {"[null,null]", "[null,null]"}, JSON());
-  testCast(
+  testCast<JsonNativeType>(
       ARRAY(UNKNOWN()),
       JSON(),
       arrayOfUnknownElements,
@@ -355,7 +356,7 @@ TEST_F(JsonCastTest, fromArray) {
       makeArrayWithDictionaryElements<int64_t>({1, -2, 3, -4, 5, -6, 7}, 2);
   auto arrayOfDictElementsExpected = makeNullableFlatVector<JsonNativeType>(
       {"[null,-6]", "[5,-4]", "[3,-2]", "[1]"}, JSON());
-  testCast(
+  testCast<JsonNativeType>(
       ARRAY(BIGINT()),
       JSON(),
       arrayOfDictElements,
@@ -369,7 +370,7 @@ TEST_F(JsonCastTest, fromArray) {
           ARRAY(JSON()));
   auto jsonArrayOfDictElementsExpected = makeNullableFlatVector<JsonNativeType>(
       {"[null,f]", "[e,d]", "[c,b]", "[a]"}, JSON());
-  testCast(
+  testCast<JsonNativeType>(
       ARRAY(JSON()),
       JSON(),
       jsonArrayOfDictElements,
@@ -380,7 +381,8 @@ TEST_F(JsonCastTest, fromArray) {
   auto allNullExpected = makeNullableFlatVector<JsonNativeType>(
       {std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt},
       JSON());
-  testCast(ARRAY(BIGINT()), JSON(), allNullArray, allNullExpected);
+  testCast<JsonNativeType>(
+      ARRAY(BIGINT()), JSON(), allNullArray, allNullExpected);
 }
 
 TEST_F(JsonCastTest, fromMap) {
@@ -436,7 +438,7 @@ TEST_F(JsonCastTest, fromMap) {
        R"({"a":null})"},
       JSON());
 
-  testCast(
+  testCast<JsonNativeType>(
       MAP(VARCHAR(), UNKNOWN()),
       JSON(),
       mapOfUnknownValues,
@@ -453,7 +455,7 @@ TEST_F(JsonCastTest, fromMap) {
        R"({"b":2.2,"c":3.14})",
        R"({"a":1100})"},
       JSON());
-  testCast(
+  testCast<JsonNativeType>(
       MAP(VARCHAR(), DOUBLE()),
       JSON(),
       mapOfDictElements,
@@ -465,7 +467,7 @@ TEST_F(JsonCastTest, fromMap) {
   auto jsonMapOfDictElementsExpected = makeNullableFlatVector<JsonNativeType>(
       {"{f:-6E-10,g:null}", "{d:-4.4,e:null}", "{b:2.2,c:3.14}", "{a:1100}"},
       JSON());
-  testCast(
+  testCast<JsonNativeType>(
       MAP(JSON(), DOUBLE()),
       JSON(),
       jsonMapOfDictElements,
@@ -476,7 +478,8 @@ TEST_F(JsonCastTest, fromMap) {
   auto allNullExpected = makeNullableFlatVector<JsonNativeType>(
       {std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt},
       JSON());
-  testCast(MAP(VARCHAR(), BIGINT()), JSON(), allNullMap, allNullExpected);
+  testCast<JsonNativeType>(
+      MAP(VARCHAR(), BIGINT()), JSON(), allNullMap, allNullExpected);
 }
 
 TEST_F(JsonCastTest, fromRow) {
@@ -516,7 +519,7 @@ TEST_F(JsonCastTest, fromRow) {
   auto rowOfUnknownChildrenExpected = makeNullableFlatVector<JsonNativeType>(
       {"[null,null]", "[null,null]"}, JSON());
 
-  testCast(
+  testCast<JsonNativeType>(
       ROW({UNKNOWN(), UNKNOWN()}),
       JSON(),
       rowOfUnknownChildren,
@@ -527,7 +530,7 @@ TEST_F(JsonCastTest, fromRow) {
       {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}, ROW({BIGINT(), BIGINT(), BIGINT()}));
   auto rowOfDictElementsExpected = makeNullableFlatVector<JsonNativeType>(
       {"[null,null,null]", "[2,5,8]", "[1,4,7]"}, JSON());
-  testCast(
+  testCast<JsonNativeType>(
       ROW({BIGINT(), BIGINT(), BIGINT()}),
       JSON(),
       rowOfDictElements,
@@ -541,7 +544,7 @@ TEST_F(JsonCastTest, fromRow) {
       ROW({JSON(), JSON(), JSON()}));
   auto jsonRowOfDictElementsExpected = makeNullableFlatVector<JsonNativeType>(
       {"[null,null,null]", "[a2,b2,c2]", "[a1,b1,c1]"}, JSON());
-  testCast(
+  testCast<JsonNativeType>(
       ROW({JSON(), JSON(), JSON()}),
       JSON(),
       jsonRowOfDictElements,
@@ -556,7 +559,8 @@ TEST_F(JsonCastTest, fromRow) {
   auto allNullExpected = makeNullableFlatVector<JsonNativeType>(
       {std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt},
       JSON());
-  testCast(ROW({BIGINT()}), JSON(), allNullRow, allNullExpected);
+  testCast<JsonNativeType>(
+      ROW({BIGINT()}), JSON(), allNullRow, allNullExpected);
 }
 
 TEST_F(JsonCastTest, fromNested) {
@@ -607,7 +611,7 @@ TEST_F(JsonCastTest, fromNested) {
   auto expectedVector =
       makeNullableFlatVector<JsonNativeType>(expected, JSON());
 
-  testCast(
+  testCast<JsonNativeType>(
       ROW({MAP(VARCHAR(), ARRAY(BIGINT())), ARRAY(MAP(VARCHAR(), BIGINT()))}),
       JSON(),
       rowVector,
@@ -618,14 +622,14 @@ TEST_F(JsonCastTest, unsupportedTypes) {
   // Map keys cannot be timestamp.
   auto timestampKeyMap = makeMapVector<Timestamp, int64_t>({{}});
   VELOX_ASSERT_THROW(
-      evaluateCast(
+      evaluateCast<JsonNativeType>(
           MAP(TIMESTAMP(), BIGINT()), JSON(), makeRowVector({timestampKeyMap})),
       "Cannot cast MAP<TIMESTAMP,BIGINT> to JSON");
 
   // All children of row must be of supported types.
   auto invalidTypeRow = makeRowVector({timestampKeyMap});
   VELOX_ASSERT_THROW(
-      evaluateCast(
+      evaluateCast<JsonNativeType>(
           ROW({MAP(TIMESTAMP(), BIGINT())}),
           JSON(),
           makeRowVector({invalidTypeRow})),
@@ -650,7 +654,7 @@ TEST_F(JsonCastTest, unsupportedTypes) {
       nullKeyVector,
       valueVector);
   VELOX_ASSERT_THROW(
-      evaluateCast(
+      evaluateCast<JsonNativeType>(
           MAP(VARCHAR(), BIGINT()), JSON(), makeRowVector({nullKeyMap})),
       "Map keys cannot be null.");
 
@@ -666,7 +670,7 @@ TEST_F(JsonCastTest, unsupportedTypes) {
       arrayKeyVector,
       valueVector);
   VELOX_ASSERT_THROW(
-      evaluateCast(
+      evaluateCast<JsonNativeType>(
           MAP(ARRAY(BIGINT()), BIGINT()), JSON(), makeRowVector({arrayKeyMap})),
       "Cannot cast MAP<ARRAY<BIGINT>,BIGINT> to JSON");
 
@@ -683,13 +687,13 @@ TEST_F(JsonCastTest, unsupportedTypes) {
       jsonKeyVector,
       valueVector);
   VELOX_ASSERT_THROW(
-      evaluateCast(
+      evaluateCast<JsonNativeType>(
           MAP(JSON(), BIGINT()), JSON(), makeRowVector({invalidJsonKeyMap})),
       "Cannot cast map with null keys to JSON");
 
   // Not allowing to cast from json to itself.
   VELOX_ASSERT_THROW(
-      evaluateCast(
+      evaluateCast<JsonNativeType>(
           JSON(),
           JSON(),
           makeRowVector({makeNullableFlatVector<JsonNativeType>(
@@ -875,7 +879,7 @@ TEST_F(JsonCastTest, toArray) {
        {{}},
        std::nullopt});
 
-  testCast(JSON(), ARRAY(VARCHAR()), data, expected);
+  testCast<ComplexType>(JSON(), ARRAY(VARCHAR()), data, expected);
 
   // Tests array that has null at every row.
   data = makeNullableFlatVector<JsonNativeType>(
@@ -883,7 +887,7 @@ TEST_F(JsonCastTest, toArray) {
   expected = makeNullableArrayVector<int64_t>(
       {std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt});
 
-  testCast(JSON(), ARRAY(BIGINT()), data, expected);
+  testCast<ComplexType>(JSON(), ARRAY(BIGINT()), data, expected);
 }
 
 TEST_F(JsonCastTest, toMap) {
@@ -899,7 +903,7 @@ TEST_F(JsonCastTest, toMap) {
        {{}},
        std::nullopt});
 
-  testCast(JSON(), MAP(VARCHAR(), VARCHAR()), data, expected);
+  testCast<ComplexType>(JSON(), MAP(VARCHAR(), VARCHAR()), data, expected);
 
   // Tests map of non-string keys.
   data = makeNullableFlatVector<JsonNativeType>(
@@ -914,7 +918,7 @@ TEST_F(JsonCastTest, toMap) {
        {{}},
        std::nullopt});
 
-  testCast(JSON(), MAP(BIGINT(), DOUBLE()), data, expected);
+  testCast<ComplexType>(JSON(), MAP(BIGINT(), DOUBLE()), data, expected);
 
   // Tests map that has null at every row.
   data = makeNullableFlatVector<JsonNativeType>(
@@ -922,7 +926,7 @@ TEST_F(JsonCastTest, toMap) {
   expected = makeNullableMapVector<StringView, int64_t>(
       {std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt});
 
-  testCast(JSON(), MAP(VARCHAR(), BIGINT()), data, expected);
+  testCast<ComplexType>(JSON(), MAP(VARCHAR(), BIGINT()), data, expected);
 
   // Null keys or non-string keys in JSON maps are not allowed.
   testThrow<JsonNativeType, ComplexType>(
@@ -935,24 +939,6 @@ TEST_F(JsonCastTest, toMap) {
       MAP(BIGINT(), DOUBLE()),
       {"{1:1.1,2:2.2}"_sv},
       "Not a JSON input");
-}
-
-TEST_F(JsonCastTest, orderOfKeys) {
-  auto data = makeFlatVector<JsonNativeType>(
-      {
-          R"({"k1": {"a": 1, "b": 2}})"_sv,
-          R"({"k2": {"a": 10, "b": 20}})"_sv,
-      },
-      JSON());
-
-  auto map = makeMapVector<std::string, JsonNativeType>(
-      {
-          {{"k1", R"({"a":1,"b":2})"}},
-          {{"k2", R"({"a":10,"b":20})"}},
-      },
-      MAP(VARCHAR(), JSON()));
-
-  testCast(JSON(), MAP(VARCHAR(), JSON()), data, map);
 }
 
 TEST_F(JsonCastTest, toRow) {
@@ -969,7 +955,7 @@ TEST_F(JsonCastTest, toRow) {
   auto child3 =
       makeNullableFlatVector<bool>({true, false, std::nullopt, std::nullopt});
 
-  testCast(
+  testCast<ComplexType>(
       JSON(),
       ROW({BIGINT(), VARCHAR(), BOOLEAN()}),
       array,
@@ -996,7 +982,7 @@ TEST_F(JsonCastTest, toRow) {
   auto child6 = makeNullableFlatVector<bool>(
       {true, true, true, false, false, std::nullopt});
 
-  testCast(
+  testCast<ComplexType>(
       JSON(),
       ROW({"k1", "k2", "k3"}, {BIGINT(), VARCHAR(), BOOLEAN()}),
       map,
@@ -1007,7 +993,7 @@ TEST_F(JsonCastTest, toRow) {
   auto nullExpected = makeRowVector(ROW({BIGINT(), DOUBLE()}), 1);
   nullExpected->setNull(0, true);
 
-  testCast(JSON(), ROW({BIGINT(), DOUBLE()}), null, nullExpected);
+  testCast<ComplexType>(JSON(), ROW({BIGINT(), DOUBLE()}), null, nullExpected);
 }
 
 TEST_F(JsonCastTest, toNested) {
@@ -1020,7 +1006,7 @@ TEST_F(JsonCastTest, toNested) {
        {{{{}}}},
        {{}}});
 
-  testCast(JSON(), ARRAY(ARRAY(VARCHAR())), array, arrayExpected);
+  testCast<ComplexType>(JSON(), ARRAY(ARRAY(VARCHAR())), array, arrayExpected);
 
   auto map = makeNullableFlatVector<JsonNativeType>(
       {R"({"1":[1.1,1.2],"2":[2,2.1]})"_sv, R"({"3":null,"4":[4.1,4.2]})"_sv});
@@ -1042,7 +1028,8 @@ TEST_F(JsonCastTest, toNested) {
       sizes,
       keys,
       innerArray);
-  testCast(JSON(), MAP(VARCHAR(), ARRAY(DOUBLE())), map, mapExpected);
+  testCast<ComplexType>(
+      JSON(), MAP(VARCHAR(), ARRAY(DOUBLE())), map, mapExpected);
 }
 
 TEST_F(JsonCastTest, toArrayAndMapOfJson) {
@@ -1053,7 +1040,7 @@ TEST_F(JsonCastTest, toArrayAndMapOfJson) {
       {{"[1,2]"_sv, "[null]"_sv, "null"_sv, "\"3\""_sv}, {"[]"_sv}, {}},
       ARRAY(JSON()));
 
-  testCast(JSON(), ARRAY(JSON()), array, arrayExpected);
+  testCast<ComplexType>(JSON(), ARRAY(JSON()), array, arrayExpected);
 
   // Test casting to map of JSON values.
   auto map = makeNullableFlatVector<JsonNativeType>(
@@ -1070,7 +1057,7 @@ TEST_F(JsonCastTest, toArrayAndMapOfJson) {
        {}},
       MAP(VARCHAR(), JSON()));
 
-  testCast(JSON(), MAP(VARCHAR(), JSON()), map, mapExpected);
+  testCast<ComplexType>(JSON(), MAP(VARCHAR(), JSON()), map, mapExpected);
 
   // The type of map keys is not allowed to be JSON.
   testThrow<JsonNativeType, ComplexType>(
@@ -1083,7 +1070,7 @@ TEST_F(JsonCastTest, toArrayAndMapOfJson) {
 TEST_F(JsonCastTest, toInvalid) {
   testThrow<JsonNativeType, Timestamp>(
       JSON(), TIMESTAMP(), {"null"_sv}, "Cannot cast JSON to TIMESTAMP");
-  testThrow<JsonNativeType, int32_t>(
+  testThrow<JsonNativeType, Date>(
       JSON(), DATE(), {"null"_sv}, "Cannot cast JSON to DATE");
 
   // Casting JSON arrays to ROW type with different number of fields or
@@ -1212,49 +1199,4 @@ TEST_F(JsonCastTest, castInTry) {
       JSON(),
       makeRowVector({rowVector}),
       jsonExpected);
-}
-
-TEST_F(JsonCastTest, tryCastFromJson) {
-  // Test try_cast to map when there are error in the conversions of map
-  // elements.
-  // To map(bigint, real).
-  auto data = makeFlatVector<JsonNativeType>(
-      {R"({"102":"2","101a":1.1})"_sv,
-       R"({"103":null,"104":2859327816787296000})"_sv},
-      JSON());
-  auto expectedMap =
-      makeNullableMapVector<int64_t, float>({std::nullopt, std::nullopt});
-  evaluateAndVerify(
-      JSON(), MAP(BIGINT(), REAL()), makeRowVector({data}), expectedMap, true);
-
-  // To array(bigint).
-  data = makeFlatVector<JsonNativeType>(
-      {R"(["102a","101a"])"_sv, R"(["103a","2859327816787296000"])"_sv},
-      JSON());
-  auto expectedArray =
-      makeNullableArrayVector<float>({std::nullopt, std::nullopt});
-  evaluateAndVerify(
-      JSON(), ARRAY(REAL()), makeRowVector({data}), expectedArray, true);
-
-  // To row(bigint).
-  data = makeFlatVector<JsonNativeType>(
-      {R"(["101a"])"_sv, R"(["28593278167872960000000a"])"_sv}, JSON());
-  auto expectedRow = makeRowVector(
-      {makeFlatVector<float>({0, 0})}, [](auto /*row*/) { return true; });
-  evaluateAndVerify(
-      JSON(), ROW({REAL()}), makeRowVector({data}), expectedRow, true);
-
-  // To primitive.
-  data = makeFlatVector<JsonNativeType>(
-      {R"("101a")"_sv, R"("28593278167872960000000a")"_sv}, JSON());
-  auto expected = makeNullableFlatVector<float>({std::nullopt, std::nullopt});
-  evaluateAndVerify(JSON(), REAL(), makeRowVector({data}), expected, true);
-
-  // Invalid input.
-  data = makeFlatVector<JsonNativeType>(
-      {R"(["101a"})"_sv, R"(["28593278167872960000000a"})"_sv}, JSON());
-  expectedRow = makeRowVector(
-      {makeFlatVector<float>({0, 0})}, [](auto /*row*/) { return true; });
-  evaluateAndVerify(
-      JSON(), ROW({REAL()}), makeRowVector({data}), expectedRow, true);
 }

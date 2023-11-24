@@ -28,9 +28,7 @@ namespace facebook::velox::duckdb {
 ::duckdb::LogicalType fromVeloxType(const TypePtr& type);
 
 /// Converts DuckDB type to Velox type.
-TypePtr toVeloxType(
-    ::duckdb::LogicalType type,
-    bool fileColumnNamesReadAsLowerCase = false);
+TypePtr toVeloxType(::duckdb::LogicalType type);
 
 static ::duckdb::timestamp_t veloxTimestampToDuckDB(
     const Timestamp& timestamp) {
@@ -41,18 +39,7 @@ static ::duckdb::timestamp_t veloxTimestampToDuckDB(
 static Timestamp duckdbTimestampToVelox(
     const ::duckdb::timestamp_t& timestamp) {
   auto micros = ::duckdb::Timestamp::GetEpochMicroSeconds(timestamp);
-
-  auto seconds = micros / 1'000'000;
-  auto nanoSeconds = (micros % 1'000'000) * 1'000;
-
-  // Make sure nanoseconds are >= 0 even if timestamp represents time before
-  // epoch.
-  if (nanoSeconds < 0) {
-    seconds--;
-    nanoSeconds += 1'000'000'000;
-  }
-
-  return Timestamp(seconds, nanoSeconds);
+  return Timestamp(micros / 1000000, (micros % 1000000) * 1000);
 }
 
 // Converts a duckDB Value (class that holds an arbitrary data type) into
@@ -198,15 +185,15 @@ struct DuckTimestampConversion {
 
 struct DuckDateConversion {
   typedef ::duckdb::date_t DUCK_TYPE;
-  typedef int32_t VELOX_TYPE;
+  typedef Date VELOX_TYPE;
 
   static ::duckdb::date_t toDuck(
-      const int32_t& input,
+      const Date& input,
       ::duckdb::Vector& /* unused */) {
-    return ::duckdb::Date::EpochDaysToDate(input);
+    return ::duckdb::Date::EpochDaysToDate(input.days());
   }
-  static int32_t toVelox(const ::duckdb::date_t& input) {
-    return ::duckdb::Date::EpochDays(input);
+  static Date toVelox(const ::duckdb::date_t& input) {
+    return Date(::duckdb::Date::EpochDays(input));
   }
 };
 

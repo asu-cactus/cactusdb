@@ -29,13 +29,12 @@ void SelectiveIntegerDirectColumnReader::read(
     RowSet rows,
     const uint64_t* incomingNulls) {
   VELOX_WIDTH_DISPATCH(
-      dwio::common::sizeOfIntKind(fileType_->type()->kind()),
+      dwio::common::sizeOfIntKind(type_->kind()),
       prepareRead,
       offset,
       rows,
       incomingNulls);
   readCommon<SelectiveIntegerDirectColumnReader>(rows);
-  readOffset_ += rows.back() + 1;
 }
 
 } // namespace facebook::velox::dwrf

@@ -14,13 +14,11 @@
 if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)
 endif()
-
 add_subdirectory(tz)
-add_subdirectory(fbhive)
 
 add_library(
   velox_type
-  Conversions.cpp
+  Date.cpp
   DecimalUtil.cpp
   DoubleUtil.cpp
   Filter.cpp

@@ -68,11 +68,8 @@ std::string_view getNameBeforeDelimiter(
 TypePtr toVeloxType(const std::string& typeName) {
   VELOX_CHECK(!typeName.empty(), "Cannot convert empty string to Velox type.");
 
-  auto type = std::string(getNameBeforeDelimiter(typeName, "<"));
-  if (DATE()->toString() == type) {
-    return DATE();
-  }
-  auto typeKind = mapNameToTypeKind(type);
+  auto type = getNameBeforeDelimiter(typeName, "<");
+  auto typeKind = mapNameToTypeKind(std::string(type));
   switch (typeKind) {
     case TypeKind::BOOLEAN:
       return BOOLEAN();
@@ -119,6 +116,9 @@ TypePtr toVeloxType(const std::string& typeName) {
         types.emplace_back(toVeloxType(std::string(fieldTypes[idx])));
       }
       return ROW(std::move(names), std::move(types));
+    }
+    case TypeKind::DATE: {
+      return DATE();
     }
     case TypeKind::UNKNOWN:
       return UNKNOWN();

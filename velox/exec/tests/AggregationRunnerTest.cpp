@@ -20,8 +20,7 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 #include "velox/common/base/Fs.h"
-#include "velox/exec/tests/utils/AggregationFuzzerRunner.h"
-#include "velox/exec/tests/utils/DuckQueryRunner.h"
+#include "velox/exec/tests/AggregationFuzzerRunner.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 
@@ -75,8 +74,5 @@ int main(int argc, char** argv) {
   facebook::velox::aggregate::prestosql::registerAllAggregateFunctions();
   facebook::velox::functions::prestosql::registerAllScalarFunctions();
 
-  auto duckQueryRunner =
-      std::make_unique<facebook::velox::exec::test::DuckQueryRunner>();
-  return exec::test::AggregationFuzzerRunner::runRepro(
-      FLAGS_plan_nodes_path, std::move(duckQueryRunner));
+  return exec::test::AggregationFuzzerRunner::run(FLAGS_plan_nodes_path);
 }

@@ -16,9 +16,9 @@
 #pragma once
 
 #include "velox/expression/FunctionSignature.h"
-#include "velox/functions/lib/aggregates/DecimalAggregate.h"
 #include "velox/functions/lib/aggregates/SimpleNumericAggregate.h"
 #include "velox/functions/prestosql/CheckedArithmeticImpl.h"
+#include "velox/functions/prestosql/aggregates/DecimalAggregate.h"
 
 using namespace facebook::velox::functions::aggregate;
 
@@ -171,15 +171,13 @@ class SumAggregate
 };
 
 template <typename TInputType>
-class DecimalSumAggregate
-    : public functions::aggregate::DecimalAggregate<int128_t, TInputType> {
+class DecimalSumAggregate : public DecimalAggregate<int128_t, TInputType> {
  public:
   explicit DecimalSumAggregate(TypePtr resultType)
-      : functions::aggregate::DecimalAggregate<int128_t, TInputType>(
-            resultType) {}
+      : DecimalAggregate<int128_t, TInputType>(resultType) {}
 
   virtual int128_t computeFinalValue(
-      functions::aggregate::LongDecimalWithOverflowState* accumulator) final {
+      LongDecimalWithOverflowState* accumulator) final {
     // Value is valid if the conditions below are true.
     int128_t sum = accumulator->sum;
     if ((accumulator->overflow == 1 && accumulator->sum < 0) ||
@@ -197,7 +195,7 @@ class DecimalSumAggregate
 };
 
 template <template <typename U, typename V, typename W> class T>
-exec::AggregateRegistrationResult registerSum(const std::string& name) {
+bool registerSum(const std::string& name) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures{
       exec::AggregateFunctionSignatureBuilder()
           .returnType("real")
@@ -232,9 +230,7 @@ exec::AggregateRegistrationResult registerSum(const std::string& name) {
       [name](
           core::AggregationNode::Step step,
           const std::vector<TypePtr>& argTypes,
-          const TypePtr& resultType,
-          const core::QueryConfig& /*config*/)
-          -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr& resultType) -> std::unique_ptr<exec::Aggregate> {
         VELOX_CHECK_EQ(argTypes.size(), 1, "{} takes only one argument", name);
         auto inputType = argTypes[0];
         switch (inputType->kind()) {

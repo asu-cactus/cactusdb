@@ -115,7 +115,6 @@ Mathematical Functions
     Returns a pseudo-random value in the range 0.0 <= x < 1.0.
 
 .. function:: random(n) -> [same as n]
-   :noindex:
 
     Returns a pseudo-random value in the range 0.0 <= x < n.
 
@@ -124,7 +123,6 @@ Mathematical Functions
     Returns ``x`` rounded to the nearest integer.
 
 .. function:: round(x, d) -> [same as x]
-   :noindex:
 
     Returns ``x`` rounded to ``d`` decimal places.
 
@@ -153,7 +151,6 @@ Mathematical Functions
     Returns x rounded to integer by dropping digits after decimal point.
 
 .. function:: truncate(x, n) -> double
-   :noindex:
 
     Returns x truncated to n decimal places. n can be negative to truncate n digits left of the decimal point.
 
@@ -163,7 +160,6 @@ Mathematical Functions
     specified ``bound1`` and ``bound2`` bounds and ``n`` number of buckets.
 
 .. function:: width_bucket(x, bins) -> bigint
-   :noindex:
 
     Returns the zero-based bin number of ``x`` according to the bins specified
     by the array ``bins``. The ``bins`` parameter must be an array of doubles and
@@ -240,7 +236,7 @@ Floating Point Functions
 
 
 ====================================
-Probability Functions: cdf
+Probability Functions
 ====================================
 
 .. function:: beta_cdf(a, b, value) -> double
@@ -255,65 +251,9 @@ Probability Functions: cdf
     The successProbability must be real value in [0, 1], numberOfTrials and value must be
     positive integers with numberOfTrials greater or equal to value
 
-.. function:: cauchy_cdf(median, scale, value) -> double
-
-    Compute the Cauchy cdf with given parameters median and scale (gamma): P(N; median, scale).
-    The scale parameter must be a positive double. The value parameter must be a double on the interval [0, 1].
-
-.. function:: chi_squared_cdf(df, value) -> double
-
-    Compute the Chi-square cdf with given df (degrees of freedom) parameter:  P(N < value; df).
-    The df parameter must be a positive real number, and value must be a non-negative real value (both of type DOUBLE).
-
-.. function:: f_cdf(df1, df2, value) -> double
-
-    Compute the F cdf with given df1 (numerator degrees of freedom) and df2 (denominator degrees of freedom) parameters:  P(N < value; df1, df2).
-    The numerator and denominator df parameters must be positive real numbers. The value must be a non-negative real number.
-
-.. function:: gamma_cdf(shape, scale, value) -> double
-
-    Compute the Gamma cdf with given shape and scale parameters: P(N < value; shape, scale).
-    The shape and scale parameters must be positive real numbers. The value must be a non-negative real number.
-
-.. function:: laplace_cdf(mean, scale, value) -> double
-
-     Compute the Laplace cdf with given mean and scale parameters: P(N < value; mean, scale).
-     The mean and value must be real values and the scale parameter must be a
-     positive value (all of type DOUBLE).
-
 .. function:: normal_cdf(mean, sd, value) -> double
 
     Compute the Normal cdf with given mean and standard deviation (sd): P(N < value; mean, sd).
     The mean and value must be real values and the standard deviation must be a real and
     positive value (all of type DOUBLE).
 
-.. function:: poisson_cdf(lambda, value) -> double
-
-    Compute the Poisson cdf with given lambda (mean) parameter:  P(N <= value; lambda).
-    The lambda parameter must be a positive real number (of type DOUBLE) and value must be a non-negative integer.
-
-
-====================================
-Probability Functions: inverse_cdf
-====================================
-
-.. function:: inverse_beta_cdf(a, b, p) -> double
-
-    Compute the inverse of the Beta cdf with given a, b parameters for the cumulative
-    probability (p): P(N < n). The a, b parameters must be positive real values (all of type DOUBLE).
-    The probability p must lie on the interval [0, 1].
-
-
-====================================
-Statistical Functions
-====================================
-
-.. function:: wilson_interval_lower(successes, trials, z) -> double
-
-    Returns the lower bound of the Wilson score interval of a Bernoulli trial process
-    at a confidence specified by the z-score z.
-
-.. function:: wilson_interval_upper(successes, trials, z) -> double
-
-    Returns the upper bound of the Wilson score interval of a Bernoulli trial process
-    at a confidence specified by the z-score z.

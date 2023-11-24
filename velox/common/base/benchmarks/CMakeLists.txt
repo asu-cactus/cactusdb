@@ -13,7 +13,5 @@
 # limitations under the License.
 add_executable(velox_common_base_benchmarks BitUtilBenchmark.cpp)
 
-target_link_libraries(
-  velox_common_base_benchmarks
-  PUBLIC ${FOLLY_BENCHMARK}
-  PRIVATE velox_common_base Folly::folly)
+target_link_libraries(velox_common_base_benchmarks velox_common_base
+                      Folly::folly ${FOLLY_BENCHMARK})

@@ -13,12 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #include "velox/type/Variant.h"
 #include <gtest/gtest.h>
 #include <velox/type/Type.h>
-#include "velox/common/base/tests/GTestUtils.h"
-
 #include <numeric>
 
 using namespace facebook::velox;
@@ -45,9 +42,6 @@ TEST(VariantTest, arrayInferType) {
       *ARRAY(ARRAY(DOUBLE())),
       *variant::array({variant::array({variant(TypeKind::DOUBLE)})})
            .inferType());
-  VELOX_ASSERT_THROW(
-      variant::array({variant(123456789), variant("velox")}),
-      "All array elements must be of the same kind");
 }
 
 TEST(VariantTest, mapInferType) {
@@ -211,6 +205,7 @@ TEST(VariantTest, serialize) {
   testSerDe(variant(TypeKind::VARCHAR));
   testSerDe(variant(TypeKind::VARBINARY));
   testSerDe(variant(TypeKind::TIMESTAMP));
+  testSerDe(variant(TypeKind::DATE));
   testSerDe(variant(TypeKind::ARRAY));
   testSerDe(variant(TypeKind::MAP));
   testSerDe(variant(TypeKind::ROW));
@@ -226,6 +221,7 @@ TEST(VariantTest, serialize) {
   testSerDe(variant((double)1.234));
   testSerDe(variant("This is a test."));
   testSerDe(variant::binary("This is a test."));
+  testSerDe(variant(Date(123)));
   testSerDe(variant(Timestamp(1, 2)));
 }
 
@@ -236,63 +232,30 @@ struct SerializableClass {
       : name(std::move(name)), value(value) {}
 };
 
-class VariantSerializationTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    static folly::once_flag once;
-    folly::call_once(once, []() {
-      OpaqueType::registerSerialization<SerializableClass>(
-          "SerializableClass",
-          [](const std::shared_ptr<SerializableClass>& obj) -> std::string {
-            return folly::json::serialize(
-                folly::dynamic::object("name", obj->name)("value", obj->value),
-                getSerializationOptions());
-          },
-          [](const std::string& json) -> std::shared_ptr<SerializableClass> {
-            folly::dynamic obj = folly::parseJson(json);
-            return std::make_shared<SerializableClass>(
-                obj["name"].asString(), obj["value"].asBool());
-          });
-    });
-    var_ = variant::opaque<SerializableClass>(
-        std::make_shared<SerializableClass>("test_class", false));
-  }
+TEST(VariantTest, serializeOpaque) {
+  OpaqueType::registerSerialization<SerializableClass>(
+      "serializable_class",
+      [](const std::shared_ptr<SerializableClass>& obj) -> std::string {
+        return folly::toJson(
+            folly::dynamic::object("name", obj->name)("value", obj->value));
+      },
+      [](const std::string& json) -> std::shared_ptr<SerializableClass> {
+        folly::dynamic obj = folly::parseJson(json);
+        return std::make_shared<SerializableClass>(
+            obj["name"].asString(), obj["value"].asBool());
+      });
 
-  variant var_;
-};
+  auto var = variant::opaque<SerializableClass>(
+      std::make_shared<SerializableClass>("test_class", false));
 
-TEST_F(VariantSerializationTest, serializeOpaque) {
-  auto serialized = var_.serialize();
+  auto serialized = var.serialize();
   auto deserialized_variant = variant::create(serialized);
   auto opaque = deserialized_variant.value<TypeKind::OPAQUE>().obj;
-  auto original_class = std::static_pointer_cast<SerializableClass>(opaque);
+
+  auto original_class = std::static_pointer_cast<SerializableClass>(
+      deserialized_variant.value<TypeKind::OPAQUE>().obj);
   EXPECT_EQ(original_class->name, "test_class");
   EXPECT_EQ(original_class->value, false);
-}
-
-TEST_F(VariantSerializationTest, opaqueToString) {
-  auto s = var_.toJson();
-  EXPECT_EQ(
-      s,
-      "Opaque<type:OPAQUE<SerializableClass>,value:\"{\"name\":\"test_class\",\"value\":false}\">");
-}
-
-TEST(VariantFloatingToJsonTest, normalTest) {
-  // Zero
-  EXPECT_EQ(variant::create<float>(0).toJson(), "0");
-  EXPECT_EQ(variant::create<double>(0).toJson(), "0");
-
-  // Infinite
-  EXPECT_EQ(
-      variant::create<float>(std::numeric_limits<float>::infinity()).toJson(),
-      "\"Infinity\"");
-  EXPECT_EQ(
-      variant::create<double>(std::numeric_limits<double>::infinity()).toJson(),
-      "\"Infinity\"");
-
-  // NaN
-  EXPECT_EQ(variant::create<float>(0.0 / 0.0).toJson(), "\"NaN\"");
-  EXPECT_EQ(variant::create<double>(0.0 / 0.0).toJson(), "\"NaN\"");
 }
 
 TEST(VariantTest, opaqueSerializationNotRegistered) {

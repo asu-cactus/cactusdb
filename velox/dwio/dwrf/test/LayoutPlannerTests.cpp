@@ -15,7 +15,6 @@
  */
 
 #include <gtest/gtest.h>
-#include "velox/dwio/common/OutputStream.h"
 #include "velox/dwio/dwrf/writer/LayoutPlanner.h"
 
 namespace facebook::velox::dwrf {
@@ -92,7 +91,7 @@ TEST(LayoutPlannerTests, CreateNodeToColumnIdMapping) {
 TEST(LayoutPlannerTests, Basic) {
   auto config = std::make_shared<Config>();
   config->set(
-      Config::COMPRESSION, common::CompressionKind::CompressionKind_NONE);
+      Config::COMPRESSION, dwio::common::CompressionKind::CompressionKind_NONE);
   WriterContext context{
       config,
       facebook::velox::memory::defaultMemoryManager().addRootPool(
@@ -109,7 +108,7 @@ TEST(LayoutPlannerTests, Basic) {
                        uint32_t size) {
     auto streamId = DwrfStreamIdentifier{node, seq, col, kind};
     streams.push_back(streamId);
-    dwio::common::AppendOnlyBufferedStream out{context.newStream(streamId)};
+    AppendOnlyBufferedStream out{context.newStream(streamId)};
     out.write(data.data(), size);
     out.flush();
   };

@@ -76,14 +76,6 @@ class UnsafeRowVectorSerializer : public VectorSerializer {
     }
   }
 
-  size_t maxSerializedSize() const override {
-    size_t totalSize = 0;
-    for (const auto& buffer : buffers_) {
-      totalSize += buffer->size();
-    }
-    return totalSize;
-  }
-
   void flush(OutputStream* stream) override {
     for (const auto& buffer : buffers_) {
       stream->write(buffer->as<char>(), buffer->size());

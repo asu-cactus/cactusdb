@@ -29,7 +29,7 @@ using namespace facebook::velox;
 using namespace facebook::velox::connector::hive;
 using namespace facebook::velox::exec::test;
 
-static constexpr int32_t kNumVectors = 1'000;
+static constexpr int32_t kNumVectors = 100;
 static constexpr int32_t kRowsPerVector = 10'000;
 
 namespace {
@@ -37,7 +37,6 @@ namespace {
 class SimpleAggregatesBenchmark : public HiveConnectorTestBase {
  public:
   explicit SimpleAggregatesBenchmark() {
-    OperatorTestBase::SetUpTestCase();
     HiveConnectorTestBase::SetUp();
 
     inputType_ = ROW({
@@ -87,9 +86,7 @@ class SimpleAggregatesBenchmark : public HiveConnectorTestBase {
 
       // Generate random values without nulls.
       children.emplace_back(fuzzer.fuzzFlat(INTEGER()));
-      // fuzzer.fuzzFlat(BIGINT()) generates very large number causing sum() to
-      // overflow.
-      children.emplace_back(copyIntToBigint(children.back()));
+      children.emplace_back(fuzzer.fuzzFlat(BIGINT()));
       children.emplace_back(fuzzer.fuzzFlat(REAL()));
       children.emplace_back(fuzzer.fuzzFlat(DOUBLE()));
 
@@ -99,7 +96,7 @@ class SimpleAggregatesBenchmark : public HiveConnectorTestBase {
       fuzzer.setOptions(opts);
 
       children.emplace_back(fuzzer.fuzzFlat(INTEGER()));
-      children.emplace_back(copyIntToBigint(children.back()));
+      children.emplace_back(fuzzer.fuzzFlat(BIGINT()));
       children.emplace_back(fuzzer.fuzzFlat(REAL()));
       children.emplace_back(fuzzer.fuzzFlat(DOUBLE()));
 
@@ -116,25 +113,6 @@ class SimpleAggregatesBenchmark : public HiveConnectorTestBase {
 
   void TestBody() override {}
 
-  VectorPtr copyIntToBigint(const VectorPtr& source) {
-    return copy<int32_t, int64_t>(source, BIGINT());
-  }
-
-  template <typename T, typename U>
-  VectorPtr copy(const VectorPtr& source, const TypePtr& targetType) {
-    auto flatSource = source->asFlatVector<T>();
-    auto flatTarget = BaseVector::create<FlatVector<U>>(
-        targetType, flatSource->size(), pool_.get());
-    for (auto i = 0; i < flatSource->size(); ++i) {
-      if (flatSource->isNullAt(i)) {
-        flatTarget->setNull(i, true);
-      } else {
-        flatTarget->set(i, flatSource->valueAt(i));
-      }
-    }
-    return flatTarget;
-  }
-
   void run(const std::string& key, const std::string& aggregate) {
     folly::BenchmarkSuspender suspender;
 
@@ -145,26 +123,35 @@ class SimpleAggregatesBenchmark : public HiveConnectorTestBase {
                     .planFragment();
 
     vector_size_t numResultRows = 0;
-    auto task = makeTask(plan);
+    auto task = makeTask(plan, numResultRows);
 
     task->addSplit("0", exec::Split(makeHiveConnectorSplit(filePath_->path)));
     task->noMoreSplits("0");
 
     suspender.dismiss();
 
-    while (auto result = task->next()) {
-      numResultRows += result->size();
-    }
+    exec::Task::start(task, 1);
+    auto& executor = folly::QueuedImmediateExecutor::instance();
+    auto future = task->stateChangeFuture(60'000'000).via(&executor);
+    future.wait();
 
     folly::doNotOptimizeAway(numResultRows);
   }
 
-  std::shared_ptr<exec::Task> makeTask(core::PlanFragment plan) {
+  std::shared_ptr<exec::Task> makeTask(
+      core::PlanFragment plan,
+      vector_size_t& numResultRows) {
     return exec::Task::create(
         "t",
         std::move(plan),
         0,
-        std::make_shared<core::QueryCtx>(executor_.get()));
+        std::make_shared<core::QueryCtx>(executor_.get()),
+        [&](auto vector, auto* /*future*/) {
+          if (vector) {
+            numResultRows += vector->size();
+          }
+          return exec::BlockingReason::kNotBlocked;
+        });
   }
 
  private:

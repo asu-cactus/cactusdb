@@ -207,6 +207,7 @@ class IntegerDictionaryEncoder : public AbstractIntegerDictionaryEncoder {
     uint32_t newIndex = 0;
 
     auto dictWriter = createBufferedWriter<Integer>(writeBuffer, fn);
+
     for (uint32_t i = 0; i != numKeys; ++i) {
       auto origIndex = (sort ? sortedIndex[i] : i);
       if (!dropInfrequentKeys || shouldWriteKey(dictEncoder, origIndex)) {
@@ -218,7 +219,6 @@ class IntegerDictionaryEncoder : public AbstractIntegerDictionaryEncoder {
         inDict[origIndex] = false;
       }
     }
-    dictWriter.close();
     return newIndex;
   }
 

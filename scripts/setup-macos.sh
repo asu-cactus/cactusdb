@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This script documents setting up a macOS host for Velox
+# This script documents setting up a macOS host for presto_cpp
 # development.  Running it should make you ready to compile.
 #
 # Environment variables:
@@ -34,7 +34,7 @@ source $SCRIPTDIR/setup-helper-functions.sh
 NPROC=$(getconf _NPROCESSORS_ONLN)
 
 DEPENDENCY_DIR=${DEPENDENCY_DIR:-$(pwd)}
-MACOS_DEPS="ninja flex bison cmake ccache protobuf@21 icu4c boost gflags glog libevent lz4 lzo snappy xz zstd openssl@1.1"
+MACOS_DEPS="ninja flex bison cmake ccache protobuf icu4c boost gflags glog libevent lz4 lzo snappy xz zstd openssl@1.1"
 
 function run_and_time {
   time "$@" || (echo "Failed to run $* ." ; exit 1 )
@@ -57,12 +57,11 @@ function prompt {
 }
 
 function update_brew {
-  DEFAULT_BREW_PATH=/usr/local/bin/brew
+  BREW_PATH=/usr/local/bin/brew
   if [ `arch` == "arm64" ] ;
-    then
-      DEFAULT_BREW_PATH=$(which brew) ;
-  fi
-  BREW_PATH=${BREW_PATH:-$DEFAULT_BREW_PATH}
+     then
+       BREW_PATH=/opt/homebrew/bin/brew ;
+ fi
   $BREW_PATH update --auto-update --verbose
   $BREW_PATH developer off
 }
@@ -95,7 +94,7 @@ function install_fmt {
 function install_folly {
   github_checkout facebook/folly "v2022.11.14.00"
   OPENSSL_ROOT_DIR=$(brew --prefix openssl@1.1) \
-  cmake_install -DBUILD_TESTS=OFF -DFOLLY_HAVE_INT128_T=ON
+    cmake_install -DBUILD_TESTS=OFF
 }
 
 function install_double_conversion {

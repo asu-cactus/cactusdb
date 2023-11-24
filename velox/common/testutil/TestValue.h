@@ -20,7 +20,6 @@
 #include <unordered_map>
 
 #include "velox/common/base/Exceptions.h"
-#include "velox/common/base/Macros.h"
 
 namespace facebook::velox::common::testutil {
 
@@ -103,15 +102,10 @@ void TestValue::set(
     std::function<void(T*)> injectionCb) {}
 #endif
 
-#ifdef NDEBUG
-// Keep the definition in header so that it can be inlined (elided).
-inline void TestValue::adjust(
-    const std::string& injectionPoint,
-    void* testData) {}
-#endif
+#define VELOX_CONCAT(x, y) __##x##y
+#define VELOX_VARNAME(x) VELOX_CONCAT(x, Obj)
 
-#define SCOPED_TESTVALUE_SET(point, ...)                              \
-  ::facebook::velox::common::testutil::ScopedTestValue VELOX_VARNAME( \
-      _scopedTestValue)(point, ##__VA_ARGS__)
+#define SCOPED_TESTVALUE_SET(point, ...) \
+  ScopedTestValue VELOX_VARNAME(__LINE__)(point, ##__VA_ARGS__)
 
 } // namespace facebook::velox::common::testutil

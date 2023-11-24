@@ -34,11 +34,5 @@ class SpecialForm : public Expr {
             true /* specialForm */,
             supportsFlatNoNullsFastPath,
             trackCpuUsage) {}
-
-  // This is safe to call only after all metadata is computed for input
-  // expressions.
-  virtual void computePropagatesNulls() {
-    VELOX_NYI();
-  }
 };
 } // namespace facebook::velox::exec

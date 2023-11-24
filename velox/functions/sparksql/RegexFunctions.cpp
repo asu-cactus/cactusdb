@@ -65,19 +65,17 @@ void ensureRegexIsCompatible(
 // error.
 std::shared_ptr<exec::VectorFunction> makeRLike(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
   // Return any errors from re2Search() first.
-  auto result = makeRe2Search(name, inputArgs, config);
+  auto result = makeRe2Search(name, inputArgs);
   ensureRegexIsCompatible("RLIKE", inputArgs[1].constantValue);
   return result;
 }
 
 std::shared_ptr<exec::VectorFunction> makeRegexExtract(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& config) {
-  auto result = makeRe2Extract(name, inputArgs, config, /*emptyNoMatch=*/true);
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
+  auto result = makeRe2Extract(name, inputArgs, /*emptyNoMatch=*/true);
   ensureRegexIsCompatible("REGEXP_EXTRACT", inputArgs[1].constantValue);
   return result;
 }

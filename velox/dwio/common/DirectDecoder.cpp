@@ -43,10 +43,9 @@ template void DirectDecoder<true>::skip(uint64_t numValues);
 template void DirectDecoder<false>::skip(uint64_t numValues);
 
 template <bool isSigned>
-template <typename T>
-void DirectDecoder<isSigned>::nextValues(
-    T* data,
-    uint64_t numValues,
+void DirectDecoder<isSigned>::next(
+    int64_t* const data,
+    const uint64_t numValues,
     const uint64_t* nulls) {
   uint64_t position = 0;
   // skipNulls()
@@ -61,56 +60,50 @@ void DirectDecoder<isSigned>::nextValues(
   if (position < numValues) {
     if (nulls) {
       if (!IntDecoder<isSigned>::useVInts) {
-        if constexpr (std::is_same_v<T, int128_t>) {
-          VELOX_NYI();
-        }
         for (uint64_t i = position; i < numValues; ++i) {
           if (!bits::isBitNull(nulls, i)) {
             data[i] = IntDecoder<isSigned>::readLongLE();
           }
         }
+      } else if constexpr (isSigned) {
+        for (uint64_t i = position; i < numValues; ++i) {
+          if (!bits::isBitNull(nulls, i)) {
+            data[i] = IntDecoder<isSigned>::readVsLong();
+          }
+        }
       } else {
         for (uint64_t i = position; i < numValues; ++i) {
           if (!bits::isBitNull(nulls, i)) {
-            data[i] = IntDecoder<isSigned>::template readVInt<T>();
+            data[i] = static_cast<int64_t>(IntDecoder<isSigned>::readVuLong());
           }
         }
       }
     } else {
       if (!IntDecoder<isSigned>::useVInts) {
-        if constexpr (std::is_same_v<T, int128_t>) {
-          VELOX_NYI();
-        }
         for (uint64_t i = position; i < numValues; ++i) {
           data[i] = IntDecoder<isSigned>::readLongLE();
         }
+      } else if constexpr (isSigned) {
+        for (uint64_t i = position; i < numValues; ++i) {
+          data[i] = IntDecoder<isSigned>::readVsLong();
+        }
       } else {
         for (uint64_t i = position; i < numValues; ++i) {
-          data[i] = IntDecoder<isSigned>::template readVInt<T>();
+          data[i] = static_cast<int64_t>(IntDecoder<isSigned>::readVuLong());
         }
       }
     }
   }
 }
 
-template void DirectDecoder<true>::nextValues(
-    int64_t* data,
-    uint64_t numValues,
+template void DirectDecoder<true>::next(
+    int64_t* const data,
+    const uint64_t numValues,
     const uint64_t* nulls);
 
-template void DirectDecoder<true>::nextValues(
-    int128_t* data,
-    uint64_t numValues,
-    const uint64_t* nulls);
-
-template void DirectDecoder<false>::nextValues(
-    int64_t* data,
-    uint64_t numValues,
-    const uint64_t* nulls);
-
-template void DirectDecoder<false>::nextValues(
-    int128_t* data,
-    uint64_t numValues,
+template void DirectDecoder<false>::next(
+    int64_t* const data,
+    const uint64_t numValues,
     const uint64_t* nulls);
 
 } // namespace facebook::velox::dwio::common

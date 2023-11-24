@@ -139,7 +139,7 @@ void DenseHll::initialize(int8_t indexBitLength) {
 
 void DenseHll::insertHash(uint64_t hash) {
   auto index = computeIndex(hash, indexBitLength_);
-  auto value = numberOfLeadingZeros(hash, indexBitLength_) + 1;
+  auto value = computeValue(hash, indexBitLength_);
   insert(index, value);
 }
 
@@ -497,10 +497,11 @@ DenseHll::DenseHll(const char* serialized, HashStringAllocator* allocator)
       overflowBuckets_{StlAllocator<uint16_t>(allocator)},
       overflowValues_{StlAllocator<int8_t>(allocator)} {
   auto hll = deserialize(serialized);
-  initialize(hll.indexBitLength);
+  indexBitLength_ = hll.indexBitLength;
   baseline_ = hll.baseline;
 
   auto numBuckets = 1 << indexBitLength_;
+  deltas_.resize(numBuckets / 2);
   std::copy(hll.deltas, hll.deltas + numBuckets / 2, deltas_.data());
 
   overflows_ = hll.overflows;

@@ -345,7 +345,7 @@ TEST_F(QueryAssertionsTest, multiFloatColumnWithNonUniqueKeys) {
 
 TEST_F(QueryAssertionsTest, nullDecimalValue) {
   auto shortDecimal = makeRowVector(
-      {makeNullableFlatVector<int64_t>({std::nullopt}, DECIMAL(5, 2))});
+      {makeNullableShortDecimalFlatVector({std::nullopt}, DECIMAL(5, 2))});
   EXPECT_TRUE(assertEqualResults({shortDecimal}, {shortDecimal}));
 
   createDuckDbTable({shortDecimal});
@@ -353,7 +353,7 @@ TEST_F(QueryAssertionsTest, nullDecimalValue) {
   assertQuery(plan, "SELECT c0 FROM tmp");
 
   auto longDecimal = makeRowVector(
-      {makeNullableFlatVector<int128_t>({std::nullopt}, DECIMAL(20, 2))});
+      {makeNullableLongDecimalFlatVector({std::nullopt}, DECIMAL(20, 2))});
   EXPECT_TRUE(assertEqualResults({longDecimal}, {longDecimal}));
 
   createDuckDbTable({longDecimal});

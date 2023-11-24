@@ -147,9 +147,7 @@ class MapZipWithFunction : public exec::VectorFunction {
     std::vector<VectorPtr> lambdaArgs = {
         mergedKeys, mergedLeftValues, mergedRightValues};
 
-    // Make sure already populated entries in newElements do not get
-    // overwritten.
-    const SelectivityVector validRowsInReusedResult(index);
+    const SelectivityVector allElementRows(index);
 
     VectorPtr mergedValues;
 
@@ -181,22 +179,19 @@ class MapZipWithFunction : public exec::VectorFunction {
             *entry.rows, index, mergeResults.rawNewSizes, context.pool());
       }
 
+      // Make sure already populated entries in newElements do not get
+      // overwritten.
+      exec::ScopedFinalSelectionSetter(context, &allElementRows, true, true);
+
       entry.callable->apply(
           elementRows,
-          &validRowsInReusedResult,
+          allElementRows,
           wrapCapture,
           &context,
           lambdaArgs,
           elementToTopLevelRows,
           &mergedValues);
     }
-
-    // Set nulls for rows not present in 'rows'.
-    bits::andBits(
-        mergeResults.rawNewNulls,
-        rows.asRange().bits(),
-        rows.begin(),
-        rows.end());
 
     auto localResult = std::make_shared<MapVector>(
         context.pool(),

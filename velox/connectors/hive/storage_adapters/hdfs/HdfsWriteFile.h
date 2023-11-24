@@ -40,8 +40,6 @@ class HdfsWriteFile : public WriteFile {
       short replication = 0,
       int blockSize = 0);
 
-  ~HdfsWriteFile() override;
-
   /// Get the file size.
   uint64_t size() const override;
 

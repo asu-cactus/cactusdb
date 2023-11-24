@@ -57,8 +57,7 @@ std::shared_ptr<const Type> resolveVectorFunction(
 std::shared_ptr<VectorFunction> getVectorFunction(
     const std::string& name,
     const std::vector<TypePtr>& inputTypes,
-    const std::vector<VectorPtr>& constantInputs,
-    const core::QueryConfig& config) {
+    const std::vector<VectorPtr>& constantInputs) {
   auto sanitizedName = sanitizeName(name);
 
   if (!constantInputs.empty()) {
@@ -78,12 +77,11 @@ std::shared_ptr<VectorFunction> getVectorFunction(
   }
 
   return vectorFunctionFactories().withRLock(
-      [&sanitizedName, &inputArgs, &config, &inputTypes](
+      [&sanitizedName, &inputArgs, &inputTypes](
           auto& functionMap) -> std::shared_ptr<VectorFunction> {
         if (resolveVectorFunction(sanitizedName, inputTypes)) {
           auto functionIterator = functionMap.find(sanitizedName);
-          return functionIterator->second.factory(
-              sanitizedName, inputArgs, config);
+          return functionIterator->second.factory(sanitizedName, inputArgs);
         }
         return nullptr;
       });
@@ -125,21 +123,11 @@ bool registerVectorFunction(
     VectorFunctionMetadata metadata,
     bool overwrite) {
   std::shared_ptr<VectorFunction> sharedFunc = std::move(func);
-  auto factory = [sharedFunc](
-                     const auto& /*name*/,
-                     const auto& /*vectorArg*/,
-                     const auto& /*config*/) { return sharedFunc; };
+  auto factory = [sharedFunc](const auto& /*name*/, const auto& /*vectorArg*/) {
+    return sharedFunc;
+  };
   return registerStatefulVectorFunction(
       name, signatures, factory, metadata, overwrite);
-}
-
-std::vector<ExpressionRewrite>& expressionRewrites() {
-  static std::vector<ExpressionRewrite> rewrites;
-  return rewrites;
-}
-
-void registerExpressionRewrite(ExpressionRewrite rewrite) {
-  expressionRewrites().emplace_back(rewrite);
 }
 
 } // namespace facebook::velox::exec
