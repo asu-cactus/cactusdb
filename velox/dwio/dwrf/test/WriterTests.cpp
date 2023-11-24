@@ -17,15 +17,13 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <stdexcept>
-#include "velox/common/base/tests/GTestUtils.h"
 #include "velox/dwio/dwrf/reader/ReaderBase.h"
 #include "velox/dwio/dwrf/writer/WriterBase.h"
-#include "velox/type/fbhive/HiveTypeParser.h"
+#include "velox/dwio/type/fbhive/HiveTypeParser.h"
 
 using namespace ::testing;
-using namespace facebook::velox::common;
 using namespace facebook::velox::dwio::common;
-using namespace facebook::velox::type::fbhive;
+using namespace facebook::velox::dwio::type::fbhive;
 using namespace facebook::velox::memory;
 
 namespace facebook::velox::dwrf {
@@ -36,10 +34,9 @@ class WriterTest : public Test {
 
   WriterBase& createWriter(
       const std::shared_ptr<Config>& config,
-      std::unique_ptr<FileSink> sink = nullptr) {
+      std::unique_ptr<DataSink> sink = nullptr) {
     if (!sink) {
-      auto memSink = std::make_unique<MemorySink>(
-          1024, FileSink::Options{.pool = pool_.get()});
+      auto memSink = std::make_unique<MemorySink>(*pool_, 1024);
       sinkPtr_ = memSink.get();
       sink = std::move(memSink);
     }
@@ -50,7 +47,7 @@ class WriterTest : public Test {
   }
 
   std::unique_ptr<ReaderBase> createReader() {
-    std::string_view data(sinkPtr_->data(), sinkPtr_->size());
+    std::string_view data(sinkPtr_->getData(), sinkPtr_->size());
     auto readFile = std::make_shared<InMemoryReadFile>(data);
     auto input = std::make_unique<BufferedInput>(std::move(readFile), *pool_);
     return std::make_unique<ReaderBase>(*pool_, std::move(input));
@@ -82,117 +79,8 @@ class WriterTest : public Test {
   std::unique_ptr<WriterBase> writer_;
 };
 
-class SupportedCompressionTest
-    : public WriterTest,
-      public testing::WithParamInterface<CompressionKind> {
- public:
-  SupportedCompressionTest() : supportedCompressionKind_(GetParam()) {}
-
-  static std::vector<CompressionKind> getTestParams() {
-    static std::vector<CompressionKind> params = {
-        CompressionKind::CompressionKind_NONE,
-        CompressionKind::CompressionKind_ZLIB,
-        CompressionKind::CompressionKind_ZSTD};
-    return params;
-  }
-
- protected:
-  CompressionKind supportedCompressionKind_;
-};
-
-class AllWriterCompressionTest
-    : public WriterTest,
-      public testing::WithParamInterface<CompressionKind> {
- public:
-  AllWriterCompressionTest() : compressionKind_(GetParam()) {}
-
-  static std::vector<CompressionKind> getTestParams() {
-    static std::vector<CompressionKind> params = {
-        CompressionKind::CompressionKind_NONE,
-        CompressionKind::CompressionKind_ZLIB,
-        CompressionKind::CompressionKind_SNAPPY,
-        CompressionKind::CompressionKind_LZO,
-        CompressionKind::CompressionKind_ZSTD,
-        CompressionKind::CompressionKind_LZ4,
-        CompressionKind::CompressionKind_GZIP,
-        CompressionKind::CompressionKind_MAX};
-    return params;
-  }
-
- protected:
-  CompressionKind compressionKind_;
-};
-
-TEST_P(AllWriterCompressionTest, compression) {
-  std::map<std::string, std::string> overrideConfigs;
-  overrideConfigs.emplace(
-      Config::COMPRESSION.configKey(), std::to_string(compressionKind_));
-  auto config = Config::fromMap(overrideConfigs);
-  auto& writer = createWriter(config);
-  auto& context = getContext();
-  std::array<char, 10> data;
-  std::memset(data.data(), 'a', 10);
-  auto& writerSink = writer.getSink();
-
-  for (size_t i = 0; i < 3; ++i) {
-    writerSink.setMode(WriterSink::Mode::Index);
-    writerSink.addBuffer(*pool_, data.data(), data.size());
-    writerSink.setMode(WriterSink::Mode::Data);
-    writerSink.addBuffer(*pool_, data.data(), data.size());
-    writerSink.setMode(WriterSink::Mode::Footer);
-    writerSink.addBuffer(*pool_, data.data(), data.size());
-    writerSink.setMode(WriterSink::Mode::None);
-    context.setStripeRowCount(123);
-    context.setStripeRawSize(345);
-    addStripeInfo();
-    context.nextStripe();
-  }
-
-  std::string typeStr{"struct<a:int,b:float,c:string>"};
-  HiveTypeParser parser;
-  auto schema = parser.parse(typeStr);
-
-  for (size_t i = 0; i < 2; ++i) {
-    writer.addUserMetadata(
-        folly::to<std::string>(i), folly::to<std::string>(i + 1));
-  }
-  for (size_t i = 0; i < 4; ++i) {
-    getFooter().add_statistics();
-  }
-
-  if (compressionKind_ == CompressionKind::CompressionKind_SNAPPY ||
-      compressionKind_ == CompressionKind::CompressionKind_LZO ||
-      compressionKind_ == CompressionKind::CompressionKind_LZ4 ||
-      compressionKind_ == CompressionKind::CompressionKind_GZIP ||
-      compressionKind_ == CompressionKind::CompressionKind_MAX) {
-    VELOX_ASSERT_THROW(
-        writeFooter(*schema),
-        fmt::format(
-            "Unsupported compression type: {}",
-            compressionKindToString(compressionKind_)));
-    return;
-  }
-
-  writeFooter(*schema);
-  writer.close();
-
-  // deserialize and verify
-  auto reader = createReader();
-
-  auto& ps = reader->getPostScript();
-  ASSERT_EQ(
-      reader->getCompressionKind(),
-      // Verify the compression type is the same as passed-in.
-      // If compression is not passed in (CompressionKind::CompressionKind_MAX),
-      // verify compressionKind the compression type is the same as config.
-      compressionKind_ == CompressionKind::CompressionKind_MAX
-          ? config->get(Config::COMPRESSION)
-          : compressionKind_);
-}
-
-TEST_P(SupportedCompressionTest, WriteFooter) {
+TEST_F(WriterTest, WriteFooter) {
   auto config = std::make_shared<Config>();
-  config->set(Config::COMPRESSION, supportedCompressionKind_);
   auto& writer = createWriter(config);
   auto& context = getContext();
   std::array<char, 10> data;
@@ -207,8 +95,8 @@ TEST_P(SupportedCompressionTest, WriteFooter) {
     writerSink.setMode(WriterSink::Mode::Footer);
     writerSink.addBuffer(*pool_, data.data(), data.size());
     writerSink.setMode(WriterSink::Mode::None);
-    context.setStripeRowCount(123);
-    context.setStripeRawSize(345);
+    context.stripeRowCount = 123;
+    context.stripeRawSize = 345;
     addStripeInfo();
     context.nextStripe();
   }
@@ -284,14 +172,13 @@ TEST_P(SupportedCompressionTest, WriteFooter) {
   }
 }
 
-TEST_P(SupportedCompressionTest, AddStripeInfo) {
+TEST_F(WriterTest, AddStripeInfo) {
   auto config = std::make_shared<Config>();
-  config->set(Config::COMPRESSION, supportedCompressionKind_);
   auto& writer = createWriter(config);
   auto& context = getContext();
 
-  context.setStripeRowCount(101);
-  context.setStripeRawSize(202);
+  context.stripeRowCount = 101;
+  context.stripeRawSize = 202;
   std::array<char, 512> data;
   std::memset(data.data(), 'a', data.size());
   auto& writerSink = writer.getSink();
@@ -306,10 +193,9 @@ TEST_P(SupportedCompressionTest, AddStripeInfo) {
   writer.close();
 }
 
-TEST_P(SupportedCompressionTest, NoChecksum) {
+TEST_F(WriterTest, NoChecksum) {
   auto config = std::make_shared<Config>();
   config->set(Config::CHECKSUM_ALGORITHM, proto::ChecksumAlgorithm::NULL_);
-  config->set(Config::COMPRESSION, supportedCompressionKind_);
   auto& writer = createWriter(config);
 
   std::array<char, 512> data;
@@ -338,10 +224,9 @@ TEST_P(SupportedCompressionTest, NoChecksum) {
   ASSERT_EQ(footer.checksumAlgorithm(), proto::ChecksumAlgorithm::NULL_);
 }
 
-TEST_P(SupportedCompressionTest, NoCache) {
+TEST_F(WriterTest, NoCache) {
   auto config = std::make_shared<Config>();
   config->set(Config::STRIPE_CACHE_MODE, StripeCacheMode::NA);
-  config->set(Config::COMPRESSION, supportedCompressionKind_);
   auto& writer = createWriter(config);
 
   std::array<char, 512> data;
@@ -376,20 +261,18 @@ TEST_P(SupportedCompressionTest, NoCache) {
   ASSERT_EQ(reader->getMetadataCache(), nullptr);
 }
 
-TEST_P(SupportedCompressionTest, ValidateStreamSizeConfigDisabled) {
+TEST_F(WriterTest, ValidateStreamSizeConfigDisabled) {
   auto config = std::make_shared<Config>();
   config->set(Config::STREAM_SIZE_ABOVE_THRESHOLD_CHECK_ENABLED, false);
-  config->set(Config::COMPRESSION, supportedCompressionKind_);
   auto& writer = createWriter(config);
   validateStreamSize(std::numeric_limits<uint64_t>::max());
   validateStreamSize(std::numeric_limits<uint32_t>::max());
   writer.close();
 }
 
-TEST_P(SupportedCompressionTest, ValidateStreamSizeConfigEnabled) {
+TEST_F(WriterTest, ValidateStreamSizeConfigEnabled) {
   auto config = std::make_shared<Config>();
   ASSERT_TRUE(config->get(Config::STREAM_SIZE_ABOVE_THRESHOLD_CHECK_ENABLED));
-  config->set(Config::COMPRESSION, supportedCompressionKind_);
   auto& writer = createWriter(config);
   validateStreamSize(std::numeric_limits<int32_t>::max());
 
@@ -406,24 +289,13 @@ TEST_P(SupportedCompressionTest, ValidateStreamSizeConfigEnabled) {
   writer.close();
 }
 
-VELOX_INSTANTIATE_TEST_SUITE_P(
-    AllWriterCompressionTestSuite,
-    AllWriterCompressionTest,
-    testing::ValuesIn(AllWriterCompressionTest::getTestParams()));
-
-VELOX_INSTANTIATE_TEST_SUITE_P(
-    SupportedCompressionTestSuite,
-    SupportedCompressionTest,
-    testing::ValuesIn(SupportedCompressionTest::getTestParams()));
-
-class FailingSink : public FileSink {
+class FailingSink : public DataSink {
  public:
-  FailingSink()
-      : FileSink{
-            "FailingSink",
-            FileSink::Options{.metricLogger = MetricsLog::voidLog()}} {}
+  FailingSink() : DataSink{"FailingSink", MetricsLog::voidLog(), nullptr} {}
 
   virtual ~FailingSink() override {}
+
+  using DataSink::write;
 
   void write(std::vector<DataBuffer<char>>&) override {
     DWIO_RAISE("Unexpected call");
@@ -443,11 +315,10 @@ TEST_F(WriterTest, DoNotCrashDbgModeOnAbort) {
   EXPECT_THROW(abandonWriterWithoutClosing(), std::runtime_error);
 }
 
-class MockFileSink : public dwio::common::FileSink {
+class MockDataSink : public dwio::common::DataSink {
  public:
-  explicit MockFileSink()
-      : FileSink("mock_data_sink", {.metricLogger = nullptr}) {}
-  virtual ~MockFileSink() = default;
+  explicit MockDataSink() : DataSink("mock_data_sink", nullptr) {}
+  virtual ~MockDataSink() = default;
 
   MOCK_METHOD(uint64_t, size, (), (const override));
   MOCK_METHOD(bool, isBuffered, (), (const override));
@@ -457,8 +328,8 @@ class MockFileSink : public dwio::common::FileSink {
 TEST(WriterBaseTest, FlushWriterSinkUponClose) {
   auto config = std::make_shared<Config>();
   auto pool = defaultMemoryManager().addRootPool("FlushWriterSinkUponClose");
-  auto sink = std::make_unique<MockFileSink>();
-  MockFileSink* sinkPtr = sink.get();
+  auto sink = std::make_unique<MockDataSink>();
+  MockDataSink* sinkPtr = sink.get();
   EXPECT_CALL(*sinkPtr, write(_)).Times(1);
   EXPECT_CALL(*sinkPtr, isBuffered()).WillOnce(Return(false));
   {

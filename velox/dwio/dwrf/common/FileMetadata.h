@@ -18,7 +18,7 @@
 #include <string>
 
 #include "velox/common/base/Exceptions.h"
-#include "velox/common/compression/Compression.h"
+#include "velox/dwio/common/Common.h"
 #include "velox/dwio/dwrf/common/Common.h"
 #include "velox/dwio/dwrf/common/wrap/dwrf-proto-wrapper.h"
 #include "velox/dwio/dwrf/common/wrap/orc-proto-wrapper.h"
@@ -103,7 +103,7 @@ class PostScript {
                                         : orcPtr()->has_compression();
   }
 
-  common::CompressionKind compression() const;
+  dwio::common::CompressionKind compression() const;
 
   bool hasCompressionBlockSize() const {
     return format_ == DwrfFormat::kDwrf ? dwrfPtr()->has_compressionblocksize()
@@ -405,12 +405,11 @@ class FooterWrapper : public ProtoWrapperBase {
 
   bool hasRowIndexStride() const {
     return format_ == DwrfFormat::kDwrf ? dwrfPtr()->has_rowindexstride()
-                                        : orcPtr()->has_rowindexstride();
+                                        : false;
   }
 
   uint32_t rowIndexStride() const {
-    return format_ == DwrfFormat::kDwrf ? dwrfPtr()->rowindexstride()
-                                        : orcPtr()->rowindexstride();
+    return format_ == DwrfFormat::kDwrf ? dwrfPtr()->rowindexstride() : 0;
   }
 
   int stripeCacheOffsetsSize() const {

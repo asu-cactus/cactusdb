@@ -18,7 +18,10 @@
 
 namespace facebook::velox::parquet {
 
-void registerParquetReaderFactory();
+enum class ParquetReaderType { DUCKDB, NATIVE };
+
+void registerParquetReaderFactory(
+    ParquetReaderType parquetReaderType = ParquetReaderType::DUCKDB);
 
 void unregisterParquetReaderFactory();
 

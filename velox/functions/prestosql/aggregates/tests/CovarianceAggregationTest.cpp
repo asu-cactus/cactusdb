@@ -45,31 +45,6 @@ class CovarianceAggregationTest
 
     testAggregations({data}, {}, {partialAgg}, sql);
   }
-
-  void testDistinctGroupBy(
-      const std::string& aggName,
-      const RowVectorPtr& data) {
-    auto singleAgg = fmt::format("{}(distinct c1, c2)", aggName);
-    auto sql = fmt::format(
-        "SELECT c0, {}(distinct c1, c2) FROM tmp GROUP BY 1", aggName);
-    auto plan = PlanBuilder()
-                    .values({data})
-                    .singleAggregation({"c0"}, {singleAgg})
-                    .planNode();
-    AssertQueryBuilder(plan, duckDbQueryRunner_).assertResults(sql);
-  }
-
-  void testDistinctGlobalAgg(
-      const std::string& aggName,
-      const RowVectorPtr& data) {
-    auto singleAgg = fmt::format("{}(distinct c1, c2)", aggName);
-    auto sql = fmt::format("SELECT {}(distinct c1, c2) FROM tmp", aggName);
-    auto plan = PlanBuilder()
-                    .values({data})
-                    .singleAggregation({}, {singleAgg})
-                    .planNode();
-    AssertQueryBuilder(plan, duckDbQueryRunner_).assertResults(sql);
-  }
 };
 
 TEST_P(CovarianceAggregationTest, doubleNoNulls) {
@@ -86,9 +61,6 @@ TEST_P(CovarianceAggregationTest, doubleNoNulls) {
   testGlobalAgg(aggName, data);
 
   testGroupBy(aggName, data);
-
-  testDistinctGlobalAgg(aggName, data);
-  testDistinctGroupBy(aggName, data);
 }
 
 TEST_P(CovarianceAggregationTest, doubleSomeNulls) {
@@ -106,8 +78,6 @@ TEST_P(CovarianceAggregationTest, doubleSomeNulls) {
   auto aggName = GetParam();
   testGlobalAgg(aggName, data);
   testGroupBy(aggName, data);
-  testDistinctGlobalAgg(aggName, data);
-  testDistinctGroupBy(aggName, data);
 }
 
 TEST_P(CovarianceAggregationTest, floatNoNulls) {
@@ -123,8 +93,6 @@ TEST_P(CovarianceAggregationTest, floatNoNulls) {
   auto aggName = GetParam();
   testGlobalAgg(aggName, data);
   testGroupBy(aggName, data);
-  testDistinctGlobalAgg(aggName, data);
-  testDistinctGroupBy(aggName, data);
 }
 
 TEST_P(CovarianceAggregationTest, floatSomeNulls) {
@@ -142,8 +110,6 @@ TEST_P(CovarianceAggregationTest, floatSomeNulls) {
   auto aggName = GetParam();
   testGlobalAgg(aggName, data);
   testGroupBy(aggName, data);
-  testDistinctGlobalAgg(aggName, data);
-  testDistinctGroupBy(aggName, data);
 }
 
 VELOX_INSTANTIATE_TEST_SUITE_P(

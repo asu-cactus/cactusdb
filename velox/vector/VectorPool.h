@@ -63,7 +63,7 @@ class VectorPool {
   memory::MemoryPool* const pool_;
 
   static constexpr int32_t kNumCachedVectorTypes =
-      static_cast<int32_t>(TypeKind::HUGEINT) + 1;
+      static_cast<int32_t>(TypeKind::DATE) + 1;
 
   /// Caches of pre-allocated vectors indexed by typeKind.
   std::array<TypePool, kNumCachedVectorTypes> vectors_;
@@ -73,8 +73,8 @@ class VectorPool {
 /// the allocated vector back to vector pool on destruction.
 class VectorRecycler {
  public:
-  VectorRecycler(VectorPtr& vector, VectorPool* pool)
-      : pool_(pool), vector_(vector) {}
+  explicit VectorRecycler(VectorPtr& vector, VectorPool& pool)
+      : vector_(vector), pool_(pool) {}
   VectorRecycler(const VectorRecycler&) = delete;
   VectorRecycler& operator=(const VectorRecycler&) = delete;
   VectorRecycler(const VectorRecycler&&) = delete;
@@ -83,14 +83,12 @@ class VectorRecycler {
   VectorRecycler& operator=(VectorRecycler&) = delete;
 
   ~VectorRecycler() {
-    if (pool_) {
-      pool_->release(vector_);
-    }
+    pool_.release(vector_);
   }
 
  private:
-  VectorPool* const pool_;
   VectorPtr& vector_;
+  VectorPool& pool_;
 };
 
 } // namespace facebook::velox

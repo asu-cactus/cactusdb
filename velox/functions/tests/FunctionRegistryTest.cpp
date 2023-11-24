@@ -19,7 +19,6 @@
 
 #include "velox/expression/Expr.h"
 #include "velox/expression/FunctionSignature.h"
-#include "velox/expression/RegisterSpecialForm.h"
 #include "velox/expression/VectorFunction.h"
 #include "velox/functions/FunctionRegistry.h"
 #include "velox/functions/Macros.h"
@@ -229,7 +228,6 @@ class FunctionRegistryTest : public ::testing::Test {
  public:
   FunctionRegistryTest() {
     registerTestFunctions();
-    exec::registerFunctionCallToSpecialForms();
   }
 
   void testResolveVectorFunction(

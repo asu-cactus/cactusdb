@@ -21,7 +21,6 @@
 #include "velox/dwio/common/SeekableInputStream.h"
 #include "velox/dwio/common/TypeWithId.h"
 #include "velox/dwio/dwrf/common/Compression.h"
-#include "velox/dwio/dwrf/common/Decryption.h"
 #include "velox/dwio/dwrf/common/FileMetadata.h"
 #include "velox/dwio/dwrf/common/Statistics.h"
 #include "velox/dwio/dwrf/reader/StripeMetadataCache.h"
@@ -69,8 +68,7 @@ class ReaderBase {
           dwio::common::ReaderOptions::kDefaultDirectorySizeGuess,
       uint64_t filePreloadThreshold =
           dwio::common::ReaderOptions::kDefaultFilePreloadThreshold,
-      dwio::common::FileFormat fileFormat = dwio::common::FileFormat::DWRF,
-      bool fileColumnNamesReadAsLowerCase = false);
+      dwio::common::FileFormat fileFormat = dwio::common::FileFormat::DWRF);
 
   ReaderBase(
       memory::MemoryPool& pool,
@@ -119,12 +117,8 @@ class ReaderBase {
     return *footer_;
   }
 
-  const RowTypePtr& getSchema() const {
+  const std::shared_ptr<const RowType>& getSchema() const {
     return schema_;
-  }
-
-  void setSchema(const RowTypePtr& newSchema) {
-    schema_ = newSchema;
   }
 
   const std::shared_ptr<const dwio::common::TypeWithId>& getSchemaWithId()
@@ -164,13 +158,13 @@ class ReaderBase {
   uint64_t getCompressionBlockSize() const {
     return postScript_->hasCompressionBlockSize()
         ? postScript_->compressionBlockSize()
-        : common::DEFAULT_COMPRESSION_BLOCK_SIZE;
+        : dwio::common::DEFAULT_COMPRESSION_BLOCK_SIZE;
   }
 
-  common::CompressionKind getCompressionKind() const {
+  dwio::common::CompressionKind getCompressionKind() const {
     return postScript_->hasCompressionBlockSize()
         ? postScript_->compression()
-        : common::CompressionKind::CompressionKind_NONE;
+        : dwio::common::CompressionKind::CompressionKind_NONE;
   }
 
   WriterVersion getWriterVersion() const {
@@ -234,8 +228,7 @@ class ReaderBase {
  private:
   static std::shared_ptr<const Type> convertType(
       const FooterWrapper& footer,
-      uint32_t index = 0,
-      bool fileColumnNamesReadAsLowerCase = false);
+      uint32_t index = 0);
 
   memory::MemoryPool& pool_;
   std::unique_ptr<google::protobuf::Arena> arena_;

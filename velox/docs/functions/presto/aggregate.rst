@@ -17,19 +17,17 @@ depending on the order of input values.
 General Aggregate Functions
 ---------------------------
 
-.. function:: arbitrary(x) -> [same as x]
+.. function:: arbitrary(x) -> [same as input]
 
     Returns an arbitrary non-null value of ``x``, if one exists.
 
-.. function:: array_agg(x) -> array<[same as x]>
+.. function:: array_agg(x) -> array<[same as input]>
 
-    Returns an array created from the input ``x`` elements. Ignores null
-    inputs if :doc:`presto.array_agg.ignore_nulls <../../configs>` is set
-    to false.
+    Returns an array created from the input ``x`` elements.
 
 .. function:: avg(x) -> double|real
 
-    Returns the average (arithmetic mean) of all non-null input values.
+    Returns the average (arithmetic mean) of all input values.
     When x is of type REAL, the result type is REAL.
     For all other input types, the result type is DOUBLE.
 
@@ -50,7 +48,6 @@ General Aggregate Functions
     Returns the number of input rows.
 
 .. function:: count(x) -> bigint
-    :noindex:
 
     Returns the number of non-null input values.
 
@@ -58,19 +55,6 @@ General Aggregate Functions
 
     Returns the number of ``TRUE`` input values.
     This function is equivalent to ``count(CASE WHEN x THEN 1 END)``.
-
-.. function:: entropy(c) -> double
-
-    Returns the log-2 entropy of count input-values.
-
-    .. math::
-
-        \mathrm{entropy}(c) = \sum_i \left[ {c_i \over \sum_j [c_j]} \log_2\left({\sum_j [c_j] \over c_i}\right) \right].
-
-    ``c`` must be a ``integer`` column of non-negative values.
-
-    The function ignores any ``NULL`` count. If the sum of non-``NULL`` counts is 0,
-    it returns 0.
 
 .. function:: every(boolean) -> boolean
 
@@ -82,171 +66,43 @@ General Aggregate Functions
     each input value occurs. Supports integral, floating-point,
     boolean, timestamp, and date input types.
 
-.. function:: geometric_mean(x) -> double
-
-    Returns the `geometric mean <https://en.wikipedia.org/wiki/Geometric_mean>`_ of all input values.
-
-    Supported types are BIGINT and DOUBLE.
-
 .. function:: max_by(x, y) -> [same as x]
 
     Returns the value of ``x`` associated with the maximum value of ``y`` over all input values.
-
-.. function:: max_by(x, y, n) -> array([same as x])
-    :noindex:
-
-    Returns n values of ``x`` associated with the n largest values of ``y`` in descending order of ``y``.
 
 .. function:: min_by(x, y) -> [same as x]
 
     Returns the value of ``x`` associated with the minimum value of ``y`` over all input values.
 
-.. function:: min_by(x, y, n) -> array([same as x])
-    :noindex:
-
-    Returns n values of ``x`` associated with the n smallest values of ``y`` in ascending order of ``y``.
-
-.. function:: max(x) -> [same as x]
+.. function:: max(x) -> [same as input]
 
     Returns the maximum value of all input values.
-    ``x`` must not contain nulls when it is complex type.
 
-.. function:: max(x, n) -> array<[same as x]>
-    :noindex:
-
-    Returns ``n`` largest values of all input values of ``x``.
-    ``n`` must be a positive integer and not exceed 10'000.
-
-.. function:: min(x) -> [same as x]
+.. function:: min(x) -> [same as input]
 
     Returns the minimum value of all input values.
-    ``x`` must not contain nulls when it is complex type.
 
-.. function:: min(x, n) -> array<[same as x]>
-    :noindex:
-
-    Returns ``n`` smallest values of all input values of ``x``.
-    ``n`` must be a positive integer and not exceed 10'000.
-
-.. function:: multimap_agg(K key, V value) -> map(K,array(V))
-
-    Returns a multimap created from the input ``key`` / ``value`` pairs.
-    Each key can be associated with multiple values.
-
-.. function:: reduce_agg(inputValue T, initialState S, inputFunction(S,T,S), combineFunction(S,S,S)) -> S
-
-    Reduces all non-NULL input values into a single value. ``inputFunction``
-    will be invoked for each non-NULL input value. If all inputs are NULL, the
-    result is NULL. In addition to taking the input value, ``inputFunction``
-    takes the current state, initially ``initialState``, and returns the new state.
-    ``combineFunction`` will be invoked to combine two states into a new state.
-    The final state is returned. Throws an error if ``initialState`` is NULL or
-    ``inputFunction`` or ``combineFunction`` returns a NULL.
-
-    Note that reduce_agg doesn't support evaluation over sorted inputs.::
-
-        -- Compute sum (for illustration purposes only; use SUM aggregate function in production queries).
-        SELECT id, reduce_agg(value, 0, (a, b) -> a + b, (a, b) -> a + b)
-        FROM (
-            VALUES
-                (1, 2),
-                (1, 3),
-                (1, 4),
-                (2, 20),
-                (2, 30),
-                (2, 40)
-        ) AS t(id, value)
-        GROUP BY id;
-        -- (1, 9)
-        -- (2, 90)
-
-        -- Compute product.
-        SELECT id, reduce_agg(value, 1, (a, b) -> a * b, (a, b) -> a * b)
-        FROM (
-            VALUES
-                (1, 2),
-                (1, 3),
-                (1, 4),
-                (2, 20),
-                (2, 30),
-                (2, 40)
-        ) AS t(id, value)
-        GROUP BY id;
-        -- (1, 24)
-        -- (2, 24000)
-
-        -- Compute avg (for illustration purposes only; use AVG aggregate function in production queries).
-        SELECT id, sum_and_count.sum / sum_and_count.count FROM (
-          SELECT id, reduce_agg(value, CAST(row(0, 0) AS row(sum double, count bigint)),
-            (s, x) -> CAST(row(s.sum + x, s.count + 1) AS row(sum double, count bigint)),
-            (s, s2) -> CAST(row(s.sum + s2.sum, s.count + s2.count) AS row(sum double, count bigint))) AS sum_and_count
-          FROM (
-               VALUES
-                   (1, 2),
-                   (1, 3),
-                   (1, 4),
-                   (2, 20),
-                   (2, 30),
-                   (2, 40)
-           ) AS t(id, value)
-           GROUP BY id
-        );
-        -- (1, 3.0)
-        -- (2, 30.0)
-
-.. function:: set_agg(x) -> array<[same as x]>
-
-    Returns an array created from the distinct input ``x`` elements.
-    ``x`` must not contain nulls when it is complex type.
-
-.. function:: set_union(array(T)) -> array(T)
-
-    Returns an array of all the distinct values contained in each array of the input.
-
-    Returns an empty array if all input arrays are NULL.
-
-    Example::
-
-        SELECT set_union(elements)
-        FROM (
-            VALUES
-                ARRAY[1, 2, 3],
-                ARRAY[2, 3, 4]
-        ) AS t(elements);
-
-    Returns ARRAY[1, 2, 3, 4]
-
-.. function:: sum(x) -> [same as x]
+.. function:: sum(x) -> [same as input]
 
     Returns the sum of all input values.
 
 Bitwise Aggregate Functions
 ---------------------------
 
-.. function:: bitwise_and_agg(x) -> [same as x]
+.. function:: bitwise_and_agg(x) -> bigint
 
     Returns the bitwise AND of all input values in 2's complement representation.
 
-    Supported types are TINYINT, SMALLINT, INTEGER and BIGINT.
-
-.. function:: bitwise_or_agg(x) -> [same as x]
+.. function:: bitwise_or_agg(x) -> bigint
 
     Returns the bitwise OR of all input values in 2's complement representation.
-
-    Supported types are TINYINT, SMALLINT, INTEGER and BIGINT.
-
-.. function:: bitwise_xor_agg(x) -> [same as x]
-
-    Returns the bitwise XOR of all input values in 2's complement representation.
-
-    Supported types are TINYINT, SMALLINT, INTEGER and BIGINT.
 
 Map Aggregate Functions
 -----------------------
 
-.. function:: map_agg(K key, V value) -> map(K,V)
+.. function:: map_agg(key, value) -> map(K,V)
 
-    Returns a map created from the input ``key`` / ``value`` pairs. Inputs with NULL or duplicate keys are ignored.
+    Returns a map created from the input ``key`` / ``value`` pairs.
 
 .. function:: map_union(map(K,V)) -> map(K,V)
 
@@ -274,7 +130,6 @@ Approximate Aggregate Functions
     any specific input set.
 
 .. function:: approx_distinct(x, e) -> bigint
-   :noindex:
 
     Returns the approximate number of distinct input values.
     This function provides an approximation of ``count(DISTINCT x)``.
@@ -315,7 +170,6 @@ __ https://www.cse.ust.hk/~raywong/comp5331/References/EfficientComputationOfFre
     one and must be constant for all input rows.
 
 .. function:: approx_percentile(x, percentage, accuracy) -> [same as x]
-   :noindex:
 
     As ``approx_percentile(x, percentage)``, but with a maximum rank
     error of ``accuracy``. The value of ``accuracy`` must be between
@@ -326,20 +180,17 @@ __ https://www.cse.ust.hk/~raywong/comp5331/References/EfficientComputationOfFre
     guarantee for accuracy than T-Digest.
 
 .. function:: approx_percentile(x, percentages) -> array<[same as x]>
-   :noindex:
 
     Returns the approximate percentile for all input values of ``x`` at each of
     the specified percentages. Each element of the ``percentages`` array must be
     between zero and one, and the array must be constant for all input rows.
 
 .. function:: approx_percentile(x, percentages, accuracy) -> array<[same as x]>
-   :noindex:
 
     As ``approx_percentile(x, percentages)``, but with a maximum rank error of
     ``accuracy``.
 
 .. function:: approx_percentile(x, w, percentage) -> [same as x]
-   :noindex:
 
     Returns the approximate weighed percentile for all input values of ``x``
     using the per-item weight ``w`` at the percentage ``p``. The weight must be
@@ -348,13 +199,11 @@ __ https://www.cse.ust.hk/~raywong/comp5331/References/EfficientComputationOfFre
     zero and one and must be constant for all input rows.
 
 .. function:: approx_percentile(x, w, percentage, accuracy) -> [same as x]
-   :noindex:
 
     As ``approx_percentile(x, w, percentage)``, but with a maximum
     rank error of ``accuracy``.
 
 .. function:: approx_percentile(x, w, percentages) -> array<[same as x]>
-   :noindex:
 
     Returns the approximate weighed percentile for all input values of ``x``
     using the per-item weight ``w`` at each of the given percentages specified
@@ -364,7 +213,6 @@ __ https://www.cse.ust.hk/~raywong/comp5331/References/EfficientComputationOfFre
     must be constant for all input rows.
 
 .. function:: approx_percentile(x, w, percentages, accuracy) -> array<[same as x]>
-   :noindex:
 
     As ``approx_percentile(x, w, percentages)``, but with a maximum rank error
     of ``accuracy``.
@@ -384,17 +232,6 @@ Statistical Aggregate Functions
 
     Returns the sample covariance of input values.
 
-.. function:: kurtosis(x) -> double
-
-    Returns the excess kurtosis of all input values. Unbiased estimate using
-    the following expression:
-
-    .. math::
-
-        \mathrm{kurtosis}(x) = {n(n+1) \over (n-1)(n-2)(n-3)} { \sum[(x_i-\mu)^4] \over \sigma^4} -3{ (n-1)^2 \over (n-2)(n-3) },
-
-   where :math:`\mu` is the mean, and :math:`\sigma` is the standard deviation.
-
 .. function:: regr_intercept(y, x) -> double
 
     Returns linear regression intercept of input values. ``y`` is the dependent
@@ -404,10 +241,6 @@ Statistical Aggregate Functions
 
     Returns linear regression slope of input values. ``y`` is the dependent
     value. ``x`` is the independent value.
-
-.. function:: skewness(x) -> double
-
-    Returns the skewness of all input values.
 
 .. function:: stddev(x) -> double
 
@@ -439,7 +272,3 @@ Miscellaneous
 .. function:: max_data_size_for_stats(x) -> bigint
 
     Returns an estimate of the the maximum in-memory size in bytes of ``x``.
-
-.. function:: sum_data_size_for_stats(x) -> bigint
-
-    Returns an estimate of the sum of in-memory size in bytes of ``x``.

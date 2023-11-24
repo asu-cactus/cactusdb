@@ -103,64 +103,26 @@ template <typename T>
 struct DateFunction : public TimestampWithTimezoneSupport<T> {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
-  const date::time_zone* timeZone_ = nullptr;
-
-  FOLLY_ALWAYS_INLINE void initialize(
-      const core::QueryConfig& config,
-      const arg_type<Varchar>* date) {
-    timeZone_ = getTimeZoneFromConfig(config);
-  }
-
-  FOLLY_ALWAYS_INLINE void initialize(
-      const core::QueryConfig& config,
-      const arg_type<Timestamp>* timestamp) {
-    timeZone_ = getTimeZoneFromConfig(config);
-  }
-
-  FOLLY_ALWAYS_INLINE void initialize(
-      const core::QueryConfig& config,
-      const arg_type<TimestampWithTimezone>* timestampWithTimezone) {
-    timeZone_ = getTimeZoneFromConfig(config);
-  }
-
   FOLLY_ALWAYS_INLINE void call(
       out_type<Date>& result,
       const arg_type<Varchar>& date) {
-    result = DATE()->toDays(date);
-  }
-
-  int32_t timestampToDate(const Timestamp& input) {
-    auto convertToDate = [](const Timestamp& t) -> int32_t {
-      static const int32_t kSecsPerDay{86'400};
-      auto seconds = t.getSeconds();
-      if (seconds >= 0 || seconds % kSecsPerDay == 0) {
-        return seconds / kSecsPerDay;
-      }
-      // For division with negatives, minus 1 to compensate the discarded
-      // fractional part. e.g. -1/86'400 yields 0, yet it should be considered
-      // as -1 day.
-      return seconds / kSecsPerDay - 1;
-    };
-
-    if (timeZone_ != nullptr) {
-      Timestamp t = input;
-      t.toTimezone(*timeZone_);
-      return convertToDate(t);
-    }
-
-    return convertToDate(input);
+    bool nullOutput;
+    result = util::Converter<TypeKind::DATE>::cast(date, nullOutput);
   }
 
   FOLLY_ALWAYS_INLINE void call(
       out_type<Date>& result,
       const arg_type<Timestamp>& timestamp) {
-    result = timestampToDate(timestamp);
+    bool nullOutput;
+    result = util::Converter<TypeKind::DATE>::cast(timestamp, nullOutput);
   }
 
   FOLLY_ALWAYS_INLINE void call(
       out_type<Date>& result,
       const arg_type<TimestampWithTimezone>& timestampWithTimezone) {
-    result = timestampToDate(this->toTimestamp(timestampWithTimezone));
+    bool nullOutput;
+    result = util::Converter<TypeKind::DATE>::cast(
+        this->toTimestamp(timestampWithTimezone), nullOutput);
   }
 };
 
@@ -330,34 +292,6 @@ struct DayFunction : public InitSessionTimezone<T>,
   }
 };
 
-template <typename T>
-struct LastDayOfMonthFunction : public InitSessionTimezone<T>,
-                                public TimestampWithTimezoneSupport<T> {
-  VELOX_DEFINE_FUNCTION_TYPES(T);
-
-  FOLLY_ALWAYS_INLINE void call(
-      out_type<Date>& result,
-      const arg_type<Timestamp>& timestamp) {
-    auto dt = getDateTime(timestamp, this->timeZone_);
-    result = util::lastDayOfMonthSinceEpochFromDate(dt);
-  }
-
-  FOLLY_ALWAYS_INLINE void call(
-      out_type<Date>& result,
-      const arg_type<Date>& date) {
-    auto dt = getDateTime(date);
-    result = util::lastDayOfMonthSinceEpochFromDate(dt);
-  }
-
-  FOLLY_ALWAYS_INLINE void call(
-      out_type<Date>& result,
-      const arg_type<TimestampWithTimezone>& timestampWithTimezone) {
-    auto timestamp = this->toTimestamp(timestampWithTimezone);
-    auto dt = getDateTime(timestamp, nullptr);
-    result = util::lastDayOfMonthSinceEpochFromDate(dt);
-  }
-};
-
 namespace {
 
 bool isIntervalWholeDays(int64_t milliseconds) {
@@ -375,13 +309,14 @@ struct DateMinusIntervalDayTime {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
   FOLLY_ALWAYS_INLINE void call(
-      out_type<Date>& result,
+      Date& result,
       const arg_type<Date>& date,
       const arg_type<IntervalDayTime>& interval) {
     VELOX_USER_CHECK(
         isIntervalWholeDays(interval),
         "Cannot subtract hours, minutes, seconds or milliseconds from a date");
-    result = addToDate(date, DateTimeUnit::kDay, -intervalDays(interval));
+    result = date;
+    result.addDays(-intervalDays(interval));
   }
 };
 
@@ -390,25 +325,14 @@ struct DatePlusIntervalDayTime {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
   FOLLY_ALWAYS_INLINE void call(
-      out_type<Date>& result,
+      Date& result,
       const arg_type<Date>& date,
       const arg_type<IntervalDayTime>& interval) {
     VELOX_USER_CHECK(
         isIntervalWholeDays(interval),
         "Cannot add hours, minutes, seconds or milliseconds to a date");
-    result = addToDate(date, DateTimeUnit::kDay, intervalDays(interval));
-  }
-};
-
-template <typename T>
-struct TimestampMinusIntervalDayTime {
-  VELOX_DEFINE_FUNCTION_TYPES(T);
-
-  FOLLY_ALWAYS_INLINE void call(
-      out_type<IntervalDayTime>& result,
-      const arg_type<Timestamp>& a,
-      const arg_type<Timestamp>& b) {
-    result = a.toMillis() - b.toMillis();
+    result = date;
+    result.addDays(intervalDays(interval));
   }
 };
 
@@ -612,38 +536,32 @@ inline std::optional<DateTimeUnit> fromDateTimeUnitString(
   static const StringView kMinute("minute");
   static const StringView kHour("hour");
   static const StringView kDay("day");
-  static const StringView kWeek("week");
   static const StringView kMonth("month");
   static const StringView kQuarter("quarter");
   static const StringView kYear("year");
 
-  const auto unit = boost::algorithm::to_lower_copy(unitString.str());
-
-  if (unit == kMillisecond) {
+  if (unitString == kMillisecond) {
     return DateTimeUnit::kMillisecond;
   }
-  if (unit == kSecond) {
+  if (unitString == kSecond) {
     return DateTimeUnit::kSecond;
   }
-  if (unit == kMinute) {
+  if (unitString == kMinute) {
     return DateTimeUnit::kMinute;
   }
-  if (unit == kHour) {
+  if (unitString == kHour) {
     return DateTimeUnit::kHour;
   }
-  if (unit == kDay) {
+  if (unitString == kDay) {
     return DateTimeUnit::kDay;
   }
-  if (unit == kWeek) {
-    return DateTimeUnit::kWeek;
-  }
-  if (unit == kMonth) {
+  if (unitString == kMonth) {
     return DateTimeUnit::kMonth;
   }
-  if (unit == kQuarter) {
+  if (unitString == kQuarter) {
     return DateTimeUnit::kQuarter;
   }
-  if (unit == kYear) {
+  if (unitString == kYear) {
     return DateTimeUnit::kYear;
   }
   // TODO Add support for "week".
@@ -660,8 +578,7 @@ inline bool isTimeUnit(const DateTimeUnit unit) {
 
 inline bool isDateUnit(const DateTimeUnit unit) {
   return unit == DateTimeUnit::kDay || unit == DateTimeUnit::kMonth ||
-      unit == DateTimeUnit::kQuarter || unit == DateTimeUnit::kYear ||
-      unit == DateTimeUnit::kWeek;
+      unit == DateTimeUnit::kQuarter || unit == DateTimeUnit::kYear;
 }
 
 inline std::optional<DateTimeUnit> getDateUnit(
@@ -741,47 +658,7 @@ struct DateTruncFunction : public TimestampWithTimezoneSupport<T> {
         FMT_FALLTHROUGH;
       case DateTimeUnit::kMonth:
         dateTime.tm_mday = 1;
-        dateTime.tm_hour = 0;
-        dateTime.tm_min = 0;
-        dateTime.tm_sec = 0;
-        break;
-      case DateTimeUnit::kWeek:
-        // Subtract the truncation
-        dateTime.tm_mday -= dateTime.tm_wday == 0 ? 6 : dateTime.tm_wday - 1;
-        // Setting the day of the week to Monday
-        dateTime.tm_wday = 1;
-
-        // If the adjusted day of the month falls in the previous month
-        // Move to the previous month
-        if (dateTime.tm_mday < 1) {
-          dateTime.tm_mon -= 1;
-
-          // If the adjusted month falls in the previous year
-          // Set to December and Move to the previous year
-          if (dateTime.tm_mon < 0) {
-            dateTime.tm_mon = 11;
-            dateTime.tm_year -= 1;
-          }
-
-          // Calculate the correct day of the month based on the number of days
-          // in the adjusted month
-          static const int daysInMonth[] = {
-              31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-          int daysInPrevMonth = daysInMonth[dateTime.tm_mon];
-
-          // Adjust for leap year if February
-          if (dateTime.tm_mon == 1 && (dateTime.tm_year + 1900) % 4 == 0 &&
-              ((dateTime.tm_year + 1900) % 100 != 0 ||
-               (dateTime.tm_year + 1900) % 400 == 0)) {
-            daysInPrevMonth = 29;
-          }
-          // Set to the correct day in the previous month
-          dateTime.tm_mday += daysInPrevMonth;
-        }
-        dateTime.tm_hour = 0;
-        dateTime.tm_min = 0;
-        dateTime.tm_sec = 0;
-        break;
+        FMT_FALLTHROUGH;
       case DateTimeUnit::kDay:
         dateTime.tm_hour = 0;
         FMT_FALLTHROUGH;
@@ -830,14 +707,14 @@ struct DateTruncFunction : public TimestampWithTimezoneSupport<T> {
         : getDateUnit(unitString, true).value();
 
     if (unit == DateTimeUnit::kDay) {
-      result = date;
+      result = Date(date.days());
       return;
     }
 
     auto dateTime = getDateTime(date);
     adjustDateTime(dateTime, unit);
 
-    result = timegm(&dateTime) / kSecondsInDay;
+    result = Date(timegm(&dateTime) / kSecondsInDay);
   }
 
   FOLLY_ALWAYS_INLINE void call(
@@ -873,7 +750,7 @@ struct DateTruncFunction : public TimestampWithTimezoneSupport<T> {
 };
 
 template <typename T>
-struct DateAddFunction : public TimestampWithTimezoneSupport<T> {
+struct DateAddFunction {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
   const date::time_zone* sessionTimeZone_ = nullptr;
@@ -939,28 +816,6 @@ struct DateAddFunction : public TimestampWithTimezoneSupport<T> {
   }
 
   FOLLY_ALWAYS_INLINE bool call(
-      out_type<TimestampWithTimezone>& result,
-      const arg_type<Varchar>& unitString,
-      const int64_t value,
-      const arg_type<TimestampWithTimezone>& timestampWithTimezone) {
-    const auto unit = unit_.has_value()
-        ? unit_.value()
-        : fromDateTimeUnitString(unitString, true /*throwIfInvalid*/).value();
-
-    if (value != (int32_t)value) {
-      VELOX_UNSUPPORTED("integer overflow");
-    }
-
-    auto finalTimeStamp = addToTimestamp(
-        this->toTimestamp(timestampWithTimezone), unit, (int32_t)value);
-    finalTimeStamp.toGMT(*timestampWithTimezone.template at<1>());
-    result = std::make_tuple(
-        finalTimeStamp.toMillis(), *timestampWithTimezone.template at<1>());
-
-    return true;
-  }
-
-  FOLLY_ALWAYS_INLINE bool call(
       out_type<Date>& result,
       const arg_type<Varchar>& unitString,
       const int64_t value,
@@ -979,7 +834,7 @@ struct DateAddFunction : public TimestampWithTimezoneSupport<T> {
 };
 
 template <typename T>
-struct DateDiffFunction : public TimestampWithTimezoneSupport<T> {
+struct DateDiffFunction {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
   const date::time_zone* sessionTimeZone_ = nullptr;
@@ -1004,16 +859,6 @@ struct DateDiffFunction : public TimestampWithTimezoneSupport<T> {
       const arg_type<Date>* /*date2*/) {
     if (unitString != nullptr) {
       unit_ = getDateUnit(*unitString, false);
-    }
-  }
-
-  FOLLY_ALWAYS_INLINE void initialize(
-      const core::QueryConfig& config,
-      const arg_type<Varchar>* unitString,
-      const arg_type<TimestampWithTimezone>* /*timestampWithTimezone1*/,
-      const arg_type<TimestampWithTimezone>* /*timestampWithTimezone2*/) {
-    if (unitString != nullptr) {
-      unit_ = fromDateTimeUnitString(*unitString, false /*throwIfInvalid*/);
     }
   }
 
@@ -1060,18 +905,6 @@ struct DateDiffFunction : public TimestampWithTimezoneSupport<T> {
 
     result = diffDate(unit, date1, date2);
     return true;
-  }
-
-  FOLLY_ALWAYS_INLINE bool call(
-      int64_t& result,
-      const arg_type<Varchar>& unitString,
-      const arg_type<TimestampWithTimezone>& timestamp1,
-      const arg_type<TimestampWithTimezone>& timestamp2) {
-    return call(
-        result,
-        unitString,
-        this->toTimestamp(timestamp1),
-        this->toTimestamp(timestamp2));
   }
 };
 
@@ -1265,15 +1098,13 @@ struct ParseDateTimeFunction {
 
 template <typename T>
 struct CurrentDateFunction {
-  VELOX_DEFINE_FUNCTION_TYPES(T);
-
   const date::time_zone* timeZone_ = nullptr;
 
   FOLLY_ALWAYS_INLINE void initialize(const core::QueryConfig& config) {
     timeZone_ = getTimeZoneFromConfig(config);
   }
 
-  FOLLY_ALWAYS_INLINE void call(out_type<Date>& result) {
+  FOLLY_ALWAYS_INLINE void call(Date& result) {
     auto now = Timestamp::now();
     if (timeZone_ != nullptr) {
       now.toTimezone(*timeZone_);
@@ -1281,8 +1112,8 @@ struct CurrentDateFunction {
     const std::chrono::
         time_point<std::chrono::system_clock, std::chrono::milliseconds>
             localTimepoint(std::chrono::milliseconds(now.toMillis()));
-    result = std::chrono::floor<date::days>((localTimepoint).time_since_epoch())
-                 .count();
+    auto daysSinceEpoch = std::chrono::floor<date::days>(localTimepoint);
+    result = Date(daysSinceEpoch.time_since_epoch().count());
   }
 };
 

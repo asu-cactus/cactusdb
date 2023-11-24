@@ -18,8 +18,6 @@
 #include <cstdint>
 #include <string>
 
-#include "velox/exec/AggregateUtil.h"
-
 namespace facebook::velox::exec::test {
 
 struct NonPODInt64 {
@@ -49,8 +47,6 @@ struct NonPODInt64 {
   NonPODInt64& operator=(NonPODInt64&&) = delete;
 };
 
-exec::AggregateRegistrationResult registerSumNonPODAggregate(
-    const std::string& name,
-    int alignment);
+bool registerSumNonPODAggregate(const std::string& name, int alignment);
 
 } // namespace facebook::velox::exec::test

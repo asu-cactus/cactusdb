@@ -242,15 +242,19 @@ template <typename T>
 struct UrlExtractPathFunction {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
-  // Input is always ASCII, but result may or may not be ASCII.
+  // Results refer to strings in the first argument.
+  static constexpr int32_t reuse_strings_from_arg = 0;
 
-  FOLLY_ALWAYS_INLINE void call(
+  // ASCII input always produces ASCII result.
+  static constexpr bool is_default_ascii_behavior = true;
+
+  FOLLY_ALWAYS_INLINE bool call(
       out_type<Varchar>& result,
       const arg_type<Varchar>& url) {
     boost::cmatch match;
     if (!parse(url, match)) {
       result.setEmpty();
-      return;
+      return true;
     }
 
     boost::cmatch authAndPathMatch;
@@ -259,14 +263,14 @@ struct UrlExtractPathFunction {
 
     if (matchAuthorityAndPath(
             match, authAndPathMatch, authorityMatch, hasAuthority)) {
-      StringView escapedPath;
       if (hasAuthority) {
-        escapedPath = submatch(authAndPathMatch, 2);
+        result.setNoCopy(submatch(authAndPathMatch, 2));
       } else {
-        escapedPath = submatch(match, 2);
+        result.setNoCopy(submatch(match, 2));
       }
-      urlUnescape(result, escapedPath);
     }
+
+    return true;
   }
 };
 

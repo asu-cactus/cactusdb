@@ -16,7 +16,6 @@
 #pragma once
 
 #include "velox/expression/Expr.h"
-#include "velox/expression/RegisterSpecialForm.h"
 #include "velox/parse/Expressions.h"
 #include "velox/parse/ExpressionsParser.h"
 #include "velox/parse/TypeResolver.h"
@@ -28,18 +27,6 @@ class FunctionBenchmarkBase {
  public:
   FunctionBenchmarkBase() {
     parse::registerTypeResolver();
-    exec::registerFunctionCallToSpecialForms();
-  }
-
-  void setTimezone(const std::string& value) {
-    queryCtx_->testingOverrideConfigUnsafe({
-        {core::QueryConfig::kSessionTimezone, value},
-    });
-  }
-
-  void setAdjustTimestampToTimezone(const std::string& value) {
-    queryCtx_->testingOverrideConfigUnsafe(
-        {{core::QueryConfig::kAdjustTimestampToTimezone, value}});
   }
 
   exec::ExprSet compileExpression(

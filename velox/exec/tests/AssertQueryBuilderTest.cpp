@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
-#include "velox/connectors/hive/HiveConnectorSplit.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/vector/fuzzer/VectorFuzzer.h"

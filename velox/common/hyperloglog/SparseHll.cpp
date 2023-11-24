@@ -71,7 +71,7 @@ common::InputByteStream initializeInputStream(const char* serialized) {
 
 bool SparseHll::insertHash(uint64_t hash) {
   auto index = computeIndex(hash, kIndexBitLength);
-  auto value = numberOfLeadingZeros(hash, kIndexBitLength);
+  auto value = computeValue(hash, kIndexBitLength);
 
   auto entry = encode(index, value);
   auto position = searchIndex(index, entries_);
@@ -162,26 +162,15 @@ SparseHll::SparseHll(const char* serialized, HashStringAllocator* allocator)
 }
 
 void SparseHll::mergeWith(const SparseHll& other) {
-  auto size = other.entries_.size();
-  // This check prevents merge aggregation from being performed on
-  // empty_approx_set(), an empty HyperLogLog. The merge function typically does
-  // not take an empty HyperLogLog structure as an argument.
-  if (size) {
-    mergeWith(size, other.entries_.data());
-  }
+  mergeWith(other.entries_.size(), other.entries_.data());
 }
 
 void SparseHll::mergeWith(const char* serialized) {
   auto stream = initializeInputStream(serialized);
 
   auto size = stream.read<int16_t>();
-  // This check prevents merge aggregation from being performed on
-  // empty_approx_set(), an empty HyperLogLog. The merge function typically does
-  // not take an empty HyperLogLog structure as an argument.
-  if (size) {
-    mergeWith(
-        size, reinterpret_cast<const uint32_t*>(serialized + stream.offset()));
-  }
+  mergeWith(
+      size, reinterpret_cast<const uint32_t*>(serialized + stream.offset()));
 }
 
 void SparseHll::mergeWith(size_t otherSize, const uint32_t* otherEntries) {
@@ -242,15 +231,15 @@ void SparseHll::toDense(DenseHll& denseHll) const {
   for (auto i = 0; i < entries_.size(); i++) {
     auto entry = entries_[i];
     auto index = entry >> (32 - indexBitLength);
-    auto shiftedValue = entry << indexBitLength;
-    auto zeros = shiftedValue == 0 ? 32 : __builtin_clz(shiftedValue);
 
-    // If zeros >= kIndexBitLength - indexBitLength, it means all those bits
-    // were zeros, so look at the entry value, which contains the number of
-    // leading 0 *after* kIndexBitLength.
+    auto zeros = __builtin_clz(entry << indexBitLength);
+
+    // If zeros > kIndexBitLength - indexBitLength, it means all those bits were
+    // zeros, so look at the entry value, which contains the number of leading 0
+    // *after* kIndexBitLength.
     auto bits = kIndexBitLength - indexBitLength;
-    if (zeros >= bits) {
-      zeros = bits + decodeValue(entry);
+    if (zeros > bits) {
+      zeros = bits + decodeValue(entry) - 1;
     }
 
     denseHll.insert(index, zeros + 1);

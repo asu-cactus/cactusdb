@@ -18,10 +18,8 @@
 
 namespace facebook::velox::common {
 
-Subfield::Subfield(
-    const std::string& path,
-    const std::shared_ptr<Separators>& separators) {
-  Tokenizer tokenizer(path, separators);
+Subfield::Subfield(const std::string& path) {
+  Tokenizer tokenizer(path);
   VELOX_CHECK(tokenizer.hasNext(), "Column name is missing: {}", path);
 
   auto firstElement = tokenizer.next();
@@ -41,14 +39,4 @@ Subfield::Subfield(std::vector<std::unique_ptr<Subfield::PathElement>>&& path)
     : path_(std::move(path)) {
   VELOX_CHECK_GE(path_.size(), 1);
 };
-
-Subfield Subfield::clone() const {
-  Subfield subfield;
-  subfield.path_.reserve(path_.size());
-  for (auto& element : path_) {
-    subfield.path_.push_back(element->clone());
-  }
-  return subfield;
-}
-
 } // namespace facebook::velox::common

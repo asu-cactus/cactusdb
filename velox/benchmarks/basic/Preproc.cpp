@@ -161,8 +161,7 @@ class Addition {
 template <typename Operation>
 std::shared_ptr<exec::VectorFunction> make(
     const std::string& /*name*/,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
   auto typeKind = inputArgs[0].type->kind();
   switch (typeKind) {
     case TypeKind::TINYINT:

@@ -51,7 +51,6 @@ class BuildOptions(object):
         lfs_path=None,
         shared_libs: bool = False,
         facebook_internal=None,
-        free_up_disk: bool = False,
     ) -> None:
         """fbcode_builder_dir - the path to either the in-fbsource fbcode_builder dir,
                              or for shipit-transformed repos, the build dir that
@@ -66,7 +65,6 @@ class BuildOptions(object):
         use_shipit - use real shipit instead of the simple shipit transformer
         vcvars_path - Path to external VS toolchain's vsvarsall.bat
         shared_libs - whether to build shared libraries
-        free_up_disk - take extra actions to save runner disk space
         """
 
         if not install_dir:
@@ -105,7 +103,6 @@ class BuildOptions(object):
         self.allow_system_packages = allow_system_packages
         self.lfs_path = lfs_path
         self.shared_libs = shared_libs
-        self.free_up_disk = free_up_disk
 
         lib_path = None
         if self.is_darwin():
@@ -605,7 +602,6 @@ def setup_build_options(args, host_type=None) -> BuildOptions:
             "allow_system_packages",
             "lfs_path",
             "shared_libs",
-            "free_up_disk",
         }
     }
 

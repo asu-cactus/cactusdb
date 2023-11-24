@@ -31,9 +31,6 @@ namespace velox {
 template <typename T>
 class DictionaryVector : public SimpleVector<T> {
  public:
-  DictionaryVector(const DictionaryVector&) = delete;
-  DictionaryVector& operator=(const DictionaryVector&) = delete;
-
   static constexpr bool can_simd = std::is_same_v<T, int64_t>;
 
   // Creates dictionary vector using base vector (dictionaryValues) and a set
@@ -80,19 +77,6 @@ class DictionaryVector : public SimpleVector<T> {
 
   bool isNullAt(vector_size_t idx) const override;
 
-  bool containsNullAt(vector_size_t idx) const override {
-    if constexpr (std::is_same_v<T, ComplexType>) {
-      if (isNullAt(idx)) {
-        return true;
-      }
-
-      auto innerIndex = getDictionaryIndex(idx);
-      return dictionaryValues_->containsNullAt(innerIndex);
-    } else {
-      return isNullAt(idx);
-    }
-  }
-
   const T valueAtFast(vector_size_t idx) const;
 
   /**
@@ -122,7 +106,7 @@ class DictionaryVector : public SimpleVector<T> {
     return indices_;
   }
 
-  const VectorPtr& valueVector() const override {
+  VectorPtr valueVector() const override {
     return dictionaryValues_;
   }
 
@@ -131,7 +115,13 @@ class DictionaryVector : public SimpleVector<T> {
   }
 
   BufferPtr mutableIndices(vector_size_t size) {
-    BaseVector::resizeIndices(size, BaseVector::pool_, &indices_, &rawIndices_);
+    if (indices_ && indices_->isMutable() &&
+        indices_->capacity() >= size * sizeof(vector_size_t)) {
+      return indices_;
+    }
+
+    indices_ = AlignedBuffer::allocate<vector_size_t>(size, BaseVector::pool_);
+    rawIndices_ = indices_->as<vector_size_t>();
     return indices_;
   }
 
@@ -197,8 +187,7 @@ class DictionaryVector : public SimpleVector<T> {
   /// If setNotNull is false then the values and isNull is undefined.
   void resize(vector_size_t size, bool setNotNull = true) override {
     if (size > BaseVector::length_) {
-      BaseVector::resizeIndices(
-          size, BaseVector::pool(), &indices_, &rawIndices_);
+      this->resizeIndices(size, &indices_, &rawIndices_);
       this->clearIndices(indices_, BaseVector::length_, size);
     }
 
@@ -206,8 +195,6 @@ class DictionaryVector : public SimpleVector<T> {
   }
 
   VectorPtr slice(vector_size_t offset, vector_size_t length) const override;
-
-  void validate(const VectorValidateOptions& options) const override;
 
  private:
   // return the dictionary index for the specified vector index.

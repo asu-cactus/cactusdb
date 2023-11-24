@@ -38,7 +38,6 @@ FilterNode                  FilterProject
 ProjectNode                 FilterProject
 AggregationNode             HashAggregation or StreamingAggregation
 GroupIdNode                 GroupId
-MarkDistinctNode            MarkDistinct
 HashJoinNode                HashProbe and HashBuild
 MergeJoinNode               MergeJoin
 NestedLoopJoinNode          NestedLoopJoinProbe and NestedLoopJoinBuild
@@ -47,7 +46,6 @@ TopNNode                    TopN
 LimitNode                   Limit
 UnnestNode                  Unnest
 TableWriteNode              TableWrite
-TableWriteMergeNode         TableWriteMerge
 PartitionedOutputNode       PartitionedOutput
 ExchangeNode                Exchange                                         Y
 MergeExchangeNode           MergeExchange                                    Y
@@ -57,19 +55,15 @@ LocalPartitionNode          LocalPartition and LocalExchange
 EnforceSingleRowNode        EnforceSingleRow
 AssignUniqueIdNode          AssignUniqueId
 WindowNode                  Window
-RowNumberNode               RowNumber
-TopNRowNumberNode           TopNRowNumber
 ==========================  ==============================================   ===========================
 
 Plan Nodes
 ----------
 
-.. _TableScanNode:
-
 TableScanNode
 ~~~~~~~~~~~~~
 
-The table scan operation reads data from a :doc:`connector </develop/connectors>`. For example, when used
+The table scan operation reads data from a connector. For example, when used
 with HiveConnector, table scan reads data from ORC or Parquet files.
 
 .. list-table::
@@ -91,7 +85,7 @@ with HiveConnector, table scan reads data from ORC or Parquet files.
 ArrowStreamNode
 ~~~~~~~~~~~~~~~
 
-The Arrow stream operation reads data from an Arrow array stream. The ArrowArrayStream structure is defined in Arrow abi,
+The Arrow stream operation reads data from an Arrow array stream. The ArrowArrayStream structure is defined in Arrow abi, 
 and provides the required callbacks to interact with a streaming source of Arrow arrays.
 
 .. list-table::
@@ -139,14 +133,11 @@ input columns.
    * - expressions
      - Expressions for the output columns.
 
-.. _AggregationNode:
-
 AggregationNode
 ~~~~~~~~~~~~~~~
 
 The aggregate operation groups input data on a set of grouping keys, calculating
-each measure for each combination of the grouping keys. Optionally, inputs for
-individual measures are sorted and de-duplicated.
+each measure for each combination of the grouping keys.
 
 .. list-table::
    :widths: 10 30
@@ -164,56 +155,13 @@ individual measures are sorted and de-duplicated.
    * - aggregateNames
      - Names for the output columns for the measures.
    * - aggregates
-     - One or more measures to compute. Each measure specifies an expression, e.g. count(1), sum(a), avg(b), optional boolean input column that's used to mask out rows for this particular measure, optional list of input columns to sort by before computing the measure, an optional flag to indicate that inputs must be deduplicated before computing the measure. Expressions must be in the form of aggregate function calls over input columns directly, e.g. sum(c) is ok, but sum(c + d) is not.
+     - Expressions for computing the measures, e.g. count(1), sum(a), avg(b). Expressions must be in the form of aggregate function calls over input columns directly, e.g. sum(c) is ok, but sum(c + d) is not.
+   * - aggregationMasks
+     - For each measure, an optional boolean input column that is used to mask out rows for this particular measure.
    * - ignoreNullKeys
      - A boolean flag indicating whether the aggregation should drop rows with nulls in any of the grouping keys. Used to avoid unnecessary processing for an aggregation followed by an inner join on the grouping keys.
 
-Properties of individual measures.
-
-.. list-table::
-   :widths: 10 30
-   :align: left
-   :header-rows: 1
-
-   * - Property
-     - Description
-   * - call
-     - An expression for computing the measure, e.g. count(1), sum(a), avg(b). Expressions must be in the form of aggregate function calls over input columns directly, e.g. sum(c) is ok, but sum(c + d) is not.
-   * - mask
-     - An optional boolean input column that's used to mask out rows for this particular measure. Multiple measures may specify same input column as a mask.
-   * - sortingKeys
-     - An optional list of input columns to sort by before computing the measure. If specified, sortingOrders must be used to specify the sort order for each sorting key.
-   * - sortingOrders
-     - A list of sorting orders for each sorting key.
-   * - distinct
-     - A boolean flag indicating that inputs must be de-duplicated before computing the measure.
-
-Note that if measures specify sorting keys, HashAggregation operator accumulates
-all input rows in memory before sorting these and adding to accumulators. This
-requires a lot more memory as compared to when inputs do not need to be sorted.
-
-Similarly, if measures request inputs to be de-duplicated, HashAggregation
-operator accumulates all distinct input rows in memory before adding these to
-accumulators. This requires more memory as compared to when inputs do not need
-to be de-duplicated.
-
-Furthermore, many aggregate functions produce same results on sorted and
-unsorted inputs, e.g. func:`min`, func:`max`, :func:`count`, :func:`sum`.
-The query planner should avoid generating plans that request sorted inputs
-for such aggregate functions. Some examples of aggregate functions that are
-sensitive to the order of inputs include :func:`array_agg` and :func:`min_by`
-(in the presence of ties).
-
-Similarly, some aggregate functions produce same results on unique inputs as well
-as inputs with duplicates, e.g. :func:`min`, :func:`max`. The query planner
-should avoid generating plans that request de-duplicating inputs for such
-aggregate functions.
-
-Finally, note that computing measures over sorted input is only possible if
-aggregation step is 'single'. Such computations cannot be split into partial + final.
-
-.. _GroupIdNode:
-
+.. _group-id-node:
 GroupIdNode
 ~~~~~~~~~~~
 
@@ -278,10 +226,10 @@ and emitting results.
 NestedLoopJoinNode
 ~~~~~~~~~~~~~~~~~~
 
-NestedLoopJoinNode represents an implementation that iterates through each row from
-the left side of the join and, for each row, iterates through all rows from the right
-side of the join, comparing them based on the join condition to find matching rows
-and emitting results. Nested loop join supports non-equality join.
+The cross join operation combines two separate inputs into a single output by
+combining each row of the left hand side input with each row of the right hand
+side input. If there are N rows in the left input and M rows in the right
+input, the output of the cross join will contain N * M rows.
 
 .. list-table::
    :widths: 10 30
@@ -290,10 +238,6 @@ and emitting results. Nested loop join supports non-equality join.
 
    * - Property
      - Description
-   * - joinType
-     - Join type: inner, left, right, full.
-   * - joinCondition
-     - Expression used as the join condition, may reference columns from both inputs.
    * - outputType
      - A list of output columns. This is a subset of columns available in the left and right inputs of the join. The columns may appear in different order than in the input.
 
@@ -388,16 +332,13 @@ number starting with 1.
    * - ordinalityName
      - Optional name for the ordinality column.
 
-.. _TableWriteNode:
-
 TableWriteNode
 ~~~~~~~~~~~~~~
 
 The table write operation consumes one output and writes it to storage via a
-:doc:`connector </develop/connectors>`. An example would be writing ORC or Parquet files. The table write
-operation return a list of columns containing the metadata of the written
-data: the number of rows written to storage, the writer context information,
-the written file paths on storage and the collected column stats.
+connector. An example would be writing ORC or Parquet files. The table write
+operation return a single row with a single column containing the number of
+rows written to storage.
 
 .. list-table::
    :widths: 10 30
@@ -410,28 +351,10 @@ the written file paths on storage and the collected column stats.
      - A list of input columns to write to storage. This may be a subset of the input columns in different order.
    * - columnNames
      - Column names to use when writing to storage. These can be different from the input column names.
-   * - aggregationNode
-     - Optional Aggregation plan node used to collect column stats for the data written to storage.
    * - insertTableHandle
      - Connector-specific description of the destination table.
    * - outputType
-     - A list of output columns containing the metadata of the data written storage.
-
-TableWriteMergeNode
-~~~~~~~~~~~~~~~~~~~
-
-The table write merge operation aggregates the metadata outputs from multiple
-table write operations and returns the aggregated result.
-
-.. list-table::
-   :widths: 10 30
-   :align: left
-   :header-rows: 1
-
-   * - Property
-     - Description
-   * - outputType
-     - A list of output columns containing the metadata of the written data aggregated from multiple table write operations.
+     - An output column containing a number of rows written to storage.
 
 PartitionedOutputNode
 ~~~~~~~~~~~~~~~~~~~~~
@@ -446,12 +369,12 @@ distribution fields.
 
    * - Property
      - Description
-   * - kind
-     - Specifies output buffer types: kPartitioned, kBroadcast and kArbitrary. For kPartitioned type, rows are partitioned and each sent to corresponding destination partition. For kBroadcast type, rows are not partitioned and sent to all the destination partitions. For kArbitrary type, rows are not partitioned and each sent to any one of the destination partitions.
    * - keys
      - Zero or more input fields to use for calculating a partition for each row.
    * - numPartitions
-     - Number of partitions to split the data into.g
+     - Number of partitions to split the data into.
+   * - broadcast
+     - Boolean flag indicating whether all rows should be sent to all partitions.
    * - replicateNullsAndAny
      - Boolean flag indicating whether rows with nulls in the keys should be sent to all partitions and, in case there are no such rows, whether a single arbitrarily chosen row should be sent to all partitions. Used to provide global-scope information necessary to implement anti join semantics on a single node.
    * - partitionFunctionFactory
@@ -587,8 +510,7 @@ the nodes executing the same query stage in a distributed query execution.
    * - taskUniqueId
      - A 24-bit integer to uniquely identify the task id across all the nodes.
 
-.. _WindowNode:
-
+.. _window-node:
 WindowNode
 ~~~~~~~~~~
 
@@ -619,92 +541,6 @@ If no sorting columns are specified then the order of the results is unspecified
     - Output column names for each window function invocation in windowFunctions list below.
   * - windowFunctions
     - Window function calls with the frame clause. e.g row_number(), first_value(name) between range 10 preceding and current row. The default frame is between range unbounded preceding and current row.
-
-RowNumberNode
-~~~~~~~~~~~~~
-
-An optimized version of a WindowNode with a single row_number function, an
-optional limit, and no sorting.
-
-Partitions the input using specified partitioning keys and assigns row numbers
-within each partition starting from 1. The operator runs in streaming mode. For
-each batch of input it computes and returns the results before accepting the
-next batch of input.
-
-This operator accumulates state: a hash table mapping partition keys to total
-number of rows seen in this partition so far. Returning the row numbers as
-a column in the output is optional. This operator doesn't support spilling yet.
-
-This operator is equivalent to a WindowNode followed by
-FilterNode(row_number <= limit), but it uses less memory and CPU and makes
-results available before seeing all input.
-
-.. list-table::
-  :widths: 10 30
-  :align: left
-  :header-rows: 1
-
-  * - Property
-    - Description
-  * - partitionKeys
-    - Partition by columns.
-  * - rowNumberColumnName
-    - Optional output column name for the row numbers. If specified, the generated row numbers are returned as an output column appearing after all input columns.
-  * - limit
-    - Optional per-partition limit. If specified, the number of rows produced by this node will not exceed this value for any given partition. Extra rows will be dropped.
-
-TopNRowNumberNode
-~~~~~~~~~~~~~~~~~
-
-An optimized version of a WindowNode with a single row_number function and a
-limit over sorted partitions.
-
-Partitions the input using specified partitioning keys and maintains up to
-a 'limit' number of top rows for each partition. After receiving all input,
-assigns row numbers within each partition starting from 1.
-
-This operator accumulates state: a hash table mapping partition keys to a list
-of top 'limit' rows within that partition.  Returning the row numbers as
-a column in the output is optional. This operator doesn't support spilling yet.
-
-This operator is logically equivalent to a WindowNode followed by
-FilterNode(row_number <= limit), but it uses less memory and CPU.
-
-.. list-table::
-  :widths: 10 30
-  :align: left
-  :header-rows: 1
-
-  * - Property
-    - Description
-  * - partitionKeys
-    - Partition by columns for the window functions.
-  * - sortingKeys
-    - Order by columns for the window functions.
-  * - sortingOrders
-    - Sorting order for each sorting key above. The supported sort orders are asc nulls first, asc nulls last, desc nulls first and desc nulls last.
-  * - rowNumberColumnName
-    - Optional output column name for the row numbers. If specified, the generated row numbers are returned as an output column appearing after all input columns.
-  * - limit
-    - Per-partition limit. If specified, the number of rows produced by this node will not exceed this value for any given partition. Extra rows will be dropped.
-
-MarkDistinctNode
-~~~~~~~~~~~~~~~~
-
-The MarkDistinct operator is used to produce aggregate mask columns for aggregations over distinct values, e.g. agg(DISTINCT a).
-Mask is a boolean column set to true for a subset of input rows that collectively represent a set of unique values of 'distinctKeys'.
-
-.. list-table::
-  :widths: 10 30
-  :align: left
-  :header-rows: 1
-
-  * - Property
-    - Description
-  * - markerName
-    - Name of the output mask column.
-  * - distinctKeys
-    - Names of grouping keys.
 
 Examples
 --------

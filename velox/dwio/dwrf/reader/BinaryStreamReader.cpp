@@ -38,7 +38,6 @@ BinaryStripeStreams::BinaryStripeStreams(
           selector,
           options_,
           stripeInfo_.offset(),
-          static_cast<int64_t>(stripeInfo_.numberOfRows()),
           UnsupportedStrideIndexProvider(),
           stripeIndex} {
   if (!preload_) {

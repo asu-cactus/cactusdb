@@ -15,18 +15,19 @@
  */
 
 #include <gtest/gtest.h>
-#include "velox/common/base/tests/GTestUtils.h"
-#include "velox/dwio/common/DataBufferHolder.h"
+#include "velox/dwio/dwrf/common/DataBufferHolder.h"
 
 using namespace facebook::velox::dwio::common;
+using namespace facebook::velox::dwrf;
 using namespace facebook::velox::memory;
-using facebook::velox::VeloxException;
 
 TEST(DataBufferHolderTests, InputCheck) {
   auto pool = addDefaultLeafMemoryPool();
-  VELOX_ASSERT_THROW((DataBufferHolder{*pool, 0}), "");
-  VELOX_ASSERT_THROW((DataBufferHolder{*pool, 1024, 2048}), "");
-  VELOX_ASSERT_THROW((DataBufferHolder{*pool, 1024, 1024, 1.1f}), "");
+  ASSERT_THROW((DataBufferHolder{*pool, 0}), exception::LoggedException);
+  ASSERT_THROW(
+      (DataBufferHolder{*pool, 1024, 2048}), exception::LoggedException);
+  ASSERT_THROW(
+      (DataBufferHolder{*pool, 1024, 1024, 1.1f}), exception::LoggedException);
 
   { DataBufferHolder holder{*pool, 1024}; }
   { DataBufferHolder holder{*pool, 1024, 512}; }
@@ -35,7 +36,7 @@ TEST(DataBufferHolderTests, InputCheck) {
 
 TEST(DataBufferHolderTests, TakeAndGetBuffer) {
   auto pool = addDefaultLeafMemoryPool();
-  MemorySink sink{1024, {.pool = pool.get()}};
+  MemorySink sink{*pool, 1024};
   DataBufferHolder holder{*pool, 1024, 0, 2.0f, &sink};
   DataBuffer<char> buffer{*pool, 512};
   std::memset(buffer.data(), 'a', 512);
@@ -46,7 +47,7 @@ TEST(DataBufferHolderTests, TakeAndGetBuffer) {
   holder.take(buffer);
   ASSERT_EQ(holder.size(), 1024);
   ASSERT_EQ(sink.size(), 1024);
-  auto data = sink.data();
+  auto data = sink.getData();
   for (size_t i = 0; i < 512; ++i) {
     ASSERT_EQ(data[i], 'a');
   }

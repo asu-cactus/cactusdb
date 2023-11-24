@@ -68,20 +68,6 @@ class SequenceVector : public SimpleVector<T> {
     return isNullAtFast(idx);
   }
 
-  bool containsNullAt(vector_size_t idx) const override {
-    if constexpr (std::is_same_v<T, ComplexType>) {
-      if (isNullAt(idx)) {
-        return true;
-      }
-
-      size_t offset = offsetOfIndex(idx);
-      VELOX_DCHECK_GE(offset, 0);
-      return sequenceValues_->containsNullAt(offset);
-    } else {
-      return isNullAt(idx);
-    }
-  }
-
   const T valueAtFast(vector_size_t idx) const;
 
   const T valueAt(vector_size_t idx) const override {
@@ -122,7 +108,7 @@ class SequenceVector : public SimpleVector<T> {
     return const_cast<SequenceVector<T>*>(this)->loadedVector();
   }
 
-  const VectorPtr& valueVector() const override {
+  VectorPtr valueVector() const override {
     return sequenceValues_;
   }
 

@@ -2,24 +2,6 @@
 Map Functions
 ===========================
 
-.. function:: all_keys_match(x(K,V), function(K, boolean)) -> boolean
-
-    Returns whether all keys of a map match the given predicate. Returns true if all the keys match the predicate (a special case is when the map is empty); false if one or more keys don’t match; NULL if the predicate function returns NULL for one or more keys and true for all other keys. ::
-
-        SELECT all_keys_match(map(array['a', 'b', 'c'], array[1, 2, 3]), x -> length(x) = 1); -- true
-
-.. function:: any_keys_match(x(K,V), function(K, boolean)) -> boolean
-
-    Returns whether any keys of a map match the given predicate. Returns true if one or more keys match the predicate; false if none of the keys match (a special case is when the map is empty); NULL if the predicate function returns NULL for one or more keys and false for all other keys. ::
-
-        SELECT any_keys_match(map(array['a', 'b', 'c'], array[1, 2, 3]), x -> x = 'a'); -- true
-
-.. function:: any_values_match(x(K,V), function(V, boolean)) -> boolean
-
-    Returns whether any values of a map matches the given predicate. Returns true if one or more values match the predicate; false if none of the values match (a special case is when the map is empty); NULL if the predicate function returns NULL for one or more values and false for all other values. ::
-
-        SELECT ANY_VALUES_MATCH(map(ARRAY['a', 'b', 'c'], ARRAY[1, 2, 3]), x -> x = 1); -- true
-
 .. function:: cardinality(x) -> bigint
     :noindex:
 
@@ -37,24 +19,23 @@ Map Functions
         SELECT map(); -- {}
 
 .. function:: map(array(K), array(V)) -> map(K,V)
-   :noindex:
 
-    Returns a map created using the given key/value arrays. Keys are not allowed to be null or to contain nulls. ::
+    Returns a map created using the given key/value arrays. ::
 
         SELECT map(ARRAY[1,3], ARRAY[2,4]); -- {1 -> 2, 3 -> 4}
 
     See also :func:`map_agg` for creating a map as an aggregation.
-
-.. function:: map_concat(map1(K,V), map2(K,V), ..., mapN(K,V)) -> map(K,V)
-
-   Returns the union of all the given maps. If a key is found in multiple given maps,
-   that key's value in the resulting map comes from the last one of those maps.
 
 .. function:: map_entries(map(K,V)) -> array(row(K,V))
 
     Returns an array of all entries in the given map. ::
 
         SELECT map_entries(MAP(ARRAY[1, 2], ARRAY['x', 'y'])); -- [ROW(1, 'x'), ROW(2, 'y')]
+
+.. function:: map_concat(map1(K,V), map2(K,V), ..., mapN(K,V)) -> map(K,V)
+
+   Returns the union of all the given maps. If a key is found in multiple given maps,
+   that key's value in the resulting map comes from the last one of those maps.
 
 .. function:: map_filter(map(K,V), function(K,V,boolean)) -> map(K,V)
 
@@ -64,12 +45,6 @@ Map Functions
         SELECT map_filter(MAP(ARRAY[10, 20, 30], ARRAY['a', NULL, 'c']), (k, v) -> v IS NOT NULL); -- {10 -> a, 30 -> c}
         SELECT map_filter(MAP(ARRAY['k1', 'k2', 'k3'], ARRAY[20, 3, 15]), (k, v) -> v > 10); -- {k1 -> 20, k3 -> 15}
 
-.. function:: map_from_entries(array(row(K, V))) -> map(K, V)
-
-    Returns a map created from the given array of entries. Keys are not allowed to be null or to contain nulls. ::
-
-        SELECT map_from_entries(ARRAY[(1, 'x'), (2, 'y')]); -- {1 -> 'x', 2 -> 'y'}
-
 .. function:: map_keys(x(K,V)) -> array(K)
 
     Returns all the keys in the map ``x``.
@@ -77,6 +52,13 @@ Map Functions
 .. function:: map_values(x(K,V)) -> array(V)
 
     Returns all the values in the map ``x``.
+
+.. function:: subscript(map(K, V), key) -> V
+
+    Returns value for given ``key``. Throws if the key is not contained in the map.
+    Corresponds to SQL subscript operator [].
+
+    SELECT name_to_age_map['Bob'] AS bob_age;
 
 .. function:: map_zip_with(map(K,V1), map(K,V2), function(K,V1,V2,V3)) -> map(K,V3)
 
@@ -92,26 +74,6 @@ Map Functions
         SELECT map_zip_with(MAP(ARRAY['a', 'b', 'c'], ARRAY[1, 8, 27]), -- {a -> a1, b -> b4, c -> c9}
                             MAP(ARRAY['a', 'b', 'c'], ARRAY[1, 2, 3]),
                             (k, v1, v2) -> k || CAST(v1/v2 AS VARCHAR));
-
-.. function:: no_keys_match(x(K,V), function(K, boolean)) -> boolean
-
-    Returns whether no keys of a map match the given predicate. Returns true if none of the keys match the predicate (a special case is when the map is empty); false if one or more keys match; NULL if the predicate function returns NULL for one or more keys and false for all other keys. ::
-
-        SELECT no_keys_match(map(array['a', 'b', 'c'], array[1, 2, 3]), x -> x = 'd'); -- true
-
-.. function:: no_values_match(x(K,V), function(V, boolean)) -> boolean
-
-    Returns whether no values of a map match the given predicate. Returns true if none of the values match the predicate (a special case is when the map is empty); false if one or more values match; NULL if the predicate function returns NULL for one or more values and false for all other values. ::
-
-        SELECT no_values_match(map(array['a', 'b', 'c'], array[1, 2, 3]), x -> x = 'd'); -- true
-
-.. function:: subscript(map(K, V), key) -> V
-   :noindex:
-
-    Returns value for given ``key``. Throws if the key is not contained in the map.
-    Corresponds to SQL subscript operator [].
-
-    SELECT name_to_age_map['Bob'] AS bob_age;
 
 .. function:: transform_keys(map(K1,V), function(K1,V,K2)) -> map(K2,V)
 
@@ -134,3 +96,4 @@ Map Functions
         SELECT transform_values(MAP(ARRAY ['a', 'b'], ARRAY [1, 2]), (k, v) -> k || CAST(v as VARCHAR)); -- {a -> a1, b -> b2}
         SELECT transform_values(MAP(ARRAY [1, 2], ARRAY [1.0, 1.4]), -- {1 -> one_1.0, 2 -> two_1.4}
                                 (k, v) -> MAP(ARRAY[1, 2], ARRAY['one', 'two'])[k] || '_' || CAST(v AS VARCHAR));
+

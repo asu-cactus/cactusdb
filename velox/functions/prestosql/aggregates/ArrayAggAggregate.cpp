@@ -28,8 +28,7 @@ struct ArrayAccumulator {
 
 class ArrayAggAggregate : public exec::Aggregate {
  public:
-  explicit ArrayAggAggregate(TypePtr resultType, bool ignoreNulls)
-      : Aggregate(resultType), ignoreNulls_(ignoreNulls) {}
+  explicit ArrayAggAggregate(TypePtr resultType) : Aggregate(resultType) {}
 
   int32_t accumulatorFixedWidthSize() const override {
     return sizeof(ArrayAccumulator);
@@ -37,59 +36,6 @@ class ArrayAggAggregate : public exec::Aggregate {
 
   bool isFixedSize() const override {
     return false;
-  }
-
-  bool supportsToIntermediate() const override {
-    return true;
-  }
-
-  void toIntermediate(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      VectorPtr& result) const override {
-    const auto& elements = args[0];
-
-    const auto numRows = rows.size();
-
-    // Convert input to a single-entry array.
-
-    // Set nulls for rows not present in 'rows'.
-    auto* pool = allocator_->pool();
-    BufferPtr nulls = allocateNulls(numRows, pool);
-    auto mutableNulls = nulls->asMutable<uint64_t>();
-    memcpy(
-        nulls->asMutable<uint64_t>(),
-        rows.asRange().bits(),
-        bits::nbytes(numRows));
-
-    auto loadedElements = BaseVector::loadedVectorShared(elements);
-
-    if (ignoreNulls_ && loadedElements->mayHaveNulls()) {
-      rows.applyToSelected([&](vector_size_t row) {
-        if (loadedElements->isNullAt(row)) {
-          bits::setNull(mutableNulls, row);
-        }
-      });
-    }
-
-    // Set offsets to 0, 1, 2, 3...
-    BufferPtr offsets = allocateOffsets(numRows, pool);
-    auto* rawOffsets = offsets->asMutable<vector_size_t>();
-    std::iota(rawOffsets, rawOffsets + numRows, 0);
-
-    // Set sizes to 1.
-    BufferPtr sizes = allocateSizes(numRows, pool);
-    auto* rawSizes = sizes->asMutable<vector_size_t>();
-    std::fill(rawSizes, rawSizes + numRows, 1);
-
-    result = std::make_shared<ArrayVector>(
-        pool,
-        ARRAY(elements->type()),
-        nulls,
-        numRows,
-        offsets,
-        sizes,
-        loadedElements);
   }
 
   void initializeNewGroups(
@@ -141,9 +87,6 @@ class ArrayAggAggregate : public exec::Aggregate {
       bool /*mayPushdown*/) override {
     decodedElements_.decode(*args[0], rows);
     rows.applyToSelected([&](vector_size_t row) {
-      if (ignoreNulls_ && decodedElements_.isNullAt(row)) {
-        return;
-      }
       auto group = groups[row];
       auto tracker = trackRowSize(group);
       value<ArrayAccumulator>(group)->elements.appendValue(
@@ -164,13 +107,11 @@ class ArrayAggAggregate : public exec::Aggregate {
       auto group = groups[row];
       auto decodedRow = decodedIntermediate_.index(row);
       auto tracker = trackRowSize(group);
-      if (!decodedIntermediate_.isNullAt(row)) {
-        value<ArrayAccumulator>(group)->elements.appendRange(
-            elements,
-            arrayVector->offsetAt(decodedRow),
-            arrayVector->sizeAt(decodedRow),
-            allocator_);
-      }
+      value<ArrayAccumulator>(group)->elements.appendRange(
+          elements,
+          arrayVector->offsetAt(decodedRow),
+          arrayVector->sizeAt(decodedRow),
+          allocator_);
     });
   }
 
@@ -184,9 +125,6 @@ class ArrayAggAggregate : public exec::Aggregate {
     decodedElements_.decode(*args[0], rows);
     auto tracker = trackRowSize(group);
     rows.applyToSelected([&](vector_size_t row) {
-      if (ignoreNulls_ && decodedElements_.isNullAt(row)) {
-        return;
-      }
       values.appendValue(decodedElements_, row, allocator_);
     });
   }
@@ -202,14 +140,12 @@ class ArrayAggAggregate : public exec::Aggregate {
     auto& values = value<ArrayAccumulator>(group)->elements;
     auto elements = arrayVector->elements();
     rows.applyToSelected([&](vector_size_t row) {
-      if (!decodedIntermediate_.isNullAt(row)) {
-        auto decodedRow = decodedIntermediate_.index(row);
-        values.appendRange(
-            elements,
-            arrayVector->offsetAt(decodedRow),
-            arrayVector->sizeAt(decodedRow),
-            allocator_);
-      }
+      auto decodedRow = decodedIntermediate_.index(row);
+      values.appendRange(
+          elements,
+          arrayVector->offsetAt(decodedRow),
+          arrayVector->sizeAt(decodedRow),
+          allocator_);
     });
   }
 
@@ -228,14 +164,12 @@ class ArrayAggAggregate : public exec::Aggregate {
     return size;
   }
 
-  // A boolean representing whether to ignore nulls when aggregating inputs.
-  const bool ignoreNulls_;
   // Reusable instance of DecodedVector for decoding input vectors.
   DecodedVector decodedElements_;
   DecodedVector decodedIntermediate_;
 };
 
-exec::AggregateRegistrationResult registerArray(const std::string& name) {
+bool registerArray(const std::string& name) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures{
       exec::AggregateFunctionSignatureBuilder()
           .typeVariable("E")
@@ -244,20 +178,18 @@ exec::AggregateRegistrationResult registerArray(const std::string& name) {
           .argumentType("E")
           .build()};
 
-  return exec::registerAggregateFunction(
+  exec::registerAggregateFunction(
       name,
       std::move(signatures),
       [name](
           core::AggregationNode::Step step,
           const std::vector<TypePtr>& argTypes,
-          const TypePtr& resultType,
-          const core::QueryConfig& config) -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr& resultType) -> std::unique_ptr<exec::Aggregate> {
         VELOX_CHECK_EQ(
             argTypes.size(), 1, "{} takes at most one argument", name);
-        return std::make_unique<ArrayAggAggregate>(
-            resultType, config.prestoArrayAggIgnoreNulls());
-      },
-      /*registerCompanionFunctions*/ true);
+        return std::make_unique<ArrayAggAggregate>(resultType);
+      });
+  return true;
 }
 
 } // namespace

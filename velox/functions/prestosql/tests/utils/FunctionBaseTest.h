@@ -104,32 +104,29 @@ class FunctionBaseTest : public testing::Test,
   std::shared_ptr<T> evaluate(
       const core::TypedExprPtr& typedExpr,
       const RowVectorPtr& data,
-      const std::optional<SelectivityVector>& rows = std::nullopt,
-      const TypePtr& resultType = nullptr) {
+      const std::optional<SelectivityVector>& rows = std::nullopt) {
     auto result = evaluate(typedExpr, data, rows);
-    return castEvaluateResult<T>(result, typedExpr->toString(), resultType);
+    return castEvaluateResult<T>(result, typedExpr->toString());
   }
 
   template <typename T>
   std::shared_ptr<T> evaluate(
       const std::string& expression,
       const RowVectorPtr& data,
-      const std::optional<SelectivityVector>& rows = std::nullopt,
-      const TypePtr& resultType = nullptr) {
+      const std::optional<SelectivityVector>& rows = std::nullopt) {
     auto result = evaluate(expression, data, rows);
-    return castEvaluateResult<T>(result, expression, resultType);
+    return castEvaluateResult<T>(result, expression);
   }
 
   template <typename T>
   std::shared_ptr<T> evaluateSimplified(
       const std::string& expression,
       const RowVectorPtr& data,
-      const std::optional<SelectivityVector>& rows = std::nullopt,
-      const TypePtr& resultType = nullptr) {
+      const std::optional<SelectivityVector>& rows = std::nullopt) {
     auto typedExpr = makeTypedExpr(expression, asRowType(data->type()));
     auto result = evaluateImpl<exec::ExprSetSimplified>(typedExpr, data, rows);
 
-    return castEvaluateResult<T>(result, expression, resultType);
+    return castEvaluateResult<T>(result, expression);
   }
 
   template <typename T>
@@ -137,8 +134,7 @@ class FunctionBaseTest : public testing::Test,
       const std::string& expression,
       RowVectorPtr data,
       const SelectivityVector& rows,
-      VectorPtr& result,
-      const TypePtr& resultType = nullptr) {
+      VectorPtr& result) {
     exec::ExprSet exprSet(
         {makeTypedExpr(expression, asRowType(data->type()))}, &execCtx_);
 
@@ -147,11 +143,6 @@ class FunctionBaseTest : public testing::Test,
     exprSet.eval(rows, evalCtx, results);
     result = results[0];
 
-    // reinterpret_cast is used for functions that return logical types like
-    // DATE().
-    if (resultType != nullptr) {
-      return std::reinterpret_pointer_cast<T>(results[0]);
-    }
     return std::dynamic_pointer_cast<T>(results[0]);
   }
 
@@ -180,25 +171,23 @@ class FunctionBaseTest : public testing::Test,
       const std::string& expr,
       const std::vector<std::optional<Args>>& args,
       const std::vector<TypePtr>& types,
-      const std::optional<SelectivityVector>& rows = std::nullopt,
-      const TypePtr& resultType = nullptr) {
+      const std::optional<SelectivityVector>& rows = std::nullopt) {
     std::vector<VectorPtr> flatVectors;
     for (vector_size_t i = 0; i < args.size(); ++i) {
       flatVectors.emplace_back(makeNullableFlatVector(
           std::vector<std::optional<Args>>{args[i]}, types[i]));
     }
     auto rowVectorPtr = makeRowVector(flatVectors);
-    return evaluateOnce<ReturnType>(expr, rowVectorPtr, rows, resultType);
+    return evaluateOnce<ReturnType>(expr, rowVectorPtr, rows);
   }
 
   template <typename ReturnType>
   std::optional<ReturnType> evaluateOnce(
       const std::string& expr,
       const RowVectorPtr rowVectorPtr,
-      const std::optional<SelectivityVector>& rows = std::nullopt,
-      const TypePtr& resultType = nullptr) {
-    auto result = evaluate<SimpleVector<EvalType<ReturnType>>>(
-        expr, rowVectorPtr, rows, resultType);
+      const std::optional<SelectivityVector>& rows = std::nullopt) {
+    auto result =
+        evaluate<SimpleVector<EvalType<ReturnType>>>(expr, rowVectorPtr, rows);
     return result->isNullAt(0) ? std::optional<ReturnType>{}
                                : ReturnType(result->valueAt(0));
   }
@@ -258,22 +247,8 @@ class FunctionBaseTest : public testing::Test,
   template <typename T>
   std::shared_ptr<T> castEvaluateResult(
       const VectorPtr& result,
-      const std::string& expression,
-      const TypePtr& expectedType = nullptr) {
-    // reinterpret_cast is used for functions that return logical types
-    // like DATE().
+      const std::string& expression) {
     VELOX_CHECK(result, "Expression evaluation result is null: {}", expression);
-    if (expectedType != nullptr) {
-      VELOX_CHECK_EQ(
-          result->type()->kind(),
-          expectedType->kind(),
-          "Expression evaluation result is not of expected type kind: {} -> {} vector of type {}",
-          expression,
-          result->encoding(),
-          result->type()->kindName());
-      auto castedResult = std::reinterpret_pointer_cast<T>(result);
-      return castedResult;
-    }
 
     auto castedResult = std::dynamic_pointer_cast<T>(result);
     VELOX_CHECK(

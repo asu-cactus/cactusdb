@@ -21,7 +21,6 @@
 #include <fmt/format.h>
 #include <folly/chrono/Hardware.h>
 #include <folly/futures/SharedPromise.h>
-#include "folly/GLog.h"
 #include "velox/common/base/BitUtil.h"
 #include "velox/common/base/CoalesceIo.h"
 #include "velox/common/base/Portability.h"
@@ -33,11 +32,6 @@
 #include "velox/common/memory/MemoryAllocator.h"
 
 namespace facebook::velox::cache {
-
-#define VELOX_CACHE_LOG_PREFIX "[CACHE] "
-#define VELOX_CACHE_LOG(severity) LOG(severity) << VELOX_CACHE_LOG_PREFIX
-#define VELOX_CACHE_LOG_EVERY_MS(severity, ms) \
-  FB_LOG_EVERY_MS(severity, ms) << VELOX_CACHE_LOG_PREFIX
 
 class AsyncDataCache;
 class CacheShard;
@@ -101,7 +95,7 @@ struct FileCacheKey {
   }
 };
 
-/// Non-owning reference to a file number and offset.
+// Non-owning reference to a file number and offset.
 struct RawFileCacheKey {
   uint64_t fileNum;
   uint64_t offset;
@@ -111,7 +105,6 @@ struct RawFileCacheKey {
   }
 };
 } // namespace facebook::velox::cache
-
 namespace std {
 template <>
 struct hash<::facebook::velox::cache::FileCacheKey> {
@@ -148,7 +141,7 @@ class AsyncDataCacheEntry {
   static constexpr int32_t kExclusive = -10000;
   static constexpr int32_t kTinyDataSize = 2048;
 
-  explicit AsyncDataCacheEntry(CacheShard* shard);
+  explicit AsyncDataCacheEntry(CacheShard* FOLLY_NONNULL shard);
   ~AsyncDataCacheEntry();
 
   // Sets the key and allocates the entry's memory.  Resets
@@ -204,19 +197,19 @@ class AsyncDataCacheEntry {
     return numPins_;
   }
 
-  /// Sets the 'isPrefetch_' and updates the cache's total prefetch count.
-  /// Returns the new prefetch pages count.
+  // Sets the 'isPrefetch_' and updates the cache's total prefetch count.
+  // Returns the new prefetch pages count.
   memory::MachinePageCount setPrefetch(bool flag = true);
 
   bool isPrefetch() const {
     return isPrefetch_;
   }
 
-  /// Distinguishes between a reuse of a cached entry from first retrieval of a
-  /// prefetched entry. If this is false, we have an actual reuse of cached
-  /// data.
+  // Distinguishes between a reuse of a cached entry from first
+  // retrieval of a prefetched entry. If this is false, we have an
+  // actual reuse of cached data.
   bool getAndClearFirstUseFlag() {
-    const bool value = isFirstUse_;
+    bool value = isFirstUse_;
     isFirstUse_ = false;
     return value;
   }
@@ -261,10 +254,10 @@ class AsyncDataCacheEntry {
   void release();
   void addReference();
 
-  // Returns a future that will be realized when a caller can retry getting
-  // 'this'. Must be called inside the mutex of 'shard_'.
+  // Returns a future that will be realized when a caller can retry
+  // getting 'this'. Must be called inside the mutex of 'shard_'.
   folly::SemiFuture<bool> getFuture() {
-    if (promise_ == nullptr) {
+    if (!promise_) {
       promise_ = std::make_unique<folly::SharedPromise<bool>>();
     }
     return promise_->getSemiFuture();
@@ -295,7 +288,7 @@ class AsyncDataCacheEntry {
   // evicted before they are hit.
   bool isPrefetch_{false};
 
-  // Sets after first use of a prefetched entry. Cleared by
+  // Set after first use of a prefetched entry. Cleared by
   // getAndClearFirstUseFlag(). Does not require synchronization since used for
   // statistics only.
   std::atomic<bool> isFirstUse_{false};
@@ -352,7 +345,7 @@ class CachePin {
   }
 
   bool empty() const {
-    return entry_ == nullptr;
+    return !entry_;
   }
 
   void clear() {
@@ -379,12 +372,12 @@ class CachePin {
 
  private:
   void addReference() const {
-    VELOX_CHECK_NOT_NULL(entry_);
+    VELOX_CHECK(entry_);
     entry_->addReference();
   }
 
   void release() {
-    if (entry_ != nullptr) {
+    if (entry_) {
       entry_->release();
     }
     entry_ = nullptr;
@@ -401,36 +394,37 @@ class CachePin {
   friend class CacheShard;
 };
 
-/// Represents a possibly multi-entry load from a file system. The cache expects
-/// to load multiple entries in most IOs. The IO is either done by a background
-/// prefetch thread or if the query thread gets there first, then the query
-/// thread will do the IO. The IO is also cancelled as a unit.
+// State of a CoalescedLoad
+enum class LoadState { kPlanned, kLoading, kCancelled, kLoaded };
+
+// Represents a possibly multi-entry load from a file system. The
+// cache expects to load multiple entries in most IOs. The IO is
+// either done by a background prefetch thread or if the query
+// thread gets there first, then the query thread will do the
+// IO. The IO is also cancelled as a unit.
 class CoalescedLoad {
  public:
-  /// State of a CoalescedLoad
-  enum class State { kPlanned, kLoading, kCancelled, kLoaded };
-
   CoalescedLoad(std::vector<RawFileCacheKey> keys, std::vector<int32_t> sizes)
-      : state_(State::kPlanned),
+      : state_(LoadState::kPlanned),
         keys_(std::move(keys)),
         sizes_(std::move(sizes)) {}
 
   virtual ~CoalescedLoad();
 
-  /// Makes entries for the keys that are not yet loaded and does a coalesced
-  /// load of the entries that are not yet present. If another thread is in the
-  /// process of doing this and 'wait' is null, returns immediately. If another
-  /// thread is in the process of doing this and 'wait' is not null, waits for
-  /// the other thread to be done.
+  // Makes entries for the keys that are not yet loaded and does a coalesced
+  // load of the entries that are not yet present. If another thread is in the
+  // process of doing this and 'wait' is null, returns immediately. If another
+  // thread is in the process of doing this and 'wait' is not null, waits for
+  // the other thread to be done.
   bool loadOrFuture(folly::SemiFuture<bool>* wait);
 
-  State state() const {
+  LoadState state() const {
     tsan_lock_guard<std::mutex> l(mutex_);
     return state_;
   }
 
   void cancel() {
-    setEndState(State::kCancelled);
+    setEndState(LoadState::kCancelled);
   }
 
   /// Returns the cache space 'this' will occupy after loaded.
@@ -451,12 +445,12 @@ class CoalescedLoad {
   virtual std::vector<CachePin> loadData(bool isPrefetch) = 0;
 
   // Sets a final state and resumes waiting threads.
-  void setEndState(State endState);
+  void setEndState(LoadState endState);
 
   // Serializes access to all members.
   mutable std::mutex mutex_;
 
-  State state_;
+  LoadState state_;
 
   // Allows waiting for load or cancellation.
   std::unique_ptr<folly::SharedPromise<bool>> promise_;
@@ -469,80 +463,72 @@ class CoalescedLoad {
 // this struct to provide a snapshot of state.
 struct CacheStats {
   // Total size in 'tinyData_'
-  int64_t tinySize{0};
+  int64_t tinySize{};
   // Total size in 'data_'
-  int64_t largeSize{0};
+  int64_t largeSize{};
   // Unused capacity in 'tinyData_'.
-  int64_t tinyPadding{0};
+  int64_t tinyPadding{};
   // Unused capacity in 'data_'.
-  int64_t largePadding{0};
+  int64_t largePadding{};
   // Total number of entries.
-  int32_t numEntries{0};
+  int32_t numEntries{};
   // Number of entries that do not cache anything.
-  int32_t numEmptyEntries{0};
+  int32_t numEmptyEntries{};
   // Number of entries pinned for shared access.
-  int32_t numShared{0};
+  int32_t numShared{};
   // Number of entries pinned for exclusive access.
-  int32_t numExclusive{0};
+  int32_t numExclusive{};
   // Number of entries that are being or have been prefetched but have not been
   // hit.
-  int32_t numPrefetch{0};
+  int32_t numPrefetch{};
   // Total size of entries in prefetch state.
-  int64_t prefetchBytes{0};
+  int64_t prefetchBytes{};
   // Number of hits (saved IO). The first hit to a prefetched entry does not
   // count.
-  int64_t numHit{0};
+  int64_t numHit{};
   // Sum of sizes of entries counted in 'numHit'.
-  int64_t hitBytes{0};
+  int64_t hitBytes{};
   // Number of new entries created.
-  int64_t numNew{0};
+  int64_t numNew{};
   // Number of times a valid entry was removed in order to make space.
-  int64_t numEvict{0};
+  int64_t numEvict{};
   // Number of entries considered for evicting.
-  int64_t numEvictChecks{0};
+  int64_t numEvictChecks{};
   // Number of times a user waited for an entry to transit from exclusive to
   // shared mode.
-  int64_t numWaitExclusive{0};
+  int64_t numWaitExclusive{};
   // Cumulative clocks spent in allocating or freeing memory for backing cache
   // entries.
-  uint64_t allocClocks{0};
+  uint64_t allocClocks{};
   // Sum of scores of evicted entries. This serves to infer an average
   // lifetime for entries in cache.
-  int64_t sumEvictScore{0};
+  int64_t sumEvictScore{};
 
   std::shared_ptr<SsdCacheStats> ssdStats = nullptr;
-
-  std::string toString() const;
 };
-
-/// Collection of cache entries whose key hashes to the same shard of
-/// the hash number space.  The cache population is divided into shards
-/// to decrease contention on the mutex for the key to entry mapping
-/// and other housekeeping.
+// Collection of cache entries whose key hashes to the same shard of
+// the hash number space.  The cache population is divided into shards
+// to decrease contention on the mutex for the key to entry mapping
+// and other housekeeping.
 class CacheShard {
  public:
-  explicit CacheShard(AsyncDataCache* cache) : cache_(cache) {}
+  explicit CacheShard(AsyncDataCache* FOLLY_NONNULL cache) : cache_(cache) {}
 
-  /// See AsyncDataCache::findOrCreate.
+  // See AsyncDataCache::findOrCreate.
   CachePin findOrCreate(
       RawFileCacheKey key,
       uint64_t size,
       folly::SemiFuture<bool>* readyFuture);
 
-  /// Returns true if there is an entry for 'key'. Updates access time.
+  // Returns true if there is an entry for 'key'. Updates access time.
   bool exists(RawFileCacheKey key) const;
 
-  AsyncDataCache* cache() const {
+  AsyncDataCache* cache() {
     return cache_;
   }
-
   std::mutex& mutex() {
     return mutex_;
   }
-
-  /// Release any resources that consume memory from this 'CacheShard' for a
-  /// graceful shutdown. The shard will no longer be valid after this call.
-  void shutdown();
 
   // removes 'bytesToFree' worth of entries or as many entries as are
   // not pinned. This favors first removing older and less frequently
@@ -572,26 +558,19 @@ class CacheShard {
   }
 
  private:
-  static constexpr uint32_t kMaxFreeEntries = 1 << 10;
   static constexpr int32_t kNoThreshold = std::numeric_limits<int32_t>::max();
 
   void calibrateThreshold();
 
   void removeEntryLocked(AsyncDataCacheEntry* entry);
 
-  // Returns an unused entry if found.
-  //
-  // TODO: consider to pass a size hint so as to select the a free entry which
-  // already has the right amount of memory associated with it.
-  std::unique_ptr<AsyncDataCacheEntry> getFreeEntry();
+  // Returns an unused entry if found. 'size' is a hint for selecting an entry
+  // that already has the right amount of memory associated with it.
+  std::unique_ptr<AsyncDataCacheEntry> getFreeEntryWithSize(uint64_t sizeHint);
 
   CachePin initEntry(RawFileCacheKey key, AsyncDataCacheEntry* entry);
 
   void freeAllocations(std::vector<memory::Allocation>& allocations);
-
-  void tryAddFreeEntry(std::unique_ptr<AsyncDataCacheEntry>&& entry);
-
-  AsyncDataCache* const cache_;
 
   mutable std::mutex mutex_;
   folly::F14FastMap<RawFileCacheKey, AsyncDataCacheEntry*> entryMap_;
@@ -602,91 +581,109 @@ class CacheShard {
   // A reserve of entries that are not associated to a key. Keeps a
   // few around to avoid allocating one inside 'mutex_'.
   std::vector<std::unique_ptr<AsyncDataCacheEntry>> freeEntries_;
-
+  AsyncDataCache* const cache_;
   // Index in 'entries_' for the next eviction candidate.
-  uint32_t clockHand_{0};
-  // Number of gets since last stats sampling.
-  uint32_t eventCounter_{0};
+  uint32_t clockHand_{};
+  // Number of gets  since last stats sampling.
+  uint32_t eventCounter_{};
   // Maximum retainable entry score(). Anything above this is evictable.
   int32_t evictionThreshold_{kNoThreshold};
   // Cumulative count of cache hits.
-  uint64_t numHit_{0};
+  uint64_t numHit_{};
   // Sum of bytes in cache hits.
-  uint64_t hitBytes_{0};
+  uint64_t hitBytes_{};
   // Cumulative count of hits on entries held in exclusive mode.
-  uint64_t numWaitExclusive_{0};
+  uint64_t numWaitExclusive_{};
   // Cumulative count of new entry creation.
-  uint64_t numNew_{0};
+  uint64_t numNew_{};
   // Count of entries evicted.
-  uint64_t numEvict_{0};
+  uint64_t numEvict_{};
   // Count of entries considered for eviction. This divided by
   // 'numEvict_' measured efficiency of eviction.
-  uint64_t numEvictChecks_{0};
+  uint64_t numEvictChecks_{};
   // Sum of evict scores. This divided by 'numEvict_' correlates to
   // time data stays in cache.
-  uint64_t sumEvictScore_{0};
+  uint64_t sumEvictScore_{};
   // Tracker of time spent in allocating/freeing MemoryAllocator space
   // for backing cached data.
-  std::atomic<uint64_t> allocClocks_{0};
+  std::atomic<uint64_t> allocClocks_;
 };
 
-class AsyncDataCache : public memory::Cache {
+class AsyncDataCache : public memory::MemoryAllocator {
  public:
   AsyncDataCache(
-      memory::MemoryAllocator* allocator,
+      const std::shared_ptr<memory::MemoryAllocator>& allocator,
+      uint64_t maxBytes,
       std::unique_ptr<SsdCache> ssdCache = nullptr);
 
-  ~AsyncDataCache() override;
-
-  static std::shared_ptr<AsyncDataCache> create(
-      memory::MemoryAllocator* allocator,
-      std::unique_ptr<SsdCache> ssdCache = nullptr);
-
-  static AsyncDataCache* getInstance();
-
-  static void setInstance(AsyncDataCache* asyncDataCache);
-
-  /// Release any resources that consume memory from 'allocator_' for a graceful
-  /// shutdown. The cache will no longer be valid after this call.
-  void shutdown();
-
-  /// Calls 'allocate' until this returns true. Returns true if
-  /// allocate returns true. and Tries to evict at least 'numPages' of
-  /// cache after each failed call to 'allocate'.  May pause to wait
-  /// for SSD cache flush if ''ssdCache_' is set and is busy
-  /// writing. Does random back-off after several failures and
-  /// eventually gives up. Allocation must not be serialized by a mutex
-  /// for memory arbitration to work.
-  bool makeSpace(
-      memory::MachinePageCount numPages,
-      std::function<bool()> allocate) override;
-
-  memory::MemoryAllocator* allocator() const override {
-    return allocator_;
-  }
-
-  /// Finds or creates a cache entry corresponding to 'key'. The entry
-  /// is returned in 'pin'. If the entry is new, it is pinned in
-  /// exclusive mode and its 'data_' has uninitialized space for at
-  /// least 'size' bytes. If the entry is in cache and already filled,
-  /// the pin is in shared mode.  If the entry is in exclusive mode for
-  /// some other pin, the pin is empty. If 'waitFuture' is not nullptr
-  /// and the pin is exclusive on some other pin, this is set to a
-  /// future that is realized when the pin is no longer exclusive. When
-  /// the future is realized, the caller may retry findOrCreate().
-  /// runtime error with code kNoCacheSpace if there is no space to create the
-  /// new entry after evicting any unpinned content.
+  // Finds or creates a cache entry corresponding to 'key'. The entry
+  // is returned in 'pin'. If the entry is new, it is pinned in
+  // exclusive mode and its 'data_' has uninitialized space for at
+  // least 'size' bytes. If the entry is in cache and already filled,
+  // the pin is in shared mode.  If the entry is in exclusive mode for
+  // some other pin, the pin is empty. If 'waitFuture' is not nullptr
+  // and the pin is exclusive on some other pin, this is set to a
+  // future that is realized when the pin is no longer exclusive. When
+  // the future is realized, the caller may retry findOrCreate().
+  // runtime error with code kNoCacheSpace if there is no space to create the
+  // new entry after evicting any unpinned content.
   CachePin findOrCreate(
       RawFileCacheKey key,
       uint64_t size,
       folly::SemiFuture<bool>* waitFuture = nullptr);
 
-  /// Returns true if there is an entry for 'key'. Updates access time.
+  // Returns true if there is an entry for 'key'. Updates access time.
   bool exists(RawFileCacheKey key) const;
+
+  Kind kind() const override {
+    return allocator_->kind();
+  }
+
+  bool allocateNonContiguous(
+      memory::MachinePageCount numPages,
+      memory::Allocation& out,
+      ReservationCallback reservationCB = nullptr,
+      memory::MachinePageCount minSizeClass = 0) override;
+
+  int64_t freeNonContiguous(memory::Allocation& allocation) override {
+    return allocator_->freeNonContiguous(allocation);
+  }
+
+  bool allocateContiguous(
+      memory::MachinePageCount numPages,
+      memory::Allocation* FOLLY_NULLABLE collateral,
+      memory::ContiguousAllocation& allocation,
+      ReservationCallback reservationCB = nullptr) override;
+
+  void freeContiguous(memory::ContiguousAllocation& allocation) override {
+    allocator_->freeContiguous(allocation);
+  }
+
+  void* allocateBytes(uint64_t bytes, uint16_t alignment) override;
+
+  void freeBytes(void* p, uint64_t size) noexcept override {
+    allocator_->freeBytes(p, size);
+  }
+
+  bool checkConsistency() const override {
+    return allocator_->checkConsistency();
+  }
+
+  const std::vector<memory::MachinePageCount>& sizeClasses() const override {
+    return allocator_->sizeClasses();
+  }
+
+  memory::MachinePageCount numAllocated() const override {
+    return allocator_->numAllocated();
+  }
+
+  memory::MachinePageCount numMapped() const override {
+    return allocator_->numMapped();
+  }
 
   CacheStats refreshStats() const;
 
-  std::string toString() const;
+  std::string toString() const override;
 
   memory::MachinePageCount incrementCachedPages(int64_t pages) {
     // The counter is unsigned and the increment is signed.
@@ -698,23 +695,27 @@ class AsyncDataCache : public memory::Cache {
     return prefetchPages_.fetch_add(pages) + pages;
   }
 
+  uint64_t maxBytes() const {
+    return maxBytes_;
+  }
+
   SsdCache* ssdCache() const {
     return ssdCache_.get();
   }
 
-  /// Updates stats for creation of a new cache entry of 'size' bytes,
-  /// i.e. a cache miss. Periodically updates SSD admission criteria,
-  /// i.e. reconsider criteria every half cache capacity worth of misses.
+  // Updates stats for creation of a new cache entry of 'size' bytes,
+  // i.e. a cache miss. Periodically updates SSD admission criteria,
+  // i.e. reconsider criteria every half cache capacity worth of misses.
   void incrementNew(uint64_t size);
 
-  /// Updates statistics after bringing in 'bytes' worth of data that
-  /// qualifies for SSD save and is not backed by SSD. Periodically
-  /// triggers a background write of eligible entries to SSD.
+  // Updates statistics after bringing in 'bytes' worth of data that
+  // qualifies for SSD save and is not backed by SSD. Periodically
+  // triggers a background write of eligible entries to SSD.
   void possibleSsdSave(uint64_t bytes);
 
-  /// Sets a callback applied to new entries at the point where
-  ///  they are set to shared mode. Used for testing and can be used for
-  /// e.g. checking checksums.
+  // Sets a callback applied to new entries at the point where
+  //  they are set to shared mode. Used for testing and can be used for
+  // e.g. checking checksums.
   void setVerifyHook(std::function<void(const AsyncDataCacheEntry&)> hook) {
     verifyHook_ = hook;
   }
@@ -752,16 +753,29 @@ class AsyncDataCache : public memory::Cache {
     return numSkippedSaves_;
   }
 
+  memory::Stats stats() const override {
+    return allocator_->stats();
+  }
+
  private:
   static constexpr int32_t kNumShards = 4; // Must be power of 2.
   static constexpr int32_t kShardMask = kNumShards - 1;
 
-  static AsyncDataCache** getInstancePtr();
-
   // Waits a pseudorandom delay times 'counter'.
   void backoff(int32_t counter);
 
-  memory::MemoryAllocator* const allocator_;
+  // Calls 'allocate' until this returns true. Returns true if
+  // allocate returns true. and Tries to evict at least 'numPages' of
+  // cache after each failed call to 'allocate'.  May pause to wait
+  // for SSD cache flush if ''ssdCache_' is set and is busy
+  // writing. Does random back-off after several failures and
+  // eventually gives up. Allocation must not be serialized by a mutex
+  // for memory arbitration to work.
+  bool makeSpace(
+      memory::MachinePageCount numPages,
+      std::function<bool()> allocate);
+
+  std::shared_ptr<memory::MemoryAllocator> allocator_;
   std::unique_ptr<SsdCache> ssdCache_;
   std::vector<std::unique_ptr<CacheShard>> shards_;
   std::atomic<int32_t> shardCounter_{0};
@@ -769,6 +783,7 @@ class AsyncDataCache : public memory::Cache {
   // Number of pages that are allocated and not yet loaded or loaded
   // but not yet hit for the first time.
   std::atomic<memory::MachinePageCount> prefetchPages_{0};
+  uint64_t maxBytes_;
 
   // Approximate counter of bytes allocated to cover misses. When this
   // exceeds 'nextSsdScoreSize_' we update the SSD admission criteria.
@@ -844,11 +859,8 @@ CoalesceIoStats readPins(
 } // namespace facebook::velox::cache
 
 template <>
-struct fmt::formatter<facebook::velox::cache::CoalescedLoad::State>
-    : formatter<int> {
-  auto format(
-      facebook::velox::cache::CoalescedLoad::State s,
-      format_context& ctx) {
+struct fmt::formatter<facebook::velox::cache::LoadState> : formatter<int> {
+  auto format(facebook::velox::cache::LoadState s, format_context& ctx) {
     return formatter<int>::format(static_cast<int>(s), ctx);
   }
 };

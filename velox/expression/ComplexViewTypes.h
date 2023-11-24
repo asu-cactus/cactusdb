@@ -357,7 +357,6 @@ class OptionalAccessor {
   }
 
   element_t value() const {
-    VELOX_DCHECK(has_value());
     return (*reader_)[index_];
   }
 
@@ -366,7 +365,6 @@ class OptionalAccessor {
   }
 
   element_t operator*() const {
-    VELOX_DCHECK(has_value());
     return value();
   }
 
@@ -509,13 +507,13 @@ auto materializeElement(const T& element) {
 // When returnsOptionalValues is false, the interface is like std::vector<V>.
 template <bool returnsOptionalValues, typename V>
 class ArrayView {
- public:
   using reader_t = VectorReader<V>;
   using element_t = typename std::conditional<
       returnsOptionalValues,
       typename reader_t::exec_in_t,
       typename reader_t::exec_null_free_in_t>::type;
 
+ public:
   ArrayView(const reader_t* reader, vector_size_t offset, vector_size_t size)
       : reader_(reader), offset_(offset), size_(size) {}
 
@@ -880,45 +878,6 @@ class MapView {
   vector_size_t size_;
 };
 
-class GenericView;
-
-// A view type that is used to represent a row of any size of any children
-// types. Function `at(index)` returns a generic view for the field at `index`.
-template <bool returnsOptionalValues>
-class DynamicRowView {
-  using readers_t = std::vector<std::unique_ptr<VectorReader<Any>>>;
-
- public:
-  DynamicRowView(const readers_t* childReaders, vector_size_t offset)
-      : childReaders_{*childReaders}, offset_{offset} {}
-
-  vector_size_t offset() const {
-    return offset_;
-  }
-
-  using elem_n_t = typename std::conditional<
-      returnsOptionalValues,
-      OptionalAccessor<Any>,
-      GenericView>::type;
-
-  template <typename IndexT>
-  elem_n_t at(IndexT index) {
-    if constexpr (returnsOptionalValues) {
-      return elem_n_t{childReaders_[index].get(), offset_};
-    } else {
-      return childReaders_[index]->operator[](offset_);
-    }
-  }
-
-  size_t size() const {
-    return childReaders_.size();
-  }
-
- private:
-  const readers_t& childReaders_;
-  vector_size_t offset_;
-};
-
 template <bool returnsOptionalValues, typename... T>
 class RowView {
   using reader_t = std::tuple<std::unique_ptr<VectorReader<T>>...>;
@@ -932,6 +891,10 @@ class RowView {
           exec_null_free_in_t>::type;
 
   vector_size_t offset() const {
+    return offset_;
+  }
+
+  vector_size_t childVectorAt() const {
     return offset_;
   }
 
@@ -1074,31 +1037,19 @@ class GenericView {
         index_(index) {}
 
   uint64_t hash() const {
-    return decoded_.base()->hashValueAt(decodedIndex());
-  }
-
-  bool isNull() const {
-    return decoded_.isNullAt(index_);
-  }
-
-  const BaseVector* base() const {
-    return decoded_.base();
+    return decoded_.base()->hashValueAt(index_);
   }
 
   bool operator==(const GenericView& other) const {
     return decoded_.base()->equalValueAt(
-        other.decoded_.base(), decodedIndex(), other.decodedIndex());
-  }
-
-  vector_size_t decodedIndex() const {
-    return decoded_.index(index_);
+        other.decoded_.base(), index_, other.index_);
   }
 
   std::optional<int64_t> compare(
       const GenericView& other,
       const CompareFlags flags) const {
     return decoded_.base()->compare(
-        other.decoded_.base(), decodedIndex(), other.decodedIndex(), flags);
+        other.decoded_.base(), index_, other.index_, flags);
   }
 
   TypeKind kind() const {
@@ -1122,8 +1073,7 @@ class GenericView {
     // TODO: We can distinguish if this is a null-free or not null-free
     // generic. And based on that determine if we want to call operator[] or
     // readNullFree. For now we always return nullable.
-    return ensureReader<ToType>()->operator[](
-        index_); // We pass the non-decoded index.
+    return ensureReader<ToType>()->operator[](index_);
   }
 
   template <typename ToType>
@@ -1132,8 +1082,7 @@ class GenericView {
       return std::nullopt;
     }
 
-    return ensureReader<ToType>()->operator[](
-        index_); // We pass the non-decoded index.
+    return ensureReader<ToType>()->operator[](index_);
   }
 
  private:

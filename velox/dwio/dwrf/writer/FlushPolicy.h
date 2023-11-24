@@ -30,28 +30,24 @@ enum class FlushDecision {
 class DWRFFlushPolicy : virtual public dwio::common::FlushPolicy {
  public:
   virtual ~DWRFFlushPolicy() override = default;
-
   virtual bool shouldFlush(
       const dwio::common::StripeProgress& stripeProgress) override = 0;
-
-  /// Checks additional flush criteria based on dictionary encoding.
-  /// Different actions can also be taken based on the additional checks.
-  /// e.g. abandon dictionary encodings.
+  // Check additional flush criteria based on dictioanry encoding.
+  // Different actions can also be taken based on the additional checks.
+  // e.g. abandon dictionary encodings.
   virtual FlushDecision shouldFlushDictionary(
       bool stripeProgressDecision,
       bool overMemoryBudget,
       const WriterContext& context) = 0;
-
-  /// This method needs to be safe to call *after* WriterBase::close().
+  // This method needs to be safe to call *after* WriterBase::close().
   virtual void onClose() override = 0;
 };
 
 class DefaultFlushPolicy : public DWRFFlushPolicy {
  public:
-  DefaultFlushPolicy(
+  explicit DefaultFlushPolicy(
       uint64_t stripeSizeThreshold,
       uint64_t dictionarySizeThreshold);
-
   virtual ~DefaultFlushPolicy() override = default;
 
   bool shouldFlush(
@@ -69,7 +65,9 @@ class DefaultFlushPolicy : public DWRFFlushPolicy {
       bool overMemoryBudget,
       const WriterContext& context) override;
 
-  void onClose() override {}
+  void onClose() override {
+    // No-op
+  }
 
  private:
   const uint64_t stripeSizeThreshold_;
@@ -79,7 +77,6 @@ class DefaultFlushPolicy : public DWRFFlushPolicy {
 class RowsPerStripeFlushPolicy : public DWRFFlushPolicy {
  public:
   explicit RowsPerStripeFlushPolicy(std::vector<uint64_t> rowsPerStripe);
-
   virtual ~RowsPerStripeFlushPolicy() override = default;
 
   bool shouldFlush(const dwio::common::StripeProgress& stripeProgress) override;
@@ -91,17 +88,18 @@ class RowsPerStripeFlushPolicy : public DWRFFlushPolicy {
     return FlushDecision::SKIP;
   }
 
-  void onClose() override {}
+  void onClose() override {
+    // No-op
+  }
 
  private:
-  const std::vector<uint64_t> rowsPerStripe_;
+  std::vector<uint64_t> rowsPerStripe_;
 };
 
 class RowThresholdFlushPolicy : public DWRFFlushPolicy {
  public:
   explicit RowThresholdFlushPolicy(uint64_t rowCountThreshold)
       : rowCountThreshold_{rowCountThreshold} {}
-
   virtual ~RowThresholdFlushPolicy() override = default;
 
   bool shouldFlush(
@@ -116,16 +114,17 @@ class RowThresholdFlushPolicy : public DWRFFlushPolicy {
     return FlushDecision::SKIP;
   }
 
-  void onClose() override {}
+  void onClose() override {
+    // No-op
+  }
 
  private:
-  const uint64_t rowCountThreshold_;
+  uint64_t rowCountThreshold_;
 };
 
 class LambdaFlushPolicy : public DWRFFlushPolicy {
  public:
   explicit LambdaFlushPolicy(std::function<bool()> lambda) : lambda_{lambda} {}
-
   virtual ~LambdaFlushPolicy() override = default;
 
   bool shouldFlush(const dwio::common::StripeProgress& /* ununsed */) override {
@@ -139,10 +138,12 @@ class LambdaFlushPolicy : public DWRFFlushPolicy {
     return FlushDecision::SKIP;
   }
 
-  void onClose() override {}
+  void onClose() override {
+    // No-op
+  }
 
  private:
-  const std::function<bool()> lambda_;
+  std::function<bool()> lambda_;
 };
 
 } // namespace facebook::velox::dwrf

@@ -17,9 +17,6 @@
 #include "velox/connectors/hive/PartitionIdGenerator.h"
 
 #include "velox/connectors/hive/HivePartitionUtil.h"
-#include "velox/dwio/catalog/fbhive/FileUtils.h"
-
-using namespace facebook::velox::dwio::catalog::fbhive;
 
 namespace facebook::velox::connector::hive {
 
@@ -37,16 +34,11 @@ PartitionIdGenerator::PartitionIdGenerator(
         exec::VectorHasher::create(inputType->childAt(channel), channel));
   }
 
-  std::vector<TypePtr> partitionKeyTypes;
   std::vector<std::string> partitionKeyNames;
+  std::vector<TypePtr> partitionKeyTypes;
   for (auto channel : partitionChannels_) {
-    VELOX_USER_CHECK(
-        exec::VectorHasher::typeKindSupportsValueIds(
-            inputType->childAt(channel)->kind()),
-        "Unsupported partition type: {}.",
-        inputType->childAt(channel)->toString());
-    partitionKeyTypes.push_back(inputType->childAt(channel));
     partitionKeyNames.push_back(inputType->nameOf(channel));
+    partitionKeyTypes.push_back(inputType->childAt(channel));
   }
 
   partitionValues_ = BaseVector::create<RowVector>(
@@ -61,7 +53,7 @@ PartitionIdGenerator::PartitionIdGenerator(
 void PartitionIdGenerator::run(
     const RowVectorPtr& input,
     raw_vector<uint64_t>& result) {
-  const auto numRows = input->size();
+  auto numRows = input->size();
   result.resize(numRows);
 
   // TODO Check that there are no nulls in the partition keys.
@@ -97,8 +89,7 @@ void PartitionIdGenerator::run(
 }
 
 std::string PartitionIdGenerator::partitionName(uint64_t partitionId) const {
-  return FileUtils::makePartName(
-      extractPartitionKeyValues(partitionValues_, partitionId));
+  return makePartitionName(partitionValues_, partitionId);
 }
 
 void PartitionIdGenerator::computeValueIds(
@@ -122,9 +113,7 @@ void PartitionIdGenerator::computeValueIds(
 
   uint64_t multiplier = 1;
   for (auto& hasher : hashers_) {
-    multiplier = hasher->typeKind() == TypeKind::BOOLEAN
-        ? hasher->enableValueRange(multiplier, 50)
-        : hasher->enableValueIds(multiplier, 50);
+    multiplier = hasher->enableValueIds(multiplier, 50);
 
     VELOX_CHECK_NE(
         multiplier,
@@ -145,7 +134,7 @@ void PartitionIdGenerator::updateValueToPartitionIdMapping() {
     return;
   }
 
-  const auto numPartitions = partitionIds_.size();
+  auto numPartitions = partitionIds_.size();
 
   partitionIds_.clear();
 

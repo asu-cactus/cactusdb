@@ -28,21 +28,21 @@ TypeWithId::TypeWithId(
     uint32_t id,
     uint32_t maxId,
     uint32_t column)
-    : type_{std::move(type)},
-      parent_{nullptr},
-      id_{id},
-      maxId_{maxId},
-      column_{column},
+    : type{std::move(type)},
+      parent{nullptr},
+      id{id},
+      maxId{maxId},
+      column{column},
       children_{std::move(children)} {
   for (auto& child : children_) {
-    const_cast<const TypeWithId*&>(child->parent_) = this;
+    const_cast<const TypeWithId*&>(child->parent) = this;
   }
 }
 
 std::shared_ptr<const TypeWithId> TypeWithId::create(
     const std::shared_ptr<const Type>& root,
     uint32_t next) {
-  return create(root, next, 0);
+  return create_(root, next, 0);
 }
 
 uint32_t TypeWithId::size() const {
@@ -54,22 +54,22 @@ const std::shared_ptr<const TypeWithId>& TypeWithId::childAt(
   return children_.at(idx);
 }
 
-std::shared_ptr<const TypeWithId> TypeWithId::create(
+std::shared_ptr<const TypeWithId> TypeWithId::create_(
     const std::shared_ptr<const Type>& type,
     uint32_t& next,
     uint32_t column) {
-  DWIO_ENSURE_NOT_NULL(type);
-  const uint32_t myId = next++;
+  DWIO_ENSURE_NOT_NULL(type.get());
+  uint32_t myId = next++;
   std::vector<std::shared_ptr<const TypeWithId>> children{};
   children.reserve(type->size());
   auto offset = 0;
   for (const auto& child : *type) {
-    children.emplace_back(create(
+    children.emplace_back(create_(
         child,
         next,
         (myId == 0 && type->kind() == TypeKind::ROW) ? offset++ : column));
   }
-  const uint32_t maxId = next - 1;
+  uint32_t maxId = next - 1;
   return std::make_shared<const TypeWithId>(
       type, std::move(children), myId, maxId, column);
 }

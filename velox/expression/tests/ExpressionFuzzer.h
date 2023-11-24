@@ -132,8 +132,7 @@ class ExpressionFuzzer {
     // occurred.
     void onError(
         const SelectivityVector& /*rows*/,
-        const ::facebook::velox::ErrorVector& /*errors*/,
-        const std::string& /*queryId*/) override {}
+        const ::facebook::velox::ErrorVector& /*errors*/) override {}
 
    private:
     std::unordered_map<std::string, ExprUsageStats>& exprNameToStats_;
@@ -228,7 +227,7 @@ class ExpressionFuzzer {
       std::vector<core::TypedExprPtr> plans,
       const RowVectorPtr& rowVector,
       const VectorPtr& resultVectors,
-      const std::vector<int>& columnsToWrapInLazy);
+      const std::vector<column_index_t>& columnsToWrapInLazy);
 
   /// Return a random signature mapped to functionName in expressionToSignature_
   /// whose return type can match returnType. Return nullptr if no such

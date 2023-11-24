@@ -28,10 +28,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.repository }}-${{ github.head_ref || github.sha }}
-  cancel-in-progress: true
-
 defaults:
   run:
     shell: bash
@@ -58,7 +54,7 @@ jobs:
           key: ccache-benchmark-${{ github.sha }}
           restore-keys: |
             ccache-benchmark-
-
+      
       - name: "Checkout Repo"
         if: ${{ github.event_name == 'pull_request' }}
         uses: actions/checkout@v3

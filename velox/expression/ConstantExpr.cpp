@@ -147,21 +147,11 @@ void appendSqlLiteral(
       out << (value ? "TRUE" : "FALSE");
       break;
     }
-    case TypeKind::INTEGER: {
-      if (vector.type()->isDate()) {
-        auto dateVector = vector.wrappedVector()->as<SimpleVector<int32_t>>();
-        out << "'"
-            << DATE()->toString(dateVector->valueAt(vector.wrappedIndex(row)))
-            << "'::" << vector.type()->toString();
-      } else {
-        out << "'" << vector.wrappedVector()->toString(vector.wrappedIndex(row))
-            << "'::" << vector.type()->toString();
-      }
-      break;
-    }
     case TypeKind::TINYINT:
     case TypeKind::SMALLINT:
+    case TypeKind::INTEGER:
     case TypeKind::BIGINT:
+    case TypeKind::DATE:
     case TypeKind::TIMESTAMP:
     case TypeKind::REAL:
     case TypeKind::DOUBLE:
@@ -214,18 +204,13 @@ void appendSqlLiteral(
           "Type not supported yet: {}", vector.type()->toString());
   }
 }
-
-bool canBeExpressedInSQL(const TypePtr& type) {
-  return type->isPrimitiveType() && type != VARBINARY();
-}
-
 } // namespace
 
 std::string ConstantExpr::toSql(
     std::vector<VectorPtr>* complexConstants) const {
   VELOX_CHECK_NOT_NULL(sharedConstantValue_);
   std::ostringstream out;
-  if (complexConstants && !canBeExpressedInSQL(sharedConstantValue_->type())) {
+  if (complexConstants && !sharedConstantValue_->type()->isPrimitiveType()) {
     int idx = complexConstants->size();
     out << "__complex_constant(c" << idx << ")";
     complexConstants->push_back(sharedConstantValue_);

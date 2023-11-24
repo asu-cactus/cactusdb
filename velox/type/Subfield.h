@@ -16,8 +16,6 @@
 #pragma once
 
 #include <boost/algorithm/string/replace.hpp>
-#include <ostream>
-
 #include "velox/common/base/Exceptions.h"
 
 namespace facebook::velox::common {
@@ -27,29 +25,6 @@ enum SubfieldKind {
   kNestedField,
   kStringSubscript,
   kLongSubscript
-};
-
-// Contains field name separators to be used in Tokenizer.
-struct Separators {
-  static const std::shared_ptr<Separators>& get() {
-    static const std::shared_ptr<Separators> instance =
-        std::make_shared<Separators>();
-    return instance;
-  }
-
-  bool isSeparator(char c) const {
-    return (
-        c == closeBracket || c == dot || c == openBracket || c == quote ||
-        c == wildCard);
-  }
-
-  char backSlash = '\\';
-  char closeBracket = ']';
-  char dot = '.';
-  char openBracket = '[';
-  char quote = '\"';
-  char wildCard = '*';
-  char unicodeCaret = '^';
 };
 
 class Subfield {
@@ -94,9 +69,7 @@ class Subfield {
 
   class NestedField final : public PathElement {
    public:
-    explicit NestedField(const std::string& name) : name_(name) {
-      VELOX_USER_CHECK_NE(name, "", "NestedFields must have non-empty names.");
-    }
+    explicit NestedField(const std::string& name) : name_(name) {}
 
     SubfieldKind kind() const override {
       return kNestedField;
@@ -218,10 +191,7 @@ class Subfield {
   };
 
  public:
-  // Separators: the customized separators to tokenize field name.
-  explicit Subfield(
-      const std::string& path,
-      const std::shared_ptr<Separators>& separators = Separators::get());
+  explicit Subfield(const std::string& path);
 
   explicit Subfield(std::vector<std::unique_ptr<PathElement>>&& path);
 
@@ -254,9 +224,6 @@ class Subfield {
   }
 
   std::string toString() const {
-    if (!valid()) {
-      return "";
-    }
     std::ostringstream out;
     out << static_cast<const NestedField*>(path_[0].get())->name();
     for (int i = 1; i < path_.size(); i++) {
@@ -289,20 +256,9 @@ class Subfield {
     return result;
   }
 
-  bool valid() const {
-    return !path_.empty() && path_[0]->kind() == kNestedField;
-  }
-
-  Subfield clone() const;
-
  private:
   std::vector<std::unique_ptr<PathElement>> path_;
 };
-
-inline std::ostream& operator<<(std::ostream& out, const Subfield& subfield) {
-  return out << subfield.toString();
-}
-
 } // namespace facebook::velox::common
 
 namespace std {

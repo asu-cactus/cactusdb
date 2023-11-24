@@ -22,9 +22,33 @@
 #include "velox/expression/ReverseSignatureBinder.h"
 #include "velox/expression/SignatureBinder.h"
 #include "velox/type/Type.h"
-#include "velox/vector/fuzzer/VectorFuzzer.h"
 
 namespace facebook::velox::test {
+
+namespace {
+
+// Return a random type among those in kSupportedTypes determined by rng.
+// TODO: Extend this function to return arbitrary random types including nested
+// complex types.
+TypePtr randomType(std::mt19937& rng) {
+  // Decimal types are not supported because VectorFuzzer doesn't support them.
+  static std::vector<TypePtr> kSupportedTypes{
+      BOOLEAN(),
+      TINYINT(),
+      SMALLINT(),
+      INTEGER(),
+      BIGINT(),
+      REAL(),
+      DOUBLE(),
+      TIMESTAMP(),
+      DATE(),
+      INTERVAL_DAY_TIME()};
+  auto index = boost::random::uniform_int_distribution<uint32_t>(
+      0, kSupportedTypes.size() - 1)(rng);
+  return kSupportedTypes[index];
+}
+
+} // namespace
 
 std::string typeToBaseName(const TypePtr& type) {
   return boost::algorithm::to_lower_copy(std::string{type->kindName()});
@@ -48,12 +72,8 @@ void ArgumentTypeFuzzer::determineUnboundedTypeVariables() {
     // Random randomType() never generates unknown here.
     // TODO: we should extend randomType types and exclude unknown based
     // on variableInfo.
-    bindings_[variableName] = randType();
+    bindings_[variableName] = randomType(rng_);
   }
-}
-
-TypePtr ArgumentTypeFuzzer::randType() {
-  return velox::randType(rng_, 2);
 }
 
 bool ArgumentTypeFuzzer::fuzzArgumentTypes(uint32_t maxVariadicArgs) {
@@ -76,7 +96,7 @@ bool ArgumentTypeFuzzer::fuzzArgumentTypes(uint32_t maxVariadicArgs) {
   for (auto i = 0; i < formalArgsCnt; i++) {
     TypePtr actualArg;
     if (formalArgs[i].baseName() == "any") {
-      actualArg = randType();
+      actualArg = randomType(rng_);
     } else {
       actualArg = exec::SignatureBinder::tryResolveType(
           formalArgs[i], variables(), bindings_);
@@ -107,7 +127,7 @@ TypePtr ArgumentTypeFuzzer::fuzzReturnType() {
 
   determineUnboundedTypeVariables();
   if (signature_.returnType().baseName() == "any") {
-    returnType_ = randType();
+    returnType_ = randomType(rng_);
     return returnType_;
   } else {
     returnType_ = exec::SignatureBinder::tryResolveType(

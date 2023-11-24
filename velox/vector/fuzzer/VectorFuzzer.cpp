@@ -22,8 +22,8 @@
 #include <locale>
 
 #include "velox/common/base/Exceptions.h"
+#include "velox/type/Date.h"
 #include "velox/type/Timestamp.h"
-#include "velox/vector/BaseVector.h"
 #include "velox/vector/FlatVector.h"
 #include "velox/vector/NullsBuilder.h"
 #include "velox/vector/VectorTypeUtils.h"
@@ -119,7 +119,11 @@ int128_t rand(FuzzerGenerator& rng) {
 }
 
 Timestamp randTimestamp(FuzzerGenerator& rng, VectorFuzzer::Options opts) {
-  switch (opts.timestampPrecision) {
+  auto precision = opts.useMicrosecondPrecisionTimestamp
+      ? VectorFuzzer::Options::TimestampPrecision::kMicroSeconds
+      : opts.timestampPrecision;
+
+  switch (precision) {
     case VectorFuzzer::Options::TimestampPrecision::kNanoSeconds:
       return Timestamp(rand<int32_t>(rng), (rand<int64_t>(rng) % MAX_NANOS));
     case VectorFuzzer::Options::TimestampPrecision::kMicroSeconds:
@@ -130,6 +134,10 @@ Timestamp randTimestamp(FuzzerGenerator& rng, VectorFuzzer::Options opts) {
       return Timestamp(rand<int32_t>(rng), 0);
   }
   return {}; // no-op.
+}
+
+Date randDate(FuzzerGenerator& rng) {
+  return Date(rand<int32_t>(rng));
 }
 
 size_t getElementsVectorLength(
@@ -250,6 +258,9 @@ VectorPtr fuzzConstantPrimitiveImpl(
   if constexpr (std::is_same_v<TCpp, Timestamp>) {
     return std::make_shared<ConstantVector<TCpp>>(
         pool, size, false, type, randTimestamp(rng, opts));
+  } else if constexpr (std::is_same_v<TCpp, Date>) {
+    return std::make_shared<ConstantVector<TCpp>>(
+        pool, size, false, type, randDate(rng));
   } else if (type->isShortDecimal()) {
     return std::make_shared<ConstantVector<int64_t>>(
         pool, size, false, type, randShortDecimal(type, rng));
@@ -279,6 +290,8 @@ void fuzzFlatPrimitiveImpl(
       flatVector->set(i, randString(rng, opts, strBuf, converter));
     } else if constexpr (std::is_same_v<TCpp, Timestamp>) {
       flatVector->set(i, randTimestamp(rng, opts));
+    } else if constexpr (std::is_same_v<TCpp, Date>) {
+      flatVector->set(i, randDate(rng));
     } else if constexpr (std::is_same_v<TCpp, int64_t>) {
       if (vector->type()->isShortDecimal()) {
         flatVector->set(i, randShortDecimal(vector->type(), rng));
@@ -288,8 +301,6 @@ void fuzzFlatPrimitiveImpl(
     } else if constexpr (std::is_same_v<TCpp, int128_t>) {
       if (vector->type()->isLongDecimal()) {
         flatVector->set(i, randLongDecimal(vector->type(), rng));
-      } else if (vector->type()->isHugeint()) {
-        flatVector->set(i, rand<int128_t>(rng));
       } else {
         VELOX_NYI();
       }
@@ -307,26 +318,21 @@ class VectorLoaderWrap : public VectorLoader {
  public:
   explicit VectorLoaderWrap(VectorPtr vector) : vector_(vector) {}
 
-  void loadInternal(
-      RowSet rowSet,
-      ValueHook* hook,
-      vector_size_t resultSize,
-      VectorPtr* result) override {
+  void loadInternal(RowSet rowSet, ValueHook* hook, VectorPtr* result)
+      override {
     VELOX_CHECK(!hook, "VectorLoaderWrap doesn't support ValueHook");
     SelectivityVector rows(rowSet.back() + 1, false);
     for (auto row : rowSet) {
       rows.setValid(row, true);
     }
     rows.updateBounds();
-    *result = makeEncodingPreservedCopy(rows, resultSize);
+    *result = makeEncodingPreservedCopy(rows);
   }
 
  private:
   // Returns a copy of 'vector_' while retaining dictionary encoding if present.
   // Multiple dictionary layers are collapsed into one.
-  VectorPtr makeEncodingPreservedCopy(
-      SelectivityVector& rows,
-      vector_size_t vectorSize);
+  VectorPtr makeEncodingPreservedCopy(SelectivityVector& rows);
   VectorPtr vector_;
 };
 
@@ -554,7 +560,7 @@ VectorPtr VectorFuzzer::fuzzComplex(const TypePtr& type, vector_size_t size) {
     }
 
     default:
-      VELOX_UNREACHABLE("Unexpected type: {}", type->toString());
+      VELOX_UNREACHABLE();
   }
   return nullptr; // no-op.
 }
@@ -686,19 +692,9 @@ MapVectorPtr VectorFuzzer::fuzzMap(
 }
 
 RowVectorPtr VectorFuzzer::fuzzInputRow(const RowTypePtr& rowType) {
-  return fuzzRow(rowType, opts_.vectorSize, false);
-}
-
-RowVectorPtr VectorFuzzer::fuzzInputFlatRow(const RowTypePtr& rowType) {
-  std::vector<VectorPtr> children;
-  auto size = static_cast<vector_size_t>(opts_.vectorSize);
-  children.reserve(rowType->size());
-  for (auto i = 0; i < rowType->size(); ++i) {
-    children.emplace_back(fuzzFlat(rowType->childAt(i), size));
-  }
-
-  return std::make_shared<RowVector>(
-      pool_, rowType, nullptr, size, std::move(children));
+  ScopedOptions restorer(this);
+  opts_.containerHasNulls = false;
+  return fuzzRow(rowType, opts_.vectorSize);
 }
 
 RowVectorPtr VectorFuzzer::fuzzRow(
@@ -746,15 +742,13 @@ RowVectorPtr VectorFuzzer::fuzzRow(const RowTypePtr& rowType) {
 
 RowVectorPtr VectorFuzzer::fuzzRow(
     const RowTypePtr& rowType,
-    vector_size_t size,
-    bool allowTopLevelNulls) {
+    vector_size_t size) {
   std::vector<VectorPtr> children;
   for (auto i = 0; i < rowType->size(); ++i) {
     children.push_back(fuzz(rowType->childAt(i), size));
   }
 
-  auto nulls =
-      allowTopLevelNulls && opts_.containerHasNulls ? fuzzNulls(size) : nullptr;
+  auto nulls = opts_.containerHasNulls ? fuzzNulls(size) : nullptr;
   return std::make_shared<RowVector>(
       pool_, rowType, nulls, size, std::move(children));
 }
@@ -791,24 +785,64 @@ std::pair<int8_t, int8_t> VectorFuzzer::randPrecisionScale(
   return {precision, scale};
 }
 
-TypePtr VectorFuzzer::randType(int maxDepth) {
-  return velox::randType(rng_, maxDepth);
+TypePtr VectorFuzzer::randScalarNonFloatingPointType() {
+  static TypePtr kNonFloatingPointTypes[]{
+      BOOLEAN(),
+      TINYINT(),
+      SMALLINT(),
+      INTEGER(),
+      BIGINT(),
+      VARCHAR(),
+      VARBINARY(),
+      TIMESTAMP(),
+      DATE(),
+  };
+  static constexpr int kNumTypes =
+      sizeof(kNonFloatingPointTypes) / sizeof(kNonFloatingPointTypes[0]);
+  return kNonFloatingPointTypes[rand<uint32_t>(rng_) % kNumTypes];
 }
 
-TypePtr VectorFuzzer::randType(
-    const std::vector<TypePtr>& scalarTypes,
-    int maxDepth) {
-  return velox::randType(rng_, scalarTypes, maxDepth);
+TypePtr VectorFuzzer::randType(int maxDepth) {
+  // @TODO Add decimal TypeKinds to randType.
+  // Refer https://github.com/facebookincubator/velox/issues/3942
+  static TypePtr kScalarTypes[]{
+      BOOLEAN(),
+      TINYINT(),
+      SMALLINT(),
+      INTEGER(),
+      BIGINT(),
+      REAL(),
+      DOUBLE(),
+      VARCHAR(),
+      VARBINARY(),
+      TIMESTAMP(),
+      DATE(),
+  };
+  static constexpr int kNumScalarTypes =
+      sizeof(kScalarTypes) / sizeof(kScalarTypes[0]);
+  // Should we generate a scalar type?
+  if (maxDepth <= 1 || rand<bool>(rng_)) {
+    return kScalarTypes[rand<uint32_t>(rng_) % kNumScalarTypes];
+  }
+  switch (rand<uint32_t>(rng_) % 3) {
+    case 0:
+      return MAP(randType(0), randType(maxDepth - 1));
+    case 1:
+      return ARRAY(randType(maxDepth - 1));
+    default:
+      return randRowType(maxDepth - 1);
+  }
 }
 
 RowTypePtr VectorFuzzer::randRowType(int maxDepth) {
-  return velox::randRowType(rng_, maxDepth);
-}
-
-RowTypePtr VectorFuzzer::randRowType(
-    const std::vector<TypePtr>& scalarTypes,
-    int maxDepth) {
-  return velox::randRowType(rng_, scalarTypes, maxDepth);
+  int numFields = 1 + rand<uint32_t>(rng_) % 7;
+  std::vector<std::string> names;
+  std::vector<TypePtr> fields;
+  for (int i = 0; i < numFields; ++i) {
+    names.push_back(fmt::format("f{}", i));
+    fields.push_back(randType(maxDepth));
+  }
+  return ROW(std::move(names), std::move(fields));
 }
 
 VectorPtr VectorFuzzer::wrapInLazyVector(VectorPtr baseVector) {
@@ -847,58 +881,9 @@ RowVectorPtr VectorFuzzer::fuzzRowChildrenToLazy(RowVectorPtr rowVector) {
       std::move(children));
 }
 
-// Utility function to check if a RowVector can have nested lazy children.
-// This is only possible if the rows for its children map 1-1 with the top level
-// rows (Rows of 'baseRowVector''s parent). For this to be true, the row vector
-// cannot have any encoding layers over it, and it cannot have nulls.
-bool canWrapRowChildInLazy(const VectorPtr& baseRowVector) {
-  if (baseRowVector->typeKind() == TypeKind::ROW) {
-    RowVector* rowVector = baseRowVector->as<RowVector>();
-    if (rowVector) {
-      return rowVector->nulls() == nullptr;
-    }
-  }
-  return false;
-}
-
-// Utility function That only takes a row vector that passes the check in
-// canWrapChildrenInLazy() and either picks the first child to be wrapped in
-// lazy OR picks the first row vector child that passes canWrapChildrenInLazy()
-// and traverses its children recursively.
-VectorPtr wrapRowChildInLazyRecursive(VectorPtr& baseVector) {
-  RowVector* rowVector = baseVector->as<RowVector>();
-  VELOX_CHECK_NOT_NULL(rowVector);
-  std::vector<VectorPtr> children;
-  children.reserve(rowVector->childrenSize());
-  bool foundChildVectorToWrap = false;
-  for (column_index_t i = 0; i < rowVector->childrenSize(); i++) {
-    auto child = rowVector->childAt(i);
-    if (!foundChildVectorToWrap && canWrapRowChildInLazy(child)) {
-      child = wrapRowChildInLazyRecursive(child);
-      foundChildVectorToWrap = true;
-    }
-    children.push_back(child);
-  }
-  if (!foundChildVectorToWrap && !children.empty()) {
-    children[0] = VectorFuzzer::wrapInLazyVector(children[0]);
-  }
-
-  BufferPtr newNulls = nullptr;
-  if (rowVector->nulls()) {
-    newNulls = AlignedBuffer::copy(rowVector->pool(), rowVector->nulls());
-  }
-
-  return std::make_shared<RowVector>(
-      rowVector->pool(),
-      rowVector->type(),
-      std::move(newNulls),
-      rowVector->size(),
-      std::move(children));
-}
-
 RowVectorPtr VectorFuzzer::fuzzRowChildrenToLazy(
     RowVectorPtr rowVector,
-    const std::vector<int>& columnsToWrapInLazy) {
+    const std::vector<column_index_t>& columnsToWrapInLazy) {
   if (columnsToWrapInLazy.empty()) {
     return rowVector;
   }
@@ -909,15 +894,9 @@ RowVectorPtr VectorFuzzer::fuzzRowChildrenToLazy(
     VELOX_USER_CHECK_NOT_NULL(child);
     VELOX_USER_CHECK(!child->isLazy());
     if (listIndex < columnsToWrapInLazy.size() &&
-        i == (column_index_t)std::abs(columnsToWrapInLazy[listIndex])) {
-      child = canWrapRowChildInLazy(child)
-          ? wrapRowChildInLazyRecursive(child)
-          : VectorFuzzer::wrapInLazyVector(child);
-      if (columnsToWrapInLazy[listIndex] < 0) {
-        // Negative index represents a lazy vector that is loaded.
-        child->loadedVector();
-      }
+        i == columnsToWrapInLazy[listIndex]) {
       listIndex++;
+      child = VectorFuzzer::wrapInLazyVector(child);
     }
     children.push_back(child);
   }
@@ -930,22 +909,18 @@ RowVectorPtr VectorFuzzer::fuzzRowChildrenToLazy(
   return std::make_shared<RowVector>(
       rowVector->pool(),
       rowVector->type(),
-      std::move(newNulls),
+      newNulls,
       rowVector->size(),
       std::move(children));
 }
 
-VectorPtr VectorLoaderWrap::makeEncodingPreservedCopy(
-    SelectivityVector& rows,
-    vector_size_t vectorSize) {
+VectorPtr VectorLoaderWrap::makeEncodingPreservedCopy(SelectivityVector& rows) {
+  VectorPtr result;
   DecodedVector decoded;
   decoded.decode(*vector_, rows, false);
 
   if (decoded.isConstantMapping() || decoded.isIdentityMapping()) {
-    VectorPtr result;
-
     BaseVector::ensureWritable(rows, vector_->type(), vector_->pool(), result);
-    result->resize(vectorSize);
     result->copy(vector_.get(), rows, nullptr);
     return result;
   }
@@ -961,103 +936,31 @@ VectorPtr VectorLoaderWrap::makeEncodingPreservedCopy(
   });
   baseRows.updateBounds();
 
-  VectorPtr baseResult;
   BaseVector::ensureWritable(
-      baseRows, baseVector->type(), vector_->pool(), baseResult);
-  baseResult->copy(baseVector, baseRows, nullptr);
+      baseRows, baseVector->type(), vector_->pool(), result);
+  result->copy(baseVector, baseRows, nullptr);
 
-  BufferPtr indices = allocateIndices(vectorSize, vector_->pool());
+  BufferPtr indices = allocateIndices(rows.end(), vector_->pool());
   auto rawIndices = indices->asMutable<vector_size_t>();
   auto decodedIndices = decoded.indices();
   rows.applyToSelected(
       [&](auto row) { rawIndices[row] = decodedIndices[row]; });
 
   BufferPtr nulls = nullptr;
-  if (decoded.nulls() || vectorSize > rows.end()) {
-    // We fill [rows.end(), vectorSize) with nulls then copy nulls for selected
-    // baseRows.
-    nulls = allocateNulls(vectorSize, vector_->pool(), bits::kNull);
-    if (baseRows.hasSelections()) {
-      if (decoded.nulls()) {
-        std::memcpy(
-            nulls->asMutable<uint64_t>(),
-            decoded.nulls(),
-            bits::nbytes(rows.end()));
-      } else {
-        bits::fillBits(
-            nulls->asMutable<uint64_t>(), 0, rows.end(), bits::kNotNull);
-      }
+  if (decoded.nulls()) {
+    if (!baseRows.hasSelections()) {
+      nulls = allocateNulls(rows.end(), vector_->pool(), bits::kNull);
+    } else {
+      nulls = AlignedBuffer::allocate<bool>(rows.end(), vector_->pool());
+      std::memcpy(
+          nulls->asMutable<uint64_t>(),
+          decoded.nulls(),
+          bits::nbytes(rows.end()));
     }
   }
 
   return BaseVector::wrapInDictionary(
-      std::move(nulls), std::move(indices), vectorSize, baseResult);
-}
-
-namespace {
-
-const std::vector<TypePtr> defaultScalarTypes() {
-  // @TODO Add decimal TypeKinds to randType.
-  // Refer https://github.com/facebookincubator/velox/issues/3942
-  static std::vector<TypePtr> kScalarTypes{
-      BOOLEAN(),
-      TINYINT(),
-      SMALLINT(),
-      INTEGER(),
-      BIGINT(),
-      REAL(),
-      DOUBLE(),
-      VARCHAR(),
-      VARBINARY(),
-      TIMESTAMP(),
-      DATE(),
-      INTERVAL_DAY_TIME(),
-  };
-  return kScalarTypes;
-}
-} // namespace
-
-TypePtr randType(FuzzerGenerator& rng, int maxDepth) {
-  return randType(rng, defaultScalarTypes(), maxDepth);
-}
-
-TypePtr randType(
-    FuzzerGenerator& rng,
-    const std::vector<TypePtr>& scalarTypes,
-    int maxDepth) {
-  const int numScalarTypes = scalarTypes.size();
-  // Should we generate a scalar type?
-  if (maxDepth <= 1 || rand<bool>(rng)) {
-    return scalarTypes[rand<uint32_t>(rng) % numScalarTypes];
-  }
-  switch (rand<uint32_t>(rng) % 3) {
-    case 0:
-      return MAP(
-          randType(rng, scalarTypes, 0),
-          randType(rng, scalarTypes, maxDepth - 1));
-    case 1:
-      return ARRAY(randType(rng, scalarTypes, maxDepth - 1));
-    default:
-      return randRowType(rng, scalarTypes, maxDepth - 1);
-  }
-}
-
-RowTypePtr randRowType(FuzzerGenerator& rng, int maxDepth) {
-  return randRowType(rng, defaultScalarTypes(), maxDepth);
-}
-
-RowTypePtr randRowType(
-    FuzzerGenerator& rng,
-    const std::vector<TypePtr>& scalarTypes,
-    int maxDepth) {
-  int numFields = 1 + rand<uint32_t>(rng) % 7;
-  std::vector<std::string> names;
-  std::vector<TypePtr> fields;
-  for (int i = 0; i < numFields; ++i) {
-    names.push_back(fmt::format("f{}", i));
-    fields.push_back(randType(rng, scalarTypes, maxDepth));
-  }
-  return ROW(std::move(names), std::move(fields));
+      std::move(nulls), std::move(indices), rows.end(), result);
 }
 
 } // namespace facebook::velox

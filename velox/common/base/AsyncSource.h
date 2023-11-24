@@ -25,7 +25,6 @@
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/base/Portability.h"
 #include "velox/common/future/VeloxPromise.h"
-#include "velox/common/testutil/TestValue.h"
 
 namespace facebook::velox {
 
@@ -44,8 +43,6 @@ class AsyncSource {
   // Makes an item if it is not already made. To be called on a background
   // executor.
   void prepare() {
-    common::testutil::TestValue::adjust(
-        "facebook::velox::AsyncSource::prepare", this);
     std::function<std::unique_ptr<Item>()> make = nullptr;
     {
       std::lock_guard<std::mutex> l(mutex_);
@@ -81,8 +78,6 @@ class AsyncSource {
   // the item is preparing on the executor, waits for the item and otherwise
   // makes it on the caller thread.
   std::unique_ptr<Item> move() {
-    common::testutil::TestValue::adjust(
-        "facebook::velox::AsyncSource::move", this);
     std::function<std::unique_ptr<Item>()> make = nullptr;
     ContinueFuture wait;
     {

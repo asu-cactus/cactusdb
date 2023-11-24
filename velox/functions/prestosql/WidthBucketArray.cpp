@@ -179,8 +179,7 @@ std::vector<double> toBinValues(
 
 std::shared_ptr<exec::VectorFunction> makeWidthBucketArray(
     const std::string& name,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& /*config*/) {
+    const std::vector<exec::VectorFunctionArg>& inputArgs) {
   VELOX_CHECK_EQ(inputArgs.size(), 2);
   const auto& operandVector = inputArgs[0];
   const auto& binsVector = inputArgs[1];
