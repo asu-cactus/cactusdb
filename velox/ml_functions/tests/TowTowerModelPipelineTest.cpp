@@ -4,21 +4,24 @@
 #include <gflags/gflags.h>
 #include <torch/torch.h>
 #include <random>
+#include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/connectors/hive/HiveConfig.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/parquet/RegisterParquetReader.h"
+#include "velox/dwio/parquet/RegisterParquetWriter.h"
+#include "velox/dwio/parquet/writer/Writer.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/ml_functions/BatchNorm.h"
+#include "velox/ml_functions/ComplexLayer.h"
 #include "velox/ml_functions/Concat.h"
 #include "velox/ml_functions/CosineSimilarity.h"
 #include "velox/ml_functions/Dropout.h"
 #include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/Encoder.h"
 #include "velox/ml_functions/SequencePooling.h"
-#include "velox/ml_functions/ComplexLayer.h"
 #include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
@@ -45,6 +48,9 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
     parse::registerTypeResolver();
     // HiveConnectorTestBase::SetUp();
     parquet::registerParquetReaderFactory();
+    parquet::registerParquetWriterFactory();
+    filesystems::registerLocalFileSystem();
+    dwio::common::LocalFileSink::registerFactory();
 
     ioExecutor_ = std::make_unique<folly::IOThreadPoolExecutor>(2);
 
@@ -53,6 +59,9 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
             ->newConnector(kHiveConnectorId, nullptr, ioExecutor_.get());
     connector::registerConnector(hiveConnector);
+
+    rootPool_ = memory::defaultMemoryManager().addRootPool("TwoTowerTest");
+    pool_ = rootPool_->addLeafChild("TwoTowerTest");
 
     // SetUp();
   }
@@ -63,6 +72,30 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
     }
   }
 
+  // Function from ParquetTestBase.h
+  std::unique_ptr<dwio::common::FileSink> createSink(
+      const std::string& filePath) {
+    auto sink = dwio::common::FileSink::create(
+        fmt::format("file:{}", filePath), {.pool = rootPool_.get()});
+    return sink;
+  }
+
+  // Function from ParquetTestBase.h
+  std::unique_ptr<facebook::velox::parquet::Writer> createWriter(
+      std::unique_ptr<dwio::common::FileSink> sink,
+      std::function<
+          std::unique_ptr<facebook::velox::parquet::DefaultFlushPolicy>()>
+          flushPolicy,
+      facebook::velox::common::CompressionKind compressionKind =
+          facebook::velox::common::CompressionKind_NONE) {
+    facebook::velox::parquet::WriterOptions options;
+    options.memoryPool = rootPool_.get();
+    options.flushPolicyFactory = flushPolicy;
+    options.compression = compressionKind;
+    return std::make_unique<facebook::velox::parquet::Writer>(
+        std::move(sink), options);
+  }
+
   std::unique_ptr<folly::IOThreadPoolExecutor> ioExecutor_;
 
   std::shared_ptr<folly::Executor> executor_{
@@ -71,9 +104,8 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
   std::shared_ptr<core::QueryCtx> queryCtx_{
       std::make_shared<core::QueryCtx>(executor_.get())};
 
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
-  VectorMaker maker{pool_.get()};
+  std::shared_ptr<memory::MemoryPool> rootPool_;
+  std::shared_ptr<memory::MemoryPool> pool_;
 
   ~TowTowerModelPipelineTest() {
     HiveConnectorTestBase::TearDown();
@@ -116,6 +148,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
     int numSplit,
     int batchSize,
     int numDriver) {
+  VectorMaker maker{pool_.get()};
   std::cout
       << "[INFO]: TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading"
       << std::endl;
@@ -630,14 +663,6 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
       //   {core::QueryConfig::kMaxOutputBatchRows, "600"}
   });
   uint64_t kSizeKB = 1024UL;
-  // std::shared_ptr<memory::MemoryPool> rootPool{
-  //     memory::defaultMemoryManager().addRootPool("root", 5000 * MB)};
-  // queryCtx_->testingOverrideMemoryPool(rootPool);
-  //   int numSplit = 2;
-  auto queryDataHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/query_data.parquet"},
-      numSplit,
-      dwio::common::FileFormat::PARQUET);
 
   auto userHiveSplits = makeHiveConnectorSplits(
       {"/root/velox_latest/data/movielens_user_s_8192.parquet"},
@@ -658,32 +683,38 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
-  //   std::vector<RowVectorPtr> queryDataRowVector;
-  //   std::vector<int> userIds;
-  //   int numBatch = int(numSamples / batchSize);
-  //   for (int i = 0; i < numBatch; i++) {
-  //     std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1,
-  //     6040); auto userIdFlatVector = maker.flatVector<int>(userIds,
-  //     INTEGER()); std::vector<int> movieIds =
-  //     randomGenerator.gen1DInt(batchSize, 1, 3706); auto movieIdFlatVector =
-  //     maker.flatVector<int>(movieIds, INTEGER()); auto
-  //     queryDataRowVectorBatch = maker.rowVector(
-  //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
-  //         movieIdFlatVector});
-  //     queryDataRowVector.push_back(queryDataRowVectorBatch);
-  //   }
-  //   std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1, 6040);
-  //   auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
-  //   std::vector<int> movieIds = randomGenerator.gen1DInt(batchSize, 1, 3706);
-  //   auto movieIdFlatVector = maker.flatVector<int>(movieIds, INTEGER());
-  //   auto queryDataRowVector = maker.rowVector(
-  //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
-  //         movieIdFlatVector});
-  // use python script to generate splitted query table
-  // FIXME refactor the code to generate query parquet file via velox parquet writer, ref: SinkTests.cpp
-  std::string cmdToGenData = fmt::format(
-      "python3 /root/velox_latest/data/gen_data.py -n {}", numSamples);
-  int returnCode = system(cmdToGenData.c_str());
+  // Deprecated approach: use Python code to generate splitted query parquet
+  // writer, ref: SinkTests.cpp
+  //   std::string cmdToGenData = fmt::format(
+  //       "python3 /root/velox_latest/data/gen_data.py -n {}", numSamples);
+  //   int returnCode = system(cmdToGenData.c_str());
+
+  std::vector<int> userIds = randomGenerator.gen1DInt(numSamples, 1, 6040);
+  auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
+  std::vector<int> movieIds = randomGenerator.gen1DInt(numSamples, 1, 3706);
+  auto movieIdFlatVector = maker.flatVector<int>(movieIds, INTEGER());
+  auto queryDataRowVector = maker.rowVector(
+      {"q_user_id", "q_movie_id"}, {userIdFlatVector, movieIdFlatVector});
+
+  auto tempPath = exec::test::TempDirectoryPath::create();
+  auto filePath = fs::path(fmt::format("{}/query_data_test.parquet", tempPath->path));
+  auto sink = createSink(filePath);
+  auto sinkPtr = sink.get();
+  uint64_t kRowsInRowGroup = 1000;
+  uint64_t kBytesInRowGroup = 128 * 1024 * 1024;
+  auto writer = createWriter(std::move(sink), [&]() {
+    return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
+        kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
+  });
+  writer->write(queryDataRowVector);
+  writer->flush();
+  writer->close();
+
+  auto queryDataHiveSplits = makeHiveConnectorSplits(
+      //   {"/root/velox_latest/data/query_data.parquet"},
+      {filePath},
+      numSplit,
+      dwio::common::FileFormat::PARQUET);
 
   core::PlanNodeId readQueryDataPlanNodeId;
   core::PlanNodeId readUserDataPlanNodeId;
@@ -896,6 +927,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
     int numSplit,
     int batchSize,
     int numDriver) {
+  VectorMaker maker{pool_.get()};
   std::cout
       << "[INFO]: TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading"
       << std::endl;
@@ -1400,7 +1432,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
   //         movieIdFlatVector});
   // use python script to generate splitted query table
-  // FIXME refactor the code to generate query parquet file via velox parquet writer, ref: SinkTests.cpp
+  // FIXME refactor the code to generate query parquet file via velox parquet
+  // writer, ref: SinkTests.cpp
   std::string cmdToGenData = fmt::format(
       "python3 /root/velox_latest/data/gen_data.py -n {}", numSamples);
   int returnCode = system(cmdToGenData.c_str());
@@ -1514,9 +1547,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
                "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
           .project( // user/movie tower inference
               {"fully_layer_with_batch_norm3(fully_layer_with_batch_norm2(fully_layer_with_batch_norm1(user_tower_features))) as user_nn_out",
-               "fully_layer_with_batch_norm2_3(fully_layer_with_batch_norm2_2(fully_layer_with_batch_norm2_1(movie_tower_features))) as movie_nn_out"
-            })
-        //   .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
+               "fully_layer_with_batch_norm2_3(fully_layer_with_batch_norm2_2(fully_layer_with_batch_norm2_1(movie_tower_features))) as movie_nn_out"})
+          .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
           .planFragment();
 
   std::vector<RowVectorPtr> resultUserData;
@@ -1612,11 +1644,11 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   return time;
 }
 
-
 int64_t
 TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
     int numSamples,
     int numSplit) {
+  VectorMaker maker{pool_.get()};
   std::cout
       << "[INFO]: TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize"
       << std::endl;
@@ -2279,34 +2311,6 @@ int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
 
-  //   po::options_description desc("Allowed options");
-  //   desc.add_options()("help", "Display this help message")
-  //     ("num_sample",po::value<int>()->default_value(5000),"Number of query
-  //     samples")
-  //     ("num_split", po::value<int>()->default_value(2), "Number of split")
-  //     ("benchmark_mode",po::value<int>()->default_value(0),"Benchmark Mode:
-  //     0-non-materialize, 1-materialize, 2-both")
-  //     ("batch_size", po::value<int>()->default_value(500), "batch size")
-  //     ("num_repeat",po::value<int>()->default_value(1),"number of repreat run
-  //     to measure latency")
-  //     ("num_driver", po::value<int>()->default_value(2), "number of driver");
-
-  //   po::variables_map vm;
-  //   po::store(po::parse_command_line(argc, argv, desc), vm);
-  //   po::notify(vm);
-
-  //   if (vm.count("help")) {
-  //     std::cout << desc << std::endl;
-  //     return 1;
-  //   }
-
-  //   int numSamples = vm["num_sample"].as<int>(); // default 5000
-  //   int numSplit = vm["num_split"].as<int>(); // default 2
-  //   int benchmarkMode = vm["benchmark_mode"].as<int>(); // default 0 0:
-  //   non-materialize 1: materialize 2: both int batchSize =
-  //   vm["batch_size"].as<int>(); // default 500 int numRepeat =
-  //   vm["num_repeat"].as<int>(); // default 1 int numDriver =
-  //   vm["num_driver"].as<int>(); // default 2
   int numSamples = FLAGS_num_sample;
   int numSplit = FLAGS_num_split; // default 2
   int benchmarkMode = FLAGS_benchmark_mode; // default 0 0: non-materialize 1:
@@ -2332,7 +2336,7 @@ int main(int argc, char** argv) {
 
   if (benchmarkMode == 0 or benchmarkMode == 2) {
     for (int i = 0; i < numRepeat; i++) {
-      nonMaterializeLatency += demo.testEndtoEndPipelineFusedMultiThreading(
+      nonMaterializeLatency += demo.testEndtoEndPipelineMultiThreading(
           numSamples, numSplit, batchSize, numDriver);
     }
     nonMaterializeLatency = nonMaterializeLatency / numRepeat;
