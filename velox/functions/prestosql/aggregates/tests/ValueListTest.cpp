@@ -33,6 +33,13 @@ class ValueListTest : public functions::test::FunctionBaseTest {
   read(aggregate::ValueList& values, const TypePtr& type, vector_size_t size) {
     aggregate::ValueListReader reader(values);
     auto result = BaseVector::create(type, size, pool());
+
+    // Initialize result to all-nulls to ensure ValueListReader::next() reset
+    // null bits correctly.
+    for (auto i = 0; i < size; ++i) {
+      result->setNull(i, true);
+    }
+
     for (auto i = 0; i < size; i++) {
       reader.next(*result, i);
     }
@@ -105,13 +112,20 @@ TEST_F(ValueListTest, integers) {
 
 TEST_F(ValueListTest, arrays) {
   // No nulls.
+  int32_t kSizeCaps[] = {500, 4000, 6000, 50000};
+  int32_t counter = 0;
   for (auto size : kTestSizes) {
     auto data = makeArrayVector<int32_t>(
         size,
         [](auto row) { return row % 7; },
         [](auto row) { return row % 11; });
 
+    auto previousBytes = allocator()->cumulativeBytes();
     testRoundTrip(data);
+    if (counter < sizeof(kSizeCaps) / sizeof(kSizeCaps[0])) {
+      auto cap = kSizeCaps[counter++];
+      EXPECT_GT(cap, allocator()->cumulativeBytes() - previousBytes);
+    }
   }
 
   // Different percentage of nulls.

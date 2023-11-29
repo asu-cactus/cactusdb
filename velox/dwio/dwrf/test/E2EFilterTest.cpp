@@ -15,6 +15,7 @@
  */
 
 #include "velox/common/base/Portability.h"
+#include "velox/common/testutil/TestValue.h"
 #include "velox/dwio/common/tests/E2EFilterTestBase.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/dwrf/writer/FlushPolicy.h"
@@ -73,9 +74,14 @@ class E2EFilterTest : public E2EFilterTestBase {
                                : (++flushCounter % flushEveryNBatches_ == 0);
       });
     };
-    auto sink = std::make_unique<MemorySink>(*leafPool_, 200 * 1024 * 1024);
+
+    auto sink = std::make_unique<MemorySink>(
+        200 * 1024 * 1024,
+        dwio::common::FileSink::Options{.pool = leafPool_.get()});
+    ASSERT_TRUE(sink->isBuffered());
     sinkPtr_ = sink.get();
-    writer_ = std::make_unique<Writer>(options, std::move(sink), *rootPool_);
+    options.memoryPool = rootPool_.get();
+    writer_ = std::make_unique<dwrf::Writer>(std::move(sink), options);
     for (auto& batch : batches) {
       writer_->write(batch);
     }
@@ -100,7 +106,7 @@ class E2EFilterTest : public E2EFilterTestBase {
   std::unordered_set<std::string> flatMapColumns_;
 
  private:
-  WriterOptions createWriterOptions(const TypePtr& type) {
+  dwrf::WriterOptions createWriterOptions(const TypePtr& type) {
     auto config = std::make_shared<dwrf::Config>();
     config->set(dwrf::Config::COMPRESSION, CompressionKind_NONE);
     config->set(dwrf::Config::USE_VINTS, useVInts_);
@@ -129,25 +135,28 @@ class E2EFilterTest : public E2EFilterTestBase {
           continue;
         }
         auto& child = schemaWithId->childAt(i);
-        mapFlatCols.push_back(child->column);
+        mapFlatCols.push_back(child->column());
         if (!rowType.childAt(i)->isRow()) {
           continue;
         }
-        flatmapNodeIdsAsStruct_[child->id] = mapFlatColsStructKeys[i];
+        flatmapNodeIdsAsStruct_[child->id()] = mapFlatColsStructKeys[i];
       }
       config->set(dwrf::Config::FLATTEN_MAP, true);
+      config->set(dwrf::Config::MAP_FLAT_DISABLE_DICT_ENCODING, false);
+      config->set(dwrf::Config::MAP_FLAT_DISABLE_DICT_ENCODING_STRING, false);
+
       config->set<const std::vector<uint32_t>>(
           dwrf::Config::MAP_FLAT_COLS, mapFlatCols);
       config->set<const std::vector<std::vector<std::string>>>(
           dwrf::Config::MAP_FLAT_COLS_STRUCT_KEYS, mapFlatColsStructKeys);
     }
-    WriterOptions options;
+    dwrf::WriterOptions options;
     options.config = config;
     options.schema = writerSchema;
     return options;
   }
 
-  std::unique_ptr<Writer> writer_;
+  std::unique_ptr<dwrf::Writer> writer_;
   std::unordered_map<uint32_t, std::vector<std::string>>
       flatmapNodeIdsAsStruct_;
 };
@@ -236,6 +245,14 @@ TEST_F(E2EFilterTest, floatAndDouble) {
 }
 
 TEST_F(E2EFilterTest, stringDirect) {
+  testutil::TestValue::enable();
+  bool coverage[2][2]{};
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::dwrf::SelectiveStringDirectColumnReader::try8ConsecutiveSmall",
+      std::function<void(bool*)>([&](bool* params) {
+        coverage[0][params[0]] = true;
+        coverage[1][params[1]] = true;
+      }));
   flushEveryNBatches_ = 1;
   testWithTypes(
       "string_val:string,"
@@ -244,11 +261,16 @@ TEST_F(E2EFilterTest, stringDirect) {
         makeStringUnique("string_val");
         makeStringUnique("string_val_2");
       },
-
       true,
       {"string_val", "string_val_2"},
       20,
       true);
+#ifndef NDEBUG
+  ASSERT_TRUE(coverage[0][0]);
+  ASSERT_TRUE(coverage[0][1]);
+  ASSERT_TRUE(coverage[1][0]);
+  ASSERT_TRUE(coverage[1][1]);
+#endif
 }
 
 TEST_F(E2EFilterTest, stringDictionary) {
@@ -271,15 +293,15 @@ TEST_F(E2EFilterTest, timestamp) {
       "timestamp_val:timestamp,"
       "long_val:bigint",
       [&]() {},
-      false,
-      {"long_val"},
+      true,
+      {"long_val", "timestamp_val"},
       20,
       true,
       true);
 }
 
 TEST_F(E2EFilterTest, listAndMap) {
-  int numCombinations = 10;
+  int numCombinations = 20;
 #if !defined(NDEBUG) || defined(TSAN_BUILD)
   // The test is running slow under dev/debug and TSAN build; reduce the number
   // of combinations to avoid timeout.
@@ -289,7 +311,7 @@ TEST_F(E2EFilterTest, listAndMap) {
       "long_val:bigint,"
       "long_val_2:bigint,"
       "int_val:int,"
-      "array_val:array<struct<array_member: array<int>>>,"
+      "array_val:array<struct<array_member: array<int>, float_val:float, long_val:bigint, string_val:string>>,"
       "map_val:map<bigint,struct<nested_map: map<int, int>>>",
       [&]() {},
       true,
@@ -369,21 +391,48 @@ TEST_F(E2EFilterTest, flatMapAsStruct) {
       kColumns, [] {}, false, {"long_val"}, 10, true);
 }
 
-TEST_F(E2EFilterTest, flatMap) {
+TEST_F(E2EFilterTest, flatMapScalar) {
   constexpr auto kColumns =
       "long_val:bigint,"
       "long_vals:map<tinyint,bigint>,"
+      "string_vals:map<string,string>";
+  flatMapColumns_ = {"long_vals", "string_vals"};
+  auto customize = [this] {
+    dataSetBuilder_->makeUniformMapKeys(Subfield("string_vals"));
+    dataSetBuilder_->makeMapStringValues(Subfield("string_vals"));
+  };
+  int numCombinations = 5;
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer) || __has_feature(__address_sanitizer__)
+  numCombinations = 1;
+#endif
+#endif
+  testWithTypes(
+      kColumns,
+      customize,
+      false,
+      {"long_val", "long_vals"},
+      numCombinations,
+      true);
+}
+
+TEST_F(E2EFilterTest, flatMapComplex) {
+  constexpr auto kColumns =
+      "long_val:bigint,"
       "struct_vals:map<varchar,struct<v1:bigint, v2:float>>,"
       "array_vals:map<tinyint,array<int>>";
-  flatMapColumns_ = {"long_vals", "struct_vals", "array_vals"};
+  flatMapColumns_ = {"struct_vals", "array_vals"};
   auto customize = [this] {
     dataSetBuilder_->makeUniformMapKeys(Subfield("struct_vals"));
   };
   int numCombinations = 5;
 #if defined(__has_feature)
-#if __has_feature(thread_sanitizer)
+#if __has_feature(thread_sanitizer) || __has_feature(__address_sanitizer__)
   numCombinations = 1;
 #endif
+#endif
+#if !defined(NDEBUG)
+  numCombinations = 1;
 #endif
   testWithTypes(
       kColumns, customize, false, {"long_val"}, numCombinations, true);

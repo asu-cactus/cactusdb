@@ -39,11 +39,18 @@ template <typename T, bool isMapKey = false>
 void generateJsonTyped(
     const SimpleVector<T>& input,
     int row,
-    std::string& result) {
+    std::string& result,
+    const TypePtr& type) {
   auto value = input.valueAt(row);
 
   if constexpr (std::is_same_v<T, StringView>) {
-    folly::json::escapeString(value, result, folly::json::serialization_opts{});
+    // TODO Presto escapes Unicode characters using uppercase hex:
+    //  SELECT cast(U&'\+01F64F' as json); -- "\uD83D\uDE4F"
+    //  Folly uses lowercase hex digits: "\ud83d\ude4f".
+    // Figure out how to produce uppercase digits.
+    folly::json::serialization_opts opts;
+    opts.encode_non_ascii = true;
+    folly::json::escapeString(value, result, opts);
   } else if constexpr (std::is_same_v<T, UnknownValue>) {
     VELOX_FAIL(
         "Casting UNKNOWN to JSON: Vectors of UNKNOWN type should not contain non-null rows");
@@ -54,9 +61,10 @@ void generateJsonTyped(
 
     if constexpr (std::is_same_v<T, bool>) {
       result.append(value ? "true" : "false");
-    } else if constexpr (
-        std::is_same_v<T, Date> || std::is_same_v<T, Timestamp>) {
+    } else if constexpr (std::is_same_v<T, Timestamp>) {
       result.append(std::to_string(value));
+    } else if (type->isDate()) {
+      result.append(DATE()->toString(value));
     } else {
       folly::toAppend<std::string, T>(value, &result);
     }
@@ -89,7 +97,7 @@ void castToJson(
         flatResult.set(row, "null");
       } else {
         result.clear();
-        generateJsonTyped(*inputVector, row, result);
+        generateJsonTyped(*inputVector, row, result, input.type());
 
         flatResult.set(row, StringView{result});
       }
@@ -97,10 +105,10 @@ void castToJson(
   } else {
     context.applyToSelectedNoThrow(rows, [&](auto row) {
       if (inputVector->isNullAt(row)) {
-        VELOX_FAIL("Map keys cannot be null.");
+        VELOX_USER_FAIL("Map keys cannot be null.");
       } else {
         result.clear();
-        generateJsonTyped<T, true>(*inputVector, row, result);
+        generateJsonTyped<T, true>(*inputVector, row, result, input.type());
 
         flatResult.set(row, StringView{result});
       }
@@ -161,13 +169,14 @@ struct AsJson {
       const BufferPtr& elementToTopLevelRows,
       bool isMapKey = false)
       : decoded_(context) {
+    VELOX_CHECK(rows.hasSelections());
+
     ErrorVectorPtr oldErrors;
     context.swapErrors(oldErrors);
     if (isJsonType(input->type())) {
       json_ = input;
     } else {
-      if (!exec::PeeledEncoding::isPeelable(input->encoding()) ||
-          !rows.hasSelections()) {
+      if (!exec::PeeledEncoding::isPeelable(input->encoding())) {
         doCast(context, input, rows, isMapKey, json_);
       } else {
         exec::ScopedContextSaver saver;
@@ -195,7 +204,7 @@ struct AsJson {
     if (isMapKey && decoded_->mayHaveNulls()) {
       context.applyToSelectedNoThrow(rows, [&](auto row) {
         if (decoded_->isNullAt(row)) {
-          VELOX_FAIL("Cannot cast map with null keys to JSON.");
+          VELOX_USER_FAIL("Cannot cast map with null keys to JSON.");
         }
       });
     }
@@ -284,6 +293,22 @@ void castToJsonFromArray(
   auto elements = inputArray->elements();
   auto elementsRows =
       functions::toElementRows(elements->size(), rows, inputArray);
+  if (!elementsRows.hasSelections()) {
+    // All arrays are null or empty.
+    context.applyToSelectedNoThrow(rows, [&](auto row) {
+      if (inputArray->isNullAt(row)) {
+        flatResult.set(row, "null");
+      } else {
+        VELOX_CHECK_EQ(
+            inputArray->sizeAt(row),
+            0,
+            "All arrays are expected to be null or empty");
+        flatResult.set(row, "[]");
+      }
+    });
+    return;
+  }
+
   auto elementToTopLevelRows = functions::getElementToTopLevelRows(
       elements->size(), rows, inputArray, context.pool());
   AsJson elementsAsJson{context, elements, elementsRows, elementToTopLevelRows};
@@ -346,6 +371,22 @@ void castToJsonFromMap(
   auto mapKeys = inputMap->mapKeys();
   auto mapValues = inputMap->mapValues();
   auto elementsRows = functions::toElementRows(mapKeys->size(), rows, inputMap);
+  if (!elementsRows.hasSelections()) {
+    // All maps are null or empty.
+    context.applyToSelectedNoThrow(rows, [&](auto row) {
+      if (inputMap->isNullAt(row)) {
+        flatResult.set(row, "null");
+      } else {
+        VELOX_CHECK_EQ(
+            inputMap->sizeAt(row),
+            0,
+            "All maps are expected to be null or empty");
+        flatResult.set(row, "{}");
+      }
+    });
+    return;
+  }
+
   auto elementToTopLevelRows = functions::getElementToTopLevelRows(
       mapKeys->size(), rows, inputMap, context.pool());
   // Maps with unsupported key types should have already been rejected by
@@ -419,6 +460,7 @@ void castToJsonFromRow(
     const SelectivityVector& rows,
     FlatVector<StringView>& flatResult) {
   // input is guaranteed to be in flat encoding when passed in.
+  VELOX_CHECK_EQ(input.encoding(), VectorEncoding::Simple::ROW);
   auto inputRow = input.as<RowVector>();
   auto childrenSize = inputRow->childrenSize();
 
@@ -497,7 +539,10 @@ FOLLY_ALWAYS_INLINE void castFromJsonTyped<TypeKind::VARCHAR>(
     const folly::dynamic& object,
     exec::GenericWriter& writer) {
   if (isJsonType(writer.type())) {
-    writer.castTo<Varchar>().append(toJson(object));
+    // Sort keys to match Presto's behavior.
+    folly::json::serialization_opts opts;
+    opts.sort_keys = true;
+    writer.castTo<Varchar>().append(folly::json::serialize(object, opts));
   } else if (object.isBool()) {
     writer.castTo<Varchar>().append(object.asBool() ? "true" : "false");
   } else {
@@ -663,17 +708,30 @@ FOLLY_ALWAYS_INLINE void castFromJsonTyped<TypeKind::ROW>(
   } else {
     auto rowType = writer.type()->asRow();
     column_index_t fieldCount = rowType.size();
-    auto notFound = object.items().end();
+
+    folly::F14FastMap<std::string, const folly::dynamic*> lowerCaseKeys;
+    lowerCaseKeys.reserve(object.size());
+
+    for (const auto& [key, value] : object.items()) {
+      // Skip null values.
+      if (!value.isNull()) {
+        const auto lowerCaseKey =
+            boost::algorithm::to_lower_copy(key.asString());
+        lowerCaseKeys.insert({lowerCaseKey, &value});
+      }
+    }
 
     for (column_index_t i = 0; i < fieldCount; ++i) {
-      auto it = object.find(rowType.nameOf(i));
-      if (it == notFound || it->second.isNull()) {
+      const auto lowerCaseName =
+          boost::algorithm::to_lower_copy(rowType.nameOf(i));
+      auto it = lowerCaseKeys.find(lowerCaseName);
+      if (it == lowerCaseKeys.end()) {
         writerTyped.set_null_at(i);
       } else {
         VELOX_DYNAMIC_TYPE_DISPATCH(
             castFromJsonTyped,
             rowType.childAt(i)->kind(),
-            it->second,
+            *(it->second),
             writerTyped.get_writer_at(i));
       }
     }
@@ -704,6 +762,7 @@ void castFromJson(
       try {
         object = folly::parseJson(inputVector->valueAt(row));
       } catch (const std::exception& e) {
+        writer.commitNull();
         VELOX_USER_FAIL("Not a JSON input: {}", inputVector->valueAt(row));
       }
 
@@ -713,12 +772,17 @@ void castFromJson(
         try {
           castFromJsonTyped<kind>(object, writer.current());
         } catch (const VeloxException& ve) {
+          if (!ve.isUserError()) {
+            throw;
+          }
+          writer.commitNull();
           VELOX_USER_FAIL(
               "Cannot cast from Json value {} to {}: {}",
               inputVector->valueAt(row),
               result.type()->toString(),
               ve.message());
         } catch (const std::exception& e) {
+          writer.commitNull();
           VELOX_USER_FAIL(
               "Cannot cast from Json value {} to {}: {}",
               inputVector->valueAt(row),
@@ -757,7 +821,6 @@ bool JsonCastOperator::isSupportedFromType(const TypePtr& other) const {
 
   switch (other->kind()) {
     case TypeKind::UNKNOWN:
-    case TypeKind::DATE:
     case TypeKind::TIMESTAMP:
       return true;
     case TypeKind::ARRAY:
@@ -779,6 +842,10 @@ bool JsonCastOperator::isSupportedFromType(const TypePtr& other) const {
 }
 
 bool JsonCastOperator::isSupportedToType(const TypePtr& other) const {
+  if (other->isDate()) {
+    return false;
+  }
+
   if (isSupportedBasicType(other)) {
     return true;
   }

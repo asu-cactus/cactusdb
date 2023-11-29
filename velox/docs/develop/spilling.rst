@@ -167,7 +167,7 @@ partition to create a sorted reader to restore the spilled partition state.
     std::unique_ptr<TreeOfLosers<SpillMergeStream>> Spiller::startMerge(
         int32_t partition);
 
-**unsorted spill restore**: Used by order by hash build and hash probe
+**unsorted spill restore**: Used by hash build and hash probe
 operators. The operator first calls Spiller::finishSpill() to mark the
 completion of spilling. The Spiller collects metadata for the spilled
 partitioned and returns these to the operator. The operator processes the
@@ -517,7 +517,7 @@ Some hash probe optimizations are disabled if the spilling has been triggered
 by the hash build. For example, dynamic filtering is disabled because the
 complete set of join keys is not known.
 
-Spilling not supported for `null-aware anti-join type with filter because it
+Spilling not supported for null-aware anti-join type with filter because it
 requires to cross join null-key probe rows with all build-side rows for filter
 evaluation to check if the null-key probe rows can be added to output or not.
 

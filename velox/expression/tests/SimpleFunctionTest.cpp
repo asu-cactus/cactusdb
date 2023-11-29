@@ -18,10 +18,11 @@
 #include <optional>
 #include <string>
 
+#include <glog/logging.h>
 #include "folly/lang/Hint.h"
-#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "velox/expression/Expr.h"
+#include "velox/expression/SimpleFunctionAdapter.h"
 #include "velox/functions/Udf.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/functions/prestosql/tests/utils/FunctionBaseTest.h"
@@ -34,12 +35,64 @@
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 namespace {
+
 class SimpleFunctionTest : public functions::test::FunctionBaseTest {
  protected:
   VectorPtr arraySum(const std::vector<std::vector<int64_t>>& data) {
     return makeFlatVector<int64_t>(data.size(), [&](auto row) {
       return std::accumulate(data[row].begin(), data[row].end(), 0);
     });
+  }
+
+  template <typename T>
+  struct CallNullFreeFuncVoidOut {
+    VELOX_DEFINE_FUNCTION_TYPES(T);
+
+    template <typename T1, typename T2>
+    void callNullFree(int32_t&, const T1&, const T2&) {}
+
+    template <typename T1>
+    void callNullFree(int32_t&, const T1&) {}
+  };
+
+  template <typename T>
+  struct CallNullFreeFuncBoolOut {
+    VELOX_DEFINE_FUNCTION_TYPES(T);
+
+    template <typename T1, typename T2>
+    bool callNullFree(int32_t&, const T1&, const T2&) {
+      return true;
+    }
+
+    template <typename T1>
+    bool callNullFree(int32_t&, const T1&) {
+      return true;
+    }
+  };
+
+  template <typename... TArgs>
+  void testCallNullFreeSupportFlatNotNulls(bool voidOutput, bool expected) {
+    using holderClassVoid = core::UDFHolder<
+        CallNullFreeFuncVoidOut<exec::VectorExec>,
+        exec::VectorExec,
+        int32_t,
+        TArgs...>;
+    using holderClassBool = core::UDFHolder<
+        CallNullFreeFuncBoolOut<exec::VectorExec>,
+        exec::VectorExec,
+        int32_t,
+        TArgs...>;
+    if (voidOutput) {
+      ASSERT_EQ(
+          expected,
+          exec::SimpleFunctionAdapter<holderClassVoid>()
+              .supportsFlatNoNullsFastPath());
+    } else {
+      ASSERT_EQ(
+          expected,
+          exec::SimpleFunctionAdapter<holderClassBool>()
+              .supportsFlatNoNullsFastPath());
+    }
   }
 };
 
@@ -937,7 +990,7 @@ VectorPtr testVariadicArgReuse(
       exec::simpleFunctions()
           .resolveFunction(functionName, {})
           ->createFunction()
-          ->createVectorFunction(execCtx->queryCtx()->queryConfig(), {});
+          ->createVectorFunction({}, execCtx->queryCtx()->queryConfig());
 
   // Create a dummy EvalCtx.
   SelectivityVector rows(inputs[0]->size());
@@ -1064,6 +1117,28 @@ TEST_F(SimpleFunctionTest, isAsciiArgs) {
   ASSERT_TRUE(function_t::isAsciiArgs(rows, {input}));
 }
 
+template <typename T>
+struct StringInputIntOutputFunction {
+  VELOX_DEFINE_FUNCTION_TYPES(T);
+
+  void call(int32_t& out, const arg_type<Varchar>& input) {
+    throw std::runtime_error(
+        "This method is not expected to be called for all-ascii input!");
+  }
+
+  void callAscii(int32_t& out, const arg_type<Varchar>& input) {
+    out = input.size();
+  }
+};
+
+TEST_F(SimpleFunctionTest, TestcallAscii) {
+  registerFunction<StringInputIntOutputFunction, int32_t, Varchar>(
+      {"get_input_size"});
+  auto asciiInput = makeFlatVector<std::string>({"abc123", "10% #\0"});
+  EXPECT_NO_THROW(evaluate<SimpleVector<int32_t>>(
+      "get_input_size(c0)", makeRowVector({asciiInput})));
+}
+
 // Return false always.
 template <typename T>
 struct GenericOutputFunc {
@@ -1133,5 +1208,35 @@ TEST_F(SimpleFunctionTest, simpleFunctionRegistryThreadSafe) {
   for (auto& th : threads) {
     th.join();
   }
+}
+
+TEST_F(SimpleFunctionTest, flatNoNullsPathCallNullFree) {
+  // Void return type.
+  testCallNullFreeSupportFlatNotNulls<Map<int32_t, int32_t>>(true, false);
+  testCallNullFreeSupportFlatNotNulls<Array<int32_t>>(true, false);
+  testCallNullFreeSupportFlatNotNulls<Row<int32_t>>(true, false);
+  testCallNullFreeSupportFlatNotNulls<Any>(true, false);
+  testCallNullFreeSupportFlatNotNulls<Variadic<Any>>(true, false);
+  testCallNullFreeSupportFlatNotNulls<int32_t, Any>(true, false);
+  testCallNullFreeSupportFlatNotNulls<Any, int64_t>(true, false);
+
+  testCallNullFreeSupportFlatNotNulls<Variadic<int32_t>>(true, true);
+  testCallNullFreeSupportFlatNotNulls<int32_t>(true, true);
+  testCallNullFreeSupportFlatNotNulls<int64_t, int64_t>(true, true);
+  testCallNullFreeSupportFlatNotNulls<Varchar, Varchar>(true, true);
+
+  // Bool return type.
+  testCallNullFreeSupportFlatNotNulls<Map<int32_t, int32_t>>(false, false);
+  testCallNullFreeSupportFlatNotNulls<Array<int32_t>>(false, false);
+  testCallNullFreeSupportFlatNotNulls<Row<int32_t>>(false, false);
+  testCallNullFreeSupportFlatNotNulls<Any>(false, false);
+  testCallNullFreeSupportFlatNotNulls<Variadic<Any>>(false, false);
+  testCallNullFreeSupportFlatNotNulls<int32_t, Any>(false, false);
+  testCallNullFreeSupportFlatNotNulls<Any, int64_t>(false, false);
+
+  testCallNullFreeSupportFlatNotNulls<Variadic<int32_t>>(false, false);
+  testCallNullFreeSupportFlatNotNulls<int32_t>(false, false);
+  testCallNullFreeSupportFlatNotNulls<int64_t, int64_t>(false, false);
+  testCallNullFreeSupportFlatNotNulls<Varchar, Varchar>(false, false);
 }
 } // namespace

@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_library(velox_functions_aggregates SingleValueAccumulator.cpp)
+add_library(velox_functions_aggregates SingleValueAccumulator.cpp
+                                       AverageAggregateBase.cpp ValueSet.cpp)
 
 target_link_libraries(velox_functions_aggregates velox_exec
                       velox_presto_serializer Folly::folly)
 
 if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)
+elseif(${VELOX_BUILD_TEST_UTILS})
+  add_subdirectory(tests/utils)
 endif()

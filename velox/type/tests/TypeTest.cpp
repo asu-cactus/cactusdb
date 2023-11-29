@@ -32,6 +32,28 @@ void testTypeSerde(const TypePtr& type) {
 }
 } // namespace
 
+TEST(TypeTest, constructorThrow) {
+  EXPECT_NO_THROW(RowType({"a", "b"}, {VARCHAR(), INTEGER()}));
+
+  EXPECT_THROW(RowType({"a"}, {VARCHAR(), INTEGER()}), VeloxRuntimeError);
+  VELOX_ASSERT_THROW(
+      RowType({"a"}, {VARCHAR(), INTEGER()}),
+      "Mismatch names/types sizes: "
+      "[names: {'a'}, types: {VARCHAR, INTEGER}]");
+
+  EXPECT_THROW(RowType({"a", "b"}, {}), VeloxRuntimeError);
+  VELOX_ASSERT_THROW(
+      RowType({"a", "b"}, {}),
+      "Mismatch names/types sizes: "
+      "[names: {'a', 'b'}, types: { }]");
+
+  EXPECT_THROW(RowType({"a", "b"}, {VARCHAR(), nullptr}), VeloxRuntimeError);
+  VELOX_ASSERT_THROW(
+      RowType({"a", "b"}, {VARCHAR(), nullptr}),
+      "Child types cannot be null: "
+      "[names: {'a', 'b'}, types: {VARCHAR, NULL}]");
+}
+
 TEST(TypeTest, array) {
   auto arrayType = ARRAY(ARRAY(ARRAY(INTEGER())));
   EXPECT_EQ("ARRAY<ARRAY<ARRAY<INTEGER>>>", arrayType->toString());
@@ -63,6 +85,10 @@ TEST(TypeTest, integer) {
   EXPECT_EQ(int0->begin(), int0->end());
 
   testTypeSerde(int0);
+}
+
+TEST(TypeTest, hugeint) {
+  EXPECT_EQ(getType("HUGEINT", {}), HUGEINT());
 }
 
 TEST(TypeTest, timestamp) {
@@ -127,9 +153,14 @@ TEST(TypeTest, date) {
   EXPECT_EQ(date->toString(), "DATE");
   EXPECT_EQ(date->size(), 0);
   EXPECT_THROW(date->childAt(0), std::invalid_argument);
-  EXPECT_EQ(date->kind(), TypeKind::DATE);
-  EXPECT_STREQ(date->kindName(), "DATE");
+  EXPECT_EQ(date->kind(), TypeKind::INTEGER);
+  EXPECT_STREQ(date->kindName(), "INTEGER");
   EXPECT_EQ(date->begin(), date->end());
+
+  EXPECT_TRUE(date->kindEquals(INTEGER()));
+  EXPECT_NE(*date, *INTEGER());
+  EXPECT_FALSE(date->equivalent(*INTEGER()));
+  EXPECT_FALSE(INTEGER()->equivalent(*date));
 
   testTypeSerde(date);
 }
@@ -155,9 +186,32 @@ TEST(TypeTest, intervalDayTime) {
   testTypeSerde(interval);
 }
 
+TEST(TypeTest, intervalYearMonth) {
+  auto interval = INTERVAL_YEAR_MONTH();
+  EXPECT_EQ(interval->toString(), "INTERVAL YEAR TO MONTH");
+  EXPECT_EQ(interval->size(), 0);
+  EXPECT_THROW(interval->childAt(0), std::invalid_argument);
+  EXPECT_EQ(interval->kind(), TypeKind::INTEGER);
+  EXPECT_STREQ(interval->kindName(), "INTEGER");
+  EXPECT_EQ(interval->begin(), interval->end());
+
+  EXPECT_TRUE(interval->kindEquals(INTEGER()));
+  EXPECT_NE(*interval, *INTEGER());
+  EXPECT_FALSE(interval->equivalent(*INTEGER()));
+  EXPECT_FALSE(INTEGER()->equivalent(*interval));
+
+  int32_t month = kMonthInYear * 2 + 1;
+  EXPECT_EQ("2-1", INTERVAL_YEAR_MONTH()->valueToString(month));
+
+  month = kMonthInYear * -2 + -1;
+  EXPECT_EQ("-2-1", INTERVAL_YEAR_MONTH()->valueToString(month));
+
+  testTypeSerde(interval);
+}
+
 TEST(TypeTest, shortDecimal) {
   auto shortDecimal = DECIMAL(10, 5);
-  EXPECT_EQ(shortDecimal->toString(), "DECIMAL(10,5)");
+  EXPECT_EQ(shortDecimal->toString(), "DECIMAL(10, 5)");
   EXPECT_EQ(shortDecimal->size(), 0);
   EXPECT_THROW(shortDecimal->childAt(0), std::invalid_argument);
   EXPECT_EQ(shortDecimal->kind(), TypeKind::BIGINT);
@@ -190,7 +244,7 @@ TEST(TypeTest, shortDecimal) {
 
 TEST(TypeTest, longDecimal) {
   auto longDecimal = DECIMAL(30, 5);
-  EXPECT_EQ(longDecimal->toString(), "DECIMAL(30,5)");
+  EXPECT_EQ(longDecimal->toString(), "DECIMAL(30, 5)");
   EXPECT_EQ(longDecimal->size(), 0);
   EXPECT_THROW(longDecimal->childAt(0), std::invalid_argument);
   EXPECT_EQ(longDecimal->kind(), TypeKind::HUGEINT);
@@ -225,19 +279,15 @@ TEST(TypeTest, longDecimal) {
 }
 
 TEST(TypeTest, dateToString) {
-  Date epoch(0);
-  EXPECT_EQ(epoch.toString(), "1970-01-01");
+  EXPECT_EQ(DATE()->toString(0), "1970-01-01");
 
   // 50 years after epoch
-  Date jan2020(18262);
-  EXPECT_EQ(jan2020.toString(), "2020-01-01");
+  EXPECT_EQ(DATE()->toString(18262), "2020-01-01");
 
-  Date beforeEpoch(-5);
-  EXPECT_EQ(beforeEpoch.toString(), "1969-12-27");
+  EXPECT_EQ(DATE()->toString(-5), "1969-12-27");
 
   // 50 years before epoch
-  Date wayBeforeEpoch(-18262);
-  EXPECT_EQ(wayBeforeEpoch.toString(), "1920-01-02");
+  EXPECT_EQ(DATE()->toString(-18262), "1920-01-02");
 
   // Trying a very large -integer for boundary checks. Such values are tested in
   // ExpressionFuzzer.
@@ -246,70 +296,36 @@ TEST(TypeTest, dateToString) {
   // for the number of years, so the eventual results might look like garbage.
   // However, they are consistent with presto java so keeping the same
   // implementation.
-  Date dateOverflow(-1855961014);
-  EXPECT_EQ(dateOverflow.toString(), "-5079479-05-03");
-}
-
-TEST(TypeTest, dateComparison) {
-  Date epoch(0);
-  Date beforeEpoch(-5);
-  Date jan2020(18262);
-  Date jan2020Copy(18262);
-  Date dec2019(18261);
-
-  EXPECT_EQ(jan2020, jan2020Copy);
-  EXPECT_EQ(jan2020Copy, jan2020);
-
-  EXPECT_NE(jan2020, dec2019);
-  EXPECT_NE(dec2019, jan2020);
-  EXPECT_NE(epoch, beforeEpoch);
-
-  EXPECT_LT(dec2019, jan2020);
-  EXPECT_LT(beforeEpoch, epoch);
-
-  EXPECT_LE(jan2020, jan2020Copy);
-  EXPECT_LE(dec2019, jan2020);
-  EXPECT_LE(beforeEpoch, epoch);
-
-  EXPECT_GT(jan2020, dec2019);
-  EXPECT_GT(epoch, beforeEpoch);
-
-  EXPECT_GE(jan2020, jan2020Copy);
-  EXPECT_GE(jan2020, dec2019);
-  EXPECT_GE(epoch, beforeEpoch);
+  EXPECT_EQ(DATE()->toString(-1855961014), "-5079479-05-03");
 }
 
 TEST(TypeTest, parseStringToDate) {
   auto parseDate = [](const std::string& dateStr) {
-    Date returnDate;
-    parseTo(dateStr, returnDate);
-    return returnDate;
+    return DATE()->toDays(dateStr);
   };
 
   // Epoch.
-  EXPECT_EQ(parseDate("1970-01-01").days(), 0);
+  EXPECT_EQ(parseDate("1970-01-01"), 0);
 
   // 50 years after epoch.
-  EXPECT_EQ(parseDate("2020-01-01").days(), 18262);
+  EXPECT_EQ(parseDate("2020-01-01"), 18262);
 
   // Before epoch.
-  EXPECT_EQ(parseDate("1969-12-27").days(), -5);
+  EXPECT_EQ(parseDate("1969-12-27"), -5);
 
   // 50 years before epoch.
-  EXPECT_EQ(parseDate("1920-01-02").days(), -18262);
+  EXPECT_EQ(parseDate("1920-01-02"), -18262);
 
   // Century before epoch.
-  EXPECT_EQ(parseDate("1812-04-15").days(), -57604);
+  EXPECT_EQ(parseDate("1812-04-15"), -57604);
 
   // Century after epoch.
-  EXPECT_EQ(parseDate("2135-11-09").days(), 60577);
+  EXPECT_EQ(parseDate("2135-11-09"), 60577);
 }
 
 TEST(TypeTest, dateFormat) {
   auto parseDate = [](const std::string& dateStr) {
-    Date returnDate;
-    parseTo(dateStr, returnDate);
-    return returnDate;
+    return DATE()->toString(DATE()->toDays(dateStr));
   };
 
   EXPECT_EQ(fmt::format("{}", parseDate("2015-12-24")), "2015-12-24");
@@ -362,6 +378,7 @@ TEST(TypeTest, map) {
 }
 
 TEST(TypeTest, row) {
+  VELOX_ASSERT_THROW(ROW({{"a", nullptr}}), "Child types cannot be null");
   auto row0 = ROW({{"a", INTEGER()}, {"b", ROW({{"a", BIGINT()}})}});
   auto rowInner = row0->childAt(1);
   EXPECT_EQ(row0->toString(), "ROW<a:INTEGER,b:ROW<a:BIGINT>>");
@@ -407,16 +424,16 @@ TEST(TypeTest, row) {
   }
 
   auto row1 =
-      ROW({{"a,b", INTEGER()}, {"my \"column\"", ROW({{"#1", BIGINT()}})}});
+      ROW({{"a,b", INTEGER()}, {R"(my "column")", ROW({{"#1", BIGINT()}})}});
   EXPECT_EQ(
       row1->toString(),
-      "ROW<\"a,b\":INTEGER,\"my \"\"column\"\"\":ROW<\"#1\":BIGINT>>");
+      R"(ROW<"a,b":INTEGER,"my ""column""":ROW<"#1":BIGINT>>)");
   EXPECT_EQ(row1->nameOf(0), "a,b");
-  EXPECT_EQ(row1->nameOf(1), "my \"column\"");
-  EXPECT_EQ(row1->childAt(1)->toString(), "ROW<\"#1\":BIGINT>");
+  EXPECT_EQ(row1->nameOf(1), R"(my "column")");
+  EXPECT_EQ(row1->childAt(1)->toString(), R"(ROW<"#1":BIGINT>)");
 
   auto row2 = ROW({{"", INTEGER()}});
-  EXPECT_EQ(row2->toString(), "ROW<\"\":INTEGER>");
+  EXPECT_EQ(row2->toString(), R"(ROW<"":INTEGER>)");
   EXPECT_EQ(row2->nameOf(0), "");
 
   VELOX_ASSERT_THROW(createScalarType(TypeKind::ROW), "not a scalar type");
@@ -611,7 +628,7 @@ TEST(TypeTest, cpp2Type) {
   EXPECT_EQ(*CppToType<double>::create(), *DOUBLE());
   EXPECT_EQ(*CppToType<bool>::create(), *BOOLEAN());
   EXPECT_EQ(*CppToType<Timestamp>::create(), *TIMESTAMP());
-  EXPECT_EQ(*CppToType<Date>::create(), *DATE());
+  EXPECT_EQ(*CppToType<Date>::create(), *INTEGER());
   EXPECT_EQ(*CppToType<Array<int32_t>>::create(), *ARRAY(INTEGER()));
   auto type = CppToType<Map<int32_t, Map<int64_t, float>>>::create();
   EXPECT_EQ(*type, *MAP(INTEGER(), MAP(BIGINT(), REAL())));
@@ -765,6 +782,8 @@ TEST(TypeTest, unknown) {
   EXPECT_TRUE(unknownArray->containsUnknown());
 
   testTypeSerde(unknownArray);
+
+  ASSERT_EQ(0, unknownArray->elementType()->cppSizeInBytes());
 }
 
 TEST(TypeTest, isVariadicType) {
@@ -787,7 +806,6 @@ TEST(TypeTest, fromKindToScalerType) {
         TypeKind::VARCHAR,
         TypeKind::VARBINARY,
         TypeKind::TIMESTAMP,
-        TypeKind::DATE,
         TypeKind::UNKNOWN}) {
     SCOPED_TRACE(mapTypeKindToName(kind));
     auto type = fromKindToScalerType(kind);
@@ -804,4 +822,144 @@ TEST(TypeTest, fromKindToScalerType) {
     SCOPED_TRACE(mapTypeKindToName(kind));
     EXPECT_ANY_THROW(fromKindToScalerType(kind));
   }
+}
+
+TEST(TypeTest, rowEquvialentCheckWithChildRowsWithDifferentNames) {
+  std::vector<TypePtr> types;
+  std::vector<TypePtr> typesWithDifferentNames;
+  RowTypePtr childRowType1 =
+      ROW({"a", "b", "c"}, {TINYINT(), VARBINARY(), BIGINT()});
+  RowTypePtr childRowType2 =
+      ROW({"d", "e", "f"}, {TINYINT(), VARBINARY(), BIGINT()});
+  RowTypePtr childRowType3 =
+      ROW({"x", "y", "z"}, {TINYINT(), VARBINARY(), BIGINT()});
+  RowTypePtr childRowType1WithDifferentNames =
+      ROW({"A", "B", "C"}, {TINYINT(), VARBINARY(), BIGINT()});
+  RowTypePtr childRowType2WithDifferentNames =
+      ROW({"D", "E", "F"}, {TINYINT(), VARBINARY(), BIGINT()});
+  RowTypePtr childRowType3WithDifferentNames =
+      ROW({"X", "Y", "Z"}, {TINYINT(), VARBINARY(), BIGINT()});
+  RowTypePtr rowType =
+      ROW({"A", "B", "C"}, {childRowType1, childRowType2, childRowType3});
+  RowTypePtr rowTypeWithDifferentName =
+      ROW({"a", "b", "c"},
+          {childRowType1WithDifferentNames,
+           childRowType2WithDifferentNames,
+           childRowType3WithDifferentNames});
+  ASSERT_TRUE(rowTypeWithDifferentName->equivalent(*rowType));
+}
+
+TEST(TypeTest, unionWith) {
+  std::vector<TypePtr> types;
+  std::vector<TypePtr> typesWithDifferentNames;
+  RowTypePtr emptyRowType = ROW({}, {});
+  RowTypePtr childRowType1 =
+      ROW({"a", "b", "c"}, {TINYINT(), VARBINARY(), BIGINT()});
+  RowTypePtr childRowType2 =
+      ROW({"d", "e", "f"}, {TINYINT(), VARBINARY(), BIGINT()});
+  RowTypePtr resultRowType =
+      ROW({"a", "b", "c", "d", "e", "f"},
+          {TINYINT(), VARBINARY(), BIGINT(), TINYINT(), VARBINARY(), BIGINT()});
+  RowTypePtr resultRowType2 =
+      ROW({"a", "b", "c", "a", "b", "c"},
+          {TINYINT(), VARBINARY(), BIGINT(), TINYINT(), VARBINARY(), BIGINT()});
+
+  ASSERT_TRUE(
+      emptyRowType->unionWith(childRowType1)->equivalent(*childRowType1));
+  ASSERT_TRUE(
+      childRowType1->unionWith(childRowType2)->equivalent(*resultRowType));
+  ASSERT_TRUE(
+      childRowType1->unionWith(childRowType1)->equivalent(*resultRowType2));
+}
+
+TEST(TypeTest, orderableComparable) {
+  // Scalar type.
+  EXPECT_TRUE(INTEGER()->isOrderable());
+  EXPECT_TRUE(INTEGER()->isComparable());
+  EXPECT_TRUE(REAL()->isOrderable());
+  EXPECT_TRUE(REAL()->isComparable());
+  EXPECT_TRUE(VARCHAR()->isOrderable());
+  EXPECT_TRUE(VARCHAR()->isComparable());
+  EXPECT_TRUE(BIGINT()->isOrderable());
+  EXPECT_TRUE(BIGINT()->isComparable());
+  EXPECT_TRUE(DOUBLE()->isOrderable());
+  EXPECT_TRUE(DOUBLE()->isComparable());
+
+  // Map type.
+  auto mapType = MAP(INTEGER(), REAL());
+  EXPECT_FALSE(mapType->isOrderable());
+  EXPECT_TRUE(mapType->isComparable());
+
+  // Array type.
+  auto arrayType = ARRAY(INTEGER());
+  EXPECT_TRUE(arrayType->isOrderable());
+  EXPECT_TRUE(arrayType->isComparable());
+
+  arrayType = ARRAY(mapType);
+  EXPECT_FALSE(arrayType->isOrderable());
+  EXPECT_TRUE(arrayType->isComparable());
+
+  // Row type.
+  auto rowType = ROW({INTEGER(), REAL()});
+  EXPECT_TRUE(rowType->isOrderable());
+  EXPECT_TRUE(rowType->isComparable());
+
+  rowType = ROW({INTEGER(), mapType});
+  EXPECT_FALSE(rowType->isOrderable());
+  EXPECT_TRUE(rowType->isComparable());
+
+  // Decimal types.
+  auto shortDecimal = DECIMAL(10, 5);
+  EXPECT_TRUE(shortDecimal->isOrderable());
+  EXPECT_TRUE(shortDecimal->isComparable());
+
+  auto longDecimal = DECIMAL(30, 5);
+  EXPECT_TRUE(longDecimal->isOrderable());
+  EXPECT_TRUE(longDecimal->isComparable());
+
+  // Function type.
+  auto functionType = std::make_shared<FunctionType>(
+      std::vector<TypePtr>{BIGINT(), VARCHAR()}, BOOLEAN());
+  EXPECT_FALSE(functionType->isOrderable());
+  EXPECT_FALSE(functionType->isComparable());
+
+  // Mixed.
+  mapType = MAP(INTEGER(), functionType);
+  EXPECT_FALSE(mapType->isOrderable());
+  EXPECT_FALSE(mapType->isComparable());
+
+  arrayType = ARRAY(mapType);
+  EXPECT_FALSE(arrayType->isOrderable());
+  EXPECT_FALSE(arrayType->isComparable());
+
+  rowType = ROW({INTEGER(), mapType});
+  EXPECT_FALSE(rowType->isOrderable());
+  EXPECT_FALSE(rowType->isComparable());
+}
+
+TEST(TypeTest, functionTypeEquivalent) {
+  auto functionType = std::make_shared<FunctionType>(
+      std::vector<TypePtr>{BIGINT(), VARCHAR()}, BOOLEAN());
+  auto otherFunctionType =
+      std::make_shared<FunctionType>(std::vector<TypePtr>{BIGINT()}, BOOLEAN());
+  EXPECT_FALSE(functionType->equivalent(*otherFunctionType));
+
+  otherFunctionType = std::make_shared<FunctionType>(
+      std::vector<TypePtr>{BIGINT(), VARCHAR()}, BOOLEAN());
+  EXPECT_TRUE(functionType->equivalent(*otherFunctionType));
+
+  functionType = std::make_shared<FunctionType>(
+      std::vector<TypePtr>{ARRAY(BIGINT())}, BOOLEAN());
+  otherFunctionType = std::make_shared<FunctionType>(
+      std::vector<TypePtr>{ARRAY(BIGINT())}, BOOLEAN());
+  EXPECT_TRUE(functionType->equivalent(*otherFunctionType));
+
+  functionType = std::make_shared<FunctionType>(
+      std::vector<TypePtr>{MAP(BIGINT(), VARCHAR())}, BOOLEAN());
+  EXPECT_FALSE(functionType->equivalent(*otherFunctionType));
+
+  otherFunctionType = std::make_shared<FunctionType>(
+      std::vector<TypePtr>{MAP(BIGINT(), VARCHAR())}, BOOLEAN());
+
+  EXPECT_TRUE(functionType->equivalent(*otherFunctionType));
 }

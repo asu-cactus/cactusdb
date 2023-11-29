@@ -15,8 +15,9 @@
  */
 #pragma once
 
-#include "velox/external/duckdb/duckdb.hpp"
 #include "velox/type/Type.h"
+
+#include <duckdb.hpp> // @manual
 
 namespace facebook::velox {
 class variant;
@@ -28,7 +29,9 @@ namespace facebook::velox::duckdb {
 ::duckdb::LogicalType fromVeloxType(const TypePtr& type);
 
 /// Converts DuckDB type to Velox type.
-TypePtr toVeloxType(::duckdb::LogicalType type);
+TypePtr toVeloxType(
+    ::duckdb::LogicalType type,
+    bool fileColumnNamesReadAsLowerCase = false);
 
 static ::duckdb::timestamp_t veloxTimestampToDuckDB(
     const Timestamp& timestamp) {
@@ -39,7 +42,18 @@ static ::duckdb::timestamp_t veloxTimestampToDuckDB(
 static Timestamp duckdbTimestampToVelox(
     const ::duckdb::timestamp_t& timestamp) {
   auto micros = ::duckdb::Timestamp::GetEpochMicroSeconds(timestamp);
-  return Timestamp(micros / 1000000, (micros % 1000000) * 1000);
+
+  auto seconds = micros / 1'000'000;
+  auto nanoSeconds = (micros % 1'000'000) * 1'000;
+
+  // Make sure nanoseconds are >= 0 even if timestamp represents time before
+  // epoch.
+  if (nanoSeconds < 0) {
+    seconds--;
+    nanoSeconds += 1'000'000'000;
+  }
+
+  return Timestamp(seconds, nanoSeconds);
 }
 
 // Converts a duckDB Value (class that holds an arbitrary data type) into
@@ -185,15 +199,15 @@ struct DuckTimestampConversion {
 
 struct DuckDateConversion {
   typedef ::duckdb::date_t DUCK_TYPE;
-  typedef Date VELOX_TYPE;
+  typedef int32_t VELOX_TYPE;
 
   static ::duckdb::date_t toDuck(
-      const Date& input,
+      const int32_t& input,
       ::duckdb::Vector& /* unused */) {
-    return ::duckdb::Date::EpochDaysToDate(input.days());
+    return ::duckdb::Date::EpochDaysToDate(input);
   }
-  static Date toVelox(const ::duckdb::date_t& input) {
-    return Date(::duckdb::Date::EpochDays(input));
+  static int32_t toVelox(const ::duckdb::date_t& input) {
+    return ::duckdb::Date::EpochDays(input);
   }
 };
 

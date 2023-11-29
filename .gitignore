@@ -1,7 +1,7 @@
 #==============================================================================#
 # This file specifies intentionally untracked files that git should ignore.
 #==============================================================================#
-
+data/
 #==============================================================================#
 # File extensions to be ignored anywhere in the tree.
 #==============================================================================#
@@ -89,6 +89,7 @@ _build/
 *.swp
 a.out
 CMake/resolve_dependency_module/boost/FindBoost.cmake
+__cmake_systeminformation/
 
 #==============================================================================#
 # Kate Swap Files

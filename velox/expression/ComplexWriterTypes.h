@@ -17,6 +17,7 @@
 #pragma once
 #include <folly/Likely.h>
 #include <cinttypes>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -27,6 +28,7 @@
 
 #include "velox/common/base/Exceptions.h"
 #include "velox/core/CoreTypeSystem.h"
+#include "velox/core/Metaprogramming.h"
 #include "velox/expression/ComplexViewTypes.h"
 #include "velox/expression/UdfTypeResolver.h"
 #include "velox/type/Type.h"
@@ -90,7 +92,7 @@ struct PrimitiveWriter {
 
 template <typename V>
 bool constexpr provide_std_interface =
-    CppToType<V>::isPrimitiveType && !std::is_same_v<Varchar, V> &&
+    SimpleTypeTrait<V>::isPrimitiveType && !std::is_same_v<Varchar, V> &&
     !std::is_same_v<Varbinary, V> && !std::is_same_v<Any, V>;
 
 // bool is an exception, it requires commit but also provides std::interface.
@@ -104,6 +106,9 @@ template <typename V>
 class ArrayWriter {
   using child_writer_t = VectorWriter<V, void>;
   using element_t = typename child_writer_t::exec_out_t;
+
+  static constexpr bool hasStringValue =
+      std::is_same_v<V, Varchar> || std::is_same_v<V, Varbinary>;
 
  public:
   // Note: size is with respect to the current size of this array being written.
@@ -211,6 +216,16 @@ class ArrayWriter {
     add_items(data);
   }
 
+  // Don't mutate elementVecotr_ through this API unless you know what you're
+  // doing.
+  typename child_writer_t::vector_t* elementsVector() {
+    return elementsVector_;
+  }
+
+  vector_size_t valuesOffset() const {
+    return valuesOffset_;
+  }
+
   // Any vector type with std-like optional-free interface.
   template <typename VectorType>
   void add_items(const VectorType& data) {
@@ -224,7 +239,14 @@ class ArrayWriter {
     } else {
       for (const auto& item : data) {
         auto& writer = add_item();
-        writer.copy_from(item);
+        // Handle copy_from for opaque and opaque custom types.
+        using unwrapped_type = typename UnwrapCustomType<V>::type;
+        if constexpr (util::is_shared_ptr<unwrapped_type>::value) {
+          writer =
+              std::make_shared<typename unwrapped_type::element_type>(item);
+        } else {
+          writer.copy_from(item);
+        }
       }
     }
   }
@@ -244,7 +266,33 @@ class ArrayWriter {
           this->operator[](i + start) = std::nullopt;
         }
       }
+    } else if constexpr (hasStringValue) {
+      auto* vector = arrayView.elementsVector();
+      bool found = false;
+      // Caching at this layer is much faster.
+      for (auto* item : vectorsWithAcquiredBuffers_) {
+        if (item == vector) {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        vectorsWithAcquiredBuffers_.push_back(vector);
+        this->elementsVector_->acquireSharedStringBuffers(vector);
+      }
+      auto start = length_ + valuesOffset_;
+      resize(length_ + arrayView.size());
+      for (const auto& element : arrayView) {
+        if (element.has_value()) {
+          elementsVector_->setNoCopy(start, element.value());
+        } else {
+          elementsVector_->setNull(start, true);
+        }
+        start++;
+      }
     } else {
+      reserve(size() + arrayView.size());
       for (const auto& item : arrayView) {
         if (item.has_value()) {
           auto& writer = add_item();
@@ -296,6 +344,11 @@ class ArrayWriter {
 
   // Tracks the capacity of elements vector.
   vector_size_t elementsVectorCapacity_ = 0;
+
+  typename std::conditional<
+      hasStringValue,
+      std::vector<const BaseVector*>,
+      std::byte>::type vectorsWithAcquiredBuffers_;
 
   template <typename A, typename B>
   friend struct VectorWriter;

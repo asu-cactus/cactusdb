@@ -63,6 +63,26 @@ void registerSimpleFunctions(const std::string& prefix) {
       {prefix + "minus"});
   registerFunction<DatePlusIntervalDayTime, Date, Date, IntervalDayTime>(
       {prefix + "plus"});
+  registerFunction<
+      TimestampMinusIntervalDayTime,
+      Timestamp,
+      Timestamp,
+      IntervalDayTime>({prefix + "minus"});
+  registerFunction<
+      TimestampPlusIntervalDayTime,
+      Timestamp,
+      Timestamp,
+      IntervalDayTime>({prefix + "plus"});
+  registerFunction<
+      IntervalDayTimePlusTimestamp,
+      Timestamp,
+      IntervalDayTime,
+      Timestamp>({prefix + "plus"});
+  registerFunction<
+      TimestampMinusFunction,
+      IntervalDayTime,
+      Timestamp,
+      Timestamp>({prefix + "minus"});
   registerFunction<DayFunction, int64_t, TimestampWithTimezone>(
       {prefix + "day", prefix + "day_of_month"});
   registerFunction<DayOfWeekFunction, int64_t, Timestamp>(
@@ -87,6 +107,12 @@ void registerSimpleFunctions(const std::string& prefix) {
   registerFunction<HourFunction, int64_t, Date>({prefix + "hour"});
   registerFunction<HourFunction, int64_t, TimestampWithTimezone>(
       {prefix + "hour"});
+  registerFunction<LastDayOfMonthFunction, Date, Timestamp>(
+      {prefix + "last_day_of_month"});
+  registerFunction<LastDayOfMonthFunction, Date, Date>(
+      {prefix + "last_day_of_month"});
+  registerFunction<LastDayOfMonthFunction, Date, TimestampWithTimezone>(
+      {prefix + "last_day_of_month"});
   registerFunction<MinuteFunction, int64_t, Timestamp>({prefix + "minute"});
   registerFunction<MinuteFunction, int64_t, Date>({prefix + "minute"});
   registerFunction<MinuteFunction, int64_t, TimestampWithTimezone>(
@@ -114,10 +140,22 @@ void registerSimpleFunctions(const std::string& prefix) {
       {prefix + "date_add"});
   registerFunction<DateAddFunction, Timestamp, Varchar, int64_t, Timestamp>(
       {prefix + "date_add"});
+  registerFunction<
+      DateAddFunction,
+      TimestampWithTimezone,
+      Varchar,
+      int64_t,
+      TimestampWithTimezone>({prefix + "date_add"});
   registerFunction<DateDiffFunction, int64_t, Varchar, Date, Date>(
       {prefix + "date_diff"});
   registerFunction<DateDiffFunction, int64_t, Varchar, Timestamp, Timestamp>(
       {prefix + "date_diff"});
+  registerFunction<
+      DateDiffFunction,
+      int64_t,
+      Varchar,
+      TimestampWithTimezone,
+      TimestampWithTimezone>({prefix + "date_diff"});
   registerFunction<DateFormatFunction, Varchar, Timestamp, Varchar>(
       {prefix + "date_format"});
   registerFunction<DateFormatFunction, Varchar, TimestampWithTimezone, Varchar>(

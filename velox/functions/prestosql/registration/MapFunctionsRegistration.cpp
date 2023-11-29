@@ -26,9 +26,20 @@ void registerMapFunctions(const std::string& prefix) {
       udf_transform_values, prefix + "transform_values");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_map, prefix + "map");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_map_entries, prefix + "map_entries");
+  VELOX_REGISTER_VECTOR_FUNCTION(
+      udf_map_from_entries, prefix + "map_from_entries");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_map_keys, prefix + "map_keys");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_map_values, prefix + "map_values");
   VELOX_REGISTER_VECTOR_FUNCTION(udf_map_zip_with, prefix + "map_zip_with");
+
+  VELOX_REGISTER_VECTOR_FUNCTION(udf_all_keys_match, prefix + "all_keys_match");
+  VELOX_REGISTER_VECTOR_FUNCTION(udf_any_keys_match, prefix + "any_keys_match");
+  VELOX_REGISTER_VECTOR_FUNCTION(udf_no_keys_match, prefix + "no_keys_match");
+
+  VELOX_REGISTER_VECTOR_FUNCTION(
+      udf_any_values_match, prefix + "any_values_match");
+  VELOX_REGISTER_VECTOR_FUNCTION(
+      udf_no_values_match, prefix + "no_values_match");
 
   registerMapConcatFunction(prefix + "map_concat");
 }

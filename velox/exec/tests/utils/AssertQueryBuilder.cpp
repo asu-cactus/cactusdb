@@ -57,10 +57,23 @@ AssertQueryBuilder& AssertQueryBuilder::maxDrivers(int32_t maxDrivers) {
   return *this;
 }
 
+AssertQueryBuilder& AssertQueryBuilder::destination(int32_t destination) {
+  params_.destination = destination;
+  return *this;
+}
+
 AssertQueryBuilder& AssertQueryBuilder::config(
     const std::string& key,
     const std::string& value) {
   configs_[key] = value;
+  return *this;
+}
+
+AssertQueryBuilder& AssertQueryBuilder::configs(
+    const std::unordered_map<std::string, std::string>& values) {
+  for (auto& entry : values) {
+    configs_[entry.first] = entry.second;
+  }
   return *this;
 }
 
@@ -180,6 +193,13 @@ std::shared_ptr<Task> AssertQueryBuilder::assertTypeAndNumRows(
 }
 
 RowVectorPtr AssertQueryBuilder::copyResults(memory::MemoryPool* pool) {
+  std::shared_ptr<Task> unused;
+  return copyResults(pool, unused);
+}
+
+RowVectorPtr AssertQueryBuilder::copyResults(
+    memory::MemoryPool* pool,
+    std::shared_ptr<Task>& task) {
   auto [cursor, results] = readCursor();
 
   if (results.empty()) {
@@ -200,6 +220,7 @@ RowVectorPtr AssertQueryBuilder::copyResults(memory::MemoryPool* pool) {
     copyCount += result->size();
   }
 
+  task = cursor->task();
   return copy;
 }
 
@@ -208,10 +229,18 @@ AssertQueryBuilder::readCursor() {
   VELOX_CHECK_NOT_NULL(params_.planNode);
 
   if (!configs_.empty() || !connectorConfigs_.empty()) {
-    if (!params_.queryCtx) {
+    if (params_.queryCtx == nullptr) {
       // NOTE: the destructor of 'executor_' will wait for all the async task
       // activities to finish on AssertQueryBuilder dtor.
-      params_.queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
+      static std::atomic<uint64_t> cursorQueryId{0};
+      params_.queryCtx = std::make_shared<core::QueryCtx>(
+          executor_.get(),
+          core::QueryConfig({}),
+          std::unordered_map<std::string, std::shared_ptr<Config>>{},
+          cache::AsyncDataCache::getInstance(),
+          nullptr,
+          nullptr,
+          fmt::format("TaskCursorQuery_{}", cursorQueryId++));
     }
   }
   if (!configs_.empty()) {

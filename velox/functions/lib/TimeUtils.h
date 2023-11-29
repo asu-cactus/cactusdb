@@ -19,7 +19,6 @@
 #include "velox/core/QueryConfig.h"
 #include "velox/external/date/tz.h"
 #include "velox/functions/Macros.h"
-#include "velox/type/Date.h"
 
 namespace facebook::velox::functions {
 namespace {
@@ -52,22 +51,45 @@ FOLLY_ALWAYS_INLINE
 std::tm getDateTime(Timestamp timestamp, const date::time_zone* timeZone) {
   int64_t seconds = getSeconds(timestamp, timeZone);
   std::tm dateTime;
-  VELOX_USER_CHECK_NOT_NULL(
-      gmtime_r((const time_t*)&seconds, &dateTime),
+  VELOX_USER_CHECK(
+      Timestamp::epochToUtc(seconds, dateTime),
       "Timestamp is too large: {} seconds since epoch",
       seconds);
   return dateTime;
 }
 
+// days is the number of days since Epoch.
 FOLLY_ALWAYS_INLINE
-std::tm getDateTime(Date date) {
-  int64_t seconds = date.days() * kSecondsInDay;
+std::tm getDateTime(int32_t days) {
+  int64_t seconds = days * kSecondsInDay;
   std::tm dateTime;
-  VELOX_USER_CHECK_NOT_NULL(
-      gmtime_r((const time_t*)&seconds, &dateTime),
+  VELOX_USER_CHECK(
+      Timestamp::epochToUtc(seconds, dateTime),
       "Date is too large: {} days",
-      date.days());
+      days);
   return dateTime;
+}
+
+FOLLY_ALWAYS_INLINE int getYear(const std::tm& time) {
+  // tm_year: years since 1900.
+  return 1900 + time.tm_year;
+}
+
+FOLLY_ALWAYS_INLINE int getMonth(const std::tm& time) {
+  // tm_mon: months since January – [0, 11].
+  return 1 + time.tm_mon;
+}
+
+FOLLY_ALWAYS_INLINE int getDay(const std::tm& time) {
+  return time.tm_mday;
+}
+
+FOLLY_ALWAYS_INLINE int32_t getQuarter(const std::tm& time) {
+  return time.tm_mon / 3 + 1;
+}
+
+FOLLY_ALWAYS_INLINE int32_t getDayOfYear(const std::tm& time) {
+  return time.tm_yday + 1;
 }
 
 template <typename T>

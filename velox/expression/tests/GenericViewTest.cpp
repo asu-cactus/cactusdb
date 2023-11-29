@@ -143,7 +143,7 @@ TEST_F(GenericViewTest, compare) {
   ASSERT_NE(reader[0].compare(reader[1], flags).value(), 0);
   ASSERT_NE(reader[0].compare(reader[2], flags).value(), 0);
 
-  flags.stopAtNull = true;
+  flags.nullHandlingMode = CompareFlags::NullHandlingMode::kStopAtNull;
   ASSERT_FALSE(reader[0].compare(reader[2], flags).has_value());
   ASSERT_TRUE(reader[0].compare(reader[1], flags).has_value());
 }
@@ -824,6 +824,25 @@ TEST_F(GenericViewTest, allGenericExceptTop) {
   testAllGenericExceptTop<Row<Any, Any>>(true);
   testAllGenericExceptTop<Row<>>(true);
   testAllGenericExceptTop<Row<Any>>(true);
+}
+
+TEST_F(GenericViewTest, dictionaryVectorInput) {
+  auto vector = makeFlatVector<int32_t>({1, 2, 3, 4, 5});
+  BufferPtr indices =
+      AlignedBuffer::allocate<vector_size_t>(5, execCtx_.pool());
+  auto rawIndices = indices->asMutable<vector_size_t>();
+  for (auto i = 0; i < 5; ++i) {
+    // 13 and 10 are coprime so this shuffles the indices.
+    rawIndices[i] = 4 - i;
+  }
+
+  auto dictVector = wrapInDictionary(indices, 5, vector);
+
+  DecodedVector decoded;
+  exec::VectorReader<Any> reader(decode(decoded, *dictVector.get()));
+  for (int i = 0; i < 4; i++) {
+    ASSERT_EQ(reader[i].castTo<int32_t>(), 5 - i);
+  }
 }
 
 } // namespace

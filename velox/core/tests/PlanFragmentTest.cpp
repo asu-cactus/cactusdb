@@ -125,10 +125,13 @@ TEST_F(PlanFragmentTest, aggregationCanSpill) {
   std::vector<std::string> emptyAggregateNames{};
   std::vector<TypedExprPtr> aggregateInputs{
       std::make_shared<InputTypedExpr>(BIGINT())};
-  const std::vector<CallTypedExprPtr> aggregates{
-      std::make_shared<core::CallTypedExpr>(BIGINT(), aggregateInputs, "sum")};
-  const std::vector<CallTypedExprPtr> emptyAggregates{};
-  const std::vector<FieldAccessTypedExprPtr> emptyAggregateMasks;
+  const std::vector<AggregationNode::Aggregate> aggregates{
+      {std::make_shared<core::CallTypedExpr>(BIGINT(), aggregateInputs, "sum"),
+       {},
+       nullptr,
+       {},
+       {}}};
+  const std::vector<AggregationNode::Aggregate> emptyAggregates{};
 
   struct {
     AggregationNode::Step aggregationStep;
@@ -151,7 +154,7 @@ TEST_F(PlanFragmentTest, aggregationCanSpill) {
   } testSettings[] = {
       {AggregationNode::Step::kSingle, false, true, false, false, false},
       {AggregationNode::Step::kSingle, true, false, false, false, false},
-      {AggregationNode::Step::kSingle, true, true, true, false, false},
+      {AggregationNode::Step::kSingle, true, true, true, false, true},
       {AggregationNode::Step::kSingle, true, true, false, true, false},
       {AggregationNode::Step::kSingle, true, true, false, false, true},
       {AggregationNode::Step::kIntermediate, false, true, false, false, false},
@@ -164,11 +167,11 @@ TEST_F(PlanFragmentTest, aggregationCanSpill) {
       {AggregationNode::Step::kPartial, true, true, true, false, false},
       {AggregationNode::Step::kPartial, true, true, false, true, false},
       {AggregationNode::Step::kPartial, true, true, false, false, false},
-      {AggregationNode::Step::kSingle, false, true, false, false, false},
-      {AggregationNode::Step::kSingle, true, false, false, false, false},
-      {AggregationNode::Step::kSingle, true, true, true, false, false},
-      {AggregationNode::Step::kSingle, true, true, false, true, false},
-      {AggregationNode::Step::kSingle, true, true, false, false, true}};
+      {AggregationNode::Step::kFinal, false, true, false, false, false},
+      {AggregationNode::Step::kFinal, true, false, false, false, false},
+      {AggregationNode::Step::kFinal, true, true, true, false, true},
+      {AggregationNode::Step::kFinal, true, true, false, true, false},
+      {AggregationNode::Step::kFinal, true, true, false, false, true}};
 
   for (const auto& testData : testSettings) {
     SCOPED_TRACE(testData.debugString());
@@ -179,7 +182,6 @@ TEST_F(PlanFragmentTest, aggregationCanSpill) {
         testData.hasPreAggregation ? preGroupingKeys : emptyPreGroupingKeys,
         testData.isDistinct ? emptyAggregateNames : aggregateNames,
         testData.isDistinct ? emptyAggregates : aggregates,
-        emptyAggregateMasks,
         false,
         valueNode_);
     auto queryCtx = getSpillQueryCtx(

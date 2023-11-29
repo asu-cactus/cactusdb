@@ -59,6 +59,7 @@ LogicalType fromVeloxType(const TypePtr& type) {
     auto [precision, scale] = getDecimalPrecisionScale(*type);
     return LogicalType::DECIMAL(precision, scale);
   }
+
   switch (type->kind()) {
     case TypeKind::BOOLEAN:
       return LogicalType::BOOLEAN;
@@ -67,9 +68,15 @@ LogicalType fromVeloxType(const TypePtr& type) {
     case TypeKind::SMALLINT:
       return LogicalType::SMALLINT;
     case TypeKind::INTEGER:
+      if (type->isIntervalYearMonth()) {
+        return LogicalType::INTERVAL;
+      }
+      if (type->isDate()) {
+        return LogicalType::DATE;
+      }
       return LogicalType::INTEGER;
     case TypeKind::BIGINT:
-      if (isIntervalDayTimeType(type)) {
+      if (type->isIntervalDayTime()) {
         return LogicalType::INTERVAL;
       }
       return LogicalType::BIGINT;
@@ -81,8 +88,6 @@ LogicalType fromVeloxType(const TypePtr& type) {
       return LogicalType::VARCHAR;
     case TypeKind::TIMESTAMP:
       return LogicalType::TIMESTAMP;
-    case TypeKind::DATE:
-      return LogicalType::DATE;
     case TypeKind::ARRAY:
       return LogicalType::LIST(fromVeloxType(type->childAt(0)));
     case TypeKind::MAP:
@@ -105,7 +110,7 @@ LogicalType fromVeloxType(const TypePtr& type) {
 }
 
 //! Type mapping for DuckDB -> velox conversions, we support more types here
-TypePtr toVeloxType(LogicalType type) {
+TypePtr toVeloxType(LogicalType type, bool fileColumnNamesReadAsLowerCase) {
   switch (type.id()) {
     case LogicalTypeId::SQLNULL:
       return UNKNOWN();
@@ -141,12 +146,14 @@ TypePtr toVeloxType(LogicalType type) {
       return VARBINARY();
     case LogicalTypeId::LIST: {
       auto childType = ::duckdb::ListType::GetChildType(type);
-      return ARRAY(toVeloxType(childType));
+      return ARRAY(toVeloxType(childType, fileColumnNamesReadAsLowerCase));
     }
     case LogicalTypeId::MAP: {
       auto keyType = ::duckdb::MapType::KeyType(type);
       auto valueType = ::duckdb::MapType::ValueType(type);
-      return MAP(toVeloxType(keyType), toVeloxType(valueType));
+      return MAP(
+          toVeloxType(keyType, fileColumnNamesReadAsLowerCase),
+          toVeloxType(valueType, fileColumnNamesReadAsLowerCase));
     }
     case LogicalTypeId::STRUCT: {
       std::vector<std::string> names;
@@ -157,9 +164,14 @@ TypePtr toVeloxType(LogicalType type) {
       types.reserve(numChildren);
 
       for (auto i = 0; i < numChildren; ++i) {
-        names.push_back(::duckdb::StructType::GetChildName(type, i));
-        types.push_back(
-            toVeloxType(::duckdb::StructType::GetChildType(type, i)));
+        auto name = ::duckdb::StructType::GetChildName(type, i);
+        if (fileColumnNamesReadAsLowerCase) {
+          folly::toLowerAscii(name);
+        }
+        names.push_back(std::move(name));
+        types.push_back(toVeloxType(
+            ::duckdb::StructType::GetChildType(type, i),
+            fileColumnNamesReadAsLowerCase));
       }
       return ROW(std::move(names), std::move(types));
     }
@@ -188,12 +200,16 @@ variant duckValueToVariant(const Value& val) {
       return variant(val.GetValue<float>());
     case LogicalTypeId::DOUBLE:
       return variant(val.GetValue<double>());
+    case LogicalTypeId::TIMESTAMP:
+      return variant(duckdbTimestampToVelox(val.GetValue<timestamp_t>()));
     case LogicalTypeId::DECIMAL:
       return decimalVariant(val);
     case LogicalTypeId::VARCHAR:
       return variant(val.GetValue<std::string>());
     case LogicalTypeId::BLOB:
       return variant::binary(val.GetValue<std::string>());
+    case LogicalTypeId::DATE:
+      return variant(val.GetValue<::duckdb::date_t>().days);
     default:
       throw std::runtime_error(
           "unsupported type for duckdb value -> velox  variant conversion: " +

@@ -15,12 +15,12 @@
  */
 #pragma once
 
+#include "velox/exec/Aggregate.h"
 #include "velox/exec/AggregationMasks.h"
 #include "velox/exec/Operator.h"
 
 namespace facebook::velox::exec {
 
-class Aggregate;
 class RowContainer;
 
 class StreamingAggregation : public Operator {
@@ -29,6 +29,8 @@ class StreamingAggregation : public Operator {
       int32_t operatorId,
       DriverCtx* driverCtx,
       const std::shared_ptr<const core::AggregationNode>& aggregationNode);
+
+  void initialize() override;
 
   void addInput(RowVectorPtr input) override;
 
@@ -70,6 +72,9 @@ class StreamingAggregation : public Operator {
 
   /// Maximum number of rows in the output batch.
   const uint32_t outputBatchSize_;
+
+  // Used at initialize() and gets reset() afterward.
+  std::shared_ptr<const core::AggregationNode> aggregationNode_;
 
   const core::AggregationNode::Step step_;
 

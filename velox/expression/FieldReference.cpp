@@ -16,20 +16,56 @@
 
 #include "velox/expression/FieldReference.h"
 
+#include "velox/expression/PeeledEncoding.h"
+
 namespace facebook::velox::exec {
 
-void FieldReference::evalSpecialForm(
+void FieldReference::computeDistinctFields() {
+  SpecialForm::computeDistinctFields();
+  if (inputs_.empty()) {
+    mergeFields(
+        distinctFields_,
+        multiplyReferencedFields_,
+        {this->as<FieldReference>()});
+  }
+}
+
+// Fast path to avoid copying result.  An alternative way to do this is to
+// ensure that children has null if parent has nulls on corresponding rows,
+// whenever the RowVector is constructed or mutated (eager propagation of
+// nulls).  The current lazy propagation might still be better (more efficient)
+// when adding extra nulls.
+bool FieldReference::addNullsFast(
+    const SelectivityVector& rows,
+    EvalCtx& context,
+    VectorPtr& result,
+    const RowVector* row) {
+  if (result) {
+    return false;
+  }
+  auto& child =
+      inputs_.empty() ? context.getField(index_) : row->childAt(index_);
+  if (row->mayHaveNulls()) {
+    if (!child.unique()) {
+      return false;
+    }
+    addNulls(rows, row->rawNulls(), context, const_cast<VectorPtr&>(child));
+  }
+  result = child;
+  return true;
+}
+
+void FieldReference::apply(
     const SelectivityVector& rows,
     EvalCtx& context,
     VectorPtr& result) {
-  if (result) {
-    context.ensureWritable(rows, type_, result);
-  }
   const RowVector* row;
   DecodedVector decoded;
   VectorPtr input;
-  VectorRecycler inputRecycler(input, context.vectorPool());
+  std::shared_ptr<PeeledEncoding> peeledEncoding;
   bool useDecode = false;
+  LocalSelectivityVector nonNullRowsHolder(*context.execCtx());
+  const SelectivityVector* nonNullRows = &rows;
   if (inputs_.empty()) {
     row = context.row();
   } else {
@@ -47,51 +83,78 @@ void FieldReference::evalSpecialForm(
     }
 
     decoded.decode(*input, rows);
+    if (decoded.mayHaveNulls()) {
+      nonNullRowsHolder.get(rows);
+      nonNullRowsHolder->deselectNulls(
+          decoded.nulls(), rows.begin(), rows.end());
+      nonNullRows = nonNullRowsHolder.get();
+      if (!nonNullRows->hasSelections()) {
+        addNulls(rows, decoded.nulls(), context, result);
+        return;
+      }
+    }
     useDecode = !decoded.isIdentityMapping();
-    const BaseVector* base = decoded.base();
-    VELOX_CHECK(base->encoding() == VectorEncoding::Simple::ROW);
-    row = base->as<const RowVector>();
+    if (useDecode) {
+      std::vector<VectorPtr> peeledVectors;
+      LocalDecodedVector localDecoded{context};
+      peeledEncoding = PeeledEncoding::peel(
+          {input}, *nonNullRows, localDecoded, true, peeledVectors);
+      VELOX_CHECK_NOT_NULL(peeledEncoding);
+      if (peeledVectors[0]->isLazy()) {
+        peeledVectors[0] =
+            peeledVectors[0]->as<LazyVector>()->loadedVectorShared();
+      }
+      VELOX_CHECK(peeledVectors[0]->encoding() == VectorEncoding::Simple::ROW);
+      row = peeledVectors[0]->as<const RowVector>();
+    } else {
+      VELOX_CHECK(input->encoding() == VectorEncoding::Simple::ROW);
+      row = input->as<const RowVector>();
+    }
   }
   if (index_ == -1) {
     auto rowType = dynamic_cast<const RowType*>(row->type().get());
     VELOX_CHECK(rowType);
     index_ = rowType->getChildIdx(field_);
   }
-  // If we refer to a column of the context row, this may have been
-  // peeled due to peeling off encoding, hence access it via
-  // 'context'.  Check if the child is unique before taking the second
-  // reference. Unique constant vectors can be resized in place, non-unique
-  // must be copied to set the size.
-  bool isUniqueChild = inputs_.empty() ? context.getField(index_).unique()
-                                       : row->childAt(index_).unique();
+  if (!useDecode && addNullsFast(rows, context, result, row)) {
+    return;
+  }
   VectorPtr child =
       inputs_.empty() ? context.getField(index_) : row->childAt(index_);
+  if (child->encoding() == VectorEncoding::Simple::LAZY) {
+    child = BaseVector::loadedVectorShared(child);
+  }
   if (result.get()) {
-    auto indices = useDecode ? decoded.indices() : nullptr;
-    result->copy(child.get(), rows, indices);
-  } else {
-    if (child->encoding() == VectorEncoding::Simple::LAZY) {
-      child = BaseVector::loadedVectorShared(child);
+    if (useDecode) {
+      child = peeledEncoding->wrap(type_, context.pool(), child, *nonNullRows);
     }
+    result->copy(child.get(), *nonNullRows, nullptr);
+  } else {
     // The caller relies on vectors having a meaningful size. If we
     // have a constant that is not wrapped in anything we set its size
-    // to correspond to rows.end(). This is in place for unique ones
-    // and a copy otherwise.
+    // to correspond to rows.end().
     if (!useDecode && child->isConstantEncoding()) {
-      if (isUniqueChild) {
-        child->resize(rows.end());
-      } else {
-        child = BaseVector::wrapInConstant(rows.end(), 0, child);
-      }
+      child = BaseVector::wrapInConstant(nonNullRows->end(), 0, child);
     }
-    result = useDecode ? std::move(decoded.wrap(child, *input, rows.end()))
+    result = useDecode ? std::move(peeledEncoding->wrap(
+                             type_, context.pool(), child, *nonNullRows))
                        : std::move(child);
   }
+  child.reset();
 
   // Check for nulls in the input struct. Propagate these nulls to 'result'.
   if (!inputs_.empty() && decoded.mayHaveNulls()) {
     addNulls(rows, decoded.nulls(), context, result);
   }
+}
+
+void FieldReference::evalSpecialForm(
+    const SelectivityVector& rows,
+    EvalCtx& context,
+    VectorPtr& result) {
+  VectorPtr localResult;
+  apply(rows, context, localResult);
+  context.moveOrCopyResult(localResult, rows, result);
 }
 
 void FieldReference::evalSpecialFormSimplified(
@@ -120,12 +183,46 @@ void FieldReference::evalSpecialFormSimplified(
   } else {
     VELOX_CHECK_EQ(index_, index);
   }
+
+  LocalSelectivityVector nonNullRowsHolder(*context.execCtx());
+  const SelectivityVector* nonNullRows = &rows;
+  if (row->mayHaveNulls()) {
+    nonNullRowsHolder.get(rows);
+    nonNullRowsHolder->deselectNulls(row->rawNulls(), rows.begin(), rows.end());
+    nonNullRows = nonNullRowsHolder.get();
+    if (!nonNullRows->hasSelections()) {
+      addNulls(rows, row->rawNulls(), context, result);
+      return;
+    }
+  }
+
   auto& child = row->childAt(index_);
   context.ensureWritable(rows, type_, result);
-  result->copy(child.get(), rows, nullptr);
+  result->copy(child.get(), *nonNullRows, nullptr);
   if (row->mayHaveNulls()) {
     addNulls(rows, row->rawNulls(), context, result);
   }
+}
+
+std::string FieldReference::toString(bool recursive) const {
+  std::stringstream out;
+  if (!inputs_.empty() && recursive) {
+    appendInputs(out);
+    out << ".";
+  }
+  out << name();
+  return out.str();
+}
+
+std::string FieldReference::toSql(
+    std::vector<VectorPtr>* complexConstants) const {
+  std::stringstream out;
+  if (!inputs_.empty()) {
+    appendInputsSql(out, complexConstants);
+    out << ".";
+  }
+  out << "\"" << name() << "\"";
+  return out.str();
 }
 
 } // namespace facebook::velox::exec

@@ -22,7 +22,7 @@
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/dwrf/writer/FlushPolicy.h"
 #include "velox/dwio/dwrf/writer/Writer.h"
-#include "velox/dwio/type/fbhive/HiveTypeParser.h"
+#include "velox/type/fbhive/HiveTypeParser.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/FlatVector.h"
 
@@ -30,7 +30,7 @@ using namespace ::testing;
 using namespace facebook::velox::dwio::common;
 using namespace facebook::velox::test;
 using namespace facebook::velox::dwrf;
-using namespace facebook::velox::dwio::type::fbhive;
+using namespace facebook::velox::type::fbhive;
 using namespace facebook::velox;
 using namespace facebook::velox::memory;
 using folly::Random;
@@ -38,11 +38,11 @@ using folly::Random;
 uint64_t computeCumulativeNodeSize(
     std::unordered_map<uint32_t, uint64_t>& nodeSizes,
     const TypeWithId& type) {
-  auto totalSize = nodeSizes[type.id];
+  auto totalSize = nodeSizes[type.id()];
   for (auto i = 0; i < type.size(); i++) {
     totalSize += computeCumulativeNodeSize(nodeSizes, *type.childAt(i));
   }
-  nodeSizes[type.id] = totalSize;
+  nodeSizes[type.id()] = totalSize;
   return totalSize;
 }
 
@@ -105,6 +105,7 @@ void verifyStats(
       rowReader.getColumnSelector(),
       rowReader.getRowReaderOptions(),
       stripeInfo.offset(),
+      static_cast<int64_t>(stripeInfo.numberOfRows()),
       rowReader,
       0};
   streams.loadReadPlan();
@@ -118,7 +119,7 @@ void verifyStats(
   for (auto nodeId = 0; nodeId < strideSize; nodeId++) {
     auto si = EncodingKey(nodeId).forKind(proto::Stream::ROW_INDEX);
     auto rowIndex =
-        ProtoUtils::readProto<proto::RowIndex>(streams.getStream(si, true));
+        ProtoUtils::readProto<proto::RowIndex>(streams.getStream(si, {}, true));
     EXPECT_NE(rowIndex, nullptr);
     EXPECT_EQ(rowIndex->entry_size(), repeat) << " entry size mismatch";
 
@@ -151,16 +152,20 @@ class ColumnWriterStatsTest : public ::testing::Test {
       const size_t repeat,
       const int32_t flatMapColId) {
     // write file to memory
-    auto sink = std::make_unique<MemorySink>(*leafPool_, 200 * 1024 * 1024);
+    auto sink = std::make_unique<MemorySink>(
+        200 * 1024 * 1024,
+        dwio::common::FileSink::Options{.pool = leafPool_.get()});
     auto sinkPtr = sink.get();
 
-    auto config = std::make_shared<Config>();
-    config->set(Config::ROW_INDEX_STRIDE, folly::to<uint32_t>(batch->size()));
+    auto config = std::make_shared<dwrf::Config>();
+    config->set(
+        dwrf::Config::ROW_INDEX_STRIDE, folly::to<uint32_t>(batch->size()));
     if (flatMapColId >= 0) {
-      config->set(Config::FLATTEN_MAP, true);
-      config->set(Config::MAP_FLAT_COLS, {folly::to<uint32_t>(flatMapColId)});
+      config->set(dwrf::Config::FLATTEN_MAP, true);
+      config->set(
+          dwrf::Config::MAP_FLAT_COLS, {folly::to<uint32_t>(flatMapColId)});
     }
-    WriterOptions options;
+    dwrf::WriterOptions options;
     options.config = config;
     options.schema = type;
     options.flushPolicyFactory = [&]() {
@@ -169,7 +174,7 @@ class ColumnWriterStatsTest : public ::testing::Test {
       });
     };
 
-    Writer writer{options, std::move(sink), rootPool_};
+    dwrf::Writer writer{std::move(sink), options, rootPool_};
 
     for (size_t i = 0; i < repeat; ++i) {
       writer.write(batch);
@@ -177,11 +182,11 @@ class ColumnWriterStatsTest : public ::testing::Test {
 
     writer.close();
 
-    std::string_view data(sinkPtr->getData(), sinkPtr->size());
+    std::string_view data(sinkPtr->data(), sinkPtr->size());
     auto readFile = std::make_shared<facebook::velox::InMemoryReadFile>(data);
     auto input = std::make_unique<BufferedInput>(readFile, *leafPool_);
 
-    ReaderOptions readerOpts{leafPool_.get()};
+    dwio::common::ReaderOptions readerOpts{leafPool_.get()};
     RowReaderOptions rowReaderOpts;
     auto reader = std::make_unique<DwrfReader>(readerOpts, std::move(input));
     return reader->createRowReader(rowReaderOpts);

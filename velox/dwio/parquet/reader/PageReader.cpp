@@ -15,16 +15,13 @@
  */
 
 #include "velox/dwio/parquet/reader/PageReader.h"
+
 #include "velox/dwio/common/BufferUtil.h"
 #include "velox/dwio/common/ColumnVisitors.h"
-#include "velox/dwio/parquet/reader/NestedStructureDecoder.h"
 #include "velox/dwio/parquet/thrift/ThriftTransport.h"
 #include "velox/vector/FlatVector.h"
 
-#include <snappy.h>
-#include <thrift/protocol/TCompactProtocol.h> //@manual
-#include <zlib.h>
-#include <zstd.h>
+#include <thrift/protocol/TCompactProtocol.h> // @manual
 
 namespace facebook::velox::parquet {
 
@@ -121,78 +118,63 @@ const char* PageReader::readBytes(int32_t size, BufferPtr& copy) {
   return copy->as<char>();
 }
 
-const char* FOLLY_NONNULL PageReader::uncompressData(
+common::CompressionKind PageReader::thriftCodecToCompressionKind() {
+  switch (codec_) {
+    case thrift::CompressionCodec::UNCOMPRESSED:
+      return common::CompressionKind::CompressionKind_NONE;
+      break;
+    case thrift::CompressionCodec::SNAPPY:
+      return common::CompressionKind::CompressionKind_SNAPPY;
+      break;
+    case thrift::CompressionCodec::GZIP:
+      return common::CompressionKind::CompressionKind_GZIP;
+      break;
+    case thrift::CompressionCodec::LZO:
+      return common::CompressionKind::CompressionKind_LZO;
+      break;
+    case thrift::CompressionCodec::LZ4:
+      return common::CompressionKind::CompressionKind_LZ4;
+      break;
+    case thrift::CompressionCodec::ZSTD:
+      return common::CompressionKind::CompressionKind_ZSTD;
+      break;
+    case thrift::CompressionCodec::LZ4_RAW:
+      return common::CompressionKind::CompressionKind_LZ4;
+    default:
+      VELOX_UNSUPPORTED(
+          "Unsupported compression type: " +
+          facebook::velox::parquet::thrift::to_string(codec_));
+      break;
+  }
+}
+
+const char* FOLLY_NONNULL PageReader::decompressData(
     const char* pageData,
     uint32_t compressedSize,
     uint32_t uncompressedSize) {
-  switch (codec_) {
-    case thrift::CompressionCodec::UNCOMPRESSED:
-      return pageData;
-    case thrift::CompressionCodec::SNAPPY: {
-      dwio::common::ensureCapacity<char>(
-          uncompressedData_, uncompressedSize, &pool_);
-
-      size_t sizeFromSnappy;
-      if (!snappy::GetUncompressedLength(
-              pageData, compressedSize, &sizeFromSnappy)) {
-        VELOX_FAIL("Snappy uncompressed size not available");
-      }
-      VELOX_CHECK_EQ(uncompressedSize, sizeFromSnappy);
-      snappy::RawUncompress(
-          pageData, compressedSize, uncompressedData_->asMutable<char>());
-      return uncompressedData_->as<char>();
-    }
-    case thrift::CompressionCodec::ZSTD: {
-      dwio::common::ensureCapacity<char>(
-          uncompressedData_, uncompressedSize, &pool_);
-
-      auto ret = ZSTD_decompress(
-          uncompressedData_->asMutable<char>(),
+  std::unique_ptr<dwio::common::SeekableInputStream> inputStream =
+      std::make_unique<dwio::common::SeekableArrayInputStream>(
+          pageData, compressedSize, 0);
+  auto streamDebugInfo =
+      fmt::format("Page Reader: Stream {}", inputStream_->getName());
+  std::unique_ptr<dwio::common::SeekableInputStream> decompressedStream =
+      dwio::common::compression::createDecompressor(
+          thriftCodecToCompressionKind(),
+          std::move(inputStream),
           uncompressedSize,
-          pageData,
+          pool_,
+          getParquetDecompressionOptions(thriftCodecToCompressionKind()),
+          streamDebugInfo,
+          nullptr,
+          true,
           compressedSize);
-      VELOX_CHECK(
-          !ZSTD_isError(ret),
-          "ZSTD returned an error: ",
-          ZSTD_getErrorName(ret));
-      return uncompressedData_->as<char>();
-    }
-    case thrift::CompressionCodec::GZIP: {
-      dwio::common::ensureCapacity<char>(
-          uncompressedData_, uncompressedSize, &pool_);
-      z_stream stream;
-      memset(&stream, 0, sizeof(stream));
-      constexpr int WINDOW_BITS = 15;
-      // Determine if this is libz or gzip from header.
-      constexpr int DETECT_CODEC = 32;
-      // Initialize decompressor.
-      auto ret = inflateInit2(&stream, WINDOW_BITS | DETECT_CODEC);
-      VELOX_CHECK(
-          (ret == Z_OK),
-          "zlib inflateInit failed: {}",
-          stream.msg ? stream.msg : "");
-      auto inflateEndGuard = folly::makeGuard([&] {
-        if (inflateEnd(&stream) != Z_OK) {
-          LOG(WARNING) << "inflateEnd: " << (stream.msg ? stream.msg : "");
-        }
-      });
-      // Decompress.
-      stream.next_in =
-          const_cast<Bytef*>(reinterpret_cast<const Bytef*>(pageData));
-      stream.avail_in = static_cast<uInt>(compressedSize);
-      stream.next_out =
-          reinterpret_cast<Bytef*>(uncompressedData_->asMutable<char>());
-      stream.avail_out = static_cast<uInt>(uncompressedSize);
-      ret = inflate(&stream, Z_FINISH);
-      VELOX_CHECK(
-          ret == Z_STREAM_END,
-          "GZipCodec failed: {}",
-          stream.msg ? stream.msg : "");
-      return uncompressedData_->as<char>();
-    }
-    default:
-      VELOX_FAIL("Unsupported Parquet compression type '{}'", codec_);
-  }
+
+  dwio::common::ensureCapacity<char>(
+      decompressedData_, uncompressedSize, &pool_);
+  decompressedStream->readFully(
+      decompressedData_->asMutable<char>(), uncompressedSize);
+
+  return decompressedData_->as<char>();
 }
 
 void PageReader::setPageRowInfo(bool forRepDef) {
@@ -254,17 +236,17 @@ void PageReader::prepareDataPageV1(const PageHeader& pageHeader, int64_t row) {
     return;
   }
   pageData_ = readBytes(pageHeader.compressed_page_size, pageBuffer_);
-  pageData_ = uncompressData(
+  pageData_ = decompressData(
       pageData_,
       pageHeader.compressed_page_size,
       pageHeader.uncompressed_page_size);
   auto pageEnd = pageData_ + pageHeader.uncompressed_page_size;
   if (maxRepeat_ > 0) {
     uint32_t repeatLength = readField<int32_t>(pageData_);
-    repeatDecoder_ = std::make_unique<arrow::util::RleDecoder>(
+    repeatDecoder_ = std::make_unique<::arrow::util::RleDecoder>(
         reinterpret_cast<const uint8_t*>(pageData_),
         repeatLength,
-        arrow::bit_util::NumRequiredBits(maxRepeat_));
+        ::arrow::bit_util::NumRequiredBits(maxRepeat_));
 
     pageData_ += repeatLength;
   }
@@ -275,13 +257,12 @@ void PageReader::prepareDataPageV1(const PageHeader& pageHeader, int64_t row) {
       defineDecoder_ = std::make_unique<RleBpDecoder>(
           pageData_,
           pageData_ + defineLength,
-          arrow::bit_util::NumRequiredBits(maxDefine_));
-    } else {
-      wideDefineDecoder_ = std::make_unique<arrow::util::RleDecoder>(
-          reinterpret_cast<const uint8_t*>(pageData_),
-          defineLength,
-          arrow::bit_util::NumRequiredBits(maxDefine_));
+          ::arrow::bit_util::NumRequiredBits(maxDefine_));
     }
+    wideDefineDecoder_ = std::make_unique<::arrow::util::RleDecoder>(
+        reinterpret_cast<const uint8_t*>(pageData_),
+        defineLength,
+        ::arrow::bit_util::NumRequiredBits(maxDefine_));
     pageData_ += defineLength;
   }
   encodedDataSize_ = pageEnd - pageData_;
@@ -320,23 +301,23 @@ void PageReader::prepareDataPageV2(const PageHeader& pageHeader, int64_t row) {
   pageData_ = readBytes(bytes, pageBuffer_);
 
   if (repeatLength) {
-    repeatDecoder_ = std::make_unique<arrow::util::RleDecoder>(
+    repeatDecoder_ = std::make_unique<::arrow::util::RleDecoder>(
         reinterpret_cast<const uint8_t*>(pageData_),
         repeatLength,
-        arrow::bit_util::NumRequiredBits(maxRepeat_));
+        ::arrow::bit_util::NumRequiredBits(maxRepeat_));
   }
 
   if (maxDefine_ > 0) {
     defineDecoder_ = std::make_unique<RleBpDecoder>(
         pageData_ + repeatLength,
         pageData_ + repeatLength + defineLength,
-        arrow::bit_util::NumRequiredBits(maxDefine_));
+        ::arrow::bit_util::NumRequiredBits(maxDefine_));
   }
   auto levelsSize = repeatLength + defineLength;
   pageData_ += levelsSize;
   if (pageHeader.data_page_header_v2.__isset.is_compressed ||
       pageHeader.data_page_header_v2.is_compressed) {
-    pageData_ = uncompressData(
+    pageData_ = decompressData(
         pageData_,
         pageHeader.compressed_page_size - levelsSize,
         pageHeader.uncompressed_page_size - levelsSize);
@@ -367,7 +348,7 @@ void PageReader::prepareDictionary(const PageHeader& pageHeader) {
 
   if (codec_ != thrift::CompressionCodec::UNCOMPRESSED) {
     pageData_ = readBytes(pageHeader.compressed_page_size, pageBuffer_);
-    pageData_ = uncompressData(
+    pageData_ = decompressData(
         pageData_,
         pageHeader.compressed_page_size,
         pageHeader.uncompressed_page_size);
@@ -384,8 +365,9 @@ void PageReader::prepareDictionary(const PageHeader& pageHeader) {
           ? sizeof(float)
           : sizeof(double);
       auto numBytes = dictionary_.numValues * typeSize;
-      if (type_->type->isShortDecimal() && parquetType == thrift::Type::INT32) {
-        auto veloxTypeLength = type_->type->cppSizeInBytes();
+      if (type_->type()->isShortDecimal() &&
+          parquetType == thrift::Type::INT32) {
+        auto veloxTypeLength = type_->type()->cppSizeInBytes();
         auto numVeloxBytes = dictionary_.numValues * veloxTypeLength;
         dictionary_.values =
             AlignedBuffer::allocate<char>(numVeloxBytes, &pool_);
@@ -402,7 +384,8 @@ void PageReader::prepareDictionary(const PageHeader& pageHeader) {
             bufferStart_,
             bufferEnd_);
       }
-      if (type_->type->isShortDecimal() && parquetType == thrift::Type::INT32) {
+      if (type_->type()->isShortDecimal() &&
+          parquetType == thrift::Type::INT32) {
         auto values = dictionary_.values->asMutable<int64_t>();
         auto parquetValues = dictionary_.values->asMutable<int32_t>();
         for (auto i = dictionary_.numValues - 1; i >= 0; --i) {
@@ -438,7 +421,7 @@ void PageReader::prepareDictionary(const PageHeader& pageHeader) {
     case thrift::Type::FIXED_LEN_BYTE_ARRAY: {
       auto parquetTypeLength = type_->typeLength_;
       auto numParquetBytes = dictionary_.numValues * parquetTypeLength;
-      auto veloxTypeLength = type_->type->cppSizeInBytes();
+      auto veloxTypeLength = type_->type()->cppSizeInBytes();
       auto numVeloxBytes = dictionary_.numValues * veloxTypeLength;
       dictionary_.values = AlignedBuffer::allocate<char>(numVeloxBytes, &pool_);
       auto data = dictionary_.values->asMutable<char>();
@@ -453,7 +436,7 @@ void PageReader::prepareDictionary(const PageHeader& pageHeader) {
             bufferStart_,
             bufferEnd_);
       }
-      if (type_->type->isShortDecimal()) {
+      if (type_->type()->isShortDecimal()) {
         // Parquet decimal values have a fixed typeLength_ and are in big-endian
         // layout.
         if (numParquetBytes < numVeloxBytes) {
@@ -476,7 +459,7 @@ void PageReader::prepareDictionary(const PageHeader& pageHeader) {
           values[i] = __builtin_bswap64(values[i]);
         }
         break;
-      } else if (type_->type->isLongDecimal()) {
+      } else if (type_->type()->isLongDecimal()) {
         // Parquet decimal values have a fixed typeLength_ and are in big-endian
         // layout.
         if (numParquetBytes < numVeloxBytes) {
@@ -496,7 +479,7 @@ void PageReader::prepareDictionary(const PageHeader& pageHeader) {
         }
         auto values = dictionary_.values->asMutable<int128_t>();
         for (auto i = 0; i < dictionary_.numValues; ++i) {
-          values[i] = dwio::common::builtin_bswap128(values[i]);
+          values[i] = bits::builtin_bswap128(values[i]);
         }
         break;
       }
@@ -577,7 +560,7 @@ void PageReader::preloadRepDefs() {
 }
 
 void PageReader::decodeRepDefs(int32_t numTopLevelRows) {
-  if (definitionLevels_.empty()) {
+  if (definitionLevels_.empty() && maxDefine_ > 0) {
     preloadRepDefs();
   }
   repDefBegin_ = repDefEnd_;
@@ -601,14 +584,14 @@ void PageReader::decodeRepDefs(int32_t numTopLevelRows) {
 
 int32_t PageReader::getLengthsAndNulls(
     LevelMode mode,
-    const ::parquet::internal::LevelInfo& info,
+    const arrow::LevelInfo& info,
     int32_t begin,
     int32_t end,
     int32_t maxItems,
     int32_t* lengths,
     uint64_t* nulls,
     int32_t nullsStartIndex) const {
-  ::parquet::internal::ValidityBitmapInputOutput bits;
+  arrow::ValidityBitmapInputOutput bits;
   bits.values_read_upper_bound = maxItems;
   bits.values_read = 0;
   bits.null_count = 0;
@@ -621,7 +604,7 @@ int32_t PageReader::getLengthsAndNulls(
           definitionLevels_.data() + begin, end - begin, info, &bits);
       break;
     case LevelMode::kList: {
-      ::parquet::internal::DefRepLevelsToList(
+      arrow::DefRepLevelsToList(
           definitionLevels_.data() + begin,
           repetitionLevels_.data() + begin,
           end - begin,
@@ -684,7 +667,7 @@ void PageReader::makeDecoder() {
       break;
     case Encoding::DELTA_BINARY_PACKED:
     default:
-      VELOX_UNSUPPORTED("Encoding not supported yet");
+      VELOX_UNSUPPORTED("Encoding not supported yet: {}", encoding_);
   }
 }
 

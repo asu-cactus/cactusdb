@@ -36,7 +36,7 @@ DEFINE_string(
 
 DEFINE_string(
     special_forms,
-    "and,or,cast,coalesce",
+    "and,or,cast,coalesce,if,switch",
     "Comma-separated list of special forms to use in generated expression. "
     "Supported special forms: and, or, coalesce, if, switch, cast.");
 
@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
   // Calls common init functions in the necessary order, initializing
   // singletons, installing proper signal handlers for better debugging
   // experience, and initialize glog and gflags.
-  folly::init(&argc, &argv);
+  folly::Init init(&argc, &argv);
 
   // TODO: List of the functions that at some point crash or fail and need to
   // be fixed before we can enable.
@@ -58,7 +58,6 @@ int main(int argc, char** argv) {
       // cardinality passing a VARBINARY (since HLL's implementation uses an
       // alias to VARBINARY).
       "cardinality",
-      "in",
       "element_at",
       "width_bucket",
   };
