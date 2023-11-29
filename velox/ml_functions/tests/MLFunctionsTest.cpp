@@ -506,7 +506,7 @@ void MLFunctionsTest::test_torch_dense_layer(){
     task->addSplit(p0, exec::Split(std::move(split)));
   }
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(task, velox_threads);
+  task->start(velox_threads);
   task->noMoreSplits(p0);
   // Start task with 2 as maximum drivers and wait for execution to finish
   waitForFinishedDrivers(task);
@@ -687,7 +687,7 @@ void MLFunctionsTest::test_multithreading() {
           return exec::BlockingReason::kNotBlocked;
   });
 
-  task->start(task, concurrency);
+  task->start(concurrency);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
     semaphore.wait();
@@ -842,7 +842,7 @@ void MLFunctionsTest::test_multithreading_oom() {
   });
 
   // Create 2 hive splits and add them to task
-  task->start(task, concurrency);
+  task->start(concurrency);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
     semaphore.wait();
@@ -928,7 +928,7 @@ void MLFunctionsTest::test_batching() {
   });
 
   // Create 2 hive splits and add them to task
-  task->start(task, concurrency);
+  task->start(concurrency);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
     semaphore.wait();
@@ -986,7 +986,25 @@ void MLFunctionsTest::test_spill(){
                                       https://github.com/facebookincubator/velox/pull/5890 
                                       */
                                       //  {core::QueryConfig::kSpillPartitionBits, "1"}
-                                       {core::QueryConfig::kAggregationSpillPartitionBits, "1"}
+                                      /*
+                                      PR 7317 remove the kAggregationSpillPartitionBits flag
+                                      Comments copied from PR
+                                      
+                                        Simplify the hash aggregation spill processing by removing the
+                                        fine-grained partition control logic in grouping set:
+
+                                        Always create aggregation spiller with single partition
+                                        Always spill all the rows from spiller no matter it is triggered by memory arbitration,
+                                        threshold or test injection
+                                        Simplify the corresponding un-spilling code path.
+                                        The final or single aggregation is multi-threaded executed on a worker which means
+                                        that each aggregate operator runs a subset of data so that fine-grained partitioning
+                                        inside an operator is not that necessary.
+
+                                        The followup is to remove the corresponding query configs and simplification inside
+                                        the spiller.
+                                      */
+                                      //  {core::QueryConfig::kAggregationSpillPartitionBits, "1"}
                                       });
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
@@ -1016,7 +1034,7 @@ void MLFunctionsTest::test_spill(){
   task->setSpillDirectory(spillDirectory->path);
   //auto task = exec::Task::create("0", joinPlan , 0, std::move(queryCtx_));
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(task, 1);
+  task->start(1);
   
   waitForFinishedDrivers(task);
   auto stats = task->taskStats().pipelineStats;
@@ -1133,7 +1151,7 @@ void MLFunctionsTest::test_mnist_multithreading() {
     task->addSplit(p0, exec::Split(std::move(split)));
   }
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(task, num_splits);
+  task->start(num_splits);
   task->noMoreSplits(p0);
   // Start task with 2 as maximum drivers and wait for execution to finish
   waitForFinishedDrivers(task);
@@ -1247,7 +1265,7 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
     task->addSplit(p0, exec::Split(std::move(split)));
   }
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(task, concurrency);
+  task->start(concurrency);
   task->noMoreSplits(p0);
   waitForFinishedDrivers(task);
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
@@ -1371,7 +1389,7 @@ void MLFunctionsTest::test_mnist_oom_weights() {
   }
 
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(task, num_splits);
+  task->start(num_splits);
   task->noMoreSplits(p0);
   // Start task with 2 as maximum drivers and wait for execution to finish
   waitForFinishedDrivers(task);
@@ -1579,7 +1597,7 @@ void MLFunctionsTest::test_deep_bench_conv1() {
     task->addSplit(p0, exec::Split(std::move(split)));
   }
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(task, velox_threads);
+  task->start(velox_threads);
   task->noMoreSplits(p0);
   // Start task with 2 as maximum drivers and wait for execution to finish
   waitForFinishedDrivers(task);
@@ -1696,7 +1714,7 @@ void MLFunctionsTest::test_land_cover_conv3() {
   }
   
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(task, confs[2]);
+  task->start(confs[2]);
   task->noMoreSplits(p0);
   // Start task with 2 as maximum drivers and wait for execution to finish
   waitForFinishedDrivers(task);

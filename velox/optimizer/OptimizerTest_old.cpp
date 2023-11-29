@@ -1568,7 +1568,7 @@ core::PlanFragment test_oom_optimizer(PlanBuilder& planbuilder, std::shared_ptr<
   });
 
   // Create 2 hive splits and add them to task
-  task->start(task, concurrency);
+  task->start(concurrency);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
     semaphore.wait();
@@ -1674,7 +1674,7 @@ void test_mnist_oom_error(int argc, char** argv){
   });
 
   // Create 2 hive splits and add them to task
-  task->start(task, concurrency);
+  task->start(concurrency);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
     semaphore.wait();
@@ -1970,7 +1970,7 @@ void test_oom_success(int argc, char** argv){
         return exec::BlockingReason::kNotBlocked;
   });
 
-  task->start(task, 1);
+  task->start(1);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
     semaphore.wait();
@@ -2042,7 +2042,7 @@ void test_oom_success(int argc, char** argv){
   // });
 
   // // Create 2 hive splits and add them to task
-  // task->start(task, concurrency);
+  // task->start(concurrency);
   // std::cout << "Hive splits:" << std::endl;
   // for(auto& split : hiveSplits) {
   //   semaphore.wait();
@@ -2308,7 +2308,7 @@ void exec_plan_udf(PlanBuilder& planBuilder, int memoryLimit, std::vector<std::v
           return exec::BlockingReason::kNotBlocked;
   });
 
-  task->start(task, threadsNum);
+  task->start(threadsNum);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : hiveSplits) {
     semaphore.wait();
@@ -2444,7 +2444,7 @@ std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
         return exec::BlockingReason::kNotBlocked;
   });
 
-  task->start(task, threadsNum);
+  task->start(threadsNum);
   std::cout << "Hive splits:" << std::endl;
   for(auto& split : inputHiveSplits) {
     semaphore.wait();
