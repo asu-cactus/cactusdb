@@ -396,4 +396,28 @@ folly::Range<vector_size_t*> initializeRowNumberMapping(
   return folly::Range(mapping->asMutable<vector_size_t>(), size);
 }
 
+void projectChildren(
+    std::vector<VectorPtr>& projectedChildren,
+    const RowVectorPtr& src,
+    const std::vector<IdentityProjection>& projections,
+    int32_t size,
+    const BufferPtr& mapping) {
+  projectChildren(
+      projectedChildren, src->children(), projections, size, mapping);
+}
+
+void projectChildren(
+    std::vector<VectorPtr>& projectedChildren,
+    const std::vector<VectorPtr>& src,
+    const std::vector<IdentityProjection>& projections,
+    int32_t size,
+    const BufferPtr& mapping) {
+  for (auto [inputChannel, outputChannel] : projections) {
+    if (outputChannel >= projectedChildren.size()) {
+      projectedChildren.resize(outputChannel + 1);
+    }
+    projectedChildren[outputChannel] =
+        wrapChild(size, mapping, src[inputChannel]);
+  }
+}
 } // namespace facebook::velox::exec

@@ -16,7 +16,6 @@
 #include "velox/duckdb/conversion/DuckConversion.h"
 #include <gtest/gtest.h>
 #include <limits>
-#include "velox/external/duckdb/duckdb.hpp"
 #include "velox/type/Variant.h"
 
 using namespace facebook::velox;
@@ -63,6 +62,21 @@ TEST(DuckConversionTest, duckValueToVariant) {
     EXPECT_NO_THROW(duckValueToVariant(Value::FLOAT(i)));
   }
 
+  // Timestamp.
+  for (const auto ts : {
+           Timestamp::fromMillis(123),
+           Timestamp::fromMillis(-123),
+           Timestamp::fromMillis(0),
+           Timestamp::fromMillis(123'456'789),
+           Timestamp::fromMillis(-123'456'789),
+       }) {
+    SCOPED_TRACE(ts.toString());
+    EXPECT_EQ(
+        variant(ts),
+        duckValueToVariant(
+            Value::TIMESTAMP(::duckdb::Timestamp::FromEpochMs(ts.toMillis()))));
+  }
+
   // Strings.
   std::vector<std::string> vec = {"", "asdf", "aS$!#^*HFD"};
   for (const auto& i : vec) {
@@ -71,13 +85,18 @@ TEST(DuckConversionTest, duckValueToVariant) {
 }
 
 TEST(DuckConversionTest, duckValueToVariantUnsupported) {
+  /// We use ::duckdb::TransformStringToLogicalType() for scalar types instead
+  /// of LogicalType:: due this bug in GCC
+  /// https://gcc.gnu.org/bugzilla/show_bug.cgi?id=101957. The scalar types are
+  /// defined as static constexpr const causing a double definition only in the
+  /// debug build.
   std::vector<LogicalType> unsupported = {
-      LogicalType::TIME,
-      LogicalType::TIMESTAMP,
-      LogicalType::INTERVAL,
-      LogicalType::LIST({LogicalType::INTEGER}),
+      ::duckdb::TransformStringToLogicalType("time"),
+      ::duckdb::TransformStringToLogicalType("interval"),
+      LogicalType::LIST({::duckdb::TransformStringToLogicalType("integer")}),
       LogicalType::STRUCT(
-          {{"a", LogicalType::INTEGER}, {"b", LogicalType::TINYINT}})};
+          {{"a", ::duckdb::TransformStringToLogicalType("integer")},
+           {"b", ::duckdb::TransformStringToLogicalType("tinyint")}})};
 
   for (const auto& i : unsupported) {
     EXPECT_THROW(duckValueToVariant(Value(i)), std::runtime_error);
@@ -121,10 +140,10 @@ TEST(DuckConversionTest, createTable) {
 
   auto testCreateTable = [&](const RowTypePtr& rowType) {
     auto result = con.Query("DROP TABLE IF EXISTS t");
-    VELOX_CHECK(result->success, "{}", result->error);
+    VELOX_CHECK(!result->HasError(), "{}", result->GetError());
 
     result = con.Query(makeCreateTableSql("t", *rowType));
-    VELOX_CHECK(result->success, "{}", result->error);
+    VELOX_CHECK(!result->HasError(), "{}", result->GetError());
   };
 
   testCreateTable(

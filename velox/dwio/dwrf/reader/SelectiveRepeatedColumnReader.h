@@ -29,7 +29,7 @@ class SelectiveListColumnReader
  public:
   SelectiveListColumnReader(
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
-      const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
+      const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
       DwrfParams& params,
       common::ScanSpec& scanSpec);
 
@@ -38,7 +38,7 @@ class SelectiveListColumnReader
   }
 
   void seekToRowGroup(uint32_t index) override {
-    SelectiveColumnReader::seekToRowGroup(index);
+    dwio::common::SelectiveListColumnReader::seekToRowGroup(index);
     auto positionsProvider = formatData_->seekToRowGroup(index);
     length_->seekToRowGroup(positionsProvider);
 
@@ -64,7 +64,7 @@ class SelectiveMapColumnReader : public dwio::common::SelectiveMapColumnReader {
  public:
   SelectiveMapColumnReader(
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
-      const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
+      const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
       DwrfParams& params,
       common::ScanSpec& scanSpec);
 
@@ -74,7 +74,7 @@ class SelectiveMapColumnReader : public dwio::common::SelectiveMapColumnReader {
   }
 
   void seekToRowGroup(uint32_t index) override {
-    SelectiveColumnReader::seekToRowGroup(index);
+    dwio::common::SelectiveMapColumnReader::seekToRowGroup(index);
     auto positionsProvider = formatData_->seekToRowGroup(index);
 
     length_->seekToRowGroup(positionsProvider);

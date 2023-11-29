@@ -16,6 +16,7 @@
 
 #include "velox/connectors/hive/HiveConfig.h"
 #include "velox/core/Config.h"
+#include "velox/core/QueryConfig.h"
 
 #include <boost/algorithm/string.hpp>
 
@@ -41,11 +42,24 @@ stringToInsertExistingPartitionsBehavior(const std::string& strValue) {
 // static
 HiveConfig::InsertExistingPartitionsBehavior
 HiveConfig::insertExistingPartitionsBehavior(const Config* config) {
-  auto strBehavior =
+  const auto behavior =
       config->get<std::string>(kInsertExistingPartitionsBehavior);
-  return strBehavior.has_value()
-      ? stringToInsertExistingPartitionsBehavior(strBehavior.value())
+  return behavior.has_value()
+      ? stringToInsertExistingPartitionsBehavior(behavior.value())
       : InsertExistingPartitionsBehavior::kError;
+}
+
+// static
+std::string HiveConfig::insertExistingPartitionsBehaviorString(
+    InsertExistingPartitionsBehavior behavior) {
+  switch (behavior) {
+    case InsertExistingPartitionsBehavior::kError:
+      return "ERROR";
+    case InsertExistingPartitionsBehavior::kOverwrite:
+      return "OVERWRITE";
+    default:
+      return fmt::format("UNKNOWN BEHAVIOR {}", static_cast<int>(behavior));
+  }
 }
 
 // static
@@ -111,4 +125,103 @@ std::optional<std::string> HiveConfig::s3IAMRole(const Config* config) {
 std::string HiveConfig::s3IAMRoleSessionName(const Config* config) {
   return config->get(kS3IamRoleSessionName, std::string("velox-session"));
 }
+
+// static
+std::string HiveConfig::gcsEndpoint(const Config* config) {
+  return config->get<std::string>(kGCSEndpoint, std::string(""));
+}
+
+// static
+std::string HiveConfig::gcsScheme(const Config* config) {
+  return config->get<std::string>(kGCSScheme, std::string("https"));
+}
+
+// static
+std::string HiveConfig::gcsCredentials(const Config* config) {
+  return config->get<std::string>(kGCSCredentials, std::string(""));
+}
+
+// static.
+bool HiveConfig::isOrcUseColumnNames(const Config* config) {
+  return config->get<bool>(kOrcUseColumnNames, false);
+}
+
+// static.
+bool HiveConfig::isFileColumnNamesReadAsLowerCase(const Config* config) {
+  return config->get<bool>(kFileColumnNamesReadAsLowerCase, false);
+}
+
+// static.
+int64_t HiveConfig::maxCoalescedBytes(const Config* config) {
+  return config->get<int64_t>(kMaxCoalescedBytes, 128 << 20);
+}
+
+// static.
+int32_t HiveConfig::maxCoalescedDistanceBytes(const Config* config) {
+  return config->get<int32_t>(kMaxCoalescedDistanceBytes, 512 << 10);
+}
+
+// static.
+int32_t HiveConfig::numCacheFileHandles(const Config* config) {
+  return config->get<int32_t>(kNumCacheFileHandles, 20'000);
+}
+
+// static.
+bool HiveConfig::isFileHandleCacheEnabled(const Config* config) {
+  return config->get<bool>(kEnableFileHandleCache, true);
+}
+
+// static.
+uint32_t HiveConfig::sortWriterMaxOutputRows(const Config* config) {
+  return config->get<int32_t>(kSortWriterMaxOutputRows, 1024);
+}
+
+// static.
+uint64_t HiveConfig::sortWriterMaxOutputBytes(const Config* config) {
+  return config->get<uint64_t>(kSortWriterMaxOutputBytes, 10UL << 20);
+}
+
+uint64_t HiveConfig::getOrcWriterMaxStripeSize(
+    const Config* connectorQueryCtxConfig,
+    const Config* connectorPropertiesConfig) {
+  if (connectorQueryCtxConfig != nullptr &&
+      connectorQueryCtxConfig->isValueExists(kOrcWriterMaxStripeSize)) {
+    return toCapacity(
+        connectorQueryCtxConfig->get<std::string>(kOrcWriterMaxStripeSize)
+            .value(),
+        core::CapacityUnit::BYTE);
+  }
+  if (connectorPropertiesConfig != nullptr &&
+      connectorPropertiesConfig->isValueExists(kOrcWriterMaxStripeSizeConfig)) {
+    return toCapacity(
+        connectorPropertiesConfig
+            ->get<std::string>(kOrcWriterMaxStripeSizeConfig)
+            .value(),
+        core::CapacityUnit::BYTE);
+  }
+  return 64L * 1024L * 1024L;
+}
+
+uint64_t HiveConfig::getOrcWriterMaxDictionaryMemory(
+    const Config* connectorQueryCtxConfig,
+    const Config* connectorPropertiesConfig) {
+  if (connectorQueryCtxConfig != nullptr &&
+      connectorQueryCtxConfig->isValueExists(kOrcWriterMaxDictionaryMemory)) {
+    return toCapacity(
+        connectorQueryCtxConfig->get<std::string>(kOrcWriterMaxDictionaryMemory)
+            .value(),
+        core::CapacityUnit::BYTE);
+  }
+  if (connectorPropertiesConfig != nullptr &&
+      connectorPropertiesConfig->isValueExists(
+          kOrcWriterMaxDictionaryMemoryConfig)) {
+    return toCapacity(
+        connectorPropertiesConfig
+            ->get<std::string>(kOrcWriterMaxDictionaryMemoryConfig)
+            .value(),
+        core::CapacityUnit::BYTE);
+  }
+  return 16L * 1024L * 1024L;
+}
+
 } // namespace facebook::velox::connector::hive

@@ -27,19 +27,22 @@ class GreatestLeastTest : public functions::test::FunctionBaseTest {
       const std::string& query,
       const std::vector<std::vector<T>>& inputs,
       const std::vector<std::optional<T>>& output,
-      std::optional<size_t> stringBuffersExpectedCount = std::nullopt) {
+      std::optional<size_t> stringBuffersExpectedCount = std::nullopt,
+      const TypePtr& type = CppToType<T>::create(),
+      const TypePtr& resultType = CppToType<T>::create()) {
     // Create input vectors
     auto vectorSize = inputs[0].size();
     std::vector<VectorPtr> inputColumns(inputs.size());
     for (auto i = 0; i < inputColumns.size(); ++i) {
-      inputColumns[i] = makeFlatVector<T>(inputs[i]);
+      inputColumns[i] = makeFlatVector<T>(inputs[i], type);
       for (auto j = 0; j < vectorSize; ++j) {
         inputColumns[i]->asFlatVector<T>()->set(j, inputs[i][j]);
       }
     }
 
     // Call evaluate to run the query on the created input
-    auto result = evaluate<SimpleVector<T>>(query, makeRowVector(inputColumns));
+    auto result = evaluate<SimpleVector<T>>(
+        query, makeRowVector(inputColumns), std::nullopt, resultType);
     for (int32_t i = 0; i < vectorSize; ++i) {
       if (output[i].has_value()) {
         ASSERT_EQ(result->valueAt(i), output[i]);
@@ -68,10 +71,21 @@ TEST_F(GreatestLeastTest, leastDouble) {
   runTest<double>("least(c0)", {{0, 1.1, -1.1}}, {0, 1.1, -1.1});
   runTest<double>("least(c0, 1.0)", {{0, 1.1, -1.1}}, {0, 1, -1.1});
   runTest<double>(
-      "least(c0, 1.0 , c1)", {{0, 1.1, -1.1}, {100, -100, 0}}, {0, -100, -1.1});
+      "least(c0, 1.0, c1)", {{0, 1.1, -1.1}, {100, -100, 0}}, {0, -100, -1.1});
+}
+
+TEST_F(GreatestLeastTest, leastReal) {
+  runTest<float>("least(c0)", {{0, 1.1, -1.1}}, {0, 1.1, -1.1});
+  runTest<float>("least(c0, 1.0::real)", {{0, 1.1, -1.1}}, {0, 1, -1.1});
+  runTest<float>(
+      "least(c0, 1.0::real, c1)",
+      {{0, 1.1, -1.1}, {100, -100, 0}},
+      {0, -100, -1.1});
 }
 
 TEST_F(GreatestLeastTest, nanInput) {
+  // Presto rejects NaN inputs of type DOUBLE, but allows NaN inputs of type
+  // REAL.
   std::vector<double> input{0, 1.1, std::nan("1")};
   VELOX_ASSERT_THROW(
       runTest<double>("least(c0)", {{0.0 / 0.0}}, {0}),
@@ -82,13 +96,30 @@ TEST_F(GreatestLeastTest, nanInput) {
       runTest<double>("greatest(c0)", {1, {0.0 / 0.0}}, {1, 0}),
       "Invalid argument to greatest(): NaN");
   runTest<double>("try(greatest(c0, 1.0))", {input}, {1.0, 1.1, std::nullopt});
+
+  auto result = evaluateOnce<bool, float, float>(
+      "is_nan(least(c0))", std::nanf("1"), 1.2);
+  ASSERT_TRUE(result.has_value());
+  ASSERT_TRUE(result.value());
+
+  result = evaluateOnce<bool, float, float>(
+      "is_nan(greatest(c0))", std::nanf("1"), 1.2);
+  ASSERT_TRUE(result.has_value());
+  ASSERT_TRUE(result.value());
 }
 
 TEST_F(GreatestLeastTest, greatestDouble) {
   runTest<double>("greatest(c0)", {{0, 1.1, -1.1}}, {0, 1.1, -1.1});
   runTest<double>("greatest(c0, 1.0)", {{0, 1.1, -1.1}}, {1, 1.1, 1});
   runTest<double>(
-      "greatest(c0, 1.0 , c1)",
+      "greatest(c0, 1.0, c1)", {{0, 1.1, -1.1}, {100, -100, 0}}, {100, 1.1, 1});
+}
+
+TEST_F(GreatestLeastTest, greatestReal) {
+  runTest<float>("greatest(c0)", {{0, 1.1, -1.1}}, {0, 1.1, -1.1});
+  runTest<float>("greatest(c0, 1.0::real)", {{0, 1.1, -1.1}}, {1, 1.1, 1});
+  runTest<float>(
+      "greatest(c0, 1.0::real, c1)",
       {{0, 1.1, -1.1}, {100, -100, 0}},
       {100, 1.1, 1});
 }
@@ -172,21 +203,27 @@ TEST_F(GreatestLeastTest, leastTimeStamp) {
 }
 
 TEST_F(GreatestLeastTest, greatestDate) {
-  runTest<Date>(
+  runTest<int32_t>(
       "greatest(c0, c1, c2)",
-      {{Date(0), Date(5), Date(0)},
-       {Date(1), Date(0), Date(-5)},
-       {Date(5), Date(-5), Date(-10)}},
-      {Date(5), Date(5), Date(0)});
+      {
+          {0, 5, 0},
+          {1, 0, -5},
+          {5, -5, -10},
+      },
+      {5, 5, 0},
+      std::nullopt,
+      DATE(),
+      DATE());
 }
 
 TEST_F(GreatestLeastTest, leastDate) {
-  runTest<Date>(
+  runTest<int32_t>(
       "least(c0, c1, c2)",
-      {{Date(0), Date(0), Date(5)},
-       {Date(1), Date(-1), Date(-1)},
-       {Date(5), Date(5), Date(-5)}},
-      {Date(0), Date(-1), Date(-5)});
+      {{0, 0, 5}, {1, -1, -1}, {5, 5, -5}},
+      {0, -1, -5},
+      std::nullopt,
+      DATE(),
+      DATE());
 }
 
 TEST_F(GreatestLeastTest, stringBuffersMoved) {
@@ -224,18 +261,18 @@ TEST_F(GreatestLeastTest, shortDecimal) {
   static const auto kMin = DecimalUtil::kLongDecimalMin + 1;
   static const auto kMax = DecimalUtil::kLongDecimalMax - 1;
 
-  const auto a = makeNullableShortDecimalFlatVector(
+  const auto a = makeNullableFlatVector<int64_t>(
       {10000, -10000, 20000, kMax, kMin, std::nullopt}, type);
-  const auto b = makeNullableShortDecimalFlatVector(
+  const auto b = makeNullableFlatVector<int64_t>(
       {-10000, 10000, -20000, kMin, kMax, 1}, type);
   runDecimalTest("least(c0)", {a}, a);
   runDecimalTest("greatest(c0)", {a}, a);
 
-  auto expected = makeNullableShortDecimalFlatVector(
+  auto expected = makeNullableFlatVector<int64_t>(
       {-10000, -10000, -20000, kMin, kMin, std::nullopt}, type);
   runDecimalTest("least(c0, c1)", {a, b}, expected);
 
-  expected = makeNullableShortDecimalFlatVector(
+  expected = makeNullableFlatVector<int64_t>(
       {10000, 10000, 20000, kMax, kMax, std::nullopt}, type);
   runDecimalTest("greatest(c0, c1)", {a, b}, expected);
 }
@@ -245,7 +282,7 @@ TEST_F(GreatestLeastTest, longDecimal) {
   static const auto kMin = DecimalUtil::kLongDecimalMin + 1;
   static const auto kMax = DecimalUtil::kLongDecimalMax - 1;
 
-  const auto a = makeNullableLongDecimalFlatVector(
+  const auto a = makeNullableFlatVector<int128_t>(
       {HugeInt::build(10, 300),
        HugeInt::build(-10, 300),
        HugeInt::build(200, 300),
@@ -253,7 +290,7 @@ TEST_F(GreatestLeastTest, longDecimal) {
        kMin,
        std::nullopt},
       type);
-  const auto b = makeNullableLongDecimalFlatVector(
+  const auto b = makeNullableFlatVector<int128_t>(
       {HugeInt::build(-10, 300),
        HugeInt::build(10, 300),
        HugeInt::build(-200, 300),
@@ -264,7 +301,7 @@ TEST_F(GreatestLeastTest, longDecimal) {
   runDecimalTest("least(c0)", {a}, a);
   runDecimalTest("greatest(c0)", {a}, a);
 
-  auto expected = makeNullableLongDecimalFlatVector(
+  auto expected = makeNullableFlatVector<int128_t>(
       {HugeInt::build(-10, 300),
        HugeInt::build(-10, 300),
        HugeInt::build(-200, 300),
@@ -274,7 +311,7 @@ TEST_F(GreatestLeastTest, longDecimal) {
       type);
   runDecimalTest("least(c0, c1)", {a, b}, expected);
 
-  expected = makeNullableLongDecimalFlatVector(
+  expected = makeNullableFlatVector<int128_t>(
       {HugeInt::build(10, 300),
        HugeInt::build(10, 300),
        HugeInt::build(200, 300),
@@ -283,4 +320,22 @@ TEST_F(GreatestLeastTest, longDecimal) {
        std::nullopt},
       type);
   runDecimalTest("greatest(c0, c1)", {a, b}, expected);
+}
+
+TEST_F(GreatestLeastTest, boolean) {
+  auto data = makeRowVector({
+      makeFlatVector<bool>({true, true, false, false, true, false}),
+      makeNullableFlatVector<bool>(
+          {true, false, true, false, std::nullopt, std::nullopt}),
+  });
+
+  auto result = evaluate("least(c0, c1)", data);
+  auto expected = makeNullableFlatVector<bool>(
+      {true, false, false, false, std::nullopt, std::nullopt});
+  test::assertEqualVectors(expected, result);
+
+  result = evaluate("greatest(c0, c1)", data);
+  expected = makeNullableFlatVector<bool>(
+      {true, true, true, false, std::nullopt, std::nullopt});
+  test::assertEqualVectors(expected, result);
 }

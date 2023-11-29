@@ -14,8 +14,8 @@
 .PHONY: all cmake build clean debug release unit
 
 BUILD_BASE_DIR=_build
-BUILD_DIR=release
-BUILD_TYPE=Release
+BUILD_DIR=debug
+BUILD_TYPE=debug
 BENCHMARKS_BASIC_DIR=$(BUILD_BASE_DIR)/$(BUILD_DIR)/velox/benchmarks/basic/
 BENCHMARKS_DUMP_DIR=dumps
 TREAT_WARNINGS_AS_ERRORS ?= 1
@@ -46,11 +46,20 @@ ifdef GCSSDK_ROOT_DIR
 CMAKE_FLAGS += -DGCSSDK_ROOT_DIR=$(GCSSDK_ROOT_DIR)
 endif
 
+ifdef AZURESDK_ROOT_DIR
+CMAKE_FLAGS += -DAZURESDK_ROOT_DIR=$(AZURESDK_ROOT_DIR)
+endif
+
 # Use Ninja if available. If Ninja is used, pass through parallelism control flags.
 USE_NINJA ?= 1
 ifeq ($(USE_NINJA), 1)
 ifneq ($(shell which ninja), )
-GENERATOR=-GNinja -DMAX_LINK_JOBS=$(MAX_LINK_JOBS) -DMAX_HIGH_MEM_JOBS=$(MAX_HIGH_MEM_JOBS)
+GENERATOR := -GNinja
+GENERATOR += -DMAX_LINK_JOBS=$(MAX_LINK_JOBS)
+GENERATOR += -DMAX_HIGH_MEM_JOBS=$(MAX_HIGH_MEM_JOBS)
+
+# Ninja makes compilers disable colored output by default.
+GENERATOR += -DVELOX_FORCE_COLORED_OUTPUT=ON
 endif
 endif
 
@@ -80,18 +89,20 @@ cmake:					#: Use CMake to create a Makefile build system
 		${CMAKE_FLAGS} \
 		$(GENERATOR) \
 		$(USE_CCACHE) \
-		$(FORCE_COLOR) \
 		${EXTRA_CMAKE_FLAGS}
+
+cmake-gpu:
+	$(MAKE) EXTRA_CMAKE_FLAGS=-DVELOX_ENABLE_GPU=ON cmake
 
 build:					#: Build the software based in BUILD_DIR and BUILD_TYPE variables
 	cmake --build $(BUILD_BASE_DIR)/$(BUILD_DIR) -j $(NUM_THREADS)
 
 debug:					#: Build with debugging symbols
-	$(MAKE) cmake BUILD_DIR=debug BUILD_TYPE=Debug
+	$(MAKE) cmake BUILD_DIR=debug BUILD_TYPE=Debug EXTRA_CMAKE_FLAGS="-DVELOX_ENABLE_PARQUET=ON"
 	$(MAKE) build BUILD_DIR=debug -j ${NUM_THREADS}
 
 release:				#: Build the release version
-	$(MAKE) cmake BUILD_DIR=release BUILD_TYPE=Release && \
+	$(MAKE) cmake BUILD_DIR=release BUILD_TYPE=Release EXTRA_CMAKE_FLAGS="-DVELOX_ENABLE_PARQUET=ON" && \
 	$(MAKE) build BUILD_DIR=release
 
 min_debug:				#: Minimal build with debugging symbols
@@ -159,7 +170,8 @@ python-clean:
 	DEBUG=1 ${PYTHON_EXECUTABLE} setup.py clean
 
 python-build:
-	DEBUG=1 CMAKE_BUILD_PARALLEL_LEVEL=4 ${PYTHON_EXECUTABLE} setup.py develop
+	DEBUG=1 CMAKE_BUILD_PARALLEL_LEVEL=4 ${PYTHON_EXECUTABLE} -m pip install -e .$(extras) --verbose
 
-python-test: python-build
+python-test: 
+	$(MAKE) python-build extras="[tests]"
 	DEBUG=1 ${PYTHON_EXECUTABLE} -m unittest -v

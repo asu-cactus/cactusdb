@@ -13,6 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <fmt/core.h>
+#include <sstream>
+#include <string>
 
 #pragma once
 
@@ -20,7 +23,17 @@ namespace facebook::velox {
 
 // Describes value collation in comparison.
 struct CompareFlags {
-  // This flag will be ignored if stopAtNull is true.
+  enum class NullHandlingMode {
+    // This is the default null handling mode, in this mode nulls are treated as
+    // values such that:
+    //  - null == null is true,
+    //  - null == value is false.
+    //  - when equalsOnly=false null ordering is determined using the nullsFirst
+    // flag.
+    kNullAsValue,
+    kStopAtNull
+  };
+
   bool nullsFirst = true;
 
   bool ascending = true;
@@ -28,8 +41,43 @@ struct CompareFlags {
   // When true, comparison should return non-0 early when sizes mismatch.
   bool equalsOnly = false;
 
-  // When true, the compare returns std::nullopt if null encountered.
-  bool stopAtNull = false;
+  NullHandlingMode nullHandlingMode = NullHandlingMode::kNullAsValue;
+
+  bool mayStopAtNull() const {
+    return nullHandlingMode == CompareFlags::NullHandlingMode::kStopAtNull;
+  }
+
+  bool nullAsValue() const {
+    return nullHandlingMode == CompareFlags::NullHandlingMode::kNullAsValue;
+  }
+
+  // Helper method to construct compare flags with equalsOnly = true, in that
+  // case nullsFirst and ascending are not needed.
+  static constexpr CompareFlags equality(NullHandlingMode nullHandlingMode) {
+    return CompareFlags{
+        .equalsOnly = true, .nullHandlingMode = nullHandlingMode};
+  }
+
+  static std::string nullHandlingModeToStr(NullHandlingMode mode) {
+    switch (mode) {
+      case CompareFlags::NullHandlingMode::kNullAsValue:
+        return "NullAsValue";
+      case CompareFlags::NullHandlingMode::kStopAtNull:
+        return "StopAtNull";
+      default:
+        return fmt::format(
+            "Unknown Null Handling mode {}", static_cast<int>(mode));
+    }
+  }
+
+  std::string toString() const {
+    return fmt::format(
+        "[NullFirst[{}] Ascending[{}] EqualsOnly[{}] NullHandleMode[{}]]",
+        nullsFirst,
+        ascending,
+        equalsOnly,
+        nullHandlingModeToStr(nullHandlingMode));
+  }
 };
 
 } // namespace facebook::velox

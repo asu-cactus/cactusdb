@@ -16,12 +16,14 @@
 
 #pragma once
 
+#include <folly/Executor.h>
 #include "velox/common/base/BitUtil.h"
 #include "velox/dwio/common/DataBuffer.h"
 #include "velox/dwio/common/FlatMapHelper.h"
 #include "velox/dwio/common/TypeWithId.h"
 #include "velox/dwio/dwrf/reader/ColumnReader.h"
 #include "velox/dwio/dwrf/reader/ConstantColumnReader.h"
+#include "velox/dwio/dwrf/reader/StreamLabels.h"
 #include "velox/dwio/dwrf/utils/BitIterator.h"
 
 namespace facebook::velox::dwrf {
@@ -143,8 +145,9 @@ class FlatMapColumnReader : public ColumnReader {
  public:
   FlatMapColumnReader(
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
-      const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
+      const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
       StripeStreams& stripe,
+      const StreamLabels& streamLabels,
       FlatMapContext flatMapContext);
   ~FlatMapColumnReader() override = default;
 
@@ -171,8 +174,10 @@ class FlatMapStructEncodingColumnReader : public ColumnReader {
  public:
   FlatMapStructEncodingColumnReader(
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
-      const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
+      const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
       StripeStreams& stripe,
+      const StreamLabels& streamLabels,
+      folly::Executor* FOLLY_NULLABLE executor,
       FlatMapContext flatMapContext);
   ~FlatMapStructEncodingColumnReader() override = default;
 
@@ -187,6 +192,7 @@ class FlatMapStructEncodingColumnReader : public ColumnReader {
   const std::shared_ptr<const dwio::common::TypeWithId> requestedType_;
   std::vector<std::unique_ptr<KeyNode<T>>> keyNodes_;
   std::unique_ptr<NullColumnReader> nullColumnReader_;
+  folly::Executor* FOLLY_NULLABLE executor_;
   BufferPtr mergedNulls_;
 };
 
@@ -194,8 +200,10 @@ class FlatMapColumnReaderFactory {
  public:
   static std::unique_ptr<ColumnReader> create(
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
-      const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
+      const std::shared_ptr<const dwio::common::TypeWithId>& fileType,
       StripeStreams& stripe,
+      const StreamLabels& streamLabels,
+      folly::Executor* FOLLY_NULLABLE executor,
       FlatMapContext flatMapContext);
 };
 

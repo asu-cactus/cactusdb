@@ -31,6 +31,11 @@ class CompactDoubleList {
     setPrevious(this);
   }
 
+  CompactDoubleList(const CompactDoubleList& other) = delete;
+  CompactDoubleList(CompactDoubleList&& other) = delete;
+  void operator=(const CompactDoubleList& other) = delete;
+  void operator=(CompactDoubleList&& other) = delete;
+
   // Return true if 'this' is the only element.
   bool empty() const {
     return next() == this;
@@ -57,6 +62,17 @@ class CompactDoubleList {
 
   CompactDoubleList* previous() const {
     return loadPointer(previousLow_, previousHigh_);
+  }
+
+  /// Updates links after the next() of 'this' has been moved to 'newNext'. Sets
+  /// the next link of this, the previous link of 'newNext' and the previous
+  /// link of the next() of the moved 'newNext'. The use case is taking the
+  // head of a free list block without a full remove of block plus reinsert of
+  // the remainder of the block.
+  void nextMoved(CompactDoubleList* newNext) {
+    setNext(newNext);
+    VELOX_CHECK(newNext->previous() == this);
+    newNext->next()->setPrevious(newNext);
   }
 
  private:

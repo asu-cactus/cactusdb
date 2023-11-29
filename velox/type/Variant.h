@@ -46,9 +46,6 @@ template <>
 struct VariantEquality<TypeKind::TIMESTAMP>;
 
 template <>
-struct VariantEquality<TypeKind::DATE>;
-
-template <>
 struct VariantEquality<TypeKind::ARRAY>;
 
 template <>
@@ -208,10 +205,9 @@ class variant {
   VELOX_VARIANT_SCALAR_MEMBERS(TypeKind::HUGEINT)
   VELOX_VARIANT_SCALAR_MEMBERS(TypeKind::REAL)
   VELOX_VARIANT_SCALAR_MEMBERS(TypeKind::DOUBLE)
-  VELOX_VARIANT_SCALAR_MEMBERS(TypeKind::VARCHAR);
+  VELOX_VARIANT_SCALAR_MEMBERS(TypeKind::VARCHAR)
   // VARBINARY conflicts with VARCHAR, so we don't gen these methods
   // VELOX_VARIANT_SCALAR_MEMBERS(TypeKind::VARBINARY);
-  VELOX_VARIANT_SCALAR_MEMBERS(TypeKind::DATE)
   VELOX_VARIANT_SCALAR_MEMBERS(TypeKind::TIMESTAMP)
   VELOX_VARIANT_SCALAR_MEMBERS(TypeKind::UNKNOWN)
 #undef VELOX_VARIANT_SCALAR_MEMBERS
@@ -263,13 +259,6 @@ class variant {
             input}};
   }
 
-  static variant date(const Date& input) {
-    return {
-        TypeKind::DATE,
-        new
-        typename detail::VariantTypeTraits<TypeKind::DATE>::stored_type{input}};
-  }
-
   template <class T>
   static variant opaque(const std::shared_ptr<T>& input) {
     VELOX_CHECK(input.get(), "Can't create a variant of nullptr opaque type");
@@ -285,7 +274,10 @@ class variant {
     return {TypeKind::OPAQUE, new detail::OpaqueCapsule{type, input}};
   }
 
+  static void verifyArrayElements(const std::vector<variant>& inputs);
+
   static variant array(const std::vector<variant>& inputs) {
+    verifyArrayElements(inputs);
     return {
         TypeKind::ARRAY,
         new typename detail::VariantTypeTraits<TypeKind::ARRAY>::stored_type{
@@ -293,6 +285,7 @@ class variant {
   }
 
   static variant array(std::vector<variant>&& inputs) {
+    verifyArrayElements(inputs);
     return {
         TypeKind::ARRAY,
         new typename detail::VariantTypeTraits<TypeKind::ARRAY>::stored_type{
@@ -301,7 +294,7 @@ class variant {
 
   variant() : kind_{TypeKind::INVALID}, ptr_{nullptr} {}
 
-  variant(TypeKind kind) : kind_{kind}, ptr_{nullptr} {}
+  /* implicit */ variant(TypeKind kind) : kind_{kind}, ptr_{nullptr} {}
 
   variant(const variant& other) : kind_{other.kind_}, ptr_{nullptr} {
     auto op = other.ptr_;
@@ -311,13 +304,13 @@ class variant {
   }
 
   // Support construction from StringView as well as StringPiece.
-  variant(StringView view) : variant{folly::StringPiece{view}} {}
+  /* implicit */ variant(StringView view) : variant{folly::StringPiece{view}} {}
 
   // Break ties between implicit conversions to StringView/StringPiece.
-  variant(std::string str)
+  /* implicit */ variant(std::string str)
       : kind_{TypeKind::VARCHAR}, ptr_{new std::string{std::move(str)}} {}
 
-  variant(const char* str)
+  /* implicit */ variant(const char* str)
       : kind_{TypeKind::VARCHAR}, ptr_{new std::string{str}} {}
 
   template <TypeKind KIND>
@@ -361,7 +354,7 @@ class variant {
     return *this;
   }
 
-  variant& operator=(variant&& other) {
+  variant& operator=(variant&& other) noexcept {
     if (ptr_ != nullptr) {
       dynamicFree();
     }
@@ -397,7 +390,7 @@ class variant {
     return dispatchDynamicVariantEquality(*this, other, true);
   }
 
-  variant(variant&& other) : kind_{other.kind_}, ptr_{other.ptr_} {
+  variant(variant&& other) noexcept : kind_{other.kind_}, ptr_{other.ptr_} {
     other.ptr_ = nullptr;
   }
 
@@ -407,11 +400,12 @@ class variant {
     }
   }
 
-  std::string toJson(const TypePtr& type = nullptr) const;
+  std::string toJson(const TypePtr& type) const;
+  std::string toJsonUnsafe(const TypePtr& type = nullptr) const;
 
   /// Used by python binding, do not change signature.
   std::string pyToJson() const {
-    return toJson();
+    return toJsonUnsafe();
   }
 
   folly::dynamic serialize() const;
@@ -523,6 +517,7 @@ class variant {
       case TypeKind::ROW: {
         auto& r = row();
         std::vector<std::shared_ptr<const Type>> children{};
+        children.reserve(r.size());
         for (auto& v : r) {
           children.push_back(v.inferType());
         }
@@ -550,7 +545,8 @@ class variant {
   }
 
   friend std::ostream& operator<<(std::ostream& stream, const variant& k) {
-    stream << k.toJson();
+    const auto type = k.inferType();
+    stream << k.toJson(type);
     return stream;
   }
 
@@ -582,12 +578,7 @@ struct VariantConverter {
     if (value.isNull()) {
       return variant{value.kind()};
     }
-    bool nullOutput = false;
-    auto converted =
-        util::Converter<ToKind>::cast(value.value<FromKind>(), nullOutput);
-    if (nullOutput) {
-      throw std::invalid_argument("Velox cast error");
-    }
+    auto converted = util::Converter<ToKind>::cast(value.value<FromKind>());
     return {converted};
   }
 
@@ -612,7 +603,6 @@ struct VariantConverter {
         return convert<TypeKind::VARCHAR, ToKind>(value);
       case TypeKind::VARBINARY:
         return convert<TypeKind::VARBINARY, ToKind>(value);
-      case TypeKind::DATE:
       case TypeKind::TIMESTAMP:
       case TypeKind::HUGEINT:
         // Default date/timestamp conversion is prone to errors and implicit

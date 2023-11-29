@@ -16,6 +16,9 @@
 
 #pragma once
 
+#include <cassert>
+
+#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
@@ -27,6 +30,7 @@
 #include <velox/parse/TypeResolver.h>
 #include <velox/type/Type.h>
 #include <velox/type/Variant.h>
+#include <velox/vector/ComplexVector.h>
 #include <velox/vector/DictionaryVector.h>
 #include <velox/vector/FlatVector.h>
 #include "folly/json.h"
@@ -69,6 +73,72 @@ inline velox::variant pyToVariant(const py::handle& obj) {
   }
 }
 
+inline velox::variant pyToVariant(const py::handle& obj, const Type& dtype) {
+  if (obj.is_none()) {
+    return velox::variant(dtype.kind());
+  }
+  switch (dtype.kind()) {
+    case TypeKind::BOOLEAN: {
+      return pyToVariant<velox::TypeKind::BOOLEAN>(obj);
+    }
+    case TypeKind::TINYINT: {
+      return pyToVariant<velox::TypeKind::TINYINT>(obj);
+    }
+    case TypeKind::SMALLINT: {
+      return pyToVariant<velox::TypeKind::SMALLINT>(obj);
+    }
+    case TypeKind::INTEGER: {
+      return pyToVariant<velox::TypeKind::INTEGER>(obj);
+    }
+    case TypeKind::BIGINT: {
+      return pyToVariant<velox::TypeKind::BIGINT>(obj);
+    }
+    case TypeKind::REAL: {
+      return pyToVariant<velox::TypeKind::REAL>(obj);
+    }
+    case TypeKind::DOUBLE: {
+      return pyToVariant<velox::TypeKind::DOUBLE>(obj);
+    }
+    case TypeKind::VARCHAR: {
+      return pyToVariant<velox::TypeKind::VARCHAR>(obj);
+    }
+    case TypeKind::VARBINARY: {
+      return pyToVariant<velox::TypeKind::VARBINARY>(obj);
+    }
+    case TypeKind::TIMESTAMP: {
+      return pyToVariant<velox::TypeKind::TIMESTAMP>(obj);
+    }
+    default:
+      throw py::type_error("Unsupported type supplied");
+  }
+}
+
+inline void checkRowVectorBounds(const RowVectorPtr& v, vector_size_t idx) {
+  if (idx < 0 || size_t(idx) >= v->childrenSize()) {
+    throw std::out_of_range("Index out of range");
+  }
+}
+
+bool compareRowVector(const RowVectorPtr& u, const RowVectorPtr& v) {
+  CompareFlags compFlags =
+      CompareFlags::equality(CompareFlags::NullHandlingMode::kNullAsValue);
+
+  if (u->size() != v->size()) {
+    return false;
+  }
+  for (size_t i = 0; i < u->size(); i++) {
+    if (u->compare(v.get(), i, i, compFlags) != 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+inline std::string rowVectorToString(const RowVectorPtr& vector) {
+  return vector->toString(0, vector->size());
+}
+
 static VectorPtr pyToConstantVector(
     const py::handle& obj,
     vector_size_t length,
@@ -82,6 +152,11 @@ static VectorPtr variantsToFlatVector(
 
 static inline VectorPtr pyListToVector(
     const py::list& list,
+    facebook::velox::memory::MemoryPool* pool);
+
+static inline VectorPtr pyListToVector(
+    const py::list& list,
+    const Type& dtype,
     facebook::velox::memory::MemoryPool* pool);
 
 template <TypeKind T>
@@ -272,9 +347,26 @@ static void registerTypedVectors(
       m,
       ("SimpleVector_" + typeName).c_str(),
       py::module_local(asModuleLocalDefinitions))
-      .def("__getitem__", [](SimpleVectorPtr<NativeType> v, vector_size_t idx) {
-        return getItemFromSimpleVector(v, idx);
-      });
+      .def(
+          "__getitem__",
+          [](SimpleVectorPtr<NativeType> v, vector_size_t idx) {
+            return getItemFromSimpleVector(v, idx);
+          })
+      .def(
+          "__getitem__",
+          [](std::shared_ptr<SimpleVector<NativeType>> v, py::slice slice) {
+            size_t start, stop, step, length;
+            if (!slice.compute(v->size(), &start, &stop, &step, &length)) {
+              throw py::error_already_set();
+            }
+            if (step != 1) {
+              PyErr_SetString(
+                  PyExc_NotImplementedError,
+                  "Slicing with step other than 1 is not supported");
+              throw py::error_already_set();
+            }
+            return v->slice(start, length);
+          });
 
   py::class_<
       FlatVector<NativeType>,
@@ -353,7 +445,24 @@ static void addVectorBindings(
           })
       .def("encoding", &BaseVector::encoding)
       .def("append", [](VectorPtr& u, VectorPtr& v) { appendVectors(u, v); })
-      .def("resize", &BaseVector::resize);
+      .def("resize", &BaseVector::resize)
+      .def(
+          "slice",
+          [](VectorPtr& u,
+             vector_size_t start,
+             vector_size_t stop,
+             vector_size_t step) {
+            if (step != 1) {
+              PyErr_SetString(
+                  PyExc_NotImplementedError,
+                  "Slicing with step other than 1 is not supported");
+              throw py::error_already_set();
+            }
+            return u->slice(start, stop - start);
+          },
+          py::arg("start"),
+          py::arg("stop"),
+          py::arg("step") = 1);
 
   constexpr TypeKind supportedTypes[] = {
       TypeKind::BOOLEAN,
@@ -364,8 +473,7 @@ static void addVectorBindings(
       TypeKind::REAL,
       TypeKind::DOUBLE,
       TypeKind::VARBINARY,
-      TypeKind::TIMESTAMP,
-      TypeKind::DATE};
+      TypeKind::TIMESTAMP};
 
   for (int i = 0; i < sizeof(supportedTypes) / sizeof(supportedTypes[0]); i++) {
     VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(
@@ -383,10 +491,19 @@ static void addVectorBindings(
         checkBounds(indices, idx);
         return indices.indices->as<vector_size_t>()[idx];
       });
-
-  m.def("from_list", [](const py::list& list) mutable {
-    return pyListToVector(list, PyVeloxContext::getSingletonInstance().pool());
-  });
+  m.def(
+      "from_list",
+      [](const py::list& list, const Type* dtype = nullptr) mutable {
+        if (!dtype || py::isinstance<py::none>(py::cast(*dtype))) {
+          return pyListToVector(
+              list, PyVeloxContext::getSingletonInstance().pool());
+        } else {
+          return pyListToVector(
+              list, *dtype, PyVeloxContext::getSingletonInstance().pool());
+        }
+      },
+      py::arg("list"),
+      py::arg("dtype") = nullptr);
   m.def(
       "constant_vector",
       [](const py::handle& obj, vector_size_t length, TypePtr type) {
@@ -416,6 +533,75 @@ static void addVectorBindings(
             std::move(indices_buffer),
             std::move(baseVector),
             PyVeloxContext::getSingletonInstance().pool());
+      });
+
+  m.def(
+      "row_vector",
+      [](std::vector<std::string>& names,
+         std::vector<VectorPtr>& children,
+         const std::optional<py::dict>& nullabilityDict) {
+        if (children.size() == 0 || names.size() == 0) {
+          throw py::value_error("RowVector must have children.");
+        }
+        std::vector<std::shared_ptr<const Type>> childTypes;
+        childTypes.reserve(children.size());
+
+        size_t vectorSize = children[0]->size();
+        for (int i = 0; i < children.size(); i++) {
+          if (i > 0 && children[i]->size() != vectorSize) {
+            PyErr_SetString(PyExc_ValueError, "Each child must have same size");
+            throw py::error_already_set();
+          }
+          childTypes.push_back(children[i]->type());
+        }
+        auto rowType = ROW(std::move(names), std::move(childTypes));
+
+        BufferPtr nullabilityBuffer = nullptr;
+        if (nullabilityDict.has_value()) {
+          auto nullabilityValues = nullabilityDict.value();
+          nullabilityBuffer = AlignedBuffer::allocate<bool>(
+              vectorSize, PyVeloxContext::getSingletonInstance().pool(), true);
+          for (const auto&& item : nullabilityValues) {
+            auto row = item.first;
+            auto nullability = item.second;
+            if (!py::isinstance<py::int_>(row) ||
+                !py::isinstance<py::bool_>(nullability)) {
+              throw py::type_error(
+                  "Nullability must be a dictionary, rowId in int and nullability in boolean.");
+            }
+            int rowId = py::cast<int>(row);
+            if (!(rowId >= 0 && rowId < vectorSize)) {
+              throw py::type_error("Nullability index out of bounds.");
+            }
+            bool nullabilityVal = py::cast<bool>(nullability);
+            bits::setBit(
+                nullabilityBuffer->asMutable<uint64_t>(),
+                rowId,
+                bits::kNull ? nullabilityVal : !nullabilityVal);
+          }
+        }
+
+        return std::make_shared<RowVector>(
+            PyVeloxContext::getSingletonInstance().pool(),
+            rowType,
+            nullabilityBuffer,
+            vectorSize,
+            children);
+      },
+      py::arg("names"),
+      py::arg("children"),
+      py::arg("nullability") = std::nullopt);
+
+  py::class_<RowVector, BaseVector, RowVectorPtr>(
+      m, "RowVector", py::module_local(asModuleLocalDefinitions))
+      .def(
+          "__len__",
+          [](RowVectorPtr& v) {
+            return v->childrenSize() > 0 ? v->childAt(0)->size() : 0;
+          })
+      .def("__str__", [](RowVectorPtr& v) { return rowVectorToString(v); })
+      .def("__eq__", [](RowVectorPtr& u, RowVectorPtr& v) {
+        return compareRowVector(u, v);
       });
 }
 

@@ -116,6 +116,13 @@ struct resolver<Varbinary> {
 };
 
 template <>
+struct resolver<Date> {
+  using in_type = int32_t;
+  using null_free_in_type = in_type;
+  using out_type = int32_t;
+};
+
+template <>
 struct resolver<IntervalDayTime> {
   using in_type = int64_t;
   using null_free_in_type = in_type;
@@ -136,8 +143,8 @@ struct resolver<Variadic<T>> {
   // Variadic cannot be used as an out_type
 };
 
-template <typename T>
-struct resolver<Generic<T>> {
+template <typename T, bool comparable, bool orderable>
+struct resolver<Generic<T, comparable, orderable>> {
   using in_type = GenericView;
   using null_free_in_type = in_type;
   using out_type = GenericWriter;

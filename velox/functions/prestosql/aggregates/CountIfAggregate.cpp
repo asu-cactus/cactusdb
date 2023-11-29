@@ -168,7 +168,10 @@ class CountIfAggregate : public exec::Aggregate {
   }
 };
 
-bool registerCountIf(const std::string& name) {
+} // namespace
+
+exec::AggregateRegistrationResult registerCountIfAggregate(
+    const std::string& prefix) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures{
       exec::AggregateFunctionSignatureBuilder()
           .returnType("bigint")
@@ -177,14 +180,16 @@ bool registerCountIf(const std::string& name) {
           .build(),
   };
 
-  exec::registerAggregateFunction(
+  auto name = prefix + kCountIf;
+  return exec::registerAggregateFunction(
       name,
       std::move(signatures),
       [name](
           core::AggregationNode::Step step,
           std::vector<TypePtr> argTypes,
-          const TypePtr&
-          /*resultType*/) -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr& /*resultType*/,
+          const core::QueryConfig& /*config*/)
+          -> std::unique_ptr<exec::Aggregate> {
         VELOX_CHECK_EQ(argTypes.size(), 1, "{} takes one argument", name);
 
         auto isPartial = exec::isRawInput(step);
@@ -198,13 +203,6 @@ bool registerCountIf(const std::string& name) {
 
         return std::make_unique<CountIfAggregate>();
       });
-  return true;
-}
-
-} // namespace
-
-void registerCountIfAggregate(const std::string& prefix) {
-  registerCountIf(prefix + kCountIf);
 }
 
 } // namespace facebook::velox::aggregate::prestosql

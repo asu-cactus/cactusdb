@@ -207,7 +207,10 @@ class ChecksumAggregate : public exec::Aggregate {
   DecodedVector decodedIntermediate_;
 };
 
-bool registerChecksum(const std::string& name) {
+} // namespace
+
+exec::AggregateRegistrationResult registerChecksumAggregate(
+    const std::string& prefix) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures{
       exec::AggregateFunctionSignatureBuilder()
           .typeVariable("T")
@@ -217,13 +220,16 @@ bool registerChecksum(const std::string& name) {
           .build(),
   };
 
-  exec::registerAggregateFunction(
+  auto name = prefix + kChecksum;
+  return exec::registerAggregateFunction(
       name,
       std::move(signatures),
       [&name](
           core::AggregationNode::Step step,
           const std::vector<TypePtr>& argTypes,
-          const TypePtr& /*resultType*/) -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr& /*resultType*/,
+          const core::QueryConfig& /*config*/)
+          -> std::unique_ptr<exec::Aggregate> {
         VELOX_CHECK_EQ(argTypes.size(), 1, "{} takes one argument", name);
 
         if (exec::isPartialOutput(step)) {
@@ -232,14 +238,6 @@ bool registerChecksum(const std::string& name) {
 
         return std::make_unique<ChecksumAggregate>(VARBINARY());
       });
-
-  return true;
-}
-
-} // namespace
-
-void registerChecksumAggregate(const std::string& prefix) {
-  registerChecksum(prefix + kChecksum);
 }
 
 } // namespace facebook::velox::aggregate::prestosql

@@ -20,7 +20,7 @@
 #include "velox/core/QueryCtx.h"
 #include "velox/expression/Expr.h"
 #include "velox/expression/tests/ExpressionVerifier.h"
-#include "velox/expression/tests/FuzzerToolkit.h"
+#include "velox/expression/tests/utils/FuzzerToolkit.h"
 #include "velox/functions/FunctionRegistry.h"
 #include "velox/vector/fuzzer/VectorFuzzer.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
@@ -132,7 +132,8 @@ class ExpressionFuzzer {
     // occurred.
     void onError(
         const SelectivityVector& /*rows*/,
-        const ::facebook::velox::ErrorVector& /*errors*/) override {}
+        const ::facebook::velox::ErrorVector& /*errors*/,
+        const std::string& /*queryId*/) override {}
 
    private:
     std::unordered_map<std::string, ExprUsageStats>& exprNameToStats_;
@@ -227,7 +228,7 @@ class ExpressionFuzzer {
       std::vector<core::TypedExprPtr> plans,
       const RowVectorPtr& rowVector,
       const VectorPtr& resultVectors,
-      const std::vector<column_index_t>& columnsToWrapInLazy);
+      const std::vector<int>& columnsToWrapInLazy);
 
   /// Return a random signature mapped to functionName in expressionToSignature_
   /// whose return type can match returnType. Return nullptr if no such

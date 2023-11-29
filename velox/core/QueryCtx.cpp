@@ -18,20 +18,38 @@
 namespace facebook::velox::core {
 
 QueryCtx::QueryCtx(
-    folly::Executor* FOLLY_NULLABLE executor,
-    std::unordered_map<std::string, std::string> queryConfigValues,
+    folly::Executor* executor,
+    QueryConfig&& queryConfig,
     std::unordered_map<std::string, std::shared_ptr<Config>> connectorConfigs,
-    memory::MemoryAllocator* FOLLY_NONNULL allocator,
+    cache::AsyncDataCache* cache,
+    std::shared_ptr<memory::MemoryPool> pool,
+    folly::Executor* spillExecutor,
+    const std::string& queryId)
+    : queryId_(queryId),
+      executor_(executor),
+      spillExecutor_(spillExecutor),
+      cache_(cache),
+      connectorConfigs_(connectorConfigs),
+      pool_(std::move(pool)),
+      queryConfig_{std::move(queryConfig)} {
+  initPool(queryId);
+}
+
+QueryCtx::QueryCtx(
+    folly::Executor* executor,
+    QueryConfig&& queryConfig,
+    std::unordered_map<std::string, std::shared_ptr<Config>> connectorConfigs,
+    cache::AsyncDataCache* cache,
     std::shared_ptr<memory::MemoryPool> pool,
     std::shared_ptr<folly::Executor> spillExecutor,
     const std::string& queryId)
-    : connectorConfigs_(connectorConfigs),
-      allocator_(allocator),
-      pool_(std::move(pool)),
+    : queryId_(queryId),
       executor_(executor),
-      queryConfig_{std::move(queryConfigValues)},
-      queryId_(queryId),
-      spillExecutor_(std::move(spillExecutor)) {
+      spillExecutor_(spillExecutor.get()),
+      cache_(cache),
+      connectorConfigs_(connectorConfigs),
+      pool_(std::move(pool)),
+      queryConfig_{std::move(queryConfig)} {
   initPool(queryId);
 }
 
@@ -39,15 +57,15 @@ QueryCtx::QueryCtx(
     folly::Executor::KeepAlive<> executorKeepalive,
     std::unordered_map<std::string, std::string> queryConfigValues,
     std::unordered_map<std::string, std::shared_ptr<Config>> connectorConfigs,
-    memory::MemoryAllocator* FOLLY_NONNULL allocator,
+    cache::AsyncDataCache* cache,
     std::shared_ptr<memory::MemoryPool> pool,
     const std::string& queryId)
-    : connectorConfigs_(connectorConfigs),
-      allocator_(allocator),
+    : queryId_(queryId),
+      cache_(cache),
+      connectorConfigs_(connectorConfigs),
       pool_(std::move(pool)),
       executorKeepalive_(std::move(executorKeepalive)),
-      queryConfig_{std::move(queryConfigValues)},
-      queryId_(queryId) {
+      queryConfig_{std::move(queryConfigValues)} {
   initPool(queryId);
 }
 

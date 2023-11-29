@@ -36,6 +36,9 @@ struct DummyReleaser {
 template <typename T>
 class ConstantVector final : public SimpleVector<T> {
  public:
+  ConstantVector(const ConstantVector&) = delete;
+  ConstantVector& operator=(const ConstantVector&) = delete;
+
   static constexpr bool can_simd =
       (std::is_same_v<T, int64_t> || std::is_same_v<T, int32_t> ||
        std::is_same_v<T, int16_t> || std::is_same_v<T, int8_t> ||
@@ -242,7 +245,7 @@ class ConstantVector final : public SimpleVector<T> {
 
   // Base vector if isScalar() is false (e.g. complex type vector) or if base
   // vector is a lazy vector that hasn't been loaded yet.
-  VectorPtr valueVector() const override {
+  const VectorPtr& valueVector() const override {
     return valueVector_;
   }
 
@@ -252,8 +255,12 @@ class ConstantVector final : public SimpleVector<T> {
     return index_;
   }
 
-  void resize(vector_size_t size, bool setNotNull = true) override {
-    BaseVector::length_ = size;
+  void resize(vector_size_t newSize, bool /*setNotNull*/ = true) override {
+    BaseVector::length_ = newSize;
+    if constexpr (std::is_same_v<T, StringView>) {
+      SimpleVector<StringView>::resizeIsAsciiIfNotEmpty(
+          newSize, SimpleVector<StringView>::getAllIsAscii());
+    }
   }
 
   VectorPtr slice(vector_size_t /*offset*/, vector_size_t length)
@@ -270,6 +277,22 @@ class ConstantVector final : public SimpleVector<T> {
 
   void addNulls(const uint64_t* /*bits*/, const SelectivityVector& /*rows*/)
       override {
+    VELOX_FAIL("addNulls not supported");
+  }
+
+  bool containsNullAt(vector_size_t idx) const override {
+    if constexpr (std::is_same_v<T, ComplexType>) {
+      if (isNullAt(idx)) {
+        return true;
+      }
+
+      return valueVector_->containsNullAt(index_);
+    } else {
+      return isNullAt(idx);
+    }
+  }
+
+  void addNulls(const SelectivityVector& /*rows*/) override {
     VELOX_FAIL("addNulls not supported");
   }
 
@@ -315,6 +338,20 @@ class ConstantVector final : public SimpleVector<T> {
     return false;
   }
 
+  void validate(const VectorValidateOptions& options) const override {
+    // Do not call BaseVector's validate() since the nulls buffer has
+    // a fixed size for constant vectors.
+    if (options.callback) {
+      options.callback(*this);
+    }
+    if (valueVector_ != nullptr) {
+      if (!isNull_) {
+        VELOX_CHECK_LT(index_, valueVector_->size());
+      }
+      valueVector_->validate(options);
+    }
+  }
+
  protected:
   std::string toSummaryString() const override {
     std::stringstream out;
@@ -338,7 +375,8 @@ class ConstantVector final : public SimpleVector<T> {
 
     isNull_ = valueVector_->isNullAt(index_);
     BaseVector::distinctValueCount_ = isNull_ ? 0 : 1;
-    BaseVector::nullCount_ = isNull_ ? BaseVector::length_ : 0;
+    const vector_size_t vectorSize = BaseVector::length_;
+    BaseVector::nullCount_ = isNull_ ? vectorSize : 0;
     if (valueVector_->isScalar()) {
       auto simple = valueVector_->loadedVector()->as<SimpleVector<T>>();
       isNull_ = simple->isNullAt(index_);

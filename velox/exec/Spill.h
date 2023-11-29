@@ -18,7 +18,12 @@
 
 #include <folly/container/F14Set.h>
 
+#include "velox/common/base/SpillConfig.h"
+#include "velox/common/base/SpillStats.h"
+#include "velox/common/compression/Compression.h"
 #include "velox/common/file/File.h"
+#include "velox/common/file/FileSystems.h"
+#include "velox/exec/SpillFile.h"
 #include "velox/exec/TreeOfLosers.h"
 #include "velox/exec/UnorderedStreamReader.h"
 #include "velox/vector/ComplexVector.h"
@@ -26,219 +31,14 @@
 #include "velox/vector/VectorStream.h"
 
 namespace facebook::velox::exec {
-
-// Input stream backed by spill file.
-class SpillInput : public ByteStream {
- public:
-  // Reads from 'input' using 'buffer' for buffering reads.
-  SpillInput(std::unique_ptr<ReadFile>&& input, BufferPtr buffer)
-      : input_(std::move(input)),
-        buffer_(std::move(buffer)),
-        size_(input_->size()) {
-    next(true);
-  }
-
-  void next(bool throwIfPastEnd) override;
-
-  // True if all of the file has been read into vectors.
-  bool atEnd() const {
-    return offset_ >= size_ && ranges()[0].position >= ranges()[0].size;
-  }
-
- private:
-  std::unique_ptr<ReadFile> input_;
-  BufferPtr buffer_;
-  const uint64_t size_;
-  // Offset of first byte not in 'buffer_'
-  uint64_t offset_ = 0;
-};
-
-/// Represents a spill file that is first in write mode and then
-/// turns into a source of spilled RowVectors. Owns a file system file that
-/// contains the spilled data and is live for the duration of 'this'.
-
-/// NOTE: The class will not delete spill file upon destruction, so the user
-/// needs to remove the unused spill files at some point later. For example, a
-/// query Task deletes all the generated spill files in one operation using
-/// rmdir() call.
-class SpillFile {
- public:
-  SpillFile(
-      RowTypePtr type,
-      int32_t numSortingKeys,
-      const std::vector<CompareFlags>& sortCompareFlags,
-      const std::string& path,
-      memory::MemoryPool& pool)
-      : type_(std::move(type)),
-        numSortingKeys_(numSortingKeys),
-        sortCompareFlags_(sortCompareFlags),
-        pool_(pool),
-        ordinal_(ordinalCounter_++),
-        path_(fmt::format("{}-{}", path, ordinal_)) {
-    // NOTE: if the spilling operator has specified the sort comparison flags,
-    // then it must match the number of sorting keys.
-    VELOX_CHECK(
-        sortCompareFlags_.empty() ||
-        sortCompareFlags_.size() == numSortingKeys_);
-  }
-
-  int32_t numSortingKeys() const {
-    return numSortingKeys_;
-  }
-
-  const std::vector<CompareFlags>& sortCompareFlags() const {
-    return sortCompareFlags_;
-  }
-
-  /// Returns a file for writing spilled data. The caller constructs
-  /// this, then calls output() and writes serialized data to the file
-  /// and calls finishWrite when the file has reached its final
-  /// size. For sorted spilling, the data in one file is expected to be
-  // sorted.
-  WriteFile& output();
-
-  bool isWritable() const {
-    return output_ != nullptr;
-  }
-
-  /// Finishes writing and flushes any unwritten data.
-  void finishWrite() {
-    VELOX_CHECK(output_);
-    fileSize_ = output_->size();
-    output_ = nullptr;
-  }
-
-  /// Prepares 'this' for reading. Positions the read at the first row of
-  /// content. The caller must call output() and finishWrite() before this.
-  void startRead();
-
-  bool nextBatch(RowVectorPtr& rowVector);
-
-  /// Returns the file size in bytes. During the writing phase this is
-  /// the current size of the file, during reading this is the final
-  // size.
-  uint64_t size() const {
-    if (output_) {
-      return output_->size();
-    }
-    return fileSize_;
-  }
-
-  std::string label() const {
-    return fmt::format("{}", ordinal_);
-  }
-
-  const std::string& testingFilePath() const {
-    return path_;
-  }
-
- private:
-  static std::atomic<int32_t> ordinalCounter_;
-
-  // Type of 'rowVector_'. Needed for setting up writing.
-  const RowTypePtr type_;
-  const int32_t numSortingKeys_;
-  const std::vector<CompareFlags> sortCompareFlags_;
-  memory::MemoryPool& pool_;
-
-  // Ordinal number used for making a label for debugging.
-  const int32_t ordinal_;
-  const std::string path_;
-
-  // Byte size of the backing file. Set when finishing writing.
-  uint64_t fileSize_ = 0;
-  std::unique_ptr<WriteFile> output_;
-  std::unique_ptr<SpillInput> input_;
-};
-
-using SpillFiles = std::vector<std::unique_ptr<SpillFile>>;
-
-/// Sequence of files for one partition of the spilled data. If data is
-/// sorted, each file is sorted. The globally sorted order is produced
-/// by merging the constituent files.
-class SpillFileList {
- public:
-  /// Constructs a set of spill files. 'type' is a RowType describing the
-  /// content. 'numSortingKeys' is the number of leading columns on which the
-  /// data is sorted. 'path' is a file path prefix. ' 'targetFileSize' is the
-  /// target byte size of a single file in the file set. 'pool' is used for
-  /// buffering and constructing the result data read from 'this'.
-  ///
-  /// When writing sorted spill runs, the caller is responsible for buffering
-  /// and sorting the data. write is called multiple times, followed by flush().
-  SpillFileList(
-      RowTypePtr type,
-      int32_t numSortingKeys,
-      const std::vector<CompareFlags>& sortCompareFlags,
-      const std::string& path,
-      uint64_t targetFileSize,
-      memory::MemoryPool& pool)
-      : type_(type),
-        numSortingKeys_(numSortingKeys),
-        sortCompareFlags_(sortCompareFlags),
-        path_(path),
-        targetFileSize_(targetFileSize),
-        pool_(pool) {
-    // NOTE: if the associated spilling operator has specified the sort
-    // comparison flags, then it must match the number of sorting keys.
-    VELOX_CHECK(
-        sortCompareFlags_.empty() ||
-        sortCompareFlags_.size() == numSortingKeys_);
-  }
-
-  /// Adds 'rows' for the positions in 'indices' into 'this'. The indices
-  /// must produce a view where the rows are sorted if sorting is desired.
-  /// Consecutive calls must have sorted data so that the first row of the
-  /// next call is not less than the last row of the previous call.
-  void write(
-      const RowVectorPtr& rows,
-      const folly::Range<IndexRange*>& indices);
-
-  /// Closes the current output file if any. Subsequent calls to write will
-  /// start a new one.
-  void finishFile();
-
-  SpillFiles files() {
-    VELOX_CHECK(!files_.empty());
-    finishFile();
-    recordRuntimeStats();
-    return std::move(files_);
-  }
-
-  uint64_t spilledBytes() const;
-
-  uint64_t spilledFiles() const {
-    return files_.size();
-  }
-
-  std::vector<std::string> testingSpilledFilePaths() const;
-
- private:
-  // Returns the current file to write to and creates one if needed.
-  WriteFile& currentOutput();
-
-  // Writes data from 'batch_' to the current output file.
-  void flush();
-
-  // Invoked by 'files()' to record stats when finish writing all the spill
-  // files.
-  void recordRuntimeStats();
-
-  const RowTypePtr type_;
-  const int32_t numSortingKeys_;
-  const std::vector<CompareFlags> sortCompareFlags_;
-  const std::string path_;
-  const uint64_t targetFileSize_;
-  memory::MemoryPool& pool_;
-  std::unique_ptr<VectorStreamGroup> batch_;
-  SpillFiles files_;
-};
-
 // A source of sorted spilled RowVectors coming either from a file or memory.
 class SpillMergeStream : public MergeStream {
  public:
   SpillMergeStream() = default;
   virtual ~SpillMergeStream() = default;
+
+  /// Returns the id of a spill merge stream which is unique in the merge set.
+  virtual uint32_t id() const = 0;
 
   bool hasData() const final {
     return index_ < size_;
@@ -248,40 +48,7 @@ class SpillMergeStream : public MergeStream {
     return compare(other) < 0;
   }
 
-  int32_t compare(const MergeStream& other) const override {
-    auto& otherStream = static_cast<const SpillMergeStream&>(other);
-    auto& children = rowVector_->children();
-    auto& otherChildren = otherStream.current().children();
-    int32_t key = 0;
-    if (sortCompareFlags().empty()) {
-      do {
-        auto result = children[key]
-                          ->compare(
-                              otherChildren[key].get(),
-                              index_,
-                              otherStream.index_,
-                              CompareFlags())
-                          .value();
-        if (result != 0) {
-          return result;
-        }
-      } while (++key < numSortingKeys());
-    } else {
-      do {
-        auto result = children[key]
-                          ->compare(
-                              otherChildren[key].get(),
-                              index_,
-                              otherStream.index_,
-                              sortCompareFlags()[key])
-                          .value();
-        if (result != 0) {
-          return result;
-        }
-      } while (++key < numSortingKeys());
-    }
-    return 0;
-  }
+  int32_t compare(const MergeStream& other) const override;
 
   void pop();
 
@@ -300,14 +67,14 @@ class SpillMergeStream : public MergeStream {
     return index_;
   }
 
-  // Returns a DecodedVector set decoding the 'index'th child of 'rowVector_'
+  /// Returns a DecodedVector set decoding the 'index'th child of 'rowVector_'
   DecodedVector& decoded(int32_t index) {
     ensureDecodedValid(index);
     return decoded_[index];
   }
 
  protected:
-  virtual int32_t numSortingKeys() const = 0;
+  virtual int32_t numSortKeys() const = 0;
 
   virtual const std::vector<CompareFlags>& sortCompareFlags() const = 0;
 
@@ -363,37 +130,31 @@ class SpillMergeStream : public MergeStream {
 class FileSpillMergeStream : public SpillMergeStream {
  public:
   static std::unique_ptr<SpillMergeStream> create(
-      std::unique_ptr<SpillFile> spillFile) {
-    spillFile->startRead();
+      std::unique_ptr<SpillReadFile> spillFile) {
     auto* spillStream = new FileSpillMergeStream(std::move(spillFile));
     spillStream->nextBatch();
     return std::unique_ptr<SpillMergeStream>(spillStream);
   }
 
+  uint32_t id() const override;
+
  private:
-  explicit FileSpillMergeStream(std::unique_ptr<SpillFile> spillFile)
+  explicit FileSpillMergeStream(std::unique_ptr<SpillReadFile> spillFile)
       : spillFile_(std::move(spillFile)) {
     VELOX_CHECK_NOT_NULL(spillFile_);
   }
 
-  int32_t numSortingKeys() const override {
-    return spillFile_->numSortingKeys();
+  int32_t numSortKeys() const override {
+    return spillFile_->numSortKeys();
   }
 
   const std::vector<CompareFlags>& sortCompareFlags() const override {
     return spillFile_->sortCompareFlags();
   }
 
-  void nextBatch() override {
-    index_ = 0;
-    if (!spillFile_->nextBatch(rowVector_)) {
-      size_ = 0;
-      return;
-    }
-    size_ = rowVector_->size();
-  }
+  void nextBatch() override;
 
-  std::unique_ptr<SpillFile> spillFile_;
+  std::unique_ptr<SpillReadFile> spillFile_;
 };
 
 /// A source of spilled RowVectors coming from a file. The spill data might not
@@ -403,31 +164,22 @@ class FileSpillMergeStream : public SpillMergeStream {
 class FileSpillBatchStream : public BatchStream {
  public:
   static std::unique_ptr<BatchStream> create(
-      std::unique_ptr<SpillFile> spillFile) {
+      std::unique_ptr<SpillReadFile> spillFile) {
     auto* spillStream = new FileSpillBatchStream(std::move(spillFile));
     return std::unique_ptr<BatchStream>(spillStream);
   }
 
   bool nextBatch(RowVectorPtr& batch) override {
-    if (FOLLY_UNLIKELY(!isFileOpened_)) {
-      spillFile_->startRead();
-      isFileOpened_ = true;
-    }
     return spillFile_->nextBatch(batch);
   }
 
  private:
-  explicit FileSpillBatchStream(std::unique_ptr<SpillFile> spillFile)
-      : isFileOpened_(false), spillFile_(std::move(spillFile)) {
+  explicit FileSpillBatchStream(std::unique_ptr<SpillReadFile> spillFile)
+      : spillFile_(std::move(spillFile)) {
     VELOX_CHECK_NOT_NULL(spillFile_);
   }
 
-  // Indicates if 'spillFile_' has been opened for stream read or not.
-  //
-  // NOTE: we open the file until the first read on this stream object so that
-  // we don't open too many files at the same time.
-  bool isFileOpened_;
-  std::unique_ptr<SpillFile> spillFile_;
+  std::unique_ptr<SpillReadFile> spillFile_;
 };
 
 /// Identifies a spill partition generated from a given spilling operator. It
@@ -503,12 +255,14 @@ class SpillPartition {
   explicit SpillPartition(const SpillPartitionId& id)
       : SpillPartition(id, {}) {}
 
-  SpillPartition(const SpillPartitionId& id, SpillFiles files)
-      : id_(id), files_(std::move(files)) {}
+  SpillPartition(const SpillPartitionId& id, SpillFiles files) : id_(id) {
+    addFiles(std::move(files));
+  }
 
   void addFiles(SpillFiles files) {
     files_.reserve(files_.size() + files.size());
     for (auto& file : files) {
+      size_ += file.size;
       files_.push_back(std::move(file));
     }
   }
@@ -521,6 +275,11 @@ class SpillPartition {
     return files_.size();
   }
 
+  /// Returns the total file byte size of this spilled partition.
+  uint64_t size() const {
+    return size_;
+  }
+
   /// Invoked to split this spill partition into 'numShards' to process in
   /// parallel.
   ///
@@ -529,11 +288,21 @@ class SpillPartition {
 
   /// Invoked to create an unordered stream reader from this spill partition.
   /// The created reader will take the ownership of the spill files.
-  std::unique_ptr<UnorderedStreamReader<BatchStream>> createReader();
+  std::unique_ptr<UnorderedStreamReader<BatchStream>> createUnorderedReader(
+      memory::MemoryPool* pool);
+
+  /// Invoked to create an ordered stream reader from this spill partition.
+  /// The created reader will take the ownership of the spill files.
+  std::unique_ptr<TreeOfLosers<SpillMergeStream>> createOrderedReader(
+      memory::MemoryPool* pool);
+
+  std::string toString() const;
 
  private:
   SpillPartitionId id_;
   SpillFiles files_;
+  // Counts the total file size in bytes from this spilled partition.
+  uint64_t size_{0};
 };
 
 using SpillPartitionSet =
@@ -546,33 +315,32 @@ class SpillState {
   /// Constructs a SpillState. 'type' is the content RowType. 'path' is the file
   /// system path prefix. 'bits' is the hash bit field for partitioning data
   /// between files. This also gives the maximum number of partitions.
-  /// 'numSortingKeys' is the number of leading columns on which the data is
+  /// 'numSortKeys' is the number of leading columns on which the data is
   /// sorted, 0 if only hash partitioning is used. 'targetFileSize' is the
   /// target size of a single file.  'pool' owns the memory for state and
   /// results.
   SpillState(
-      const std::string& path,
+      common::GetSpillDirectoryPathCB getSpillDirectoryPath,
+      const std::string& fileNamePrefix,
       int32_t maxPartitions,
-      int32_t numSortingKeys,
+      int32_t numSortKeys,
       const std::vector<CompareFlags>& sortCompareFlags,
       uint64_t targetFileSize,
-      memory::MemoryPool& pool)
-      : path_(path),
-        maxPartitions_(maxPartitions),
-        numSortingKeys_(numSortingKeys),
-        sortCompareFlags_(sortCompareFlags),
-        targetFileSize_(targetFileSize),
-        pool_(pool),
-        files_(maxPartitions_) {}
+      uint64_t writeBufferSize,
+      common::CompressionKind compressionKind,
+      memory::MemoryPool* pool,
+      folly::Synchronized<common::SpillStats>* stats,
+      const std::unordered_map<std::string, std::string>& writeFileOptions =
+          {});
 
   /// Indicates if a given 'partition' has been spilled or not.
-  bool isPartitionSpilled(int32_t partition) const {
+  bool isPartitionSpilled(uint32_t partition) const {
     VELOX_DCHECK_LT(partition, maxPartitions_);
     return spilledPartitionSet_.contains(partition);
   }
 
   // Sets a partition as spilled.
-  void setPartitionSpilled(int32_t partition);
+  void setPartitionSpilled(uint32_t partition);
 
   // Returns how many ways spilled data can be partitioned.
   int32_t maxPartitions() const {
@@ -583,12 +351,16 @@ class SpillState {
     return targetFileSize_;
   }
 
-  memory::MemoryPool& pool() const {
-    return pool_;
+  common::CompressionKind compressionKind() const {
+    return compressionKind_;
   }
 
   const std::vector<CompareFlags>& sortCompareFlags() const {
     return sortCompareFlags_;
+  }
+
+  bool isAnyPartitionSpilled() const {
+    return !spilledPartitionSet_.empty();
   }
 
   bool isAllPartitionSpilled() const {
@@ -596,71 +368,68 @@ class SpillState {
     return spilledPartitionSet_.size() == maxPartitions_;
   }
 
-  // Appends data to 'partition'. The rows given by 'indices' must be
-  // sorted for a sorted spill and must hash to 'partition'. It is
-  // safe to call this on multiple threads if all threads specify a
-  // different partition.
-  void appendToPartition(int32_t partition, const RowVectorPtr& rows);
+  /// Appends data to 'partition'. The rows given by 'indices' must be sorted
+  /// for a sorted spill and must hash to 'partition'. It is safe to call this
+  /// on multiple threads if all threads specify a different partition. Returns
+  /// the size to append to partition.
+  uint64_t appendToPartition(uint32_t partition, const RowVectorPtr& rows);
 
-  // Finishes a sorted run for 'partition'. If write is called for 'partition'
-  // again, the data does not have to be sorted relative to the data
-  // written so far.
-  void finishWrite(int32_t partition) {
-    VELOX_DCHECK(isPartitionSpilled(partition));
-    files_[partition]->finishFile();
-  }
+  /// Finishes a sorted run for 'partition'. If write is called for 'partition'
+  /// again, the data does not have to be sorted relative to the data written so
+  /// far.
+  void finishFile(uint32_t partition);
 
   /// Returns the spill file objects from a given 'partition'. The function
   /// returns an empty list if either the partition has not been spilled or has
   /// no spilled data.
-  SpillFiles files(int32_t partition);
+  SpillFiles finish(uint32_t partition);
 
-  // Starts reading values for 'partition'. If 'extra' is non-null, it can be
-  // a stream of rows from a RowContainer so as to merge unspilled data with
-  // spilled data.
-  std::unique_ptr<TreeOfLosers<SpillMergeStream>> startMerge(
-      int32_t partition,
-      std::unique_ptr<SpillMergeStream>&& extra);
-
-  bool hasFiles(int32_t partition) const {
-    return partition < files_.size() && files_[partition];
-  }
-
-  uint64_t spilledBytes() const;
-
-  /// Return the number of spilled partitions.
-  uint32_t spilledPartitions() const;
-
-  /// Return the spilled partition number set.
+  /// Returns the spilled partition number set.
   const SpillPartitionNumSet& spilledPartitionSet() const;
 
-  /// Returns the number of spilled files we have.
-  uint64_t spilledFiles() const;
-
+  /// Returns the spilled file paths from all the partitions.
   std::vector<std::string> testingSpilledFilePaths() const;
 
+  /// Returns the file ids from a given partition.
+  std::vector<uint32_t> testingSpilledFileIds(int32_t partitionNum) const;
+
+  /// Returns the set of partitions that have spilled data.
+  SpillPartitionNumSet testingNonEmptySpilledPartitionSet() const;
+
  private:
+  void updateSpilledInputBytes(uint64_t bytes);
+
+  SpillWriter* partitionWriter(uint32_t partition) const;
+
   const RowTypePtr type_;
-  const std::string path_;
+
+  // A callback function that returns the spill directory path. Implementations
+  // can use it to ensure the path exists before returning.
+  common::GetSpillDirectoryPathCB getSpillDirPathCb_;
+
+  /// Prefix for spill files.
+  const std::string fileNamePrefix_;
   const int32_t maxPartitions_;
-  const int32_t numSortingKeys_;
+  const int32_t numSortKeys_;
   const std::vector<CompareFlags> sortCompareFlags_;
   const uint64_t targetFileSize_;
-
-  memory::MemoryPool& pool_;
+  const uint64_t writeBufferSize_;
+  const common::CompressionKind compressionKind_;
+  const std::unordered_map<std::string, std::string> writeFileOptions_;
+  memory::MemoryPool* const pool_;
+  folly::Synchronized<common::SpillStats>* const stats_;
 
   // A set of spilled partition numbers.
   SpillPartitionNumSet spilledPartitionSet_;
 
   // A file list for each spilled partition. Only partitions that have
   // started spilling have an entry here.
-  std::vector<std::unique_ptr<SpillFileList>> files_;
+  std::vector<std::unique_ptr<SpillWriter>> partitionWriters_;
 };
 
 /// Generate partition id set from given spill partition set.
 SpillPartitionIdSet toSpillPartitionIdSet(
     const SpillPartitionSet& partitionSet);
-
 } // namespace facebook::velox::exec
 
 // Adding the custom hash for SpillPartitionId to std::hash to make it usable

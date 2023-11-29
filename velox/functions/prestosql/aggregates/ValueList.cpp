@@ -47,9 +47,7 @@ void ValueList::writeLastNulls(HashStringAllocator* allocator) {
     nullsBegin_ = position.header;
   }
   stream.appendOne(lastNulls_);
-  nullsCurrent_ = allocator->finishWrite(stream, kInitialSize);
-
-  totalBytes_ += sizeof(uint64_t);
+  nullsCurrent_ = allocator->finishWrite(stream, kInitialSize).second;
 }
 
 void ValueList::appendNull(HashStringAllocator* allocator) {
@@ -65,11 +63,14 @@ void ValueList::appendNonNull(
   prepareAppend(allocator);
   ByteStream stream(allocator);
   allocator->extendWrite(dataCurrent_, stream);
-  exec::ContainerRowSerde::instance().serialize(values, index, stream);
-  totalBytes_ += stream.size();
+  exec::ContainerRowSerde::serialize(values, index, stream);
   ++size_;
-  auto reserve = std::max<int32_t>(1024, std::min<int64_t>(128, totalBytes_));
-  dataCurrent_ = allocator->finishWrite(stream, reserve);
+  bytes_ += stream.size();
+
+  // Leave space up to the size appended so far, at least 24 but no more
+  // than 1024.
+  dataCurrent_ =
+      allocator->finishWrite(stream, std::clamp(bytes_, 24, 1024)).second;
 }
 
 void ValueList::appendValue(
@@ -101,10 +102,9 @@ void ValueList::appendRange(
 ValueListReader::ValueListReader(ValueList& values)
     : size_{values.size()},
       lastNullsStart_{size_ % 64 == 0 ? size_ - 64 : size_ - size_ % 64},
-      lastNulls_{values.lastNulls()} {
-  HashStringAllocator::prepareRead(values.dataBegin(), dataStream_);
-  HashStringAllocator::prepareRead(values.nullsBegin(), nullsStream_);
-}
+      lastNulls_{values.lastNulls()},
+      dataStream_{HashStringAllocator::prepareRead(values.dataBegin())},
+      nullsStream_{HashStringAllocator::prepareRead(values.nullsBegin())} {}
 
 bool ValueListReader::next(BaseVector& output, vector_size_t outputIndex) {
   if (pos_ == lastNullsStart_) {
@@ -116,8 +116,7 @@ bool ValueListReader::next(BaseVector& output, vector_size_t outputIndex) {
   if (nulls_ & (1UL << (pos_ % 64))) {
     output.setNull(outputIndex, true);
   } else {
-    exec::ContainerRowSerde::instance().deserialize(
-        dataStream_, outputIndex, &output);
+    exec::ContainerRowSerde::deserialize(dataStream_, outputIndex, &output);
   }
 
   pos_++;

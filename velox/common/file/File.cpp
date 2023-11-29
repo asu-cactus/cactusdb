@@ -15,6 +15,7 @@
  */
 
 #include "velox/common/file/File.h"
+#include "velox/common/base/Fs.h"
 
 #include <fmt/format.h>
 #include <glog/logging.h>
@@ -25,6 +26,12 @@
 #include <folly/portability/SysUio.h>
 
 namespace facebook::velox {
+
+#define RETURN_IF_ERROR(func, result) \
+  result = func;                      \
+  if (result < 0) {                   \
+    return result;                    \
+  }
 
 std::string ReadFile::pread(uint64_t offset, uint64_t length) const {
   std::string buf;
@@ -44,7 +51,8 @@ uint64_t ReadFile::preadv(
   }
   for (auto& range : buffers) {
     auto copySize = std::min<size_t>(range.size(), fileSize - offset);
-    if (range.data()) {
+    // NOTE: skip the gap in case of coalesce io.
+    if (range.data() != nullptr) {
       pread(offset, copySize, range.data());
     }
     offset += copySize;
@@ -53,9 +61,16 @@ uint64_t ReadFile::preadv(
   return numRead;
 }
 
-void ReadFile::preadv(const std::vector<ReadFile::Segment>& segments) const {
-  for (const auto& segment : segments) {
-    pread(segment.offset, segment.buffer.size(), segment.buffer.data());
+void ReadFile::preadv(
+    folly::Range<const common::Region*> regions,
+    folly::Range<folly::IOBuf*> iobufs) const {
+  VELOX_CHECK_EQ(regions.size(), iobufs.size());
+  for (size_t i = 0; i < regions.size(); ++i) {
+    const auto& region = regions[i];
+    auto& output = iobufs[i];
+    output = folly::IOBuf(folly::IOBuf::CREATE, region.length);
+    pread(region.offset, region.length, output.writableData());
+    output.append(region.length);
   }
 }
 
@@ -133,21 +148,54 @@ uint64_t LocalReadFile::preadv(
   // Dropped bytes sized so that a typical dropped range of 50K is not
   // too many iovecs.
   static thread_local std::vector<char> droppedBytes(16 * 1024);
+  uint64_t totalBytesRead = 0;
   std::vector<struct iovec> iovecs;
   iovecs.reserve(buffers.size());
+
+  auto readvFunc = [&]() -> ssize_t {
+    const auto bytesRead =
+        folly::preadv(fd_, iovecs.data(), iovecs.size(), offset);
+    if (bytesRead < 0) {
+      LOG(ERROR) << "preadv failed with error: " << folly::errnoStr(errno);
+    } else {
+      totalBytesRead += bytesRead;
+      offset += bytesRead;
+    }
+    iovecs.clear();
+    return bytesRead;
+  };
+
   for (auto& range : buffers) {
     if (!range.data()) {
       auto skipSize = range.size();
       while (skipSize) {
         auto bytes = std::min<size_t>(droppedBytes.size(), skipSize);
+
+        if (iovecs.size() >= IOV_MAX) {
+          ssize_t bytesRead{0};
+          RETURN_IF_ERROR(readvFunc(), bytesRead);
+        }
+
         iovecs.push_back({droppedBytes.data(), bytes});
         skipSize -= bytes;
       }
     } else {
+      if (iovecs.size() >= IOV_MAX) {
+        ssize_t bytesRead{0};
+        RETURN_IF_ERROR(readvFunc(), bytesRead);
+      }
+
       iovecs.push_back({range.data(), range.size()});
     }
   }
-  return folly::preadv(fd_, iovecs.data(), iovecs.size(), offset);
+
+  // Perform any remaining preadv calls
+  if (!iovecs.empty()) {
+    ssize_t bytesRead{0};
+    RETURN_IF_ERROR(readvFunc(), bytesRead);
+  }
+
+  return totalBytesRead;
 }
 
 uint64_t LocalReadFile::size() const {
@@ -162,17 +210,31 @@ uint64_t LocalReadFile::memoryUsage() const {
   return sizeof(FILE);
 }
 
-LocalWriteFile::LocalWriteFile(std::string_view path) {
+LocalWriteFile::LocalWriteFile(
+    std::string_view path,
+    bool shouldCreateParentDirectories,
+    bool shouldThrowOnFileAlreadyExists) {
+  auto dir = fs::path(path).parent_path();
+  if (shouldCreateParentDirectories && !fs::exists(dir)) {
+    VELOX_CHECK(
+        common::generateFileDirectory(dir.c_str()),
+        "Failed to generate file directory");
+  }
+
   std::unique_ptr<char[]> buf(new char[path.size() + 1]);
   buf[path.size()] = 0;
   memcpy(buf.get(), path.data(), path.size());
   {
-    FILE* exists = fopen(buf.get(), "rb");
-    VELOX_CHECK(
-        !exists, "Failure in LocalWriteFile: path '{}' already exists.", path);
+    if (shouldThrowOnFileAlreadyExists) {
+      FILE* exists = fopen(buf.get(), "rb");
+      VELOX_CHECK(
+          !exists,
+          "Failure in LocalWriteFile: path '{}' already exists.",
+          path);
+    }
   }
-  auto file = fopen(buf.get(), "ab");
-  VELOX_CHECK(
+  auto* file = fopen(buf.get(), "ab");
+  VELOX_CHECK_NOT_NULL(
       file,
       "fopen failure in LocalWriteFile constructor, {} {}.",
       path,
@@ -196,9 +258,10 @@ void LocalWriteFile::append(std::string_view data) {
   VELOX_CHECK_EQ(
       bytes_written,
       data.size(),
-      "fwrite failure in LocalWriteFile::append, {} vs {}.",
+      "fwrite failure in LocalWriteFile::append, {} vs {}: {}",
       bytes_written,
-      data.size());
+      data.size(),
+      folly::errnoStr(errno));
 }
 
 void LocalWriteFile::flush() {

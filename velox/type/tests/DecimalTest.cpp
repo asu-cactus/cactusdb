@@ -23,6 +23,14 @@ namespace facebook::velox {
 
 namespace {
 
+void testToByteArray(int128_t value, int8_t* expected, int32_t size) {
+  char out[size];
+  int32_t length = DecimalUtil::toByteArray(value, out);
+  EXPECT_EQ(length, size);
+  EXPECT_EQ(DecimalUtil::getByteArrayLength(value), size);
+  EXPECT_EQ(std::memcmp(expected, out, length), 0);
+}
+
 TEST(DecimalTest, toString) {
   EXPECT_EQ(std::to_string(HugeInt::build(0, 0)), "0");
   EXPECT_EQ(std::to_string(HugeInt::build(0, 1)), "1");
@@ -52,7 +60,7 @@ TEST(DecimalTest, decimalToString) {
   ASSERT_EQ("1.000", DecimalUtil::toString(1000, DECIMAL(20, 3)));
   ASSERT_EQ("0.0000001000", DecimalUtil::toString(1000, DECIMAL(20, 10)));
   ASSERT_EQ("-0.001000", DecimalUtil::toString(-1000, DECIMAL(20, 6)));
-  ASSERT_EQ("0", DecimalUtil::toString(0, DECIMAL(20, 9)));
+  ASSERT_EQ("0.000000000", DecimalUtil::toString(0, DECIMAL(20, 9)));
 
   const auto minShortDecimal =
       DecimalUtil::toString(DecimalUtil::kShortDecimalMin, DECIMAL(18, 0));
@@ -129,5 +137,115 @@ TEST(DecimalTest, longDecimalSerDe) {
   deserializedData = HugeInt::deserialize(data);
   ASSERT_EQ(deserializedData, 10);
 }
+
+// The result can be obtained by
+// test("biginteger") {
+//   val a = new BigInteger("20")
+//   val arr = a.toByteArray
+//   print("length is " + arr.length + "\n")
+//   arr.foreach(r => print(r + ","))
+// }
+TEST(DecimalTest, toByteArray) {
+  int8_t expected0[1] = {0};
+  testToByteArray(0, expected0, 1);
+
+  int8_t expected1[1] = {20};
+  testToByteArray(20, expected1, 1);
+
+  int8_t expected2[1] = {-20};
+  testToByteArray(-20, expected2, 1);
+
+  int8_t expected3[2] = {0, -56};
+  testToByteArray(200, expected3, 2);
+
+  int8_t expected4[2] = {78, 32};
+  testToByteArray(20000, expected4, 2);
+
+  int8_t expected5[6] = {-2, -32, -114, 4, -5, 77};
+  testToByteArray(-1234567890099, expected5, 6);
+
+  int8_t expected6[8] = {13, -32, -74, -77, -89, 99, -1, -1};
+  testToByteArray(DecimalUtil::kShortDecimalMax, expected6, 8);
+
+  int8_t expected7[16] = {
+      -76, -60, -77, 87, -91, 121, 59, -123, -10, 117, -35, -64, 0, 0, 0, 1};
+  testToByteArray(DecimalUtil::kLongDecimalMin, expected7, 16);
+
+  int8_t expected8[16] = {
+      75, 59, 76, -88, 90, -122, -60, 122, 9, -118, 34, 63, -1, -1, -1, -1};
+  testToByteArray(DecimalUtil::kLongDecimalMax, expected8, 16);
+}
+
+TEST(DecimalTest, valueInPrecisionRange) {
+  ASSERT_TRUE(DecimalUtil::valueInPrecisionRange<int64_t>(12, 3));
+  ASSERT_TRUE(DecimalUtil::valueInPrecisionRange<int64_t>(999, 3));
+  ASSERT_FALSE(DecimalUtil::valueInPrecisionRange<int64_t>(1000, 3));
+  ASSERT_FALSE(DecimalUtil::valueInPrecisionRange<int64_t>(1234, 3));
+  ASSERT_TRUE(DecimalUtil::valueInPrecisionRange<int64_t>(
+      DecimalUtil::kShortDecimalMax, ShortDecimalType::kMaxPrecision));
+  ASSERT_FALSE(DecimalUtil::valueInPrecisionRange<int64_t>(
+      DecimalUtil::kShortDecimalMax + 1, ShortDecimalType::kMaxPrecision));
+  ASSERT_TRUE(DecimalUtil::valueInPrecisionRange<int128_t>(
+      DecimalUtil::kLongDecimalMax, LongDecimalType::kMaxPrecision));
+  ASSERT_FALSE(DecimalUtil::valueInPrecisionRange<int128_t>(
+      DecimalUtil::kLongDecimalMax + 1, LongDecimalType::kMaxPrecision));
+  ASSERT_FALSE(DecimalUtil::valueInPrecisionRange<int128_t>(
+      DecimalUtil::kLongDecimalMin - 1, LongDecimalType::kMaxPrecision));
+}
+
+TEST(DecimalAggregateTest, adjustSumForOverflow) {
+  struct SumWithOverflow {
+    int128_t sum{0};
+    int64_t overflow{0};
+
+    void add(int128_t input) {
+      overflow += DecimalUtil::addWithOverflow(sum, sum, input);
+    }
+
+    std::optional<int128_t> adjustedSum() const {
+      return DecimalUtil::adjustSumForOverflow(sum, overflow);
+    }
+
+    void reset() {
+      sum = 0;
+      overflow = 0;
+    }
+  };
+
+  SumWithOverflow accumulator;
+  // kLongDecimalMax + kLongDecimalMax will trigger one upward overflow, and the
+  // final sum result calculated by DecimalUtil::addWithOverflow is negative.
+  // DecimalUtil::adjustSumForOverflow can adjust the sum to kLongDecimalMax
+  // correctly.
+  accumulator.add(DecimalUtil::kLongDecimalMax);
+  accumulator.add(DecimalUtil::kLongDecimalMax);
+  accumulator.add(DecimalUtil::kLongDecimalMin);
+  EXPECT_EQ(accumulator.adjustedSum(), DecimalUtil::kLongDecimalMax);
+
+  accumulator.reset();
+  // kLongDecimalMin + kLongDecimalMin will trigger one downward overflow, and
+  // the final sum result calculated by DecimalUtil::addWithOverflow is
+  // positive. DecimalUtil::adjustSumForOverflow can adjust the sum to
+  // kLongDecimalMin correctly.
+  accumulator.add(DecimalUtil::kLongDecimalMin);
+  accumulator.add(DecimalUtil::kLongDecimalMin);
+  accumulator.add(DecimalUtil::kLongDecimalMax);
+  EXPECT_EQ(accumulator.adjustedSum(), DecimalUtil::kLongDecimalMin);
+
+  accumulator.reset();
+  // These inputs will eventually trigger an upward overflow, and
+  // DecimalUtil::adjustSumForOverflow will return std::nullopt.
+  accumulator.add(DecimalUtil::kLongDecimalMax);
+  accumulator.add(DecimalUtil::kLongDecimalMax);
+  EXPECT_FALSE(accumulator.adjustedSum().has_value());
+
+  accumulator.reset();
+  // These inputs will eventually trigger a downward overflow, and
+  // DecimalUtil::adjustSumForOverflow will return std::nullopt.
+  accumulator.add(DecimalUtil::kLongDecimalMin);
+  accumulator.add(DecimalUtil::kLongDecimalMin);
+  EXPECT_FALSE(accumulator.adjustedSum().has_value());
+}
+
 } // namespace
 } // namespace facebook::velox

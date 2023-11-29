@@ -67,6 +67,7 @@ supported when the element type of the array is one of the supported types, or
 when the key type of the map is BOOLEAN, TINYINT, SMALLINT, INTEGER, BIGINT,
 REAL, DOUBLE, or VARCHAR and value type of the map is one of the supported types.
 When casting from JSON to ROW, both JSON array and JSON object are supported.
+Cast from JSON object to ROW uses case insensitive match for the JSON keys.
 Behaviors of the casts are shown with the examples below:
 
 ::
@@ -82,6 +83,7 @@ Behaviors of the casts are shown with the examples below:
     SELECT CAST(JSON '[[1,23],[456]]' AS ARRAY(ARRAY(INTEGER))); -- [[1, 23], [456]]
     SELECT CAST(JSON '{"k1":1,"k2":23,"k3":456}' AS MAP(VARCHAR, INTEGER)); -- {k1=1, k2=23, k3=456}
     SELECT CAST(JSON '{"v1":123,"v2":"abc","v3":true}' AS ROW(v1 BIGINT, v2 VARCHAR, v3 BOOLEAN)); -- {v1=123, v2=abc, v3=true}
+    SELECT CAST(JSON '{"V1":123,"V2":"abc","V3":true}' AS ROW(v1 BIGINT, v2 VARCHAR, v3 BOOLEAN)); -- {v1=123, v2=abc, v3=true}
     SELECT CAST(JSON '[123,"abc",true]' AS ROW(v1 BIGINT, v2 VARCHAR, v3 BOOLEAN)); -- {v1=123, v2=abc, v3=true}
 
 Notice that casting a JSON text to VARCHAR does not turn the JSON text into
@@ -114,6 +116,17 @@ JSON Functions
     array). Returns NULL if ``json`` is not an array::
 
         SELECT json_array_length('[1, 2, 3]');
+
+.. function:: json_extract(json, json_path) -> json
+
+    Evaluates the `JSONPath`_-like expression ``json_path`` on ``json``
+    (a string containing JSON) and returns the result as a JSON string::
+
+        SELECT json_extract(json, '$.store.book');
+
+    Current implementation supports limited subset of JSONPath syntax.
+
+    .. _JSONPath: http://goessner.net/articles/JsonPath/
 
 .. function:: json_extract_scalar(json, json_path) -> varchar
 

@@ -202,7 +202,10 @@ class MaxSizeForStatsAggregate
   }
 };
 
-bool registerMaxSizeForStats(const std::string& name) {
+} // namespace
+
+exec::AggregateRegistrationResult registerMaxDataSizeForStatsAggregate(
+    const std::string& prefix) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures;
 
   signatures.push_back(exec::AggregateFunctionSignatureBuilder()
@@ -212,24 +215,21 @@ bool registerMaxSizeForStats(const std::string& name) {
                            .argumentType("T")
                            .build());
 
+  auto name = prefix + kMaxSizeForStats;
   return exec::registerAggregateFunction(
       name,
       std::move(signatures),
       [name](
           core::AggregationNode::Step step,
           const std::vector<TypePtr>& argTypes,
-          const TypePtr& resultType) -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr& resultType,
+          const core::QueryConfig& /*config*/)
+          -> std::unique_ptr<exec::Aggregate> {
         VELOX_CHECK_EQ(argTypes.size(), 1, "{} takes only one argument", name);
         auto inputType = argTypes[0];
 
         return std::make_unique<MaxSizeForStatsAggregate>(resultType);
       });
-}
-
-} // namespace
-
-void registerMaxSizeForStatsAggregate(const std::string& prefix) {
-  registerMaxSizeForStats(prefix + kMaxSizeForStats);
 }
 
 } // namespace facebook::velox::aggregate::prestosql

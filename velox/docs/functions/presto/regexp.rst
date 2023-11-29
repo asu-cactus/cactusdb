@@ -18,6 +18,11 @@ See https://github.com/google/re2/wiki/Syntax for more information.
     Note: The wildcard '%' represents 0, 1 or multiple characters and the
     wildcard '_' represents exactly one character.
 
+    Note: Each function instance allow for a maximum of 20 regular expressions to
+    be compiled throughout the lifetime of the query. Not all Patterns requires
+    compilation of regular expressions; for example a pattern 'aa' does not.
+    Only those that require the compilation of regular expressions are counted.
+
         SELECT like('abc', '%b%'); -- true
         SELECT like('a_c', '%#_%', '#'); -- true
 
@@ -29,6 +34,7 @@ See https://github.com/google/re2/wiki/Syntax for more information.
         SELECT regexp_extract('1a 2b 14m', '\d+'); -- 1
 
 .. function:: regexp_extract(string, pattern, group) -> varchar
+   :noindex:
 
     Finds the first occurrence of the regular expression ``pattern`` in
     ``string`` and returns the capturing group number ``group``::
@@ -63,6 +69,7 @@ See https://github.com/google/re2/wiki/Syntax for more information.
         SELECT regexp_replace('1a 2b 14m', '\d+[ab] '); -- '14m'
 
 .. function:: regexp_replace(string, pattern, replacement) -> varchar
+   :noindex:
 
     Replaces every instance of the substring matched by the regular expression
     ``pattern`` in ``string`` with ``replacement``. Capturing groups can be referenced in

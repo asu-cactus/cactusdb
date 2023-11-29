@@ -15,7 +15,8 @@
  */
 #include <velox/type/Timestamp.h>
 #include "velox/common/base/tests/GTestUtils.h"
-#include "velox/exec/PartitionedOutputBufferManager.h"
+#include "velox/connectors/hive/HiveConnectorSplit.h"
+#include "velox/exec/OutputBufferManager.h"
 #include "velox/exec/TableScan.h"
 #include "velox/exec/tests/utils/Cursor.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
@@ -119,7 +120,7 @@ TEST_F(GroupedExecutionTest, groupedExecutionErrors) {
   queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
   task = exec::Task::create("0", planFragment, 0, std::move(queryCtx));
   VELOX_ASSERT_THROW(
-      task->start(task, 3, 1),
+      task->start(3, 1),
       "groupedExecutionLeafNodeIds must be empty in ungrouped execution mode");
 
   // Check grouped execution without supplied leaf node ids.
@@ -128,7 +129,7 @@ TEST_F(GroupedExecutionTest, groupedExecutionErrors) {
   queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
   task = exec::Task::create("0", planFragment, 0, std::move(queryCtx));
   VELOX_ASSERT_THROW(
-      task->start(task, 3, 1),
+      task->start(3, 1),
       "groupedExecutionLeafNodeIds must not be empty in "
       "grouped execution mode");
 
@@ -139,7 +140,7 @@ TEST_F(GroupedExecutionTest, groupedExecutionErrors) {
   queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
   task = exec::Task::create("0", planFragment, 0, std::move(queryCtx));
   VELOX_ASSERT_THROW(
-      task->start(task, 3, 1),
+      task->start(3, 1),
       fmt::format(
           "Grouped execution leaf node {} is not a leaf node in any pipeline",
           projectNodeId));
@@ -152,7 +153,7 @@ TEST_F(GroupedExecutionTest, groupedExecutionErrors) {
   queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
   task = exec::Task::create("0", planFragment, 0, std::move(queryCtx));
   VELOX_ASSERT_THROW(
-      task->start(task, 3, 1),
+      task->start(3, 1),
       fmt::format(
           "Grouped execution leaf node {} is not a leaf node in any pipeline",
           projectNodeId));
@@ -165,7 +166,7 @@ TEST_F(GroupedExecutionTest, groupedExecutionErrors) {
   queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
   task = exec::Task::create("0", planFragment, 0, std::move(queryCtx));
   VELOX_ASSERT_THROW(
-      task->start(task, 3, 1),
+      task->start(3, 1),
       fmt::format(
           "Grouped execution leaf node {} not found or it is not a leaf node",
           localPartitionNodeId));
@@ -184,20 +185,15 @@ TEST_F(GroupedExecutionTest, groupedExecutionWithOutputBuffer) {
   // running grouped execution.
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   core::PlanNodeId tableScanNodeId;
-  auto pipe0Node =
+
+  auto planFragment =
       PlanBuilder(planNodeIdGenerator)
           .tableScan(rowType_)
           .capturePlanNodeId(tableScanNodeId)
           .project({"c3 as x", "c2 as y", "c1 as z", "c0 as w", "c4", "c5"})
-          .planNode();
-  auto pipe1Node =
-      PlanBuilder(planNodeIdGenerator)
-          .localPartitionRoundRobin({pipe0Node})
+          .localPartitionRoundRobinRow()
           .project({"w as c0", "z as c1", "y as c2", "x as c3", "c4", "c5"})
-          .planNode();
-  auto planFragment =
-      PlanBuilder(planNodeIdGenerator)
-          .localPartitionRoundRobin({pipe1Node})
+          .localPartitionRoundRobinRow()
           .partitionedOutput({}, 1, {"c0", "c1", "c2", "c3", "c4", "c5"})
           .planFragment();
   planFragment.executionStrategy = core::ExecutionStrategy::kGrouped;
@@ -207,7 +203,7 @@ TEST_F(GroupedExecutionTest, groupedExecutionWithOutputBuffer) {
   auto task =
       exec::Task::create("0", std::move(planFragment), 0, std::move(queryCtx));
   // 3 drivers max and 1 concurrent split group.
-  task->start(task, 3, 1);
+  task->start(3, 1);
 
   // All pipelines run grouped execution, so no drivers should be running.
   EXPECT_EQ(0, task->numRunningDrivers());
@@ -260,8 +256,7 @@ TEST_F(GroupedExecutionTest, groupedExecutionWithOutputBuffer) {
 
   // 'Delete results' from output buffer triggers 'set all output consumed',
   // which should finish the task.
-  auto outputBufferManager =
-      exec::PartitionedOutputBufferManager::getInstance().lock();
+  auto outputBufferManager = exec::OutputBufferManager::getInstance().lock();
   outputBufferManager->deleteResults(task->taskId(), 0);
 
   // Task must be finished at this stage.
@@ -299,55 +294,42 @@ TEST_F(GroupedExecutionTest, groupedExecutionWithHashAndNestedLoopJoin) {
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     core::PlanNodeId probeScanNodeId;
     core::PlanNodeId buildScanNodeId;
-    core::PlanNodePtr pipe0Node;
-    core::PlanNodePtr pipe1Node;
 
+    PlanBuilder planBuilder(planNodeIdGenerator, pool_.get());
+    planBuilder.tableScan(rowType_)
+        .capturePlanNodeId(probeScanNodeId)
+        .project({"c3 as x", "c2 as y", "c1 as z", "c0 as w", "c4", "c5"});
     // Hash or Nested Loop join.
     if (i == 0) {
-      pipe0Node =
-          PlanBuilder(planNodeIdGenerator, pool_.get())
-              .tableScan(rowType_)
-              .capturePlanNodeId(probeScanNodeId)
-              .project({"c3 as x", "c2 as y", "c1 as z", "c0 as w", "c4", "c5"})
-              .hashJoin(
-                  {"w"},
-                  {"r"},
-                  PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(rowType_, {"c0 > 0"})
-                      .capturePlanNodeId(buildScanNodeId)
-                      .project({"c0 as r"})
-                      .planNode(),
-                  "",
-                  {"x", "y", "z", "w", "c4", "c5"})
-              .planNode();
-      pipe1Node =
-          PlanBuilder(planNodeIdGenerator, pool_.get())
-              .localPartitionRoundRobin({pipe0Node})
-              .project({"w as c0", "z as c1", "y as c2", "x as c3", "c4", "c5"})
-              .planNode();
+      planBuilder
+          .hashJoin(
+              {"w"},
+              {"r"},
+              PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(rowType_, {"c0 > 0"})
+                  .capturePlanNodeId(buildScanNodeId)
+                  .project({"c0 as r"})
+                  .planNode(),
+              "",
+              {"x", "y", "z", "w", "c4", "c5"})
+          .localPartitionRoundRobinRow()
+          .project({"w as c0", "z as c1", "y as c2", "x as c3", "c4", "c5"})
+          .planNode();
     } else {
-      pipe0Node =
-          PlanBuilder(planNodeIdGenerator, pool_.get())
-              .tableScan(rowType_)
-              .capturePlanNodeId(probeScanNodeId)
-              .project({"c3 as x", "c2 as y", "c1 as z", "c0 as w", "c4", "c5"})
-              .nestedLoopJoin(
-                  PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(rowType_, {"c0 > 0"})
-                      .capturePlanNodeId(buildScanNodeId)
-                      .project({"c0 as r"})
-                      .planNode(),
-                  {"x", "y", "z", "r", "c4", "c5"})
-              .planNode();
-      pipe1Node =
-          PlanBuilder(planNodeIdGenerator, pool_.get())
-              .localPartitionRoundRobin({pipe0Node})
-              .project({"r as c0", "z as c1", "y as c2", "x as c3", "c4", "c5"})
-              .planNode();
+      planBuilder
+          .nestedLoopJoin(
+              PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(rowType_, {"c0 > 0"})
+                  .capturePlanNodeId(buildScanNodeId)
+                  .project({"c0 as r"})
+                  .planNode(),
+              {"x", "y", "z", "r", "c4", "c5"})
+          .localPartitionRoundRobinRow()
+          .project({"r as c0", "z as c1", "y as c2", "x as c3", "c4", "c5"})
+          .planNode();
     }
     auto planFragment =
-        PlanBuilder(planNodeIdGenerator, pool_.get())
-            .localPartitionRoundRobin({pipe1Node})
+        planBuilder.localPartitionRoundRobinRow()
             .partitionedOutput({}, 1, {"c0", "c1", "c2", "c3", "c4", "c5"})
             .planFragment();
 
@@ -358,7 +340,7 @@ TEST_F(GroupedExecutionTest, groupedExecutionWithHashAndNestedLoopJoin) {
     auto task = exec::Task::create(
         "0", std::move(planFragment), 0, std::move(queryCtx));
     // 3 drivers max and 1 concurrent split group.
-    task->start(task, 3, 1);
+    task->start(3, 1);
 
     // Build pipeline runs ungrouped execution, so it should have drivers
     // running.
@@ -427,8 +409,7 @@ TEST_F(GroupedExecutionTest, groupedExecutionWithHashAndNestedLoopJoin) {
 
     // 'Delete results' from output buffer triggers 'set all output consumed',
     // which should finish the task.
-    auto outputBufferManager =
-        exec::PartitionedOutputBufferManager::getInstance().lock();
+    auto outputBufferManager = exec::OutputBufferManager::getInstance().lock();
     outputBufferManager->deleteResults(task->taskId(), 0);
 
     // Task must be finished at this stage.

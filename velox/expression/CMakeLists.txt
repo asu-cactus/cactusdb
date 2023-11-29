@@ -34,7 +34,10 @@ add_library(
   FunctionCallToSpecialForm.cpp
   LambdaExpr.cpp
   VectorFunction.cpp
+  RegisterSpecialForm.cpp
+  RowConstructor.cpp
   SimpleFunctionRegistry.cpp
+  SpecialFormRegistry.cpp
   SwitchExpr.cpp
   TryExpr.cpp
   GenericWriter.cpp
@@ -48,4 +51,6 @@ add_subdirectory(type_calculation)
 
 if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)
+elseif(${VELOX_BUILD_TEST_UTILS})
+  add_subdirectory(tests/utils)
 endif()

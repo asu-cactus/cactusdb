@@ -191,17 +191,17 @@ class ApproxDistinctAggregate : public exec::Aggregate {
             accumulator->serialize(buffer.data());
             serialized = StringView::makeInline(buffer);
           } else {
-            Buffer* buffer = flatResult->getBufferWithSpace(size);
-            char* ptr = buffer->asMutable<char>() + buffer->size();
-            accumulator->serialize(ptr);
-            buffer->setSize(buffer->size() + size);
-            serialized = StringView(ptr, size);
+            char* rawBuffer = flatResult->getRawStringBufferWithSpace(size);
+            accumulator->serialize(rawBuffer);
+            serialized = StringView(rawBuffer, size);
           }
           result->setNoCopy(index, serialized);
         });
   }
 
-  void destroy(folly::Range<char**> /*groups*/) override {}
+  void destroy(folly::Range<char**> groups) override {
+    destroyAccumulators<HllAccumulator>(groups);
+  }
 
   void addRawInput(
       char** groups,
@@ -316,7 +316,7 @@ class ApproxDistinctAggregate : public exec::Aggregate {
 
     uint64_t* rawNulls = nullptr;
     if (result->mayHaveNulls()) {
-      BufferPtr nulls = result->mutableNulls(result->size());
+      BufferPtr& nulls = result->mutableNulls(result->size());
       rawNulls = nulls->asMutable<uint64_t>();
     }
 
@@ -348,17 +348,32 @@ class ApproxDistinctAggregate : public exec::Aggregate {
     decodedValue_.decode(*args[0], rows, true);
     if (args.size() > 1) {
       decodedMaxStandardError_.decode(*args[1], rows, true);
-      checkSetMaxStandardError();
+      checkSetMaxStandardError(rows);
     }
   }
 
-  void checkSetMaxStandardError() {
-    VELOX_USER_CHECK(
-        decodedMaxStandardError_.isConstantMapping(),
-        "Max standard error argument must be constant for all input rows");
+  void checkSetMaxStandardError(const SelectivityVector& rows) {
+    if (decodedMaxStandardError_.isConstantMapping()) {
+      const auto maxStandardError = decodedMaxStandardError_.valueAt<double>(0);
+      checkSetMaxStandardError(maxStandardError);
+      return;
+    }
 
-    auto maxStandardError = decodedMaxStandardError_.valueAt<double>(0);
-    checkSetMaxStandardError(maxStandardError);
+    rows.applyToSelected([&](auto row) {
+      VELOX_USER_CHECK(
+          !decodedMaxStandardError_.isNullAt(row),
+          "Max standard error cannot be null");
+      const auto maxStandardError =
+          decodedMaxStandardError_.valueAt<double>(row);
+      if (maxStandardError_ == -1) {
+        checkSetMaxStandardError(maxStandardError);
+      } else {
+        VELOX_USER_CHECK_EQ(
+            maxStandardError,
+            maxStandardError_,
+            "Max standard error argument must be constant for all input rows");
+      }
+    });
   }
 
   void checkSetMaxStandardError(double error) {
@@ -401,10 +416,11 @@ std::unique_ptr<exec::Aggregate> createApproxDistinct(
       resultType, hllAsFinalResult, hllAsRawInput);
 }
 
-bool registerApproxDistinct(
+exec::AggregateRegistrationResult registerApproxDistinct(
     const std::string& name,
     bool hllAsFinalResult,
-    bool hllAsRawInput) {
+    bool hllAsRawInput,
+    bool withCompanionFunctions) {
   auto returnType = hllAsFinalResult ? "hyperloglog" : "bigint";
 
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures;
@@ -441,13 +457,15 @@ bool registerApproxDistinct(
     }
   }
 
-  exec::registerAggregateFunction(
+  return exec::registerAggregateFunction(
       name,
       std::move(signatures),
       [name, hllAsFinalResult, hllAsRawInput](
           core::AggregationNode::Step /*step*/,
           const std::vector<TypePtr>& argTypes,
-          const TypePtr& resultType) -> std::unique_ptr<exec::Aggregate> {
+          const TypePtr& resultType,
+          const core::QueryConfig& /*config*/)
+          -> std::unique_ptr<exec::Aggregate> {
         TypePtr type = argTypes[0]->isVarbinary() ? BIGINT() : argTypes[0];
         return VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(
             createApproxDistinct,
@@ -456,19 +474,23 @@ bool registerApproxDistinct(
             hllAsFinalResult,
             hllAsRawInput);
       },
-      /*registerCompanionFunctions*/ true);
-  return true;
+      withCompanionFunctions);
 }
 
 } // namespace
 
-void registerApproxDistinctAggregates(const std::string& prefix) {
+void registerApproxDistinctAggregates(
+    const std::string& prefix,
+    bool withCompanionFunctions) {
   registerCustomType(
       prefix + "hyperloglog",
       std::make_unique<const HyperLogLogTypeFactories>());
-  registerApproxDistinct(prefix + kApproxDistinct, false, false);
-  registerApproxDistinct(prefix + kApproxSet, true, false);
-  registerApproxDistinct(prefix + kMerge, true, true);
+  registerApproxDistinct(
+      prefix + kApproxDistinct, false, false, withCompanionFunctions);
+  // approx_set and merge are already companion functions themselves. Don't
+  // register companion functions for them.
+  registerApproxDistinct(prefix + kApproxSet, true, false, false);
+  registerApproxDistinct(prefix + kMerge, true, true, false);
 }
 
 } // namespace facebook::velox::aggregate::prestosql

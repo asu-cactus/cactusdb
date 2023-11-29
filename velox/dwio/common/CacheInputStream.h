@@ -19,8 +19,8 @@
 #include "velox/common/caching/FileIds.h"
 #include "velox/common/caching/ScanTracker.h"
 #include "velox/common/caching/SsdCache.h"
+#include "velox/common/io/IoStatistics.h"
 #include "velox/dwio/common/InputStream.h"
-#include "velox/dwio/common/IoStatistics.h"
 #include "velox/dwio/common/SeekableInputStream.h"
 
 namespace facebook::velox::dwio::common {
@@ -32,7 +32,7 @@ class CacheInputStream : public SeekableInputStream {
   CacheInputStream(
       CachedBufferedInput* cache,
       IoStatistics* ioStats,
-      const Region& region,
+      const velox::common::Region& region,
       std::shared_ptr<ReadFileInputStream> input,
       uint64_t fileNum,
       std::shared_ptr<cache::ScanTracker> tracker,
@@ -42,7 +42,7 @@ class CacheInputStream : public SeekableInputStream {
 
   bool Next(const void** data, int* size) override;
   void BackUp(int count) override;
-  bool Skip(int count) override;
+  bool SkipInt64(int64_t count) override;
   google::protobuf::int64 ByteCount() const override;
   void seekToPosition(PositionProvider& position) override;
   std::string getName() const override;
@@ -101,18 +101,20 @@ class CacheInputStream : public SeekableInputStream {
   void loadPosition();
 
   // Synchronously sets 'pin_' to cover 'region'.
-  void loadSync(Region region);
+  void loadSync(velox::common::Region region);
 
   // Returns true if there is an SSD cache and 'entry' is present there and
   // successfully loaded.
-  bool loadFromSsd(Region region, cache::AsyncDataCacheEntry& entry);
+  bool loadFromSsd(
+      velox::common::Region region,
+      cache::AsyncDataCacheEntry& entry);
 
   CachedBufferedInput* const bufferedInput_;
   cache::AsyncDataCache* const cache_;
   IoStatistics* ioStats_;
   std::shared_ptr<ReadFileInputStream> input_;
   // The region of 'input' 'this' ranges over.
-  const Region region_;
+  const velox::common::Region region_;
   const uint64_t fileNum_;
   std::shared_ptr<cache::ScanTracker> tracker_;
   const cache::TrackingId trackingId_;
@@ -142,7 +144,7 @@ class CacheInputStream : public SeekableInputStream {
 
   // A restricted view over 'region'. offset is relative to 'region_'. A cloned
   // CacheInputStream can cover a subrange of the range of the original.
-  std::optional<Region> window_;
+  std::optional<velox::common::Region> window_;
 
   // Percentage of 'loadQuantum_' at which the next load quantum gets scheduled.
   // Over 100 means no prefetch.

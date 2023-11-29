@@ -21,12 +21,15 @@ add_executable(
   ArrayAnyMatchTest.cpp
   ArrayAverageTest.cpp
   ArrayCombinationsTest.cpp
+  ArrayConcatTest.cpp
   ArrayConstructorTest.cpp
   ArrayContainsTest.cpp
   ArrayDistinctTest.cpp
   ArrayDuplicatesTest.cpp
   ArrayExceptTest.cpp
   ArrayFilterTest.cpp
+  ArrayFrequencyTest.cpp
+  ArrayFlattenTest.cpp
   ArrayJoinTest.cpp
   ArrayHasDuplicatesTest.cpp
   ArrayIntersectTest.cpp
@@ -35,10 +38,14 @@ add_executable(
   ArrayNoneMatchTest.cpp
   ArrayNormalizeTest.cpp
   ArrayPositionTest.cpp
+  ArrayRemoveTest.cpp
+  ArrayRemoveNullsTest.cpp
   ArraySortTest.cpp
   ArrayShuffleTest.cpp
   ArraysOverlapTest.cpp
   ArraySumTest.cpp
+  ArrayTrimTest.cpp
+  ArrayUnionTest.cpp
   BinaryFunctionsTest.cpp
   BitwiseTest.cpp
   CardinalityTest.cpp
@@ -47,6 +54,7 @@ add_executable(
   DateTimeFunctionsTest.cpp
   DecimalArithmeticTest.cpp
   ElementAtTest.cpp
+  FindFirstTest.cpp
   FromUtf8Test.cpp
   HyperLogLogCastTest.cpp
   HyperLogLogFunctionsTest.cpp
@@ -56,7 +64,9 @@ add_executable(
   JsonFunctionsTest.cpp
   MapEntriesTest.cpp
   MapFilterTest.cpp
+  MapFromEntriesTest.cpp
   MapKeysAndValuesTest.cpp
+  MapMatchTest.cpp
   MapTest.cpp
   MapZipWithTest.cpp
   NotTest.cpp
@@ -68,13 +78,17 @@ add_executable(
   ReverseTest.cpp
   RoundTest.cpp
   ScalarFunctionRegTest.cpp
+  SimpleComparisonMatcherTest.cpp
   SliceTest.cpp
   SequenceTest.cpp
   SplitTest.cpp
+  SplitToMapTest.cpp
   StringFunctionsTest.cpp
+  TimestampWithTimeZoneCastTest.cpp
   TransformTest.cpp
   TransformKeysTest.cpp
   TransformValuesTest.cpp
+  TrimFunctionsTest.cpp
   URLFunctionsTest.cpp
   Utf8Test.cpp
   WidthBucketArrayTest.cpp
