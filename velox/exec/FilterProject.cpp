@@ -164,6 +164,9 @@ RowVectorPtr FilterProject::getOutput() {
           return nullptr;
         }
       }
+      if (outCol && outCol->size() > 0){
+        size = outCol->size();
+      }
     }
 
     return fillOutput(size, nullptr);
