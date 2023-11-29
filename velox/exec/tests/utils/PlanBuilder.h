@@ -772,6 +772,10 @@ class PlanBuilder {
     return core::PlanFragment{planNode_};
   }
 
+  PlanBuilder& planBuild() {
+    return *this;
+  }
+
   /// Add a user-defined PlanNode as the root of the plan. 'func' takes
   /// the current root of the plan and returns the new root.
   PlanBuilder& addNode(
