@@ -233,7 +233,7 @@ void HashProbe::maybeSetupSpillInput(
     VELOX_CHECK(iter != spillPartitionSet_.end());
     auto partition = std::move(iter->second);
     VELOX_CHECK_EQ(partition->id(), restoredPartitionId.value());
-    spillInputReader_ = partition->createReader();
+    spillInputReader_ = partition->createUnorderedReader(pool());
     spillPartitionSet_.erase(iter);
   }
 
@@ -246,7 +246,6 @@ void HashProbe::maybeSetupSpillInput(
   // If 'spillInputPartitionIds_' is not empty, then we set up a spiller to
   // spill the incoming probe inputs.
   const auto& spillConfig = spillConfig_.value();
-  ++numSpillRuns_;
   spiller_ = std::make_unique<Spiller>(
       Spiller::Type::kHashJoinProbe,
       probeType_,
@@ -254,12 +253,12 @@ void HashProbe::maybeSetupSpillInput(
           spillInputPartitionIds_.begin()->partitionBitOffset(),
           spillInputPartitionIds_.begin()->partitionBitOffset() +
               spillConfig.joinPartitionBits),
-      spillConfig.filePath,
+      spillConfig.getSpillDirPathCb,
+      spillConfig.fileNamePrefix,
       spillConfig.maxFileSize,
       spillConfig.writeBufferSize,
-      spillConfig.minSpillRunSize,
       spillConfig.compressionKind,
-      Spiller::pool(),
+      memory::spillMemoryPool(),
       spillConfig.executor);
   // Set the spill partitions to the corresponding ones at the build side. The
   // hash probe operator itself won't trigger any spilling.
@@ -411,8 +410,8 @@ void HashProbe::spillInput(RowVectorPtr& input) {
   }
 
   // Ensure vector are lazy loaded before spilling.
-  for (int32_t i = 0; i < input_->childrenSize(); ++i) {
-    input_->childAt(i)->loadedVector();
+  for (int32_t i = 0; i < input->childrenSize(); ++i) {
+    input->childAt(i)->loadedVector();
   }
 
   for (int32_t partition = 0; partition < numSpillInputs_.size(); ++partition) {
@@ -1448,6 +1447,7 @@ void HashProbe::abort() {
   output_.reset();
   nonSpillInputIndicesBuffer_.reset();
   spillInputIndicesBuffers_.clear();
+  spillInputReader_.reset();
 }
 
 } // namespace facebook::velox::exec

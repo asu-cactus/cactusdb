@@ -20,6 +20,16 @@
 
 namespace facebook::velox::exec {
 
+void FieldReference::computeDistinctFields() {
+  SpecialForm::computeDistinctFields();
+  if (inputs_.empty()) {
+    mergeFields(
+        distinctFields_,
+        multiplyReferencedFields_,
+        {this->as<FieldReference>()});
+  }
+}
+
 // Fast path to avoid copying result.  An alternative way to do this is to
 // ensure that children has null if parent has nulls on corresponding rows,
 // whenever the RowVector is constructed or mutated (eager propagation of
@@ -173,9 +183,22 @@ void FieldReference::evalSpecialFormSimplified(
   } else {
     VELOX_CHECK_EQ(index_, index);
   }
+
+  LocalSelectivityVector nonNullRowsHolder(*context.execCtx());
+  const SelectivityVector* nonNullRows = &rows;
+  if (row->mayHaveNulls()) {
+    nonNullRowsHolder.get(rows);
+    nonNullRowsHolder->deselectNulls(row->rawNulls(), rows.begin(), rows.end());
+    nonNullRows = nonNullRowsHolder.get();
+    if (!nonNullRows->hasSelections()) {
+      addNulls(rows, row->rawNulls(), context, result);
+      return;
+    }
+  }
+
   auto& child = row->childAt(index_);
   context.ensureWritable(rows, type_, result);
-  result->copy(child.get(), rows, nullptr);
+  result->copy(child.get(), *nonNullRows, nullptr);
   if (row->mayHaveNulls()) {
     addNulls(rows, row->rawNulls(), context, result);
   }
