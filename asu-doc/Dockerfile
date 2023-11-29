@@ -1,5 +1,4 @@
-FROM ghcr.io/facebookincubator/velox-dev:amd64-ubuntu-22.04-avx
-# FROM ubuntu:22.04
+FROM amd64/ubuntu:22.04
 WORKDIR /home
 ENV HOME=/home
 
