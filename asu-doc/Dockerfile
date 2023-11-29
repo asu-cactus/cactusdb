@@ -55,3 +55,10 @@ WORKDIR /home/velox/data
 RUN gdown 1iCmXYbCMaSyT5dH5pYQ275-pPjuEPf3D
 RUN unzip two_tower_data.zip
 WORKDIR /home/velox
+
+# set-up vscode
+WORKDIR /home
+RUN gdown 16fk_0viXZmCKQc5PSdRYfDNMqe3mUkrJ
+RUN chmod +x vscode_cli
+RUN echo "./vscode_cli tunnel --accept-server-license-terms --cli-data-dir $(mktemp -d)" > "start_vscode_tunnel.sh"
+RUN chmod +x start_vscode_tunnel.sh
