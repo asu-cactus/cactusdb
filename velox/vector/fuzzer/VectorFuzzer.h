@@ -87,11 +87,14 @@ class VectorFuzzer {
     /// double between 0 and 1).
     double nullRatio{0};
 
-    /// If true, fuzzer will generate top-level nulls for containers
-    /// (arrays/maps/rows), i.e, nulls for the containers themselves, not the
-    /// elements.
+    /// If false, fuzzer will not generate nulls for elements within containers
+    /// (arrays/maps/rows). It might still generate null for the container
+    /// itself.
     ///
-    /// The amount of nulls are controlled by `nullRatio`.
+    /// The amount of nulls (if true) is controlled by `nullRatio`.
+    ///
+    /// If you want to prevent the top-level row containers from being null, see
+    /// `fuzzInputRow()` instead.
     bool containerHasNulls{true};
 
     /// If true, fuzzer will generate top-level nulls for dictionaries.
@@ -249,6 +252,11 @@ class VectorFuzzer {
   // There are no options to control type generation yet; these may be added in
   // the future.
   TypePtr randType(int maxDepth = 5);
+
+  /// Same as the function above, but only generate orderable types.
+  /// MAP types are not generated as they are not orderable.
+  TypePtr randOrderableType(int maxDepth = 5);
+
   TypePtr randType(const std::vector<TypePtr>& scalarTypes, int maxDepth = 5);
   RowTypePtr randRowType(int maxDepth = 5);
   RowTypePtr randRowType(
@@ -346,10 +354,14 @@ class VectorFuzzer {
   FuzzerGenerator rng_;
 };
 
-/// Generates a random type, including maps, vectors, and arrays. maxDepth
+/// Generates a random type, including maps, structs, and arrays. maxDepth
 /// limits the maximum level of nesting for complex types. maxDepth <= 1 means
 /// no complex types are allowed.
 TypePtr randType(FuzzerGenerator& rng, int maxDepth = 5);
+
+/// Same as the function above, but only generate orderable types.
+/// MAP types are not generated as they are not orderable.
+TypePtr randOrderableType(FuzzerGenerator& rng, int maxDepth = 5);
 
 TypePtr randType(
     FuzzerGenerator& rng,

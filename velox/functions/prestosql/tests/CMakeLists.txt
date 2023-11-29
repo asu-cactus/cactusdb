@@ -28,6 +28,7 @@ add_executable(
   ArrayDuplicatesTest.cpp
   ArrayExceptTest.cpp
   ArrayFilterTest.cpp
+  ArrayFrequencyTest.cpp
   ArrayFlattenTest.cpp
   ArrayJoinTest.cpp
   ArrayHasDuplicatesTest.cpp
@@ -38,6 +39,7 @@ add_executable(
   ArrayNormalizeTest.cpp
   ArrayPositionTest.cpp
   ArrayRemoveTest.cpp
+  ArrayRemoveNullsTest.cpp
   ArraySortTest.cpp
   ArrayShuffleTest.cpp
   ArraysOverlapTest.cpp

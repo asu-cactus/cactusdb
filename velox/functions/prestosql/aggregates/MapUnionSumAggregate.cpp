@@ -16,7 +16,7 @@
 #include "velox/exec/Aggregate.h"
 #include "velox/exec/Strings.h"
 #include "velox/expression/FunctionSignature.h"
-#include "velox/functions/prestosql/CheckedArithmeticImpl.h"
+#include "velox/functions/lib/CheckedArithmeticImpl.h"
 #include "velox/functions/prestosql/aggregates/AggregateNames.h"
 #include "velox/vector/FlatVector.h"
 
@@ -345,11 +345,31 @@ std::unique_ptr<exec::Aggregate> createMapUnionSumAggregate(
   }
 }
 
-exec::AggregateRegistrationResult registerMapUnionSum(const std::string& name) {
+} // namespace
+
+exec::AggregateRegistrationResult registerMapUnionSumAggregate(
+    const std::string& prefix) {
+  const std::vector<std::string> keyTypes = {
+      "tinyint",
+      "smallint",
+      "integer",
+      "bigint",
+      "real",
+      "double",
+      "varchar",
+  };
+  const std::vector<std::string> valueTypes = {
+      "tinyint",
+      "smallint",
+      "integer",
+      "bigint",
+      "double",
+      "real",
+  };
+
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures;
-  for (auto keyType : {"tinyint", "smallint", "integer", "bigint", "varchar"}) {
-    for (auto valueType :
-         {"tinyint", "smallint", "integer", "bigint", "double", "real"}) {
+  for (auto keyType : keyTypes) {
+    for (auto valueType : valueTypes) {
       auto mapType = fmt::format("map({},{})", keyType, valueType);
       signatures.push_back(exec::AggregateFunctionSignatureBuilder()
                                .returnType(mapType)
@@ -359,6 +379,7 @@ exec::AggregateRegistrationResult registerMapUnionSum(const std::string& name) {
     }
   }
 
+  auto name = prefix + kMapUnionSum;
   return exec::registerAggregateFunction(
       name,
       std::move(signatures),
@@ -386,6 +407,11 @@ exec::AggregateRegistrationResult registerMapUnionSum(const std::string& name) {
           case TypeKind::BIGINT:
             return createMapUnionSumAggregate<int64_t>(
                 valueTypeKind, resultType);
+          case TypeKind::REAL:
+            return createMapUnionSumAggregate<float>(valueTypeKind, resultType);
+          case TypeKind::DOUBLE:
+            return createMapUnionSumAggregate<double>(
+                valueTypeKind, resultType);
           case TypeKind::VARCHAR:
             return createMapUnionSumAggregate<StringView>(
                 valueTypeKind, resultType);
@@ -393,12 +419,6 @@ exec::AggregateRegistrationResult registerMapUnionSum(const std::string& name) {
             VELOX_UNREACHABLE();
         }
       });
-}
-
-} // namespace
-
-void registerMapUnionSumAggregate(const std::string& prefix) {
-  registerMapUnionSum(prefix + kMapUnionSum);
 }
 
 } // namespace facebook::velox::aggregate::prestosql

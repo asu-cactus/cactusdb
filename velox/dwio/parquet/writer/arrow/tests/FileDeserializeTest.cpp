@@ -24,8 +24,8 @@
 #include <memory>
 #include <optional>
 
-#include "parquet/exception.h"
 #include "velox/dwio/parquet/writer/arrow/ColumnPage.h"
+#include "velox/dwio/parquet/writer/arrow/Exception.h"
 #include "velox/dwio/parquet/writer/arrow/FileWriter.h"
 #include "velox/dwio/parquet/writer/arrow/Metadata.h"
 #include "velox/dwio/parquet/writer/arrow/Platform.h"
@@ -93,14 +93,10 @@ static std::vector<Compression::type> GetSupportedCodecTypes() {
   codec_types.push_back(Compression::BROTLI);
 #endif
 
-#ifdef ARROW_WITH_GZIP
   codec_types.push_back(Compression::GZIP);
-#endif
 
-#ifdef ARROW_WITH_LZ4
   codec_types.push_back(Compression::LZ4);
   codec_types.push_back(Compression::LZ4_HADOOP);
-#endif
 
   codec_types.push_back(Compression::ZSTD);
   return codec_types;

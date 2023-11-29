@@ -15,9 +15,8 @@
  */
 #include "velox/exec/Aggregate.h"
 #include "velox/exec/SetAccumulator.h"
+#include "velox/functions/lib/CheckNestedNulls.h"
 #include "velox/functions/prestosql/aggregates/AggregateNames.h"
-#include "velox/functions/prestosql/aggregates/Compare.h"
-#include "velox/vector/FlatVector.h"
 
 namespace facebook::velox::aggregate::prestosql {
 
@@ -222,7 +221,8 @@ class SetAggAggregate : public SetBaseAggregate<T> {
       DecodedVector decodedElements(*elements, rows);
       auto indices = decodedElements.indices();
       rows.applyToSelected([&](vector_size_t i) {
-        checkNestedNulls(decodedElements, indices, i, throwOnNestedNulls_);
+        velox::functions::checkNestedNulls(
+            decodedElements, indices, i, throwOnNestedNulls_);
       });
     }
 
@@ -270,7 +270,8 @@ class SetAggAggregate : public SetBaseAggregate<T> {
       Base::clearNull(group);
 
       if (throwOnNestedNulls_) {
-        checkNestedNulls(Base::decoded_, indices, i, throwOnNestedNulls_);
+        velox::functions::checkNestedNulls(
+            Base::decoded_, indices, i, throwOnNestedNulls_);
       }
 
       auto tracker = Base::trackRowSize(group);
@@ -292,7 +293,8 @@ class SetAggAggregate : public SetBaseAggregate<T> {
     auto indices = Base::decoded_.indices();
     rows.applyToSelected([&](vector_size_t i) {
       if (throwOnNestedNulls_) {
-        checkNestedNulls(Base::decoded_, indices, i, throwOnNestedNulls_);
+        velox::functions::checkNestedNulls(
+            Base::decoded_, indices, i, throwOnNestedNulls_);
       }
 
       accumulator->addValue(Base::decoded_, i, Base::allocator_);
@@ -417,7 +419,10 @@ std::unique_ptr<exec::Aggregate> create(
   }
 }
 
-exec::AggregateRegistrationResult registerSetAgg(const std::string& name) {
+} // namespace
+
+exec::AggregateRegistrationResult registerSetAggAggregate(
+    const std::string& prefix) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures = {
       exec::AggregateFunctionSignatureBuilder()
           .typeVariable("T")
@@ -426,6 +431,7 @@ exec::AggregateRegistrationResult registerSetAgg(const std::string& name) {
           .argumentType("T")
           .build()};
 
+  auto name = prefix + kSetAgg;
   return exec::registerAggregateFunction(
       name,
       std::move(signatures),
@@ -477,7 +483,8 @@ exec::AggregateRegistrationResult registerSetAgg(const std::string& name) {
       });
 }
 
-exec::AggregateRegistrationResult registerSetUnion(const std::string& name) {
+exec::AggregateRegistrationResult registerSetUnionAggregate(
+    const std::string& prefix) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures = {
       exec::AggregateFunctionSignatureBuilder()
           .typeVariable("T")
@@ -486,6 +493,7 @@ exec::AggregateRegistrationResult registerSetUnion(const std::string& name) {
           .argumentType("array(T)")
           .build()};
 
+  auto name = prefix + kSetUnion;
   return exec::registerAggregateFunction(
       name,
       std::move(signatures),
@@ -501,16 +509,6 @@ exec::AggregateRegistrationResult registerSetUnion(const std::string& name) {
 
         return create<SetUnionAggregate>(typeKind, resultType);
       });
-}
-
-} // namespace
-
-void registerSetAggAggregate(const std::string& prefix) {
-  registerSetAgg(prefix + kSetAgg);
-}
-
-void registerSetUnionAggregate(const std::string& prefix) {
-  registerSetUnion(prefix + kSetUnion);
 }
 
 } // namespace facebook::velox::aggregate::prestosql

@@ -22,6 +22,7 @@
 #include "velox/vector/FlatVector.h"
 #include "velox/vector/SequenceVector.h"
 #include "velox/vector/SimpleVector.h"
+#include "velox/vector/tests/utils/VectorMakerStats.h"
 
 namespace facebook::velox::test {
 
@@ -115,9 +116,6 @@ class VectorMaker {
   RowVectorPtr rowVector(
       const std::shared_ptr<const RowType>& rowType,
       vector_size_t size);
-
-  template <typename T>
-  using EvalType = typename CppToType<T>::NativeType;
 
   template <typename T>
   FlatVectorPtr<EvalType<T>> flatVector(
@@ -369,16 +367,16 @@ class VectorMaker {
     auto numElements =
         createOffsetsAndSizes(size, sizeAt, isNullAt, &nulls, &offsets, &sizes);
 
-    auto flatVector =
-        BaseVector::create<FlatVector<T>>(type->childAt(0), numElements, pool_);
+    auto flatVector = BaseVector::create<FlatVector<EvalType<T>>>(
+        type->childAt(0), numElements, pool_);
     vector_size_t currentIndex = 0;
     for (vector_size_t i = 0; i < size; ++i) {
       if (isNullAt && isNullAt(i)) {
         continue;
       }
       for (vector_size_t j = 0; j < sizeAt(i); ++j) {
-        auto ret = valueAt(i, j);
-        flatVector->set(currentIndex, valueAt(i, j));
+        auto value = valueAt(i, j);
+        flatVector->set(currentIndex, EvalType<T>(value));
         currentIndex++;
       }
     }
@@ -770,7 +768,8 @@ class VectorMaker {
           MAP(CppToType<K>::create(), CppToType<V>::create())) {
     static_assert(
         std::is_same_v<K, int8_t> || std::is_same_v<K, int16_t> ||
-        std::is_same_v<K, int32_t> || std::is_same_v<K, int64_t>);
+        std::is_same_v<K, int32_t> || std::is_same_v<K, int64_t> ||
+        std::is_same_v<K, float> || std::is_same_v<K, double>);
 
     std::vector<std::optional<std::vector<std::pair<K, std::optional<V>>>>>
         maps;
@@ -779,6 +778,7 @@ class VectorMaker {
 
       folly::json::serialization_opts options;
       options.convert_int_keys = true;
+      options.allow_non_string_keys = true;
       folly::dynamic mapObject = folly::parseJson(jsonMap, options);
       if (mapObject.isNull()) {
         // Null map.

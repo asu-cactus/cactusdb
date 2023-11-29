@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 #include "velox/common/base/tests/GTestUtils.h"
-#include "velox/functions/lib/aggregates/tests/AggregationTestBase.h"
+#include "velox/functions/lib/aggregates/tests/utils/AggregationTestBase.h"
 #include "velox/vector/fuzzer/VectorFuzzer.h"
 
 using namespace facebook::velox;
@@ -331,35 +331,6 @@ TEST_F(MinMaxTest, array) {
   testAggregations({data}, {}, {"min(c0)", "max(c0)"}, {expected});
 }
 
-TEST_F(MinMaxTest, map) {
-  auto data = makeRowVector({
-      makeNullableMapVector<int64_t, int64_t>({
-          {{{1, 1}, {2, 2}}},
-          {{{2, std::nullopt}, {2, 3}}},
-          {{{4, 50}}},
-      }),
-  });
-
-  auto expected = makeRowVector({
-      makeMapVector<int64_t, int64_t>({{{1, 1}, {2, 2}}}),
-      makeMapVector<int64_t, int64_t>({{{4, 50}}}),
-  });
-
-  VELOX_ASSERT_THROW(
-      testAggregations({data}, {}, {"min(c0)", "max(c0)"}, {expected}),
-      "MAP comparison not supported for values that contain nulls");
-
-  data = makeRowVector({
-      makeNullableMapVector<int64_t, int64_t>({
-          {{{1, 1}, {2, 2}}},
-          {{{1, 1}, {2, 3}}},
-          {{{4, 50}}},
-      }),
-  });
-
-  testAggregations({data}, {}, {"min(c0)", "max(c0)"}, {expected});
-}
-
 TEST_F(MinMaxTest, row) {
   auto data = makeRowVector({
       makeRowVector({
@@ -494,6 +465,28 @@ TEST_F(MinMaxTest, rowCheckNull) {
   }
 }
 
+TEST_F(MinMaxTest, failOnUnorderableType) {
+  auto data = makeRowVector({
+      makeAllNullMapVector(5, VARCHAR(), BIGINT()),
+      makeFlatVector<int32_t>({1, 2, 3, 4, 5}),
+  });
+
+  static const std::string kErrorMessage =
+      "Aggregate function signature is not supported";
+  for (const auto& expr : {"min(c0)", "max(c0)"}) {
+    {
+      auto builder = PlanBuilder().values({data});
+      VELOX_ASSERT_THROW(builder.singleAggregation({}, {expr}), kErrorMessage);
+    }
+
+    {
+      auto builder = PlanBuilder().values({data});
+      VELOX_ASSERT_THROW(
+          builder.singleAggregation({"c1"}, {expr}), kErrorMessage);
+    }
+  }
+}
+
 class MinMaxNTest : public functions::aggregate::test::AggregationTestBase {
  protected:
   void SetUp() override {
@@ -523,15 +516,11 @@ class MinMaxNTest : public functions::aggregate::test::AggregationTestBase {
         }),
     });
 
-    // TODO: Enable testWithTableScan after fixing
-    // https://github.com/facebookincubator/velox/issues/6506.
     testAggregations(
         {data},
         {},
         {"min(c0, 2)", "min(c0, 5)", "max(c0, 3)", "max(c0, 7)"},
-        {expected},
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+        {expected});
 
     // Add some nulls. Expect these to be ignored.
     data = makeRowVector({
@@ -555,9 +544,7 @@ class MinMaxNTest : public functions::aggregate::test::AggregationTestBase {
         {data},
         {},
         {"min(c0, 2)", "min(c0, 5)", "max(c0, 3)", "max(c0, 7)"},
-        {expected},
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+        {expected});
 
     // Test all null input.
     data = makeRowVector({
@@ -575,9 +562,7 @@ class MinMaxNTest : public functions::aggregate::test::AggregationTestBase {
         {data},
         {},
         {"min(c0, 2)", "min(c0, 5)", "max(c0, 3)", "max(c0, 7)"},
-        {expected},
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+        {expected});
 
     // Test the NULL handling in `N` param.
     data = makeRowVector({
@@ -610,9 +595,7 @@ class MinMaxNTest : public functions::aggregate::test::AggregationTestBase {
         {data},
         {},
         {"min(c0, c1)", "min(c0, c3)", "max(c0, c2)", "max(c0, c3)"},
-        {expected},
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+        {expected});
 
     // Second argument of max_n/min_n must be less than or equal to 10000.
     VELOX_ASSERT_THROW(
@@ -650,15 +633,11 @@ class MinMaxNTest : public functions::aggregate::test::AggregationTestBase {
         }),
     });
 
-    // TODO: Enable testWithTableScan after fixing
-    // https://github.com/facebookincubator/velox/issues/6506.
     testAggregations(
         {data},
         {"c0"},
         {"min(c1, 2)", "min(c1, 5)", "max(c1, 3)", "max(c1, 7)"},
-        {expected},
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+        {expected});
 
     // Add some nulls. Expect these to be ignored.
     data = makeRowVector({
@@ -671,9 +650,7 @@ class MinMaxNTest : public functions::aggregate::test::AggregationTestBase {
         {data},
         {"c0"},
         {"min(c1, 2)", "min(c1, 5)", "max(c1, 3)", "max(c1, 7)"},
-        {expected},
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+        {expected});
 
     // Test all null input.
     data = makeRowVector({
@@ -715,9 +692,7 @@ class MinMaxNTest : public functions::aggregate::test::AggregationTestBase {
         {data},
         {"c0"},
         {"min(c1, 2)", "min(c1, 5)", "max(c1, 3)", "max(c1, 7)"},
-        {expected},
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+        {expected});
 
     // Test the NULL handling in `N` param.
     data = makeRowVector({
@@ -757,9 +732,7 @@ class MinMaxNTest : public functions::aggregate::test::AggregationTestBase {
         {data},
         {"c0"},
         {"min(c1, c2)", "min(c1, c4)", "max(c1, c3)", "max(c1, c4)"},
-        {expected},
-        /*config*/ {},
-        /*testWithTableScan*/ false);
+        {expected});
   }
 };
 
