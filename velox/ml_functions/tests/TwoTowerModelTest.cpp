@@ -3612,8 +3612,8 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
 
   std::chrono::steady_clock::time_point begin =
       std::chrono::steady_clock::now();
-  taskUser->start(taskUser, numSplit);
-  taskMovie->start(taskMovie, numSplit);
+  taskUser->start(numSplit);
+  taskMovie->start(numSplit);
 
   for (auto& split : hiveSplits) {
     taskUser->addSplit(readRawDataPlanNode, exec::Split(std::move(split)));

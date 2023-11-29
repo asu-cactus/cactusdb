@@ -665,21 +665,21 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   uint64_t kSizeKB = 1024UL;
 
   auto userHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_user_s_8192.parquet"},
+      {"/home/velox/data/movielens_user_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
   auto movieHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_movie_s_8192.parquet"},
+      {"/home/velox/data/movielens_movie_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingUserHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_rating_s_8192.parquet"},
+      {"/home/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingMovieHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_rating_s_8192.parquet"},
+      {"/home/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
@@ -850,7 +850,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
 
   std::chrono::steady_clock::time_point begin =
       std::chrono::steady_clock::now();
-  taskUser->start(taskUser, numDriver);
+  taskUser->start(numDriver);
   //   taskReadRating->start(taskReadRating, numSplit);
 
   for (auto& split : queryDataHiveSplits) {
@@ -1572,7 +1572,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
 
   std::chrono::steady_clock::time_point begin =
       std::chrono::steady_clock::now();
-  taskUser->start(taskUser, numDriver);
+  taskUser->start(numDriver);
   //   taskReadRating->start(taskReadRating, numSplit);
 
   for (auto& split : queryDataHiveSplits) {
@@ -2256,7 +2256,7 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
 
   std::chrono::steady_clock::time_point begin =
       std::chrono::steady_clock::now();
-  taskUser->start(taskUser, numSplit);
+  taskUser->start(numSplit);
 
   for (auto& split : userRatingHiveSplits) {
     taskUser->addSplit(
