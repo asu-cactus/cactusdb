@@ -27,6 +27,7 @@ RUN apt-get install -y vim
 RUN apt-get install -y libeigen3-dev
 RUN apt-get install -y libprotobuf-dev protobuf-compiler
 RUN apt-get install -y python3-pip
+RUN apt-get install -y tmux
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf
 
 
