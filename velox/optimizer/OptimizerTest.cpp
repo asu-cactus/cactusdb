@@ -453,20 +453,20 @@ void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector
           return exec::BlockingReason::kNotBlocked;
   });
 
-  task->start(task, threadsNum);
-  std::cout << "Hive splits:" << std::endl;
-  for(auto& split : hiveSplits) {
-    semaphore.wait();
-    std::cout << split->toString() << std::endl;
-    task->addSplit(planBuilderExec.p[0], exec::Split(std::move(split)));
-  }
-  task->noMoreSplits(planBuilderExec.p[0]);
-  std::cout << std::endl;
+  // task->start(task, threadsNum);
+  // std::cout << "Hive splits:" << std::endl;
+  // for(auto& split : hiveSplits) {
+  //   semaphore.wait();
+  //   std::cout << split->toString() << std::endl;
+  //   task->addSplit(planBuilderExec.p[0], exec::Split(std::move(split)));
+  // }
+  // task->noMoreSplits(planBuilderExec.p[0]);
+  // std::cout << std::endl;
  
-  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  waitForFinishedDrivers(task);
-  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  // waitForFinishedDrivers(task);
+  // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  // std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
   // another execute method
   // auto planAssert = planBuilderExec.planBuilder->planNode();
@@ -577,25 +577,25 @@ std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
         return exec::BlockingReason::kNotBlocked;
   });
 
-  task->start(task, threadsNum);
-  std::cout << "Hive splits:" << std::endl;
-  for(auto& split : inputHiveSplits) {
-    semaphore.wait();
-    std::cout << split->toString() << std::endl;
-    task->addSplit(planBuilderOpt.p[0], exec::Split(std::move(split)));
-  }
-  for(auto& split : weightHiveSplits) {
-    semaphore.wait();
-    std::cout << split->toString() << std::endl;
-    task->addSplit(planBuilderOpt.p[1], exec::Split(std::move(split)));
-  }
-  task->noMoreSplits(planBuilderOpt.p[0]);
-  task->noMoreSplits(planBuilderOpt.p[1]);
+  // task->start(task, threadsNum);
+  // std::cout << "Hive splits:" << std::endl;
+  // for(auto& split : inputHiveSplits) {
+  //   semaphore.wait();
+  //   std::cout << split->toString() << std::endl;
+  //   task->addSplit(planBuilderOpt.p[0], exec::Split(std::move(split)));
+  // }
+  // for(auto& split : weightHiveSplits) {
+  //   semaphore.wait();
+  //   std::cout << split->toString() << std::endl;
+  //   task->addSplit(planBuilderOpt.p[1], exec::Split(std::move(split)));
+  // }
+  // task->noMoreSplits(planBuilderOpt.p[0]);
+  // task->noMoreSplits(planBuilderOpt.p[1]);
 
-  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  waitForFinishedDrivers(task);
-  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  // waitForFinishedDrivers(task);
+  // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  // std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
   //anthor execute method
   // auto planOptAssert = planBuilderOpt.planBuilder->planNode();
