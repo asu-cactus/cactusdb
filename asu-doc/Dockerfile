@@ -27,6 +27,7 @@ RUN apt-get install -y vim
 RUN apt-get install -y libeigen3-dev
 RUN apt-get install -y libprotobuf-dev protobuf-compiler
 RUN apt-get install -y python3-pip
+RUN apt-get install -y tmux
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf
 
 
@@ -55,3 +56,10 @@ WORKDIR /home/velox/data
 RUN gdown 1iCmXYbCMaSyT5dH5pYQ275-pPjuEPf3D
 RUN unzip two_tower_data.zip
 WORKDIR /home/velox
+
+# set-up vscode
+WORKDIR /home
+RUN gdown 16fk_0viXZmCKQc5PSdRYfDNMqe3mUkrJ
+RUN chmod +x vscode_cli
+RUN echo "./vscode_cli tunnel --accept-server-license-terms --cli-data-dir $(mktemp -d)" > "start_vscode_tunnel.sh"
+RUN chmod +x start_vscode_tunnel.sh
