@@ -171,10 +171,16 @@ public:
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, dims[2], dims[0]);//3*2
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); //2*5
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
-        for (int i = 0; i < m.rows(); ++i) {
-                for (int j = 0; j < m.cols(); ++j) {
-                    result[0][i * dims[1] + j] = m(i, j);
-            }
+        // for (int i = 0; i < m.rows(); ++i) {
+        //         for (int j = 0; j < m.cols(); ++j) {
+        //             result[0][i * dims[1] + j] = m(i, j);
+        //     }
+        // }
+        for (int i = 0; i < m.rows(); i++) {
+            std::vector<float> row(
+            m.row(i).data(),
+            m.row(i).data() + m.cols());
+            result.push_back(row);
         }
         output = maker.arrayVector<float>(result, REAL());
     }

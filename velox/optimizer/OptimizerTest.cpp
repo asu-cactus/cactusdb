@@ -346,6 +346,10 @@ PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, in
                 .capturePlanNodeId(p0)
                 .project({fmt::format(compute, "v")}) 
                 .planBuild();
+  
+  auto plan = planBuilder.planNode();
+  auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
+  auto str = projectNode->projections()[0]->toString();
   std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
   PlanBuilderExec planBuilderExec(planBuilderShared, {p0});
   // exec_plan_udf(planBuilderExec, memoryLimit, feature, splitsNum, threadsNum);
@@ -453,20 +457,20 @@ void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector
           return exec::BlockingReason::kNotBlocked;
   });
 
-  // task->start(task, threadsNum);
-  // std::cout << "Hive splits:" << std::endl;
-  // for(auto& split : hiveSplits) {
-  //   semaphore.wait();
-  //   std::cout << split->toString() << std::endl;
-  //   task->addSplit(planBuilderExec.p[0], exec::Split(std::move(split)));
-  // }
-  // task->noMoreSplits(planBuilderExec.p[0]);
-  // std::cout << std::endl;
+  task->start(threadsNum);
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : hiveSplits) {
+    semaphore.wait();
+    std::cout << split->toString() << std::endl;
+    task->addSplit(planBuilderExec.p[0], exec::Split(std::move(split)));
+  }
+  task->noMoreSplits(planBuilderExec.p[0]);
+  std::cout << std::endl;
  
-  // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  // waitForFinishedDrivers(task);
-  // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  // std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
   // another execute method
   // auto planAssert = planBuilderExec.planBuilder->planNode();
@@ -489,7 +493,7 @@ DynamicMetaData decision_maker(PlanBuilder& planBuilder){
     decisions.leftBlockSize.push_back(149385);//597540/4 = 149385
     decisions.rightBlockSize.push_back(149385);
     decisions.rightBlockSize.push_back(1024);
-    decisions.targetStr.push_back("mat_mul0(v)");// only test first layer, not auto determined
+    decisions.targetStr.push_back("mat_mul0(ROW[\"v\"])");// only test first layer, not auto determined
     return decisions;
 }
 
@@ -545,7 +549,12 @@ OptOutput optiming_plan(PlanBuilder& planBuilder, DataFrame data, int num_sample
     auto weights = block_to_files(weightBlocks, dyDecision.blocksNum, 1);
     auto nodeid = planBuilder.planNode()->id();
     // auto str = planBuilder.findExprStrings(nodeid);
-    auto str = std::vector<std::string>{"hello"};
+    // "softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0(ROW[\"v\"]))))))"
+    // auto str = std::vector<std::string>{"softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0(v))))))"};
+    auto plan = planBuilder.planNode();
+    auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
+    auto str = std::vector<std::string>{};
+    str.push_back(projectNode->projections()[0]->toString());
     auto planBuilderOpt = build_plan_op(data.weights[0], dyDecision.rightBlockSize[0], dyDecision.rightBlockSize[1], dyDecision.leftBlockSize[0], inputs.schema, weights.schema, str, dyDecision.targetStr);
     OptOutput optOutput(true, inputs.paths, weights.paths, planBuilderOpt);
     return optOutput;
@@ -577,25 +586,25 @@ std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
         return exec::BlockingReason::kNotBlocked;
   });
 
-  // task->start(task, threadsNum);
-  // std::cout << "Hive splits:" << std::endl;
-  // for(auto& split : inputHiveSplits) {
-  //   semaphore.wait();
-  //   std::cout << split->toString() << std::endl;
-  //   task->addSplit(planBuilderOpt.p[0], exec::Split(std::move(split)));
-  // }
-  // for(auto& split : weightHiveSplits) {
-  //   semaphore.wait();
-  //   std::cout << split->toString() << std::endl;
-  //   task->addSplit(planBuilderOpt.p[1], exec::Split(std::move(split)));
-  // }
-  // task->noMoreSplits(planBuilderOpt.p[0]);
-  // task->noMoreSplits(planBuilderOpt.p[1]);
+  task->start(threadsNum);
+  std::cout << "Hive splits:" << std::endl;
+  for(auto& split : inputHiveSplits) {
+    semaphore.wait();
+    std::cout << split->toString() << std::endl;
+    task->addSplit(planBuilderOpt.p[0], exec::Split(std::move(split)));
+  }
+  for(auto& split : weightHiveSplits) {
+    semaphore.wait();
+    std::cout << split->toString() << std::endl;
+    task->addSplit(planBuilderOpt.p[1], exec::Split(std::move(split)));
+  }
+  task->noMoreSplits(planBuilderOpt.p[0]);
+  task->noMoreSplits(planBuilderOpt.p[1]);
 
-  // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  // waitForFinishedDrivers(task);
-  // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  // std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  waitForFinishedDrivers(task);
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 
   //anthor execute method
   // auto planOptAssert = planBuilderOpt.planBuilder->planNode();
@@ -675,7 +684,7 @@ void test_optimizer_demo(int argc, char** argv){
   int splits_num_rela = 4;
   int threads_num_rela = 4;
   
-  int flag = 0;
+  int flag = 2;
   auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
   if (flag == 0){
     auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size);
@@ -732,9 +741,9 @@ std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, Dat
     );
 
     core::PlanNodeId p = "0";
-    // auto oldplan = udf_plan_builder.planNode()->sources()[0];
-    // udf_plan_builder.replacePlan(oldplan);
-    // udf_plan_builder.project({"torchDNN(v)"});
+    auto oldplan = udf_plan_builder.planNode()->sources()[0];
+    udf_plan_builder.replacePlan(oldplan);
+    udf_plan_builder.project({"torchDNN(v)"});
     // udf_plan_builder.editExprStrings(p, {"torchDNN(v)"});
     // auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
@@ -755,61 +764,67 @@ std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, Dat
   else if (test_action == "Mul2JoinAgg"){
     // Here we directly start from null plan, 
     // Todo: connect with other before plan(related with sources)
-  //   exec::registerVectorFunction(
-  //   "mat_mul_b",
-  //   MatrixMultiply_b::signatures(),
-  //   std::make_unique<MatrixMultiply_b>(row, col, samples, weight)
-  // );
+    int samples = 1000;
+    exec::registerVectorFunction(
+    "mat_mul_b",
+    MatrixMultiply_b::signatures(),
+    std::make_unique<MatrixMultiply_b>(row, col, samples, weight)
+  );
 
-  // auto nodeid = planBuilder.planNode()->id();
-  // std::vector<std::string> str = udf_plan_builder.findExprStrings(nodeid);
-  // std::string searchString = "mat_mul0(v)"
-  // std::string replaceString = "result";
+  std::string searchString = "mat_mul0(ROW[\"v\"])"
+  std::string replaceString = "result";
 
-  // std::size_t found = str[0].find(searchString);
-  // while (found != std::string::npos) {
-  //     str[0].replace(found, searchString.length(), replaceString);
-  //     found = str[0].find(searchString, found + replaceString.length());
-  // }
+  auto plan = planBuilder.planNode();
+  auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
+  auto str = std::vector<std::string>{};
+  str.push_back(projectNode->projections()[0]->toString());
+
+  std::size_t found = str[0].find(searchString);
+  while (found != std::string::npos) {
+      str[0].replace(found, searchString.length(), replaceString);
+      found = str[0].find(searchString, found + replaceString.length());
+  }
   
-  // auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  // core::PlanNodeId p2;
-  // core::PlanNodeId p3;
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  core::PlanNodeId p2;
+  core::PlanNodeId p3;
 
-  // auto inputs = ROW({
-  //       {"v", ARRAY(REAL())},
-  //       {"v_row", BIGINT()},
-  //       {"v_col", BIGINT()},
-  //   });
+  auto inputs = ROW({
+        {"v", ARRAY(REAL())},
+        {"v_row", BIGINT()},
+        {"v_col", BIGINT()},
+    });
 
-  // auto weights = ROW({
-  //       {"w", ARRAY(REAL())},
-  //       {"w_row", BIGINT()},
-  //       {"w_col", BIGINT()},
-  //   });
+  auto weights = ROW({
+        {"w", ARRAY(REAL())},
+        {"w_row", BIGINT()},
+        {"w_col", BIGINT()},
+    });
 
-  // auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
-  //                 .tableScan(inputs)
-  //                 .capturePlanNodeId(p2)
-  //                 .hashJoin(
-  //                     {"v_col"},
-  //                     {"w_row"},
-  //                   exec::test::PlanBuilder(planNodeIdGenerator)
-  //                  .tableScan(weights)
-  //                  .capturePlanNodeId(p3)
-  //                  .planNode(),
-  //                   "", // extra filter
-  //                   {"v_row", "w_col", "v", "w"})
-  //                 .project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
-  //                 .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
-  //                 .project({str[0]})
-  //                 .planBuild();
+  auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
+                  .tableScan(inputs)
+                  .capturePlanNodeId(p2)
+                  .hashJoin(
+                      {"v_col"},
+                      {"w_row"},
+                    exec::test::PlanBuilder(planNodeIdGenerator)
+                   .tableScan(weights)
+                   .capturePlanNodeId(p3)
+                   .planNode(),
+                    "", // extra filter
+                    {"v_row", "w_col", "v", "w"})
+                  .project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+                  .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
+                  .project({str[0]})
+                  .planBuild();
 
     // std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
     // std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p2, p3});
     core::PlanNodeId p = "0";
     std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(udf_plan_builder);
     std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p});
+
+    PlanBuilderExec planBuilderExec(planBuilderShared, {p});
     return planBuilderExecShared;
   }
   else {
@@ -835,7 +850,7 @@ void test_optimizer_mcts(int argc, char** argv){
   filesystems::registerLocalFileSystem();
   dwrf::registerDwrfReaderFactory();
 
-  int input_features_size = 500;//597540
+  int input_features_size = 597540;//597540
   int num_samples = 1000;
   int first_layer_output_size = 1024;
   int second_layer_output_size = 14588;
@@ -860,6 +875,6 @@ void test_optimizer_mcts(int argc, char** argv){
 }
 
 int main(int argc, char** argv) {
-    test_optimizer_demo(argc, argv);
-    // test_optimizer_mcts(argc, argv);
+    // test_optimizer_demo(argc, argv);
+    test_optimizer_mcts(argc, argv);
 }
