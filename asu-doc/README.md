@@ -1,7 +1,17 @@
+<!-- TOC -->
+
+- [Use Docker to Build Your Development Environment](#use-docker-to-build-your-development-environment)
+    - [Build Docker Image](#build-docker-image)
+    - [Link to Our Private Velox Repository](#link-to-our-private-velox-repository)
+    - [Set-Up Dependencies and Compile](#set-up-dependencies-and-compile)
+    - [Develop with Visual Studio Code](#develop-with-visual-studio-code)
+- [Run Two-Tower Model Pipeline](#run-two-tower-model-pipeline)
+
+<!-- /TOC -->
 ## Use Docker to Build Your Development Environment
 
 ### Build Docker Image
-*It is recommended to use docker to create your development environment, and your dependencies won't get messed up with other stuffs.*
+*It is recommended to use docker to create your development environment, and your dependencies won't get messed up with other stuff.*
 
 Using the following command to build your docker image and start a container
 ```bash
@@ -23,8 +33,15 @@ git remote add origin git@github.com:asu-cactus/velox.git
 git remote add origin https://github.com/asu-cactus/velox.git
 # switch to our main branch
 git switch origin/main
+```
+
+### Set-Up Dependencies and Compile
+
+```bash
 # run velox setup-ubuntu to install other dependencies
 ./scripts/setup-ubuntu.sh
+# compile Velox in release mode
+make release
 ```
 
 ### Develop with Visual Studio Code
@@ -36,5 +53,15 @@ bash ~/start_vscode_tunnel.sh
 
 ## Run Two-Tower Model Pipeline
 
-<!-- TODO add details -->
-If you are going to run the two-tower model pipeline in the docker, there is no need to modify the path to the data parquet file. Otherwise, you are required to modify it correspondingly. 
+If you are going to run the two-tower model pipeline in the docker, there is no need to modify the path to the data parquet file. Otherwise, you are required to modify it correspondingly. After compilation, you will the executable file located at `_build/release/velox/ml_functions/two_tower_model_pipeline_test`. You can run the code with the following command.
+
+` ./two_tower_model_pipeline_test --num_sample=50000 --num_split=10 --batch_size=5000  --num_driver=8`
+
+| Argument   | Description          | Default Value |
+|------------|----------------------|---------------|
+| num_sample | Number of samples    |           500 |
+| num_split  | Number of splits     |             1 |
+| batch_size | Batch size           |           500 |
+| num_repeat | Number of repeat run |             1 |
+| num_driver | Number of drivers    |             1 |
+
