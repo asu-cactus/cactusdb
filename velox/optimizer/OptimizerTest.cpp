@@ -726,24 +726,24 @@ void test_optimizer_demo(int argc, char** argv){
 
 std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, DataFrame data, int features, int first_layer, int second_layer, std::string test_action){
   if (test_action == "Merge2Single"){
-    std::vector<int> dimensions;
-    dimensions.push_back(features);
-    dimensions.push_back(first_layer);
-    dimensions.push_back(second_layer);
+    // std::vector<int> dimensions;
+    // dimensions.push_back(features);
+    // dimensions.push_back(first_layer);
+    // dimensions.push_back(second_layer);
 
-    float* weights[2] = {data.weights[0], data.weights[1]};
-    float* bias[2] = {data.bias[0], data.bias[1]};
+    // float* weights[2] = {data.weights[0], data.weights[1]};
+    // float* bias[2] = {data.bias[0], data.bias[1]};
 
-    exec::registerVectorFunction(
-      "torchDNN",
-      TorchDNN::signatures(),
-      std::make_unique<TorchDNN>(weights, bias, dimensions)
-    );
+    // exec::registerVectorFunction(
+    //   "torchDNN",
+    //   TorchDNN::signatures(),
+    //   std::make_unique<TorchDNN>(weights, bias, dimensions)
+    // );
 
-    core::PlanNodeId p = "0";
-    auto oldplan = udf_plan_builder.planNode()->sources()[0];
-    udf_plan_builder.replacePlan(oldplan);
-    udf_plan_builder.project({"torchDNN(v)"});
+    // core::PlanNodeId p = "0";
+    // auto oldplan = udf_plan_builder.planNode()->sources()[0];
+    // udf_plan_builder.replacePlan(oldplan);
+    // udf_plan_builder.project({"torchDNN(v)"});
     // udf_plan_builder.editExprStrings(p, {"torchDNN(v)"});
     // auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
@@ -754,7 +754,7 @@ std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, Dat
     // std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
     // auto second = AssertQueryBuilder(udf_plan_builder.planNode()).copyResults(pool_.get());
     // std::cout << "after Results:" << second->toString() << std::endl;
-
+    core::PlanNodeId p = "0";
     std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(udf_plan_builder);
     std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p});
     PlanBuilderExec planBuilderExec(planBuilderShared, {p});
@@ -764,59 +764,59 @@ std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, Dat
   else if (test_action == "Mul2JoinAgg"){
     // Here we directly start from null plan, 
     // Todo: connect with other before plan(related with sources)
-    int samples = 1000;
-    exec::registerVectorFunction(
-    "mat_mul_b",
-    MatrixMultiply_b::signatures(),
-    std::make_unique<MatrixMultiply_b>(row, col, samples, weight)
-  );
+  //   int samples = 1000;
+  //   exec::registerVectorFunction(
+  //   "mat_mul_b",
+  //   MatrixMultiply_b::signatures(),
+  //   std::make_unique<MatrixMultiply_b>(row, col, samples, weight)
+  // );
 
-  std::string searchString = "mat_mul0(ROW[\"v\"])"
-  std::string replaceString = "result";
+  // std::string searchString = "mat_mul0(ROW[\"v\"])"
+  // std::string replaceString = "result";
 
-  auto plan = planBuilder.planNode();
-  auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
-  auto str = std::vector<std::string>{};
-  str.push_back(projectNode->projections()[0]->toString());
+  // auto plan = planBuilder.planNode();
+  // auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
+  // auto str = std::vector<std::string>{};
+  // str.push_back(projectNode->projections()[0]->toString());
 
-  std::size_t found = str[0].find(searchString);
-  while (found != std::string::npos) {
-      str[0].replace(found, searchString.length(), replaceString);
-      found = str[0].find(searchString, found + replaceString.length());
-  }
+  // std::size_t found = str[0].find(searchString);
+  // while (found != std::string::npos) {
+  //     str[0].replace(found, searchString.length(), replaceString);
+  //     found = str[0].find(searchString, found + replaceString.length());
+  // }
   
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  core::PlanNodeId p2;
-  core::PlanNodeId p3;
+  // auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  // core::PlanNodeId p2;
+  // core::PlanNodeId p3;
 
-  auto inputs = ROW({
-        {"v", ARRAY(REAL())},
-        {"v_row", BIGINT()},
-        {"v_col", BIGINT()},
-    });
+  // auto inputs = ROW({
+  //       {"v", ARRAY(REAL())},
+  //       {"v_row", BIGINT()},
+  //       {"v_col", BIGINT()},
+  //   });
 
-  auto weights = ROW({
-        {"w", ARRAY(REAL())},
-        {"w_row", BIGINT()},
-        {"w_col", BIGINT()},
-    });
+  // auto weights = ROW({
+  //       {"w", ARRAY(REAL())},
+  //       {"w_row", BIGINT()},
+  //       {"w_col", BIGINT()},
+  //   });
 
-  auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
-                  .tableScan(inputs)
-                  .capturePlanNodeId(p2)
-                  .hashJoin(
-                      {"v_col"},
-                      {"w_row"},
-                    exec::test::PlanBuilder(planNodeIdGenerator)
-                   .tableScan(weights)
-                   .capturePlanNodeId(p3)
-                   .planNode(),
-                    "", // extra filter
-                    {"v_row", "w_col", "v", "w"})
-                  .project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
-                  .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
-                  .project({str[0]})
-                  .planBuild();
+  // auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
+  //                 .tableScan(inputs)
+  //                 .capturePlanNodeId(p2)
+  //                 .hashJoin(
+  //                     {"v_col"},
+  //                     {"w_row"},
+  //                   exec::test::PlanBuilder(planNodeIdGenerator)
+  //                  .tableScan(weights)
+  //                  .capturePlanNodeId(p3)
+  //                  .planNode(),
+  //                   "", // extra filter
+  //                   {"v_row", "w_col", "v", "w"})
+  //                 .project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+  //                 .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
+  //                 .project({str[0]})
+  //                 .planBuild();
 
     // std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
     // std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p2, p3});
