@@ -861,7 +861,7 @@ void test_optimizer_mcts(int argc, char** argv){
   std::string test_action1 = "Merge2Single";
   std::string test_action2 = "Mul2JoinAgg";
 
-  auto plan_s1_builder_1 = rewriten_udf(*(udf_plan_builder.planBuilder), data, input_features_size, first_layer_output_size, second_layer_output_size, test_action1);
+  // auto plan_s1_builder_1 = rewriten_udf(*(udf_plan_builder.planBuilder), data, input_features_size, first_layer_output_size, second_layer_output_size, test_action1);
   // exec_plan_udf(plan_s1_builder_1, 1000, data.features, 4, 4);
   // auto plan_s2_builder_1 = rewriten_tradition(plan_s1_builder_1);
   // auto cost = cost_estimation(plan_s2_builder_1);
