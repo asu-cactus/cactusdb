@@ -31,6 +31,7 @@
 #include <cstring>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <json/json.h>
 
 // #define EIGEN_USE_BLAS
 
@@ -728,11 +729,146 @@ void test_optimizer_demo(int argc, char** argv){
     
 }
 
-int costFunction(std::vector<std::string> input) {
-    // Example: Implement your cost function here
-    // This function receives a string from Python and returns an integer
+class Opt {
+private:
+    std::shared_ptr<PlanBuilder> originPlanBuilder;
+    int clientSocket;
+    DataFrame data;
 
-    // Example: Return the length of the received string
+public:
+    // Constructor
+    Opt(std::shared_ptr<PlanBuilder> builder, int client, DataFrame data) : originPlanBuilder(builder), clientSocket(client), data(data) {}
+
+    // Member function that uses the PlanBuilder
+    void start() {
+        std::cout << "Executing optimization." << std::endl;
+        const char* start_str = "start";
+        send(clientSocket, start_str, std::strlen(start_str), 0);
+    }
+
+    int costFunction() {
+      return 10; 
+    }
+
+    void rewriten_udf(std::string test_action){
+      if (test_action == "Merge2Single"){
+        std::vector<int> dimensions;
+        dimensions.push_back(597540);
+        dimensions.push_back(1024);
+        dimensions.push_back(14588);
+
+        float* weights[2] = {data.weights[0], data.weights[1]};
+        float* bias[2] = {data.bias[0], data.bias[1]};
+
+        exec::registerVectorFunction(
+          "torchDNN",
+          TorchDNN::signatures(),
+          std::make_unique<TorchDNN>(weights, bias, dimensions)
+        );
+
+        core::PlanNodeId p = "0";
+        auto oldplan = originPlanBuilder->planNode()->sources()[0];
+        originPlanBuilder->replacePlan(oldplan);
+        originPlanBuilder->project({"torchDNN(v)"});
+      }
+    }
+
+    void mcts_optimizer(){
+
+      // Send a list of strings to Python
+      char str_buffer[1024];
+      std::vector<std::string> action_strings;
+      auto plan = originPlanBuilder->planNode();
+      auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
+      // auto udf_strings = std::vector<std::string>{};
+      // //softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({/"x"}))))))
+      // udf_strings.push_back(projectNode->projections()[0]->toString());
+      // // std::vector<std::string> input_strings = {"string1", "string2", "string3"};
+      // std::string joined_input;
+      // for (const auto& input_str : udf_strings) {
+      //     joined_input += input_str + "#";
+      // }
+      // joined_input += "E";
+      // send(clientSocket, joined_input.c_str(), joined_input.length(), 0);
+      
+      Json::Value input_json;
+      input_json["strings"] = Json::arrayValue;
+      input_json["strings"].append(projectNode->projections()[0]->toString());
+      std::string json_str = input_json.toStyledString();
+      send(clientSocket, json_str.c_str(), json_str.length(), 0);
+      // Wait for the MCTS result from Python
+      while (true) {
+          // Receive a string from Python
+          ssize_t bytesRead = recv(clientSocket, str_buffer, sizeof(str_buffer), 0);
+          if (bytesRead <= 0) {
+              break;  // Connection closed or error
+          }
+
+          str_buffer[bytesRead] = '\0';  // Null-terminate the received data
+          std::string received_str(str_buffer);
+
+          // size_t pos = 0;
+          // while ((pos = received_str.find("#")) != std::string::npos) {
+          //     action_strings.push_back(received_str.substr(0, pos));
+          //     received_str.erase(0, pos + 1);  // 1 is the length of "#"
+          // }
+
+          // if (received_str == "E"){
+          //   for (auto action : action_strings){
+          //      rewriten_udf(action);
+          //   }
+          //   // auto plan1 = originPlanBuilder->planNode();
+          //   // auto projectNode1 = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan1);
+          //   // auto ss = projectNode1->projections()[0]->toString();
+          //   std::cout << "new string = " << ss << std::endl;
+          //   int result = costFunction();
+          //   std::cout << "cost = " << result << std::endl;
+          //   int send_result = htonl(result);
+          //   send(clientSocket, &send_result, sizeof(send_result), 0);
+          //   action_strings.clear();
+          // }
+
+          // if (received_str == "end") {
+          //     break;  // End communication
+          // }
+          Json::Value json_data;
+          Json::CharReaderBuilder jsonReader;
+          std::istringstream jsonStream(received_str);
+          Json::parseFromStream(jsonReader, jsonStream, &json_data, nullptr);
+
+          const Json::Value& action_strings_json = json_data["action_strings"];
+          std::vector<std::string> action_strings;
+
+          for (const auto& action_string_json : action_strings_json) {
+              action_strings.push_back(action_string_json.asString());
+          }
+
+          if (json_data["end"].asString() == "F") {
+              for (auto action : action_strings){
+                rewriten_udf(action);
+              }
+              // Call your cost function with the vector of action strings
+              int result = costFunction();
+              std::cout << "cost = " << result << std::endl;
+
+              // Send the result back to Python
+              int send_result = htonl(result);
+              send(clientSocket, &send_result, sizeof(send_result), 0);
+              action_strings.clear();
+          }
+
+          if (json_data["end"].asString() == "T") {
+              break;  // End communication
+          }
+      }
+
+      // Close the connection
+      close(clientSocket);
+    }
+};
+
+int costFunction(std::vector<std::string> input) {
+
     return input[0].size(); 
 }
 
@@ -743,13 +879,24 @@ void mcts_optimizer(PlanBuilder& udf_plan_builder, int clientSocket){
 
     // Send a list of strings to Python
     std::vector<std::string> action_strings;
-    std::vector<std::string> input_strings = {"string1", "string2", "string3"};
-    std::string joined_input;
-    for (const auto& input_str : input_strings) {
-        joined_input += input_str + "#";
-    }
-    joined_input += "E";
-    send(clientSocket, joined_input.c_str(), joined_input.length(), 0);
+    auto plan = udf_plan_builder.planNode();
+    auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
+    auto input_strings = std::vector<std::string>{};
+    //softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
+
+    Json::Value input_json;
+    input_json["strings"] = Json::arrayValue;
+    input_json["strings"].append(projectNode->projections()[0]->toString());
+    std::string json_str = input_json.toStyledString();
+    send(clientSocket, json_str.c_str(), json_str.length(), 0);
+    // std::vector<std::string> input_strings = {"string1", "string2", "string3"};
+    // input_strings.push_back(projectNode->projections()[0]->toString());
+    // std::string joined_input;
+    // for (const auto& input_str : input_strings) {
+    //     joined_input += input_str + "#";
+    // }
+    // joined_input += "E";
+    // send(clientSocket, joined_input.c_str(), joined_input.length(), 0);
     
     // Wait for the MCTS result from Python
     while (true) {
@@ -762,22 +909,34 @@ void mcts_optimizer(PlanBuilder& udf_plan_builder, int clientSocket){
         str_buffer[bytesRead] = '\0';  // Null-terminate the received data
         std::string received_str(str_buffer);
 
-        size_t pos = 0;
-        while ((pos = received_str.find("#")) != std::string::npos) {
-            action_strings.push_back(received_str.substr(0, pos));
-            received_str.erase(0, pos + 1);  // 1 is the length of "#"
-        }
+        // size_t pos = 0;
+        // while ((pos = received_str.find("#")) != std::string::npos) {
+        //     action_strings.push_back(received_str.substr(0, pos));
+        //     received_str.erase(0, pos + 1);  // 1 is the length of "#"
+        // }
 
-        if (received_str == "E"){
-            int result = costFunction(action_strings);
-            std::cout << "cost = " << result << std::endl;
-            int send_result = htonl(result);
-            send(clientSocket, &send_result, sizeof(send_result), 0);
-            action_strings.clear();
-        }
+        // if (received_str == "E"){
+        //     // auto pe = rewriten_udf(udf_plan_builder, data, features, first_layer, second_layer, action_strings[0]);
+        //     int result = costFunction(action_strings);
+        //     std::cout << "cost = " << result << std::endl;
+        //     int send_result = htonl(result);
+        //     send(clientSocket, &send_result, sizeof(send_result), 0);
+        //     action_strings.clear();
+        // }
 
-        if (received_str == "end") {
-            break;  // End communication
+        // if (received_str == "end") {
+        //     break;  // End communication
+        // }
+        Json::Value json_data;
+        Json::CharReaderBuilder jsonReader;
+        std::istringstream jsonStream(received_str);
+        Json::parseFromStream(jsonReader, jsonStream, &json_data, nullptr);
+
+        const Json::Value& action_strings_json = json_data["action_strings"];
+        std::vector<std::string> action_strings;
+
+        for (const auto& action_string_json : action_strings_json) {
+            action_strings.push_back(action_string_json.asString());
         }
 
         // Execute the cost function and send the result back to Python
@@ -939,8 +1098,10 @@ void test_optimizer_mcts(int argc, char** argv){
   auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
   // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
   auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size);
-
-  mcts_optimizer(*(udf_plan_builder.planBuilder), clientSocket);
+  Opt optimizer(udf_plan_builder.planBuilder, clientSocket, data);
+  optimizer.start();
+  optimizer.mcts_optimizer();
+  // mcts_optimizer(*(udf_plan_builder.planBuilder), clientSocket);
   // exec_plan_udf(udf_plan_builder, 1000, data.features, 4, 4);
   std::string test_action1 = "Merge2Single";
   std::string test_action2 = "Mul2JoinAgg";
