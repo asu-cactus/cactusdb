@@ -18,8 +18,11 @@ set(SOURCES
 )
 
 # set (CMAKE_PREFIX_PATH "$HOME/libtorch")
-set(Torch_DIR "/home/ubuntu/libtorch/share/cmake/Torch")
+set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
+
+find_package(jsoncpp REQUIRED)
+
 
 add_executable(velox_op ${SOURCES})
 
@@ -33,6 +36,7 @@ target_link_libraries(
   velox_memory
   velox_vector_test_lib
   pthread
+  jsoncpp_lib
   # openblas
   ${TORCH_LIBRARIES}
 )
