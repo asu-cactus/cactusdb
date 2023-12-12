@@ -62,7 +62,7 @@ class DecisionTreeTest : public HiveConnectorTestBase {
 
   void run();
   void test_predict_small();
-
+  void test_predict_large();
   void TestBody() override {}
 
   void SetUp() {
@@ -110,7 +110,40 @@ void DecisionTreeTest::test_predict_small() {
   for(int i=0; i < num_rows; i++){
     std::vector<float> inputVector;
     for(int j=0; j < num_cols; j++){
-      inputVector.push_back(i*j);
+      inputVector.push_back(-5.0);
+    }
+    inputVectors.push_back(inputVector);
+  }
+  auto inputArrayVector = maker.arrayVector<float>(inputVectors, REAL());
+
+  auto inputRowVector = maker.rowVector({"x"}, {inputArrayVector});
+
+  registerFunction();
+
+  auto myPlan = exec::test::PlanBuilder(pool_.get())
+                  .values({inputRowVector})
+                  .project({"decision_tree_predict(x)"})
+                              .planNode();
+
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Decision Tree Prediction with Small Data (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::cout << "Results:" << results->toString() << std::endl;
+  std::cout << results->toString(0, results->size()) << std::endl;
+}
+
+void DecisionTreeTest::test_predict_large() {
+
+  int num_rows = 10;
+  int num_cols = 28;
+  int size = num_rows*num_cols;
+
+  std::vector<std::vector<float>> inputVectors;
+  for(int i=0; i < num_rows; i++){
+    std::vector<float> inputVector;
+    for(int j=0; j < num_cols; j++){
+      inputVector.push_back(-2.0);
     }
     inputVectors.push_back(inputVector);
   }

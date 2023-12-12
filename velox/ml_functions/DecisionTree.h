@@ -211,7 +211,15 @@ class Tree {
             if (currentLine.find("yes, missing") != std::string::npos) {
              tree[parentNodeID].isMissTrackLeft = true; // in processInnerNodes(), default value is set to no/right
             }
-        }
+
+	    if (tree[parentNodeID].leftChild == -1) {
+                tree[parentNodeID].leftChild = childNodeID;
+            } else if (tree[parentNodeID].rightChild == -1) {
+                tree[parentNodeID].rightChild = childNodeID;
+            } else {
+                std::cout << "Error in parsing trees: children nodes were updated again: " << parentNodeID << "->" << childNodeID << std::endl;
+            }
+	}
       }
 
       inline void predict(VectorPtr& input, std::vector<float>& resultVector, int numInputs, int numFeatures) {
@@ -223,13 +231,17 @@ class Tree {
         for (int rowIndex = 0; rowIndex < numInputs; rowIndex++) {
 	 int curIndex = 0;
 	 int curBase = rowIndex * numFeatures;
+	 std::cout << curBase << std::endl;
          while (!tree[curIndex].isLeaf) {
 	  const float featureValue = inputValues[curBase + tree[curIndex].indexID];
+	  std::cout << curIndex << "--" << tree[curIndex].indexID
+		  << "--" << featureValue << "--" << tree[curIndex].threshold << std::endl;
 	  curIndex = featureValue < tree[curIndex].threshold
 		 ? tree[curIndex].leftChild
 		 : tree[curIndex].rightChild; 
 	 }
          outData[rowIndex] = (float)(tree[curIndex].leafValue);
+	 std::cout << rowIndex << ":" << curIndex <<":" <<(float)(tree[curIndex].leafValue) << std::endl;
 	}
       }
 
@@ -257,6 +269,7 @@ class Tree {
 	  }
          }
          outData[rowIndex] = (float)(tree[curIndex].leafValue);
+	 std::cout << rowIndex << ":" << (float)(tree[curIndex].leafValue) << std::endl;
         }
       }
 
