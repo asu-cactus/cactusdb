@@ -323,7 +323,7 @@ class TreePrediction : public MLFunction {
 
   static std::string getName() {
     return "tree_predict";
-  };
+  }
 
  private:
   TreePtr tree;
