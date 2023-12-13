@@ -6,10 +6,10 @@ from copy import deepcopy,copy
 from tracemalloc import start
 import numpy as np
 from math import log
-import torch
 import copy
 from abc import ABC, abstractmethod
-
+import socket
+import json
 
 class Rule(ABC):
     def __init__(self, rule_type, rule_name, pattern):
@@ -69,12 +69,12 @@ class Mul2JoinAgg(Rule):
         super().__init__("Mul2JoinAgg", "Mul2JoinAgg", pattern)
 
     def check(self, condition):
-        if "mul()" in condition:
+        if "mat_mul0" in condition:
             return True
         return False
 
     def apply(self, before):
-        after = before.replace("mul()", "result")
+        after = before.replace('mat_mul0(ROW["v"])', "result")
         return after
     
     def noRules(self):
@@ -104,8 +104,13 @@ class Merge2Single(Rule):
         pattern.append_child(Pattern("source"))
         super().__init__("Merge2Single", "Merge2Single", pattern)
 
+    # def check(self, condition):
+    #     if "relu(add(mul()))" in condition:
+    #         return True
+    #     return False
+    
     def check(self, condition):
-        if "relu(add(mul()))" in condition:
+        if 'softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0(ROW["v"]))))))' in condition:
             return True
         return False
 
@@ -138,7 +143,8 @@ class Split2Multi(Rule):
 
 class rulesManager():
     def __init__(self):
-        self._rules = [Mul2JoinAgg(), JoinAgg2Mul(), Merge2Single(), Split2Multi()]
+        # self._rules = [Mul2JoinAgg(), JoinAgg2Mul(), Merge2Single(), Split2Multi()]
+        self._rules = [Merge2Single(), JoinAgg2Mul(), Mul2JoinAgg(), Split2Multi()]
 
     def add_rule(self, rule):
         self._rules.append(rule)
@@ -152,8 +158,23 @@ class rulesManager():
 
 def getReward(state):
     startTime = time.time()
-    prediction = random.uniform(0, 1)
-    return prediction,time.time()-startTime
+    # prediction = random.uniform(0, 1)
+    action_list = []
+    for action in state.order_list:
+        action_list.append(action.name)
+    
+    output_json = {
+        "action_strings": action_list,
+        "end": "F",
+        # You can add more data to the JSON object as needed
+    }
+    output_str = json.dumps(output_json)
+    client_socket.sendall(output_str.encode('utf-8'))
+
+    result = int.from_bytes(client_socket.recv(4), byteorder='big')
+    print("Received integer from C++:", result)
+    # prediction = random.uniform(0, 1)
+    return result,time.time()-startTime
 
 def randomPolicy(node):
     t1 = 0
@@ -185,7 +206,8 @@ takeActionTime = 0
 class planState:
     def __init__(self, queryContext, rulesManager):
 
-        self.order_list = [[] for _ in range(len(queryContext))]
+        # self.order_list = [[] for _ in range(len(queryContext))]
+        self.order_list = []
 
         self.inputState1 = queryContext
         self.validRules = [rulesManager for _ in range(len(queryContext))]
@@ -261,7 +283,8 @@ class planState:
         startTime = time.time()
         newState = copy.deepcopy(self)
 
-        newState.order_list[targetState].append(action)
+        # newState.order_list[targetState].append(action)
+        newState.order_list.append(action)
         newState.currentStep = self.currentStep + 1
 
         newState.inputState1[targetState] = action.apply(newState.inputState1[targetState])
@@ -390,6 +413,34 @@ class mcts():
                 return action
 
 
+def mcts_function(client_socket, input_json):
+    queryContext = input_json["strings"]
+    print(f"Received start strings from C++: {queryContext}")
+    RulesManager = rulesManager()
+    initialState = planState(queryContext, RulesManager)
+    mcts_instance = mcts(iterationLimit=10, explorationConstant=1 / math.sqrt(16), rolloutPolicy=randomPolicy)
+    mcts_instance.search(initialState)
+    node = mcts_instance.root
+    actions = []
+    while not node.isTerminal:
+        bestChild = mcts_instance.getBestChild(node, 1 / math.sqrt(16))
+        action =  mcts_instance.getAction(node, bestChild)
+        actions.append(action)
+        node = bestChild
+    print(actions)
+
+    final_json = {
+        "action_strings": actions,
+        "end": "T",
+        # You can add more data to the JSON object as needed
+    }
+    final_str = json.dumps(final_json)
+    client_socket.sendall(final_str.encode('utf-8'))
+
+
+
+
+
 if __name__ == "__main__":
 
 
@@ -414,19 +465,52 @@ if __name__ == "__main__":
 
     # # Print or use the best action as needed
     # print("Best Action:", best_action)
-    queryContext = ["relu(add(mul()))", "mul()"]
-    rulesManager = rulesManager()
-    initialState = planState(queryContext, rulesManager)
-    mcts_instance = mcts(iterationLimit=10, explorationConstant=1 / math.sqrt(16), rolloutPolicy=randomPolicy)
-    mcts_instance.search(initialState)
-    node = mcts_instance.root
-    actions = []
-    while not node.isTerminal:
-        bestChild = mcts_instance.getBestChild(node, 1 / math.sqrt(16))
-        action =  mcts_instance.getAction(node, bestChild)
-        actions.append(action)
-        node = bestChild
-    print(actions)
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_address = ('localhost', 12345)
+
+    server_socket.bind(server_address)
+    server_socket.listen(1)
+
+    print("Python server listening on port 12345...")
+    while True:
+    # Accept incoming connection from C++
+        client_socket, client_address = server_socket.accept()
+        print(f"Connected to C++ client: {client_address}")
+
+        # Receive the start string from C++
+        start_str = client_socket.recv(1024).decode('utf-8')
+        print(f"Received start string from C++: {start_str}")
+
+        if start_str == "start":
+            # Receive the list of strings from C++
+            # input_strings = client_socket.recv(1024).decode('utf-8').split('#')[:-1]
+            json_str = client_socket.recv(1024).decode('utf-8')
+            input_json = json.loads(json_str)
+            mcts_function(client_socket, input_json)
+            # Run the MCTS function
+            # mcts_function(client_socket, input_strings)
+        else:
+            print("Invalid start string received. Expected 'start'.")
+
+        # Close the connection
+        client_socket.close()
+        print("Connection closed.")
+
+    # queryContext = ["relu(add(mul()))", "mul()"]
+    # queryContext = ['softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0(ROW["v"]))))))']
+    
+    # rulesManager = rulesManager()
+    # initialState = planState(queryContext, rulesManager)
+    # mcts_instance = mcts(iterationLimit=10, explorationConstant=1 / math.sqrt(16), rolloutPolicy=randomPolicy)
+    # mcts_instance.search(initialState)
+    # node = mcts_instance.root
+    # actions = []
+    # while not node.isTerminal:
+    #     bestChild = mcts_instance.getBestChild(node, 1 / math.sqrt(16))
+    #     action =  mcts_instance.getAction(node, bestChild)
+    #     actions.append(action)
+    #     node = bestChild
+    # print(actions)
     # best_action = mcts_instance.getAction(mcts_instance.root, mcts_instance.getBestChild(mcts_instance.root, 0))
 
 
