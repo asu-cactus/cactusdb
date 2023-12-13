@@ -20,6 +20,7 @@
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/ml_functions/DecisionTree.h"
+#include "velox/ml_functions/DecisionForest.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
 
@@ -33,9 +34,9 @@ using namespace facebook::velox::core;
 
 // Utility function to generate random float/int values
 
-class DecisionTreeTest : public HiveConnectorTestBase {
+class DecisionForestTest : public HiveConnectorTestBase {
  public:
-  DecisionTreeTest() {
+  DecisionForestTest() {
     // Register Presto scalar functions.
     functions::prestosql::registerAllScalarFunctions();
 
@@ -56,13 +57,13 @@ class DecisionTreeTest : public HiveConnectorTestBase {
     // SetUp();
   }
 
-  ~DecisionTreeTest() {}
+  ~DecisionForestTest() {}
 
   void registerFunction();
 
   void run();
-  void test_predict_small();
-  void test_predict_large();
+  void test_tree_predict_small();
+  void test_forest_predict_small();
   void TestBody() override {}
 
   void SetUp() {
@@ -92,15 +93,21 @@ class DecisionTreeTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
 };
 
-void DecisionTreeTest::registerFunction() {
+void DecisionForestTest::registerFunction() {
 
   exec::registerVectorFunction(
       "decision_tree_predict",
       TreePrediction::signatures(),
       std::make_unique<TreePrediction>(0, "/home/ubuntu/model/fraud_xgboost_10_8_netsdb/0.txt", 28, false));
+
+
+  exec::registerVectorFunction(
+      "decision_forest_predict",
+      TreePrediction::signatures(),
+      std::make_unique<ForestPrediction>("/home/ubuntu/model/fraud_xgboost_10_8_netsdb", 28, true));
 }
 
-void DecisionTreeTest::test_predict_small() {
+void DecisionForestTest::test_tree_predict_small() {
 
   int num_rows = 10;
   int num_cols = 28;
@@ -133,7 +140,7 @@ void DecisionTreeTest::test_predict_small() {
   std::cout << results->toString(0, results->size()) << std::endl;
 }
 
-void DecisionTreeTest::test_predict_large() {
+void DecisionForestTest::test_forest_predict_small() {
 
   int num_rows = 10;
   int num_cols = 28;
@@ -155,23 +162,24 @@ void DecisionTreeTest::test_predict_large() {
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                   .values({inputRowVector})
-                  .project({"decision_tree_predict(x)"})
+                  .project({"decision_forest_predict(x)"})
                               .planNode();
 
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Time for Decision Tree Prediction with Small Data (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::cout << "Time for Decision Forest Prediction with Small Data (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
   std::cout << "Results:" << results->toString() << std::endl;
   std::cout << results->toString(0, results->size()) << std::endl;
 }
 
-void DecisionTreeTest::run() {
-   test_predict_small();
+void DecisionForestTest::run() {
+   //test_tree_predict_small();
+   test_forest_predict_small();
 }
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
-  DecisionTreeTest demo;
+  DecisionForestTest demo;
   demo.run();
 }
