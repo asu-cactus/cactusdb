@@ -734,10 +734,11 @@ private:
     std::shared_ptr<PlanBuilder> originPlanBuilder;
     int clientSocket;
     DataFrame data;
+    std::vector<int> dimensions; //TODO:get from planbuilder or querycontext directly
 
 public:
     // Constructor
-    Opt(std::shared_ptr<PlanBuilder> builder, int client, DataFrame data) : originPlanBuilder(builder), clientSocket(client), data(data) {}
+    Opt(std::shared_ptr<PlanBuilder> builder, int client, DataFrame data, int x, int y, int z) : originPlanBuilder(builder), clientSocket(client), data(data), dimensions({x, y, z}) {}
 
     // Member function that uses the PlanBuilder
     void start() {
@@ -746,13 +747,30 @@ public:
         send(clientSocket, start_str, std::strlen(start_str), 0);
     }
 
-    int costFunction() {
-      return 10; 
+    int costFunction(std::vector<std::string> actions) {
+        auto action = actions[0];// fix more actions, sum up cost
+        if (action == "Merge2Single" ){
+          if (dimensions[0] > 10000){
+            return 5;
+          }
+          else {
+            return 10;
+          }
+        }
+        if (action == "Mul2JoinAgg"){
+          if (dimensions[0] > 10000){
+            return 10;
+          }
+          else {
+            return 5;
+          }
+        }
+        return 0;
     }
 
     void rewriten_udf(std::string test_action){
       if (test_action == "Merge2Single"){
-        std::vector<int> dimensions;
+        // std::vector<int> dimensions;
         dimensions.push_back(597540);
         dimensions.push_back(1024);
         dimensions.push_back(14588);
@@ -848,7 +866,7 @@ public:
                 rewriten_udf(action);
               }
               // Call your cost function with the vector of action strings
-              int result = costFunction();
+              int result = costFunction(action_strings);
               std::cout << "cost = " << result << std::endl;
 
               // Send the result back to Python
@@ -1098,7 +1116,7 @@ void test_optimizer_mcts(int argc, char** argv){
   auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
   // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
   auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size);
-  Opt optimizer(udf_plan_builder.planBuilder, clientSocket, data);
+  Opt optimizer(udf_plan_builder.planBuilder, clientSocket, data, input_features_size, first_layer_output_size, second_layer_output_size);
   optimizer.start();
   optimizer.mcts_optimizer();
   // mcts_optimizer(*(udf_plan_builder.planBuilder), clientSocket);
