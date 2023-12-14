@@ -88,9 +88,9 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
-add_executable(decision_tree_prediction_test tests/DecisionTreeTest.cpp)
+add_executable(decision_forest_prediction_test tests/DecisionForestTest.cpp)
 target_link_libraries(
-  decision_tree_prediction_test
+  decision_forest_prediction_test
   velox_aggregates
   velox_type
   velox_vector
@@ -101,7 +101,6 @@ target_link_libraries(
   velox_memory
   velox_common_base
   velox_vector_fuzzer
-  openblas
   velox_dwio_parquet_reader
   ${TORCH_LIBRARIES}
 )

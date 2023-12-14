@@ -23,6 +23,7 @@
 #include "velox/ml_functions/DecisionForest.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
+#include "velox/ml_functions/VeloxDecisionTree.h"
 
 using namespace std;
 using namespace ml;
@@ -64,6 +65,7 @@ class DecisionForestTest : public HiveConnectorTestBase {
   void run();
   void test_tree_predict_small();
   void test_forest_predict_small();
+  void test_forest_predict_crossproduct_small();
   void TestBody() override {}
 
   void SetUp() {
@@ -100,6 +102,11 @@ void DecisionForestTest::registerFunction() {
       TreePrediction::signatures(),
       std::make_unique<TreePrediction>(0, "/home/ubuntu/model/fraud_xgboost_10_8_netsdb/0.txt", 28, false));
 
+
+  exec::registerVectorFunction(
+      "velox_decision_tree_predict",
+      VeloxTreePrediction::signatures(),
+      std::make_unique<VeloxTreePrediction>());
 
   exec::registerVectorFunction(
       "decision_forest_predict",
@@ -173,9 +180,89 @@ void DecisionForestTest::test_forest_predict_small() {
   std::cout << results->toString(0, results->size()) << std::endl;
 }
 
+
+void DecisionForestTest::test_forest_predict_crossproduct_small() {
+
+  int num_rows = 10;
+  int num_cols = 28;
+  int size = num_rows*num_cols;
+
+  std::vector<std::vector<float>> inputVectors;
+  for(int i=0; i < num_rows; i++){
+    std::vector<float> inputVector;
+    for(int j=0; j < num_cols; j++){
+      inputVector.push_back(-2.0);
+    }
+    inputVectors.push_back(inputVector);
+  }
+  auto inputArrayVector = maker.arrayVector<float>(inputVectors, REAL());
+
+  auto inputRowVector = maker.rowVector({"x"}, {inputArrayVector});
+
+  std::vector<TreePtr> treeVectors;
+
+  std::vector<std::string> pathVectors;
+
+  string forestFolderPath = "resources/model/fraud_xgboost_10_8";
+  
+  DIR * dir = opendir(forestFolderPath.c_str());
+  
+  if (!dir) {
+  
+      std::cout << "Please check whether folder exists in resources/model/fraud_xgboost_10_8 under the velox root directory.\n"
+	      << "Also, you need to execute the test from the velox root directory like the following:\n"
+	      << "cd velox\n"
+	      << "./_build/release/velox/ml_functions/decision_forest_prediction_test\n"
+	      << std::endl;
+  
+  }
+  
+  Forest::vectorizeForestFolder(forestFolderPath, pathVectors);
+
+  int index = 0;
+
+  for (std::string path : pathVectors) {
+  
+      ml::TreePtr tree = std::make_shared<ml::Tree>(index, path);
+    
+      treeVectors.push_back(tree);
+
+      index++;      
+  
+  }
+
+  auto treeVector = maker.flatVector<ml::TreePtr>(treeVectors);
+
+  auto treeRowVector = maker.rowVector({"tree"}, {treeVector});
+
+  //registerFunction();
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+
+  auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+	          .values({inputRowVector})
+		  .nestedLoopJoin(
+		      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                          .values({treeRowVector})
+                          .planNode(), {"t"})
+		  .project({"velox_decision_tree_predict(x, tree)"})
+                  .planNode();
+
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Decision Forest Prediction with Small Data (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::cout << "Results:" << results->toString() << std::endl;
+  std::cout << results->toString(0, results->size()) << std::endl;
+}
+
+
 void DecisionForestTest::run() {
+   
    //test_tree_predict_small();
-   test_forest_predict_small();
+   //test_forest_predict_small();
+   test_forest_predict_crossproduct_small();
+
 }
 
 int main(int argc, char** argv) {
