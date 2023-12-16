@@ -60,7 +60,7 @@ class DecisionForestTest : public HiveConnectorTestBase {
 
   ~DecisionForestTest() {}
 
-  void registerFunction();
+  void registerFunctions();
 
   void run();
   void test_tree_predict_small();
@@ -95,23 +95,53 @@ class DecisionForestTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
 };
 
-void DecisionForestTest::registerFunction() {
+void DecisionForestTest::registerFunctions() {
 
   exec::registerVectorFunction(
       "decision_tree_predict",
       TreePrediction::signatures(),
       std::make_unique<TreePrediction>(0, "/home/ubuntu/model/fraud_xgboost_10_8_netsdb/0.txt", 28, false));
 
+  registerCustomType(
+      "tree_type", std::make_unique<TreeTypeFactories>());
+
+  //registerCustomType(
+    //  "tree_type", std::make_unique<AlwaysFailingTypeFactories>());
+
+
+  registerCustomType(
+      "fancy_int", std::make_unique<FancyIntTypeFactories>());
+
 
   exec::registerVectorFunction(
       "velox_decision_tree_predict",
       VeloxTreePrediction::signatures(),
-      std::make_unique<VeloxTreePrediction>());
+      std::make_unique<VeloxTreePrediction>(28));
+
+  exec::registerVectorFunction(
+       "velox_decision_tree_construct",
+       VeloxTreeConstruction::signatures(),
+       std::make_unique<VeloxTreeConstruction>());
+
+  registerFunction<VeloxTreePredictionSimpleFunction, float, Array<float>, TheTree>(
+      {"velox_decision_tree_predict_simple"});
 
   exec::registerVectorFunction(
       "decision_forest_predict",
       TreePrediction::signatures(),
       std::make_unique<ForestPrediction>("/home/ubuntu/model/fraud_xgboost_10_8_netsdb", 28, true));
+
+/*
+  exec::registerVectorFunction(
+      "to_fancy_int",
+      ToFancyIntFunction::signatures(),
+      std::make_unique<ToFancyIntFunction>());
+  exec::registerVectorFunction(
+      "from_fancy_int",
+      FromFancyIntFunction::signatures(),
+      std::make_unique<FromFancyIntFunction>());
+*/
+      
 }
 
 void DecisionForestTest::test_tree_predict_small() {
@@ -132,7 +162,7 @@ void DecisionForestTest::test_tree_predict_small() {
 
   auto inputRowVector = maker.rowVector({"x"}, {inputArrayVector});
 
-  registerFunction();
+  registerFunctions();
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                   .values({inputRowVector})
@@ -165,7 +195,7 @@ void DecisionForestTest::test_forest_predict_small() {
 
   auto inputRowVector = maker.rowVector({"x"}, {inputArrayVector});
 
-  registerFunction();
+  registerFunctions();
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                   .values({inputRowVector})
@@ -187,6 +217,10 @@ void DecisionForestTest::test_forest_predict_crossproduct_small() {
   int num_cols = 28;
   int size = num_rows*num_cols;
 
+
+  registerFunctions();
+
+
   std::vector<std::vector<float>> inputVectors;
   for(int i=0; i < num_rows; i++){
     std::vector<float> inputVector;
@@ -198,8 +232,6 @@ void DecisionForestTest::test_forest_predict_crossproduct_small() {
   auto inputArrayVector = maker.arrayVector<float>(inputVectors, REAL());
 
   auto inputRowVector = maker.rowVector({"x"}, {inputArrayVector});
-
-  std::vector<TreePtr> treeVectors;
 
   std::vector<std::string> pathVectors;
 
@@ -218,42 +250,56 @@ void DecisionForestTest::test_forest_predict_crossproduct_small() {
   }
   
   Forest::vectorizeForestFolder(forestFolderPath, pathVectors);
-
-  int index = 0;
-
-  for (std::string path : pathVectors) {
   
-      ml::TreePtr tree = std::make_shared<ml::Tree>(index, path);
-    
-      treeVectors.push_back(tree);
+  auto data = makeFlatVector<StringView> (pathVectors.size());
 
-      index++;      
+  for (int i = 0; i < pathVectors.size(); i++) {
+  
+      data->set(i, StringView(pathVectors[i].c_str()));
   
   }
 
-  auto treeVector = maker.flatVector<ml::TreePtr>(treeVectors);
+  auto treeRowVector = maker.rowVector({"c0"}, {data});
+   
+  /*
+  auto data = makeFlatVector<int64_t>({1, 2, 3, 4, 5});
 
-  auto treeRowVector = maker.rowVector({"tree"}, {treeVector});
+  auto data1 = makeFlatVector<std::shared_ptr<FancyInt>>(5);
 
-  //registerFunction();
+  for (int i = 0; i < 5; i++) {
+  
+     data1->set(i, std::make_shared<FancyInt>(i));
 
+  }
+
+  auto inputRowVector1 = maker.rowVector({"c0"}, {data1});
+
+  auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .values({inputRowVector1})
+		  .project({"from_fancy_int(c0)"})
+		  .planNode();
+  */
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-
   auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
 	          .values({inputRowVector})
 		  .nestedLoopJoin(
 		      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                           .values({treeRowVector})
-                          .planNode(), {"t"})
-		  .project({"velox_decision_tree_predict(x, tree)"})
+			  .project({"velox_decision_tree_construct(c0)"})
+                          .planNode(), {"x", "p0"})
+		    .project({"velox_decision_tree_predict(x, p0)"})
+		    //.project({"velox_decision_tree_predict_simple(x, tree)"})
                   .planNode();
-
+  
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::cout << "Time for Decision Forest Prediction with Small Data (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
   std::cout << "Results:" << results->toString() << std::endl;
   std::cout << results->toString(0, results->size()) << std::endl;
+
+  unregisterCustomType("tree_type");
+  
 }
 
 

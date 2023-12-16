@@ -222,6 +222,24 @@ class Tree {
 	}
       }
 
+
+      inline float predictSingle(float* input, int curBase) {
+         int curIndex = 0;
+         std::cout << curBase << std::endl;
+         while (!tree[curIndex].isLeaf) {
+          const float featureValue = input[curBase + tree[curIndex].indexID];
+          std::cout << curIndex << "--" << tree[curIndex].indexID
+                  << "--" << featureValue << "--" << tree[curIndex].threshold << std::endl;
+          curIndex = featureValue < tree[curIndex].threshold
+                 ? tree[curIndex].leftChild
+                 : tree[curIndex].rightChild;
+         }
+         float result = (float)(tree[curIndex].leafValue);
+         std::cout << curIndex <<":" << result << std::endl;
+	 return result;
+      }
+
+
       inline void predict(VectorPtr& input, std::vector<float>& resultVector, int numInputs, int numFeatures) {
         //get the input features
 	auto inputFeatures = input->as<ArrayVector>()->elements();
