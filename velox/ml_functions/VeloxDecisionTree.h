@@ -203,24 +203,6 @@ public:
       );
     });
 
-    /*for (int i = 0; i < rows.size(); i++) {
-
-      float result = i;
-
-      //std::shared_ptr<void> my_tree = input2Values->valueAt(i);
-
-      //std::shared_ptr<Tree> tree = std::static_pointer_cast<Tree>(input2Values->valueAt(i));
-
-      //tree->predictSingle(input1Values, i * numFeatures, result);
-
-      results.push_back(result);
-
-    }
-
-    VectorMaker maker{context.pool()};
-
-    output = maker.flatVector<float>(results, REAL());
-    */
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -251,104 +233,5 @@ struct VeloxTreePredictionSimpleFunction {
           result = 0.0;
       }
 };
-
-class FancyInt {
-
-	public:
-	      
-		const int64_t n;
-
-  explicit FancyInt(int64_t _n) : n{_n} {}
-};
-
-
-class FancyIntType : public OpaqueType {
-  FancyIntType() : OpaqueType(std::type_index(typeid(FancyInt))) {}
-
- public:
-  static const std::shared_ptr<const FancyIntType>& get() {
-    static const std::shared_ptr<const FancyIntType> instance{
-        new FancyIntType()};
-
-    return instance;
-  }
-
-  std::string toString() const override {
-    return name();
-  }
-
-  const char* name() const override {
-    return "fancy_int";
-  }
-};
-
-class FancyIntTypeFactories : public CustomTypeFactories {
- public:
-  TypePtr getType() const override {
-    return FancyIntType::get();
-  }
-
-  exec::CastOperatorPtr getCastOperator() const override {
-    VELOX_UNSUPPORTED();
-  }
-};
-
-
-class ToFancyIntFunction : public exec::VectorFunction {
- public:
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& outputType,
-      exec::EvalCtx& context,
-      VectorPtr& result) const override {
-    auto flatInput = args[0]->as<SimpleVector<int64_t>>();
-
-    BaseVector::ensureWritable(rows, outputType, context.pool(), result);
-    auto flatResult = result->asFlatVector<std::shared_ptr<void>>();
-
-    rows.applyToSelected([&](auto row) {
-      flatResult->set(row, std::make_shared<FancyInt>(flatInput->valueAt(row)));
-    });
-  }
-
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    // bigint -> fancy_int
-    return {exec::FunctionSignatureBuilder()
-                .returnType("fancy_int")
-                .argumentType("bigint")
-                .build()};
-  }
-};
-
-class FromFancyIntFunction : public exec::VectorFunction {
- public:
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& /* outputType */,
-      exec::EvalCtx& context,
-      VectorPtr& result) const override {
-    auto flatInput = args[0]->as<SimpleVector<std::shared_ptr<void>>>();
-
-    BaseVector::ensureWritable(rows, BIGINT(), context.pool(), result);
-    auto flatResult = result->asFlatVector<int64_t>();
-
-    rows.applyToSelected([&](auto row) {
-      flatResult->set(
-          row, std::static_pointer_cast<FancyInt>(flatInput->valueAt(row))->n);
-    });
-  }
-
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    // fancy_int -> bigint
-    return {exec::FunctionSignatureBuilder()
-                .returnType("bigint")
-                .argumentType("fancy_int")
-                .build()};
-  }
-};
-
-
 
 }
