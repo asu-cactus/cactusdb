@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <folly/init/Init.h>
 #include <torch/torch.h>
 #include <random>
@@ -13,7 +28,7 @@
 #include "velox/common/file/FileSystems.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/parquet/RegisterParquetReader.h"
-// #include "velox/dwio/parquet/RegisterParquetWriter.h"
+#include "velox/dwio/parquet/RegisterParquetWriter.h"
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
 #include "velox/connectors/hive/HiveConfig.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
@@ -33,7 +48,6 @@ using namespace facebook::velox::exec;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::core;
 
-// Utility function to generate random float/int values
 
 class DecisionForestTest : public HiveConnectorTestBase {
  public:
@@ -66,15 +80,15 @@ class DecisionForestTest : public HiveConnectorTestBase {
   void test_tree_predict_small();
   void test_forest_predict_small();
   void test_forest_predict_crossproduct_small();
-  void TestBody() override {}
+  void testBody() override {}
 
-  void SetUp() {
+  void setUp() {
     // TODO: not used for now
     // HiveConnectorTestBase::SetUp();
     // parquet::registerParquetReaderFactory();
   }
 
-  void TearDown() {
+  void tearDown() {
     HiveConnectorTestBase::TearDown();
   }
 
@@ -97,10 +111,11 @@ class DecisionForestTest : public HiveConnectorTestBase {
 
 void DecisionForestTest::registerFunctions() {
 
+
   exec::registerVectorFunction(
       "decision_tree_predict",
       TreePrediction::signatures(),
-      std::make_unique<TreePrediction>(0, "/home/ubuntu/model/fraud_xgboost_10_8_netsdb/0.txt", 28, false));
+      std::make_unique<TreePrediction>(0, "resources/model/fraud_xgboost_10_8/0.txt", 28, false));
 
   registerCustomType(
       "tree_type", std::make_unique<TreeTypeFactories>());
@@ -121,11 +136,11 @@ void DecisionForestTest::registerFunctions() {
   exec::registerVectorFunction(
       "decision_forest_predict",
       TreePrediction::signatures(),
-      std::make_unique<ForestPrediction>("/home/ubuntu/model/fraud_xgboost_10_8_netsdb", 28, true));
+      std::make_unique<ForestPrediction>("resources/model/fraud_xgboost_10_8", 28, true));
 
 }
 
-void DecisionForestTest::test_tree_predict_small() {
+void DecisionForestTest::testingTreePredictSmall() {
 
   int num_rows = 10;
   int num_cols = 28;
@@ -158,7 +173,7 @@ void DecisionForestTest::test_tree_predict_small() {
   std::cout << results->toString(0, results->size()) << std::endl;
 }
 
-void DecisionForestTest::test_forest_predict_small() {
+void DecisionForestTest::testingForestPredictSmall() {
 
   int num_rows = 10;
   int num_cols = 28;
@@ -192,7 +207,7 @@ void DecisionForestTest::test_forest_predict_small() {
 }
 
 
-void DecisionForestTest::test_forest_predict_crossproduct_small() {
+void DecisionForestTest::testingForestPredictCrossproductSmall() {
 
   int num_rows = 10;
   int num_cols = 28;
@@ -209,7 +224,7 @@ void DecisionForestTest::test_forest_predict_crossproduct_small() {
 
      for(int j=0; j < num_cols; j++){
 
-         inputVector.push_back(-2.0);
+         inputVector.push_back((float)(i*j)/100.0);
 
      }
 
@@ -234,18 +249,6 @@ void DecisionForestTest::test_forest_predict_crossproduct_small() {
   std::vector<std::string> pathVectors;
 
   string forestFolderPath = "resources/model/fraud_xgboost_10_8";
-  
-  DIR * dir = opendir(forestFolderPath.c_str());
-  
-  if (!dir) {
-  
-      std::cout << "Please check whether folder exists in resources/model/fraud_xgboost_10_8 under the velox root directory.\n"
-	      << "Also, you need to execute the test from the velox root directory like the following:\n"
-	      << "cd velox\n"
-	      << "./_build/release/velox/ml_functions/decision_forest_prediction_test\n"
-	      << std::endl;
-  
-  }
   
   Forest::vectorizeForestFolder(forestFolderPath, pathVectors);
 
@@ -300,11 +303,27 @@ void DecisionForestTest::test_forest_predict_crossproduct_small() {
 
 
 void DecisionForestTest::run() {
-   
-   //test_tree_predict_small();
-   //test_forest_predict_small();
-   test_forest_predict_crossproduct_small();
 
+  string forestFolderPath = "resources/model/fraud_xgboost_10_8";
+
+  DIR * dir = opendir(forestFolderPath.c_str());
+
+  if (!dir) {
+
+      std::cout << "Please check whether folder exists in resources/model/fraud_xgboost_10_8 under the velox root directory.\n"
+              << "Also, you need to execute the test from the velox root directory like the following:\n"
+              << "cd velox\n"
+              << "./_build/release/velox/ml_functions/decision_forest_prediction_test\n"
+              << std::endl;
+      
+      exit(1);
+
+  }
+  closedir(dir);
+   
+  testingTreePredictSmall();
+  testingForestPredictSmall();
+  testingForestPredictCrossproductSmall();
 }
 
 int main(int argc, char** argv) {

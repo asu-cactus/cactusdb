@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
 #include <fcntl.h>
 #include <unistd.h>
@@ -225,17 +240,13 @@ class Tree {
 
       inline float predictSingle(float* input, int curBase) {
          int curIndex = 0;
-         std::cout << curBase << std::endl;
          while (!tree[curIndex].isLeaf) {
           const float featureValue = input[curBase + tree[curIndex].indexID];
-          std::cout << curIndex << "--" << tree[curIndex].indexID
-                  << "--" << featureValue << "--" << tree[curIndex].threshold << std::endl;
           curIndex = featureValue < tree[curIndex].threshold
                  ? tree[curIndex].leftChild
                  : tree[curIndex].rightChild;
          }
          float result = (float)(tree[curIndex].leafValue);
-         std::cout << curIndex <<":" << result << std::endl;
 	 return result;
       }
 
@@ -249,17 +260,13 @@ class Tree {
         for (int rowIndex = 0; rowIndex < numInputs; rowIndex++) {
 	 int curIndex = 0;
 	 int curBase = rowIndex * numFeatures;
-	 std::cout << curBase << std::endl;
          while (!tree[curIndex].isLeaf) {
 	  const float featureValue = inputValues[curBase + tree[curIndex].indexID];
-	  std::cout << curIndex << "--" << tree[curIndex].indexID
-		  << "--" << featureValue << "--" << tree[curIndex].threshold << std::endl;
 	  curIndex = featureValue < tree[curIndex].threshold
 		 ? tree[curIndex].leftChild
 		 : tree[curIndex].rightChild; 
 	 }
          outData[rowIndex] = (float)(tree[curIndex].leafValue);
-	 std::cout << rowIndex << ":" << curIndex <<":" <<(float)(tree[curIndex].leafValue) << std::endl;
 	}
       }
 
@@ -287,7 +294,6 @@ class Tree {
 	  }
          }
          outData[rowIndex] = (float)(tree[curIndex].leafValue);
-	 std::cout << rowIndex << ":" << (float)(tree[curIndex].leafValue) << std::endl;
         }
       }
 

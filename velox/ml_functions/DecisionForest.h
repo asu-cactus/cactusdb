@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
 #include <fcntl.h>
 #include <unistd.h>
@@ -54,7 +69,6 @@ public:
 
         }
 
-        std::cout << pathToFolder << std::endl;
 
         DIR *dr = opendir(pathToFolder.c_str());
 
@@ -62,13 +76,9 @@ public:
 
         while ((file = readdir(dr)) != NULL) {
 
-            std::cout << file->d_name << std::endl;
-
             if ((strcmp(file->d_name, ".") != 0)&&(strcmp(file->d_name, ".."))) {
 
                 std::string path = pathToFolder + std::string(file->d_name);
-
-		std::cout << path << std::endl;
 
                 pathVector.push_back(path);
 
@@ -94,8 +104,6 @@ public:
 
         for (int n = 0; n < numTrees; ++n) {
 
-            std::cout << treesPathIn[n] << std::endl;
-
             Tree::constructTreeFromPath(treesPathIn[n], &(forest[n][0]));
         }
 
@@ -118,7 +126,6 @@ public:
 
 	 float accumulatedResult = 0.0;
          
-	 std::cout << curBase << std::endl;
 	 
 	 for (int treeIndex = 0; treeIndex < numTrees; treeIndex++) {
          
@@ -130,7 +137,6 @@ public:
 
                     const float featureValue = inputValues[curBase + tree[curIndex].indexID];
 
-                    std::cout << curIndex << "--" << tree[curIndex].indexID << "--" << featureValue << "--" << tree[curIndex].threshold << std::endl;
 
                     curIndex = featureValue < tree[curIndex].threshold ? tree[curIndex].leftChild : tree[curIndex].rightChild;
 
@@ -150,7 +156,6 @@ public:
 
          outData[rowIndex] = accumulatedResult; 
 
-         std::cout << rowIndex << ":" <<(float)(accumulatedResult) << std::endl;
 
 	 }
 
