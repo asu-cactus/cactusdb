@@ -1,5 +1,7 @@
 import time
 import numpy as np
+import psycopg2
+import pandas as pd
 import os
 
 
@@ -10,6 +12,40 @@ def mkdir(dir_path):
 
 def get_postgres_connection_config():
     return "postgresql://postgresdb:postgresdb@localhost:5432/postgresdb"
+
+
+def fetch_data_from_postgres_via_sql(command):
+    # Database connection parameters
+    db_params = {
+        "dbname": "postgresdb",
+        "user": "postgresdb",
+        "password": "postgresdb",
+        "host": "localhost",
+        "port": "5432",
+    }
+
+    try:
+        # Establish a connection to the PostgreSQL database
+        connection = psycopg2.connect(**db_params)
+
+        # Create a cursor object
+        cursor = connection.cursor()
+
+        # Execute the drop view command
+        cursor.execute(command)
+
+        result_data = cursor.fetchall()
+        column_names = [desc[0] for desc in cursor.description]
+        df = pd.DataFrame(result_data, columns=column_names)
+        # Commit the transaction
+
+        # Close the cursor and connection
+        cursor.close()
+        connection.close()
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"Error: {error}")
+    return df
 
 
 def convert_df_int64_to_int32(df):
