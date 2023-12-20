@@ -15,13 +15,14 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 
-from preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat, create_embedding_matrix, \
+from .preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat, create_embedding_matrix, \
     get_varlen_pooling_list, build_input_features
-from layers.core import PredictionLayer
-from preprocessing.utils import slice_arrays
+from .layers.core import PredictionLayer
+from .preprocessing.utils import slice_arrays
 from tensorflow.python.keras.callbacks import CallbackList
-from preprocessing.callbacks import History
-from preprocessing.utils import contrast_loss
+from .preprocessing.callbacks import History
+from .preprocessing.utils import contrast_loss
+from torch.utils.tensorboard import SummaryWriter
 
 
 class BaseTower(nn.Module):

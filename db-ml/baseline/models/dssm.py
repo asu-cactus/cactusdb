@@ -3,17 +3,17 @@ CREDIT: the following code implementation is original from the following link:
 https://github.com/archersama/IntTower/tree/main
 """
 
-from model.base_tower import BaseTower
-from preprocessing.inputs import combined_dnn_input, compute_input_dim
-from layers.core import DNN
+from .base_tower import BaseTower
+from .preprocessing.inputs import combined_dnn_input, compute_input_dim
+from .layers.core import DNN
 import torch
-from preprocessing.utils import Cosine_Similarity
-from preprocessing.utils import col_score
-from preprocessing.utils import col_score_2
-from preprocessing.utils import single_score
-from preprocessing.utils import Timer
-from layers.interaction import SENETLayer
-from layers.interaction import LightSE
+from .preprocessing.utils import Cosine_Similarity
+from .preprocessing.utils import col_score
+from .preprocessing.utils import col_score_2
+from .preprocessing.utils import single_score
+from .preprocessing.utils import Timer
+from .layers.interaction import SENETLayer
+from .layers.interaction import LightSE
 
 class DSSM(BaseTower):
     """DSSM Two Tower Model"""

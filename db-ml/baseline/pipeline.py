@@ -4,15 +4,25 @@ import numpy as np
 import connectorx as cx
 from tqdm.auto import tqdm
 from abc import ABC, abstractmethod
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from models.preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
+from models.dssm import DSSM
 
 
 class Pipeline(object):
     """A convenient class to measure the running time of a program"""
 
-    def __init__(self, name, num_loop=10):
+    def __init__(self, name, num_sample=500, num_loop=10):
         self.name = name
         self.num_loop = num_loop
+        self.num_sample = num_sample
+        self.meta = dict()
         pass
+
+    @abstractmethod
+    def loading_meta_impl(self):
+        raise NotImplementedError("Not implemented")
 
     @abstractmethod
     def data_loading_impl(self):
@@ -31,6 +41,8 @@ class Pipeline(object):
         raise NotImplementedError("Not implemented")
 
     def run_pipeline(self):
+        self.loading_meta_impl()
+
         timer_end_end = utils.Timer()
         timer_data_loading = utils.Timer()
         timer_data_processing = utils.Timer()
@@ -63,34 +75,195 @@ class Pipeline(object):
         result_df = pd.DataFrame(
             {
                 "config_name": self.name,
+                "num_sample": self.num_sample,
                 "t_data_load": t_data_loading,
                 "t_data_process": t_data_processing,
                 "t_model": t_model_inference,
                 "t_end_end": t_end_end,
-            }, index=[0]
+            },
+            index=[0],
         )
         return result_df
 
 
+sql_movielens_integrated_result = """
+WITH t_changed_rating AS (
+SELECT *,
+       CASE
+           WHEN rating > 3 THEN 1
+           ELSE 0
+       END AS changed_rating
+FROM movielens_rating
+),
+t_user_rating AS (
+SELECT mu.user_id, gender, age, occupation, avg(tcr.changed_rating) AS user_mean_rating
+FROM movielens_user mu, t_changed_rating tcr
+WHERE mu.user_id = tcr.user_id
+GROUP BY mu.user_id, gender, age, occupation
+),
+t_movie_rating AS (
+SELECT mm.movie_id, genres, avg(tcr.changed_rating) AS movie_mean_rating
+FROM movielens_movie mm , t_changed_rating tcr
+WHERE mm.movie_id = tcr.movie_id
+GROUP BY mm.movie_id, genres
+)
+select user_id, gender, age, occupation, user_mean_rating, movie_id, genres, movie_mean_rating
+from movielens_q_temp mqt, t_user_rating tur, t_movie_rating tmr
+where mqt.q_user_id = tur.user_id AND mqt.q_movie_id = tmr.movie_id;
+"""
+
+
+def get_var_feature(data, col):
+    key2index = {}
+
+    def split(x):
+        key_ans = x.split("|")
+        for key in key_ans:
+            if key not in key2index:
+                # Notice : input value 0 is a special "padding",\
+                # so we do not use 0 to encode valid feature for sequence input
+                key2index[key] = len(key2index) + 1
+        return list(map(lambda x: key2index[x], key_ans))
+
+    var_feature = list(map(split, data[col].values))
+    var_feature_length = np.array(list(map(len, var_feature)))
+    max_len = max(var_feature_length)
+    var_feature = pad_sequences(
+        var_feature,
+        maxlen=max_len,
+        padding="post",
+    )
+    return key2index, var_feature, max_len
+
+def get_test_var_feature(data, col, key2index, max_len):
+    # print("user_hist_list: \n")
+
+    def split(x):
+        key_ans = x.split('|')
+        for key in key_ans:
+            if key not in key2index:
+                # Notice : input value 0 is a special "padding",
+                # so we do not use 0 to encode valid feature for sequence input
+                key2index[key] = len(key2index) + 1
+        return list(map(lambda x: key2index[x], key_ans))
+
+    test_hist = list(map(split, data[col].values))
+    test_hist = pad_sequences(test_hist, maxlen=max_len, padding='post')
+    return test_hist
+
 class TwoTowerModelPipeline(Pipeline):
-    def __init__(self, num_loop=10):
-        super(TwoTowerModelPipeline, self).__init__("two-tower-model", num_loop)
+    def __init__(self, num_sample=500, num_loop=10):
+        super(TwoTowerModelPipeline, self).__init__("two-tower-model", num_loop, num_sample)
         # self.model = None  # TODO
         # self.model.eval()
+        # self.num_sample = num_sample
         self.postgres_conn = utils.get_postgres_connection_config()
 
+    def loading_meta_impl(self):
+        embedding_dim = 32
+        epoch = 15
+        batch_size = 2048
+        lr = 0.001
+        seed = 1023
+        dropout = 0.3
+
+        ori_data = pd.read_csv('data/movielens_processed.csv')
+
+        sparse_features = ["user_id", "movie_id", "gender", "age", "occupation"]
+        dense_features = ["user_mean_rating", "movie_mean_rating"]
+        target = ["rating"]
+        device = "cpu"
+        user_sparse_features, user_dense_features = [
+            "user_id",
+            "gender",
+            "age",
+            "occupation",
+        ], ["user_mean_rating"]
+        item_sparse_features, item_dense_features = [
+            "movie_id",
+        ], ["movie_mean_rating"]
+        dict_encoder = dict()
+        for feat in sparse_features:
+            lbe = LabelEncoder()
+            lbe.fit(ori_data[feat])
+            dict_encoder[feat] = lbe
+
+        genres_key2index, train_genres_list, genres_maxlen = get_var_feature(
+            ori_data, "genres"
+        )
+
+        user_feature_columns = [
+            SparseFeat(feat, ori_data[feat].nunique(), embedding_dim=embedding_dim)
+            for i, feat in enumerate(user_sparse_features)
+        ] + [
+            DenseFeat(
+                feat,
+                1,
+            )
+            for feat in user_dense_features
+        ]
+        item_feature_columns = [
+            SparseFeat(feat, ori_data[feat].nunique(), embedding_dim=embedding_dim)
+            for i, feat in enumerate(item_sparse_features)
+        ] + [
+            DenseFeat(
+                feat,
+                1,
+            )
+            for feat in item_dense_features
+        ]
+        model = DSSM(
+            user_feature_columns, item_feature_columns, task="binary", device=device
+        )
+        model.compile(
+            "adam", "binary_crossentropy", metrics=["auc", "accuracy", "logloss"], lr=lr
+        )
+        self.model = model
+        self.meta['model'] = model
+        self.meta['sparse_features'] = sparse_features
+        self.meta['dense_features'] = dense_features
+        self.meta['dict_encoder'] = dict_encoder
+        self.meta['genres_key2index'] = genres_key2index
+        self.meta['genres_maxlen'] = genres_maxlen
+
+
+
     def data_loading_impl(self):
-        # TODO
-        # data = cx.read_sql(self.postgres_conn, "")
-        data = None
+        sampledUserId = np.random.randint(1, 6041, self.num_sample)
+        sampledMovieId = np.random.randint(1, 3707, self.num_sample)
+        query_df = pd.DataFrame(
+            {"q_user_id": sampledUserId, "q_movie_id": sampledMovieId}
+        )
+        query_df.to_sql(
+            "movielens_q_temp", self.postgres_conn, index=False, if_exists="replace"
+        )
+        data = utils.fetch_data_from_postgres_via_sql(sql_movielens_integrated_result)
         return data
 
     def data_processing_impl(self, data):
-        # TODO
+        sparse_features = self.meta['sparse_features']
+        dense_features = self.meta['dense_features']
+        dict_encoder = self.meta['dict_encoder']
+        genres_key2index = self.meta['genres_key2index']
+        genres_maxlen = self.meta['genres_maxlen']
+        
+        data["user_mean_rating"] = data["user_mean_rating"].astype(np.float64)
+        data["movie_mean_rating"] = data["movie_mean_rating"].astype(np.float64)
+
+        for feat in sparse_features:
+            lbe = dict_encoder[feat]
+            data[feat] = lbe.transform(data[feat])
+
+        test_genres_list = get_test_var_feature(
+            data, "genres", genres_key2index, genres_maxlen
+        )
+        test_model_input = {
+            name: data[name] for name in sparse_features + dense_features
+        }
+        test_model_input["genres"] = test_genres_list
         # data['COL1'] = label_encoder.transform(data['COL1'])
-        return data
+        return test_model_input
 
     def model_inference_impl(self, data):
-        # TODO
-        # result = self.model(data)
-        return data
+        y_preds = self.model.predict(data)
+        return y_preds
