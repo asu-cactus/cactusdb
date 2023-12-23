@@ -761,6 +761,7 @@ public:
         return 0;
     }
 
+
     void rewriten_udf(std::string test_action){
       if (test_action == "Merge2Single"){
         core::QueryConfig config({});
@@ -946,6 +947,7 @@ public:
       close(clientSocket);
     }
 };
+
 
 
 
