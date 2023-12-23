@@ -960,7 +960,11 @@ class PlanBuilder {
 
   void replacePlan(core::PlanNodePtr newPlan){
     planNode_ = newPlan;
-}
+  }
+
+  void reSetPlan(){
+    planNode_ = nullptr;
+  }
 
   /// Add a user-defined PlanNode as the root of the plan. 'func' takes
   /// the current root of the plan and returns the new root.
