@@ -89,6 +89,23 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(decision_forest_prediction_test tests/DecisionForestTest.cpp)
+target_link_libraries(
+  decision_forest_prediction_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
 # TODO: add or remove this unit test
 # add_executable(parquest_loader tests/TestParquetLoader.cpp)
 # target_link_libraries(

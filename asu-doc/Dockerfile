@@ -2,7 +2,13 @@ FROM amd64/ubuntu:22.04
 WORKDIR /home
 ENV HOME=/home
 
-RUN apt-get update -y
+RUN apt-get update \
+    && apt-get install -y locales \
+    && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US:en
+ENV LC_ALL en_US.UTF-8
+ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get install -y libopenblas-dev unzip 
 RUN apt-get install -y ninja-build
 RUN apt-get install -y libboost-all-dev
@@ -28,13 +34,27 @@ RUN apt-get install -y libeigen3-dev
 RUN apt-get install -y libprotobuf-dev protobuf-compiler
 RUN apt-get install -y python3-pip
 RUN apt-get install -y tmux
+RUN apt-get install -y sudo
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf
+RUN ln -s /usr/bin/python3 /usr/bin/python
 
 
 # set-up eigen
 WORKDIR /usr/include
 RUN ln -sf eigen3/Eigen Eigen
 RUN ln -sf eigen3/unsupported unsupported
+
+# configure postgres
+RUN apt-get install -qq postgresql-14
+ENV POSTGRES_USER postgresdb
+ENV POSTGRES_PASSWORD postgresdb
+ENV POSTGRES_DB postgresdb
+RUN service postgresql start \
+    && sudo -u postgres psql -c "CREATE USER $POSTGRES_USER WITH SUPERUSER PASSWORD '$POSTGRES_PASSWORD';" \
+    && sudo -u postgres createdb -O $POSTGRES_USER $POSTGRES_DB
+COPY pg_hba.conf /etc/postgresql/$PG_MAJOR/main/pg_hba.conf
+RUN echo "service postgresql start" >> /etc/bash.bashrc
+
 
 WORKDIR /home
 RUN wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.0.1%2Bcpu.zip
