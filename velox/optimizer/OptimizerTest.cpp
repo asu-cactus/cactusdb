@@ -28,6 +28,11 @@
 #include "velox/common/file/FileSystems.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
 
+#include <cstring>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <json/json.h>
+
 // #define EIGEN_USE_BLAS
 
 using namespace facebook::velox;
@@ -714,126 +719,239 @@ void test_optimizer_demo(int argc, char** argv){
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     std::cout << "Time for Test (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
   }
-  // auto udf_plan_torch_builder = build_plan_udf_torch(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
-  // auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
-  // exec_plan_udf(udf_plan_builder, memory_limit_udf, data.features, splits_num_udf, threads_num_udf);
-  // auto relational_plan = optiming_plan(*(udf_plan_builder.planBuilder), data, num_samples, input_features_size, first_layer_output_size, second_layer_output_size);
-
-  // exec_plan_relational(relational_plan.planBuilderExec, memory_limit_rela, relational_plan.inputsPaths, relational_plan.weightPaths, threads_num_rela);
-
-    
 }
 
-std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, DataFrame data, int features, int first_layer, int second_layer, std::string test_action){
-  if (test_action == "Merge2Single"){
-    // std::vector<int> dimensions;
-    // dimensions.push_back(features);
-    // dimensions.push_back(first_layer);
-    // dimensions.push_back(second_layer);
+class Opt {
+private:
+    std::shared_ptr<PlanBuilder> originPlanBuilder;
+    PlanBuilder possiblePlanBuilder;
+    int clientSocket;
+    DataFrame data;
+     //TODO:get from planbuilder or querycontext directly
 
-    // float* weights[2] = {data.weights[0], data.weights[1]};
-    // float* bias[2] = {data.bias[0], data.bias[1]};
+public:
+    // Constructor
+    Opt(std::shared_ptr<PlanBuilder> builder, int client, DataFrame data) : originPlanBuilder(builder), possiblePlanBuilder(), clientSocket(client), data(data) {}
 
-    // exec::registerVectorFunction(
-    //   "torchDNN",
-    //   TorchDNN::signatures(),
-    //   std::make_unique<TorchDNN>(weights, bias, dimensions)
-    // );
+    // Member function that uses the PlanBuilder
+    void start() {
+        std::cout << "Executing optimization." << std::endl;
+        const char* start_str = "start";
+        send(clientSocket, start_str, std::strlen(start_str), 0);
+    }
 
-    // core::PlanNodeId p = "0";
-    // auto oldplan = udf_plan_builder.planNode()->sources()[0];
-    // udf_plan_builder.replacePlan(oldplan);
-    // udf_plan_builder.project({"torchDNN(v)"});
-    // udf_plan_builder.editExprStrings(p, {"torchDNN(v)"});
-    // auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    // auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
-    //               .tableScan(asRowType(inputRowVector->type()))
-    //               .capturePlanNodeId(p0)
-    //               .project({"torchDNN(v)"})
-    //               .planBuild();
-    // std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
-    // auto second = AssertQueryBuilder(udf_plan_builder.planNode()).copyResults(pool_.get());
-    // std::cout << "after Results:" << second->toString() << std::endl;
-    core::PlanNodeId p = "0";
-    std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(udf_plan_builder);
-    std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p});
-    PlanBuilderExec planBuilderExec(planBuilderShared, {p});
-    exec_plan_udf(planBuilderExec, 1000, data.features, 4, 4);
-    return planBuilderExecShared;
-  }
-  else if (test_action == "Mul2JoinAgg"){
-    // Here we directly start from null plan, 
-    // Todo: connect with other before plan(related with sources)
-  //   int samples = 1000;
-  //   exec::registerVectorFunction(
-  //   "mat_mul_b",
-  //   MatrixMultiply_b::signatures(),
-  //   std::make_unique<MatrixMultiply_b>(row, col, samples, weight)
-  // );
+    int costFunction(std::vector<std::string> actions) {
+        auto action = actions[0];// fix more actions, sum up cost
+        if (action == "Merge2Single" ){
+          if (data.features[0].size() > 10000){
+            return 5;
+          }
+          else {
+            return 10;
+          }
+        }
+        if (action == "Mul2JoinAgg"){
+          if (data.features[0].size() > 10000){
+            return 10;
+          }
+          else {
+            return 5;
+          }
+        }
+        return 0;
+    }
 
-  // std::string searchString = "mat_mul0(ROW[\"v\"])"
-  // std::string replaceString = "result";
 
-  // auto plan = planBuilder.planNode();
-  // auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
-  // auto str = std::vector<std::string>{};
-  // str.push_back(projectNode->projections()[0]->toString());
+    void rewriten_udf(std::string test_action){
+      if (test_action == "Merge2Single"){
+        core::QueryConfig config({});
+        auto mat_mul0 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul0", {ARRAY(REAL())}, {}, config));
+        auto mat_mul3 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul3", {ARRAY(REAL())}, {}, config));
+        // std::vector<int> dimensions;
+        auto dims0 = mat_mul0->getDims();
+        auto dims3 = mat_mul3->getDims();
+        std::vector<int> dimensions;
+        dimensions.push_back(dims0[0]);
+        dimensions.push_back(dims0[1]);
+        dimensions.push_back(dims3[1]);
 
-  // std::size_t found = str[0].find(searchString);
-  // while (found != std::string::npos) {
-  //     str[0].replace(found, searchString.length(), replaceString);
-  //     found = str[0].find(searchString, found + replaceString.length());
-  // }
-  
-  // auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  // core::PlanNodeId p2;
-  // core::PlanNodeId p3;
+        float* weights[2] = {data.weights[0], data.weights[1]};
+        float* bias[2] = {data.bias[0], data.bias[1]};
 
-  // auto inputs = ROW({
-  //       {"v", ARRAY(REAL())},
-  //       {"v_row", BIGINT()},
-  //       {"v_col", BIGINT()},
-  //   });
+        exec::registerVectorFunction(
+          "torchDNN",
+          TorchDNN::signatures(),
+          std::make_unique<TorchDNN>(weights, bias, dimensions)
+        );
 
-  // auto weights = ROW({
-  //       {"w", ARRAY(REAL())},
-  //       {"w_row", BIGINT()},
-  //       {"w_col", BIGINT()},
-  //   });
+        auto oldplan = originPlanBuilder->planNode()->sources()[0];
+        possiblePlanBuilder.replacePlan(oldplan);
+        possiblePlanBuilder.project({"torchDNN(v)"});
+        // originPlanBuilder->replacePlan(oldplan);
+        // originPlanBuilder->project({"torchDNN(v)"});
+      }
+      else if (test_action == "Mul2JoinAgg"){
+        core::QueryConfig config({});
+        auto mat_mul0 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul0", {ARRAY(REAL())}, {}, config));
+        auto mat_mul3 = std::dynamic_pointer_cast<MatrixMultiply>(exec::getVectorFunction("mat_mul3", {ARRAY(REAL())}, {}, config));
+        int blocks = 4;
+        auto dims0 = mat_mul0->getDims();
+        exec::registerVectorFunction(
+        "mat_mul_b",
+        MatrixMultiply_b::signatures(),
+        std::make_unique<MatrixMultiply_b>(dims0[0]/blocks, dims0[1], data.features.size(), data.weights[0])
+      );
 
-  // auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
-  //                 .tableScan(inputs)
-  //                 .capturePlanNodeId(p2)
-  //                 .hashJoin(
-  //                     {"v_col"},
-  //                     {"w_row"},
-  //                   exec::test::PlanBuilder(planNodeIdGenerator)
-  //                  .tableScan(weights)
-  //                  .capturePlanNodeId(p3)
-  //                  .planNode(),
-  //                   "", // extra filter
-  //                   {"v_row", "w_col", "v", "w"})
-  //                 .project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
-  //                 .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
-  //                 .project({str[0]})
-  //                 .planBuild();
+      std::string searchString = "mat_mul0(ROW[\"v\"])";
+      std::string replaceString = "result";
 
-    // std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(planBuilder);
-    // std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p2, p3});
-    core::PlanNodeId p = "0";
-    std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(udf_plan_builder);
-    std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p});
+      auto plan = originPlanBuilder->planNode();
+      auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
+      auto str = std::vector<std::string>{};
+      str.push_back(projectNode->projections()[0]->toString());
 
-    PlanBuilderExec planBuilderExec(planBuilderShared, {p});
-    return planBuilderExecShared;
-  }
-  else {
-    core::PlanNodeId p = "0";
-    std::shared_ptr<PlanBuilder> planBuilderShared = std::make_shared<PlanBuilder>(udf_plan_builder);
-    std::shared_ptr<PlanBuilderExec> planBuilderExecShared = std::make_shared<PlanBuilderExec>(planBuilderShared, std::vector<core::PlanNodeId>{p});
-    return planBuilderExecShared;
-  }
-}
+      std::size_t found = str[0].find(searchString);
+      while (found != std::string::npos) {
+          str[0].replace(found, searchString.length(), replaceString);
+          found = str[0].find(searchString, found + replaceString.length());
+      }
+      
+      auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+      core::PlanNodeId p1;
+      core::PlanNodeId p2;
+
+      auto inputs = ROW({
+            {"v", ARRAY(REAL())},
+            {"v_row", BIGINT()},
+            {"v_col", BIGINT()},
+        });
+
+      auto weights = ROW({
+            {"w", ARRAY(REAL())},
+            {"w_row", BIGINT()},
+            {"w_col", BIGINT()},
+        });
+
+      auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
+                      .tableScan(inputs)
+                      .capturePlanNodeId(p1)
+                      .hashJoin(
+                          {"v_col"},
+                          {"w_row"},
+                        exec::test::PlanBuilder(planNodeIdGenerator)
+                      .tableScan(weights)
+                      .capturePlanNodeId(p2)
+                      .planNode(),
+                        "", // extra filter
+                        {"v_row", "w_col", "v", "w"})
+                      .project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+                      .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
+                      .project({str[0]})
+                      .planNode();
+      possiblePlanBuilder.replacePlan(planBuilder);
+      }
+
+      else if(test_action == "Split2Multi"){
+        core::QueryConfig config({});
+        auto torch = std::dynamic_pointer_cast<TorchDNN>(exec::getVectorFunction("torchDNN", {ARRAY(REAL())}, {}, config));
+        // std::vector<int> dimensions;
+        auto dims = torch->getDims();
+
+        core::PlanNodeId p0;
+        std::string compute =  NNBuilder()
+                              .denseLayer(dims[1], dims[0], data.weights[0], data.bias[0], NNBuilder::RELU)
+                              .denseLayer(dims[2], dims[1], data.weights[1], data.bias[1], NNBuilder::SOFTMAX)
+                              .build();
+
+
+        auto inputs = ROW({
+            {"v", ARRAY(REAL())},
+        });
+        //connect with oldplan? maybe
+        auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+        auto planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
+                      .tableScan(inputs)
+                      .capturePlanNodeId(p0)
+                      .project({fmt::format(compute, "v")}) 
+                      .planNode();
+        possiblePlanBuilder.replacePlan(planBuilder);
+      }
+
+      else {
+        possiblePlanBuilder.replacePlan(originPlanBuilder->planNode());
+      }
+    }
+
+    void mcts_optimizer(){
+
+      // Send a list of strings to Python
+      char str_buffer[1024];
+      std::vector<std::string> action_strings;
+      auto plan = originPlanBuilder->planNode();
+      auto projectNode = std::dynamic_pointer_cast<const facebook::velox::core::ProjectNode>(plan);
+      // auto udf_strings = std::vector<std::string>{};
+      // //softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({/"x"}))))))
+      // udf_strings.push_back(projectNode->projections()[0]->toString());
+      // // std::vector<std::string> input_strings = {"string1", "string2", "string3"};
+      
+      Json::Value input_json;
+      input_json["strings"] = Json::arrayValue;
+      input_json["strings"].append(projectNode->projections()[0]->toString());
+      std::string json_str = input_json.toStyledString();
+      send(clientSocket, json_str.c_str(), json_str.length(), 0);
+      // Wait for the MCTS result from Python
+      while (true) {
+          // Receive a string from Python
+          ssize_t bytesRead = recv(clientSocket, str_buffer, sizeof(str_buffer), 0);
+          if (bytesRead <= 0) {
+              break;  // Connection closed or error
+          }
+
+          str_buffer[bytesRead] = '\0';  // Null-terminate the received data
+          std::string received_str(str_buffer);
+
+          Json::Value json_data;
+          Json::CharReaderBuilder jsonReader;
+          std::istringstream jsonStream(received_str);
+          Json::parseFromStream(jsonReader, jsonStream, &json_data, nullptr);
+
+          const Json::Value& action_strings_json = json_data["action_strings"];
+          std::vector<std::string> action_strings;
+
+          for (const auto& action_string_json : action_strings_json) {
+              action_strings.push_back(action_string_json.asString());
+          }
+
+          if (json_data["end"].asString() == "F") {
+              for (auto action : action_strings){
+                rewriten_udf(action);
+              }
+              // Call your cost function with the vector of action strings
+              int result = costFunction(action_strings);
+            
+              std::cout << "cost = " << result << std::endl;
+
+              // Send the result back to Python
+              int send_result = htonl(result);
+              send(clientSocket, &send_result, sizeof(send_result), 0);
+              action_strings.clear();
+              possiblePlanBuilder.reSetPlan();
+          }
+
+          if (json_data["end"].asString() == "T") {
+              break;  // End communication
+          }
+      }
+
+      // Close the connection
+      close(clientSocket);
+    }
+};
+
+
+
+
+
 
 void test_optimizer_mcts(int argc, char** argv){
   folly::init(&argc, &argv, false);
@@ -850,6 +968,22 @@ void test_optimizer_mcts(int argc, char** argv){
   filesystems::registerLocalFileSystem();
   dwrf::registerDwrfReaderFactory();
 
+  int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+  if (clientSocket == -1) {
+      std::cerr << "Error creating socket\n";
+  }
+
+  sockaddr_in serverAddr;
+  serverAddr.sin_family = AF_INET;
+  serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  serverAddr.sin_port = htons(12345);
+
+  if (connect(clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1) {
+      std::cerr << "Error connecting to server\n";
+      close(clientSocket);
+  }
+
   int input_features_size = 597540;//597540
   int num_samples = 1000;
   int first_layer_output_size = 1024;
@@ -857,6 +991,10 @@ void test_optimizer_mcts(int argc, char** argv){
   auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
   // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
   auto udf_plan_builder = build_plan_udf(data, input_features_size, first_layer_output_size, second_layer_output_size);
+  Opt optimizer(udf_plan_builder.planBuilder, clientSocket, data);
+  optimizer.start();
+  optimizer.mcts_optimizer();
+  // mcts_optimizer(*(udf_plan_builder.planBuilder), clientSocket);
   // exec_plan_udf(udf_plan_builder, 1000, data.features, 4, 4);
   std::string test_action1 = "Merge2Single";
   std::string test_action2 = "Mul2JoinAgg";
@@ -874,7 +1012,9 @@ void test_optimizer_mcts(int argc, char** argv){
 
 }
 
+
 int main(int argc, char** argv) {
     // test_optimizer_demo(argc, argv);
     test_optimizer_mcts(argc, argv);
+    // test_connecter();
 }
