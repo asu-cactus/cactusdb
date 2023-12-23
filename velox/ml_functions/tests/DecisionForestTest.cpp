@@ -475,6 +475,9 @@ void DecisionForestTest::testingForestPredictCrossproductLarge() {
                    .planFragment();
 
 
+  //print statistics of a plan
+  
+
   queryCtx_->testingOverrideConfigUnsafe(
       {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"}, 
       {core::QueryConfig::kMaxOutputBatchRows, "100000"}});
