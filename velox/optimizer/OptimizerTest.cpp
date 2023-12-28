@@ -33,6 +33,8 @@
 #include <arpa/inet.h>
 #include <json/json.h>
 
+#include "RewriteAction.h"
+
 // #define EIGEN_USE_BLAS
 
 using namespace facebook::velox;
