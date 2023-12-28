@@ -361,7 +361,8 @@ public:
               std::cout << expression->toString() << std::endl;
 
 	      if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)) {
-	          std::string callName = call->name();
+
+    		  std::string callName = call->name();
 
 		  std::cout << "Analyzing user supplied function: " << callName << std::endl;
 
@@ -779,16 +780,6 @@ public:
 	
 	} 
 
-    }
-
-    static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
-
-    	while (!task->isFinished()) {
-        
-	    usleep(1000); // 0.01 second.
-        
-	}
-    
     }
 
 
