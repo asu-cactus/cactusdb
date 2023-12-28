@@ -554,6 +554,16 @@ public:
     float* getTensor() const override {
         return new float[0];
     }
+    
+    // Getter method for weights
+    float** getWeights() const {
+        return weights;
+    }
+
+    // Getter method for bias
+    float** getBias() const {
+        return bias;
+    }
 
     private:
         float** weights;

@@ -14,7 +14,6 @@
 include_directories(/home/linqi/velox/velox)
 set(SOURCES
   OptimizerTest.cpp
-  Optimizer.cpp
 )
 
 # set (CMAKE_PREFIX_PATH "$HOME/libtorch")
