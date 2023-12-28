@@ -958,6 +958,14 @@ class PlanBuilder {
     return *this;
   }
 
+  PlanBuilder& setRoot(core::PlanNodePtr newRoot) {
+  
+      planNode_ = newRoot;
+
+      return *this;
+  
+  }
+
   void replacePlan(core::PlanNodePtr newPlan){
     planNode_ = newPlan;
   }
