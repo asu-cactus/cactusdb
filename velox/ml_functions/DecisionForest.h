@@ -177,6 +177,10 @@ class ForestPrediction : public MLFunction {
 
    this->numFeatures = numFeatures;
 
+   this->forestPath = forestPath;
+
+   this->isClassification = isClassification;
+
   }
 
   void apply(
@@ -212,7 +216,7 @@ class ForestPrediction : public MLFunction {
   // parameters in a single file
   float* getTensor() const override {
 
-      	  return new float[0]; //will this lead to memory leak?
+       return new float[0]; //will this lead to memory leak?
   
   }
 
@@ -222,11 +226,33 @@ class ForestPrediction : public MLFunction {
 
   }
 
+  int getNumFeatures() {
+  
+       return numFeatures;
+  
+  }
+
+  std::string & getForestPath() {
+  
+       return this->forestPath; 
+  
+  }
+
+  bool getClassification() {
+  
+       return this->isClassification;
+  
+  }
+
  private:
 
   ForestPtr forest;
 
   int numFeatures;
+
+  std::string forestPath;
+
+  bool isClassification;
 
 };
 
