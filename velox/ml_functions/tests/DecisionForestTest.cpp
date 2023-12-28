@@ -474,9 +474,7 @@ void DecisionForestTest::testingForestPredictCrossproductLarge() {
                    .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
                    .planFragment();
 
-
-  //print statistics of a plan
-  
+  // print statistics of a plan
 
   queryCtx_->testingOverrideConfigUnsafe(
       {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"}, 
