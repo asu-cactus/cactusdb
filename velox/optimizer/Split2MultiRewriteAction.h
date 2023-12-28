@@ -24,7 +24,7 @@
 #include "velox/core/ITypedExpr.h"
 #include "velox/ml_functions/NNBuilder.h"
 
-using namespace ml;
+// using namespace ml;
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec;
@@ -64,7 +64,7 @@ public:
 
 			        std::string callName = call->name();
 
-			        if (callName.find("torch") != std::string::npos) {
+			        if (callName.find("torchdnn") != std::string::npos) {
 			     
 			      /* 
 			       * Case I: If this function call is the only expression in the projection (e.g.,project({"torch(v)"})), 
@@ -82,7 +82,7 @@ public:
 
 				            if (myUDF) {
 				   
-				                std::shared_ptr<TorchDNN> myTorchUDF = dynamic_pointer_cast<TorchDNN>(myUDF);
+				                std::shared_ptr<TorchDNN> myTorchUDF = std::dynamic_pointer_cast<TorchDNN>(myUDF);
 
 					            if (myTorchUDF) {
 					 
@@ -93,9 +93,9 @@ public:
                                     float** bias = myTorchUDF->getBias();
                                     
                                     compute =  NNBuilder()
-                                            .denseLayer(dims[1], dims[0], weights[0], bias[0], NNBuilder::RELU)
-                                            .denseLayer(dims[2], dims[1], weights[1], bias[1], NNBuilder::SOFTMAX)
-                                            .build();
+                                    .denseLayer(dims[1], dims[0], weights[0], bias[0], NNBuilder::RELU)
+                                    .denseLayer(dims[2], dims[1], weights[1], bias[1], NNBuilder::SOFTMAX)
+                                    .build();
 					            }
 				   
 				            }
