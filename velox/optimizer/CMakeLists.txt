@@ -11,21 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-include_directories(/home/linqi/velox/velox)
+
+#include_directories(/home/linqi/velox/velox)
 set(SOURCES
   OptimizerTest.cpp
 )
 
-# set (CMAKE_PREFIX_PATH "$HOME/libtorch")
-set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
+set(Torch_DIR "$HOME/libtorch/share/cmake/Torch")
+#set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 
 find_package(jsoncpp REQUIRED)
 
 
 add_executable(velox_op ${SOURCES})
-
-
 target_link_libraries(
   velox_op
   velox_type
@@ -39,4 +38,39 @@ target_link_libraries(
   # openblas
   ${TORCH_LIBRARIES}
 )
+
+add_executable(traversal_test TraversalTest.cpp)
+target_link_libraries(
+  traversal_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(rewrite_test RewriteTest.cpp)
+target_link_libraries(
+  rewrite_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
 # set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")

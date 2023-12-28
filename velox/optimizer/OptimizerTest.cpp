@@ -11,7 +11,6 @@
 #include "velox/expression/VectorFunction.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
-#include "velox/optimizer/Optimizer.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
@@ -40,7 +39,6 @@
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
-using namespace facebook::velox::optimizer;
 
 using exec::test::HiveConnectorTestBase;
 
