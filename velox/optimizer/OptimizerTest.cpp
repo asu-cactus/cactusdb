@@ -34,6 +34,9 @@
 
 #include "RewriteAction.h"
 #include "Split2MultiRewriteAction.h"
+#include "Merge2SingleRewriteAction.h"
+#include "Mul2JoinAggRewriteAction.h"
+#include "JoinAgg2MulRewriteAction.h"
 // #define EIGEN_USE_BLAS
 
 using namespace facebook::velox;
@@ -496,8 +499,8 @@ DynamicMetaData decision_maker(PlanBuilder& planBuilder){
     decisions.blocksNum = 4;
     decisions.planIdShot = {0, 1, 0, 0, 1};//not used, Todo
     decisions.leftBlockSize.push_back(1000);
-    decisions.leftBlockSize.push_back(149385);//597540/4 = 149385
-    decisions.rightBlockSize.push_back(149385);
+    decisions.leftBlockSize.push_back(200);//597540/4 = 149385
+    decisions.rightBlockSize.push_back(200);
     decisions.rightBlockSize.push_back(1024);
     decisions.targetStr.push_back("mat_mul0(ROW[\"v\"])");// only test first layer, not auto determined
     return decisions;
@@ -507,7 +510,7 @@ PlanBuilderExec build_plan_op(float* weight, int row, int col, int samples, RowT
   exec::registerVectorFunction(
     "mat_mul_b",
     MatrixMultiply_b::signatures(),
-    std::make_unique<MatrixMultiply_b>(row, col, samples, weight)
+    std::make_unique<MatrixMultiply_b>(row, col, samples, weight, 4)
   );
   
   std::string searchString = targetString[0];
@@ -676,7 +679,7 @@ void test_optimizer_demo(int argc, char** argv){
   filesystems::registerLocalFileSystem();
   dwrf::registerDwrfReaderFactory();
   // int input_features_size = 597540;
-  int input_features_size = 597540;
+  int input_features_size = 800;
   int num_samples = 1000;
 
   int first_layer_output_size = 1024;
@@ -800,7 +803,7 @@ public:
         exec::registerVectorFunction(
         "mat_mul_b",
         MatrixMultiply_b::signatures(),
-        std::make_unique<MatrixMultiply_b>(dims0[0]/blocks, dims0[1], data.features.size(), data.weights[0])
+        std::make_unique<MatrixMultiply_b>(dims0[0]/blocks, dims0[1], data.features.size(), data.weights[0], 4)
       );
 
       std::string searchString = "mat_mul0(ROW[\"v\"])";
@@ -1015,7 +1018,7 @@ void test_optimizer_mcts(int argc, char** argv){
 }
 
 
-void rewrite_test(int argc, char** argv){
+void rewrite_test_split2multi(int argc, char** argv){
   folly::init(&argc, &argv, false);
   functions::prestosql::registerAllScalarFunctions();
   aggregate::prestosql::registerAllAggregateFunctions();
@@ -1138,9 +1141,394 @@ void rewrite_test(int argc, char** argv){
   
 }
 
+
+void rewrite_test_merge2single(int argc, char** argv){
+  folly::init(&argc, &argv, false);
+  functions::prestosql::registerAllScalarFunctions();
+  aggregate::prestosql::registerAllAggregateFunctions();
+  parse::registerTypeResolver();
+  const std::string kHiveConnectorId = "test-hive";
+  auto hiveConnector =
+      connector::getConnectorFactory(
+          connector::hive::HiveConnectorFactory::kHiveConnectorName)
+          ->newConnector(kHiveConnectorId, nullptr);
+  connector::registerConnector(hiveConnector);
+
+  filesystems::registerLocalFileSystem();
+  dwrf::registerDwrfReaderFactory();
+
+  int input_features_size = 800;//597540
+  int num_samples = 1000;
+  int first_layer_output_size = 1024;
+  int second_layer_output_size = 14588;
+  auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
+  auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+  auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+  auto file = TempFilePath::create();
+  MyFileTest myFile;
+  auto config = std::make_shared<facebook::velox::dwrf::Config>();
+  myFile.writeToFile(file->path, {inputRowVector}, config);
+
+  core::PlanNodeId p0;
+
+  std::string compute =  NNBuilder()
+                        .denseLayer(first_layer_output_size, input_features_size, data.weights[0], data.bias[0], NNBuilder::RELU)
+                        .denseLayer(second_layer_output_size, first_layer_output_size, data.weights[1], data.bias[1], NNBuilder::SOFTMAX)
+                        .build();
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator)
+                .tableScan(asRowType(inputRowVector->type()))
+                .capturePlanNodeId(p0)
+                .project({fmt::format(compute, "v")}) 
+                .planBuild();
+
+  auto planNode = myPlan.planNode();
+  
+  std::shared_ptr<optimization::Merge2SingleRewriteAction>
+          myAction = std::make_shared<
+              optimization::Merge2SingleRewriteAction>();
+  
+  myAction->apply(
+          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator);
+
+
+  int numSplits = 8;
+  int veloxThreads = 8;
+  auto hiveSplits =  myFile.makeHiveConnectorSplits(file->path, numSplits, dwio::common::FileFormat::DWRF);
+
+  std::shared_ptr<folly::Executor> executor_{
+        std::make_shared<folly::CPUThreadPoolExecutor>(
+            std::thread::hardware_concurrency())};
+
+    std::shared_ptr<core::QueryCtx> queryCtx_{
+        std::make_shared<core::QueryCtx>(executor_.get())};
+
+    // queryCtx_->testingOverrideConfigUnsafe(
+    //     {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
+    //      {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
+    boost::interprocess::interprocess_semaphore semaphore(veloxThreads);
+
+    auto task = exec::Task::create(
+        "0",
+        myPlan.planFragment(),
+        0,
+        queryCtx_,
+        [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          if (result)
+            semaphore.post();
+          return exec::BlockingReason::kNotBlocked;
+        });
+
+    std::cout << "Hive splits:" << std::endl;
+
+    for (auto& split : hiveSplits) {
+      // std::cout << split->toString() << std::endl;
+      task->addSplit(p0, exec::Split(std::move(split)));
+    }
+    std::chrono::steady_clock::time_point begin =
+        std::chrono::steady_clock::now();
+
+    
+
+    task->start(veloxThreads);
+
+    task->noMoreSplits(p0);
+
+    // Start task with 2 as maximum drivers and wait for execution to finish
+
+    waitForFinishedDrivers(task);
+
+    std::chrono::steady_clock::time_point end =
+        std::chrono::steady_clock::now();
+
+    std::stringstream ss;
+
+
+    std::cout << "Time for TorchDNN with Input Data (sec): "
+              << std::endl;
+
+    std::cout << ss.str()
+              << (std::chrono::duration_cast<std::chrono::microseconds>(
+                      end - begin)
+                      .count()) /
+            1000000.0
+              << " secs" << std::endl;
+  
+}
+
+void rewrite_test_mul2joinagg(int argc, char** argv, int blocks){
+  folly::init(&argc, &argv, false);
+  functions::prestosql::registerAllScalarFunctions();
+  aggregate::prestosql::registerAllAggregateFunctions();
+  parse::registerTypeResolver();
+  const std::string kHiveConnectorId = "test-hive";
+  auto hiveConnector =
+      connector::getConnectorFactory(
+          connector::hive::HiveConnectorFactory::kHiveConnectorName)
+          ->newConnector(kHiveConnectorId, nullptr);
+  connector::registerConnector(hiveConnector);
+
+  filesystems::registerLocalFileSystem();
+  dwrf::registerDwrfReaderFactory();
+
+  int input_features_size = 800;//597540
+  int num_samples = 1000;
+  int first_layer_output_size = 1024;
+  int second_layer_output_size = 14588;
+  auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
+  auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+  auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+
+
+  
+  auto inputBlocks = create_input_block(num_samples*input_features_size, data.features, blocks);
+  auto weightBlocks = create_weight_block(input_features_size*first_layer_output_size, data.weights[0], blocks);
+  auto inputs = block_to_files(inputBlocks, blocks, 0);//0 denote values, 1 denote weight
+  auto weights = block_to_files(weightBlocks, blocks, 1);
+
+  auto file = TempFilePath::create();
+  MyFileTest myFile;
+  auto config = std::make_shared<facebook::velox::dwrf::Config>();
+  myFile.writeToFile(file->path, {inputRowVector}, config);
+
+  core::PlanNodeId p0;
+  // core::PlanNodeId p1 = "2";
+  // core::PlanNodeId p2 = "3";
+  std::string compute =  NNBuilder()
+                        .denseLayer(first_layer_output_size, input_features_size, data.weights[0], data.bias[0], NNBuilder::RELU)
+                        .denseLayer(second_layer_output_size, first_layer_output_size, data.weights[1], data.bias[1], NNBuilder::SOFTMAX)
+                        .build();
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator)
+                .tableScan(asRowType(inputRowVector->type()))
+                .capturePlanNodeId(p0)
+                .project({fmt::format(compute, "v")}) 
+                .planBuild();
+
+  auto planNode = myPlan.planNode();
+  core::PlanNodeId p1;
+  core::PlanNodeId p2;
+  std::shared_ptr<optimization::Mul2JoinAggRewriteAction>
+          myAction = std::make_shared<
+              optimization::Mul2JoinAggRewriteAction>(blocks, &p1, &p2, inputs.schema, weights.schema);
+  
+  myAction->apply(
+          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator);
+
+
+  int veloxThreads = 4;
+  auto inputHiveSplits = myFile.makeHiveConnectorSplits(inputs.paths);
+  auto weightHiveSplits = myFile.makeHiveConnectorSplits(weights.paths);
+
+  std::shared_ptr<folly::Executor> executor_{
+        std::make_shared<folly::CPUThreadPoolExecutor>(
+            std::thread::hardware_concurrency())};
+
+    std::shared_ptr<core::QueryCtx> queryCtx_{
+        std::make_shared<core::QueryCtx>(executor_.get())};
+
+    queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}});
+    // queryCtx_->testingOverrideConfigUnsafe(
+    //     {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
+    //      {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
+    boost::interprocess::interprocess_semaphore semaphore(veloxThreads*8);
+
+    auto task = exec::Task::create(
+        "0",
+        myPlan.planFragment(), //replace
+        0,
+        queryCtx_,
+        [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          if (result)
+            semaphore.post();
+          return exec::BlockingReason::kNotBlocked;
+        });
+
+    std::cout << "Hive splits:" << std::endl;
+    task->start(veloxThreads);
+    for (auto& split : inputHiveSplits) {
+      semaphore.wait();
+      // std::cout << split->toString() << std::endl;
+      task->addSplit(p1, exec::Split(std::move(split)));
+    }
+
+    for (auto& split : weightHiveSplits) {
+      semaphore.wait();
+      // std::cout << split->toString() << std::endl;
+      task->addSplit(p2, exec::Split(std::move(split)));
+    }
+    std::chrono::steady_clock::time_point begin =
+        std::chrono::steady_clock::now();
+
+    
+
+    // task->start(veloxThreads);
+
+    task->noMoreSplits(p1);
+    task->noMoreSplits(p2);
+
+    // Start task with 2 as maximum drivers and wait for execution to finish
+
+    waitForFinishedDrivers(task);
+
+    std::chrono::steady_clock::time_point end =
+        std::chrono::steady_clock::now();
+
+    std::stringstream ss;
+
+
+    std::cout << "Time for TorchDNN with Input Data (sec): "
+              << std::endl;
+
+    std::cout << ss.str()
+              << (std::chrono::duration_cast<std::chrono::microseconds>(
+                      end - begin)
+                      .count()) /
+            1000000.0
+              << " secs" << std::endl;
+  
+}
+
+void rewrite_test_joinagg2mul(int argc, char** argv){
+  folly::init(&argc, &argv, false);
+  functions::prestosql::registerAllScalarFunctions();
+  aggregate::prestosql::registerAllAggregateFunctions();
+  parse::registerTypeResolver();
+  const std::string kHiveConnectorId = "test-hive";
+  auto hiveConnector =
+      connector::getConnectorFactory(
+          connector::hive::HiveConnectorFactory::kHiveConnectorName)
+          ->newConnector(kHiveConnectorId, nullptr);
+  connector::registerConnector(hiveConnector);
+
+  filesystems::registerLocalFileSystem();
+  dwrf::registerDwrfReaderFactory();
+
+  int input_features_size = 800;//597540
+  int num_samples = 1000;
+  int first_layer_output_size = 1024;
+  int second_layer_output_size = 14588;
+  auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
+  auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+  auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+
+  auto valueSchema = asRowType(inputRowVector->type());
+  
+  auto inputBlocks = create_input_block(num_samples*input_features_size, data.features, 4);
+  auto weightBlocks = create_weight_block(input_features_size*first_layer_output_size, data.weights[0], 4);
+  auto inputs = block_to_files(inputBlocks, 4, 0);//0 denote values, 1 denote weight
+  auto weights = block_to_files(weightBlocks, 4, 1);
+
+  auto file = TempFilePath::create();
+  MyFileTest myFile;
+  auto config = std::make_shared<facebook::velox::dwrf::Config>();
+  myFile.writeToFile(file->path, {inputRowVector}, config);
+
+  core::PlanNodeId p0;
+  // core::PlanNodeId p1 = "2";
+  // core::PlanNodeId p2 = "3";
+  std::string compute =  NNBuilder()
+                        .denseLayer(first_layer_output_size, input_features_size, data.weights[0], data.bias[0], NNBuilder::RELU)
+                        .denseLayer(second_layer_output_size, first_layer_output_size, data.weights[1], data.bias[1], NNBuilder::SOFTMAX)
+                        .build();
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator)
+                .tableScan(asRowType(inputRowVector->type()))
+                .capturePlanNodeId(p0)
+                .project({fmt::format(compute, "v")}) 
+                .planBuild();
+
+  auto planNode = myPlan.planNode();
+  core::PlanNodeId p1;
+  core::PlanNodeId p2;
+  std::shared_ptr<optimization::Mul2JoinAggRewriteAction>
+          myAction = std::make_shared<
+              optimization::Mul2JoinAggRewriteAction>(4, &p1, &p2, inputs.schema, weights.schema);
+  
+  myAction->apply(
+          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator); //rewrite mul2joinagg
+
+  auto planNode2 = myPlan.planNode();
+  core::PlanNodeId p3;
+  std::shared_ptr<optimization::JoinAgg2MulRewriteAction> 
+          myAction2 = std::make_shared<optimization::JoinAgg2MulRewriteAction>(&p3, valueSchema);
+
+  myAction2->apply(planNode2, nullptr, maker, myPlan, pool_, planNodeIdGenerator); //rewrite joinagg2mul
+
+
+  int numSplits = 8;
+  int veloxThreads = 8;
+  auto hiveSplits =  myFile.makeHiveConnectorSplits(file->path, numSplits, dwio::common::FileFormat::DWRF);
+
+  std::shared_ptr<folly::Executor> executor_{
+        std::make_shared<folly::CPUThreadPoolExecutor>(
+            std::thread::hardware_concurrency())};
+
+    std::shared_ptr<core::QueryCtx> queryCtx_{
+        std::make_shared<core::QueryCtx>(executor_.get())};
+
+    // queryCtx_->testingOverrideConfigUnsafe(
+    //     {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
+    //      {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
+    boost::interprocess::interprocess_semaphore semaphore(veloxThreads);
+
+    auto task = exec::Task::create(
+        "0",
+        myPlan.planFragment(),
+        0,
+        queryCtx_,
+        [&semaphore](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          if (result)
+            semaphore.post();
+          return exec::BlockingReason::kNotBlocked;
+        });
+
+    std::cout << "Hive splits:" << std::endl;
+
+    for (auto& split : hiveSplits) {
+      // std::cout << split->toString() << std::endl;
+      task->addSplit(p3, exec::Split(std::move(split)));
+    }
+    std::chrono::steady_clock::time_point begin =
+        std::chrono::steady_clock::now();
+
+    
+
+    task->start(veloxThreads);
+
+    task->noMoreSplits(p3);
+
+    // Start task with 2 as maximum drivers and wait for execution to finish
+
+    waitForFinishedDrivers(task);
+
+    std::chrono::steady_clock::time_point end =
+        std::chrono::steady_clock::now();
+
+    std::stringstream ss;
+
+
+    std::cout << "Time for TorchDNN with Input Data (sec): "
+              << std::endl;
+
+    std::cout << ss.str()
+              << (std::chrono::duration_cast<std::chrono::microseconds>(
+                      end - begin)
+                      .count()) /
+            1000000.0
+              << " secs" << std::endl;
+  
+}
+
 int main(int argc, char** argv) {
     // test_optimizer_demo(argc, argv);
     // test_optimizer_mcts(argc, argv);
-    rewrite_test(argc, argv);
+    // rewrite_test_split2multi(argc, argv);
+    // rewrite_test_merge2single(argc, argv);
+    // rewrite_test_mul2joinagg(argc, argv, 4);
+    rewrite_test_joinagg2mul(argc, argv);
     // test_connecter();
 }
