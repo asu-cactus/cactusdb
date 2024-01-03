@@ -89,10 +89,8 @@ class MLFunctionsTest : public HiveConnectorTestBase {
 
   /// Run the demo.
   void run();
-  void test_dense_layer();
-  void test_torch_dense_layer();
-  void test_mnist_multithreading();
-  void test_torch_dense_layer_multithreading();
+  void ffnn(int input_size, int layer1_size, int layer2_size);
+  void torch_ffnn(int input_size, int layer1_size, int layer2_size);
 
   FlatVectorPtr<float> get_tensor(std::ifstream& file, int size, int lines);
   FlatVectorPtr<float> get_tensor(VectorMaker& m, std::ifstream& file, int size, int lines);
@@ -125,7 +123,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
     // if stripe size is a large value
     uint32_t rows = num_samples/num_splits;
 
-    config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
+    config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, kSizeKB);
     config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
     auto file = TempFilePath::create();
     writeToFile(file->path, {inputRowVector}, config);
@@ -155,6 +153,91 @@ class MLFunctionsTest : public HiveConnectorTestBase {
     std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
   }
 
+  struct DataFrame {
+    std::vector<std::vector<float>> features;
+    std::vector<float*> weights;
+    std::vector<float*> bias;
+    float* featuresFloat;
+  };
+  
+  DataFrame data_generate(int features, int samples, int first_layer, int second_layer){
+    int input_features_size = features;
+    int num_samples = samples;
+
+    int first_layer_output_size = first_layer;
+    int second_layer_output_size = second_layer;
+    // ( 1000 * 597540 x 597540 * 1024 + 1000*1024) first layer
+    // ( 1000 * 1024 x 1024 * 14588 + 1000*14588) second layer
+    int input_total_size = input_features_size * num_samples;
+
+    int weight_layer1_size = input_features_size * first_layer_output_size;
+    int weight_layer2_size = first_layer_output_size * second_layer_output_size;
+
+    int bias_layer1_size = num_samples * first_layer_output_size;
+    int bias_layer2_size = num_samples * second_layer_output_size;
+
+    std::random_device rd;  // Seed the random number generator
+    std::mt19937 gen(rd()); // Initialize the Mersenne Twister engine
+    // std::uniform_real_distribution<float> distribution(0.00000009, 0.00000011); // Define the range
+    std::uniform_real_distribution<float> distribution(0.0009, 0.0011);
+
+    //generate input
+    std::vector<std::vector<float>> featureVectors;
+    for (int i = 0; i < num_samples; i++) {
+          std::vector<float> featureVector;
+          for (int j = 0; j < input_features_size; j++) {
+                  featureVector.push_back(i*input_features_size+j);
+                  // float random_value = distribution(gen);
+                  // featureVector.push_back(0.0000001);
+                  // featureVector.push_back(random_value);
+          }
+          featureVectors.push_back(featureVector);
+      }
+
+    float* floatArray = new float[num_samples * input_features_size];
+    int index = 0;
+
+    for (const auto& row : featureVectors) {
+        for (const float& value : row) {
+            floatArray[index++] = value;
+        }
+    }
+
+    //generate weight
+    float* weight_layer1 = new float[weight_layer1_size];
+    for (int i = 0; i < weight_layer1_size; ++i) {
+        weight_layer1[i] = 0.000001; 
+    }
+    float* weight_layer2 = new float[weight_layer2_size];
+    for (int i = 0; i < weight_layer2_size; ++i) {
+        weight_layer2[i] = 0.000001; 
+    }
+    std::vector<float*> weights;
+    weights.push_back(weight_layer1);
+    weights.push_back(weight_layer2);
+
+    //generate bias
+    float* bias_layer1 = new float[bias_layer1_size];
+    for (int i = 0; i < bias_layer1_size; ++i) {
+        bias_layer1[i] = 0.00001; 
+    }
+    float* bias_layer2 = new float[bias_layer2_size];
+    for (int i = 0; i < bias_layer2_size; ++i) {
+        bias_layer2[i] = 0.00001; 
+    }
+    std::vector<float*> bias;
+    bias.push_back(bias_layer1);
+    bias.push_back(bias_layer2);
+    // create dataframe
+    DataFrame data;
+    data.features = featureVectors;
+    data.weights = weights;
+    data.bias = bias;
+    data.featuresFloat = floatArray;
+
+    return data;
+}
+
   static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
 
     while (!task->isFinished()) {     
@@ -162,7 +245,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
     }
   }
 
-
+  
   std::unique_ptr<MemoryManager> memoryManager_;
   
   uint64_t kMemoryCapacity = 512 * MB;
@@ -232,182 +315,8 @@ FlatVectorPtr<float> MLFunctionsTest::get_tensor(VectorMaker& m, std::ifstream& 
     return tensor;
 }
 
-void MLFunctionsTest::test_torch_dense_layer(){
- 
-  int input_size = 768; // num_features
-  int layer1_size = 3072; // num units in hidden layer 1
-  int layer2_size = 768;
+void MLFunctionsTest::torch_ffnn(int input_size, int layer1_size, int layer2_size){
   
-  std::vector<int> dimensions;
-  dimensions.push_back(input_size);
-  dimensions.push_back(layer1_size);
-  dimensions.push_back(layer2_size);
-  
-
-  int num_samples = std::atoi(std::getenv("samples"));
-  int num_splits = std::atoi(std::getenv("splits"));
-  int velox_threads = std::atoi(std::getenv("vthreads"));
-  int torch_threads = std::atoi(std::getenv("tthreads"));
-  torch::set_num_threads(torch_threads);
-  
-  std::ifstream weights_file("/home/ubuntu/bert_weights.txt"); 
-  std::ifstream bias_file("/home/ubuntu/bert_bias.txt"); 
-  std::ifstream test_file("/home/ubuntu/bert_input.txt"); 
-
-  FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
-  FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
-  FlatVectorPtr<float> weights_2 = get_tensor(weights_file, layer2_size * layer1_size, layer1_size);
-  FlatVectorPtr<float> bias_2 = get_tensor(bias_file, layer2_size, 1);
-  weights_file.close();
-  bias_file.close();
-
-  FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples);
-  float* data = input->values()->asMutable<float>();
-
-  std::vector<std::vector<float>> featureVectors;
-  for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
-    std::vector<float> featureVector(data + cursor, data + cursor + input_size);
-    featureVectors.push_back(featureVector);
-  }
-
-  auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
-  auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
- 
-  float* weights[2] = {weights_1->values()->asMutable<float>(), weights_2->values()->asMutable<float>()};
-  float* bias[2] = {bias_1->values()->asMutable<float>(), bias_2->values()->asMutable<float>()};
-
-  // step1: Register
-  exec::registerVectorFunction(
-    "torchDNN",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
-  );
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  core::PlanNodeId p0;
-  
-
-  auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                .tableScan(asRowType(inputRowVector->type()))
-                .capturePlanNodeId(p0)
-                //.project({fmt::format(compute, "x")}) 
-                .project({"torchDNN(x)"}) 
-                .planFragment();
-
-  auto config = std::make_shared<facebook::velox::dwrf::Config>();
-
-  // affects the number of splits
-  // number of bites in each stripe (collection of rows)
-  // strip size should be <= split size (total_size / total splits)
-  // to have the desired number of splits
-  uint64_t kSizeKB = 1024UL;
-  // used for indexing. 
-  // 2k rows will be processed in every call
-  // but doesn't effect number of splits
-  // if stripe size is a large value
-  uint32_t rows = num_samples/num_splits;
-  config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 100 * kSizeKB);
-  config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
-  auto file = TempFilePath::create();
-  writeToFile(file->path, {inputRowVector}, config);
-  
-  auto hiveSplits =  makeHiveConnectorSplits(file->path, num_splits, dwio::common::FileFormat::DWRF);
-
-  queryCtx_->testingOverrideConfigUnsafe(
-      {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"}, {core::QueryConfig::kMaxOutputBatchRows, "100000"}});
-  auto task = exec::Task::create("0", plan , 0, queryCtx_, 
-        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          //  if(result)
-          //     std::cout << result->toString() << std::endl;
-          return exec::BlockingReason::kNotBlocked;
-  });
-
-  
-  //std::cout << "Hive splits:" << std::endl;
-  for(auto& split : hiveSplits) {
-   // std::cout << split->toString() << std::endl;
-    task->addSplit(p0, exec::Split(std::move(split)));
-  }
-  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(velox_threads);
-  task->noMoreSplits(p0);
-  // Start task with 2 as maximum drivers and wait for execution to finish
-  waitForFinishedDrivers(task);
-  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::stringstream ss;
-  ss << num_samples << "," << num_splits << "," << velox_threads << "," << torch_threads << ",";
-  std::cout << ss.str() << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
-}
-
-void MLFunctionsTest::test_mnist_multithreading() {
-    
-    int input_size = 784; // num_features
-    int layer1_size = 1024; // num units in hidden layer 1
-    int layer2_size = 10;
-    
-    std::vector<float> confs = get_config(5);
-    
-    int num_samples = (int) confs[0];
-   
-    std::ifstream weights_file("/home/ubuntu/w1024.txt"); 
-    std::ifstream bias_file("/home/ubuntu/b1024.txt"); 
-    std::ifstream test_file("/home/ubuntu/x_test_large.txt"); 
-
-    FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
-    FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
-    FlatVectorPtr<float> weights_2 = get_tensor(weights_file, layer2_size * layer1_size, layer1_size);
-    FlatVectorPtr<float> bias_2 = get_tensor(bias_file, layer2_size, 1);
-    weights_file.close();
-    bias_file.close();
-
-    float* bias_1_values = bias_1->values()->asMutable<float>();
-    float* bias_2_values = bias_2->values()->asMutable<float>();
-
-    FlatVectorPtr<float> bias_1_mat = maker.flatVector<float>(num_samples * layer1_size);
-    for(int i=0; i < bias_1_mat->size(); i++)
-      bias_1_mat->set(i, bias_1_values[i%layer1_size]);
-    
-    FlatVectorPtr<float> bias_2_mat = maker.flatVector<float>(num_samples * layer2_size);
-    for(int i=0; i < bias_2_mat->size(); i++)
-      bias_2_mat->set(i, bias_2_values[i%layer2_size]);
-
-    FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples);
-    float* data = input->values()->asMutable<float>();
-
-    std::vector<std::vector<float>> featureVectors;
-    for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
-      std::vector<float> featureVector(data + cursor, data + cursor + input_size);
-      featureVectors.push_back(featureVector);
-    }
-
-    auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
-    auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
-
-    std::string compute =  NNBuilder()
-                          .denseLayer(layer1_size ,input_size, weights_1->values()->asMutable<float>(), 
-                            bias_1_mat->values()->asMutable<float>(), NNBuilder::RELU)
-                          .denseLayer(layer2_size ,layer1_size, weights_2->values()->asMutable<float>(), 
-                            bias_2_mat->values()->asMutable<float>(), NNBuilder::SOFTMAX)
-                          .build();
-
-    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    core::PlanNodeId p0;
-  
-    std::cout << compute << std::endl; // softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0({}))))))
-    auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                  .tableScan(asRowType(inputRowVector->type()))
-                  .capturePlanNodeId(p0)
-                  .project({fmt::format(compute, "x")}) 
-		              .planFragment();
-  
-    execute_plan(plan, p0, inputRowVector, confs);
-}
-
-void MLFunctionsTest::test_torch_dense_layer_multithreading(){
-  
-  int input_size = 784; // num_features
-  int layer1_size = 1024; // num units in hidden layer 1
-  int layer2_size = 10;
-
   std::vector<float> confs = get_config(6);
   
   int num_samples = (int) confs[0];
@@ -420,31 +329,13 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   dimensions.push_back(layer1_size);
   dimensions.push_back(layer2_size);
 
-  std::ifstream weights_file("/home/ubuntu/w1024.txt"); 
-  std::ifstream bias_file("/home/ubuntu/b1024.txt"); 
-  std::ifstream test_file("/home/ubuntu/x_test_large.txt"); 
+  auto data = data_generate(input_size, num_samples, layer1_size, layer2_size);
 
-  FlatVectorPtr<float> weights_1 = get_tensor(weights_file, layer1_size * input_size, input_size);
-  FlatVectorPtr<float> bias_1 = get_tensor(bias_file, layer1_size, 1);
-  FlatVectorPtr<float> weights_2 = get_tensor(weights_file, layer2_size * layer1_size, layer1_size);
-  FlatVectorPtr<float> bias_2 = get_tensor(bias_file, layer2_size, 1);
-  weights_file.close();
-  bias_file.close();
-
-  FlatVectorPtr<float> input = get_tensor(test_file, input_size * num_samples, num_samples);
-  float* data = input->values()->asMutable<float>();
-
-  std::vector<std::vector<float>> featureVectors;
-  for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
-    std::vector<float> featureVector(data + cursor, data + cursor + input_size);
-    featureVectors.push_back(featureVector);
-  }
-
-  auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+  auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
   auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
  
-  float* weights[2] = {weights_1->values()->asMutable<float>(), weights_2->values()->asMutable<float>()};
-  float* bias[2] = {bias_1->values()->asMutable<float>(), bias_2->values()->asMutable<float>()};
+  float* weights[2] = {data.weights[0], data.weights[1]};
+  float* bias[2] = {data.bias[0], data.bias[1]};
 
   // step1: Register
   exec::registerVectorFunction(
@@ -453,7 +344,6 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
     std::make_unique<TorchDNN>(weights, bias, dimensions)
   );
 
-                   
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   core::PlanNodeId p0;
   
@@ -465,9 +355,61 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   execute_plan(plan, p0, inputRowVector, confs);
 }
 
+// for 2 layers only. Can be generalized for multiple layers
+void MLFunctionsTest::ffnn(int input_size, int layer1_size, int layer2_size) {
+    
+    std::vector<float> confs = get_config(5);
+    
+    int num_samples = (int) confs[0];
+
+    auto data = data_generate(input_size, num_samples, layer1_size, layer2_size);
+
+    float* bias_1_values = data.bias[0];
+    float* bias_2_values = data.bias[1];
+
+    FlatVectorPtr<float> bias_1_mat = maker.flatVector<float>(num_samples * layer1_size);
+    for(int i=0; i < bias_1_mat->size(); i++)
+      bias_1_mat->set(i, bias_1_values[i%layer1_size]);
+    
+    FlatVectorPtr<float> bias_2_mat = maker.flatVector<float>(num_samples * layer2_size);
+    for(int i=0; i < bias_2_mat->size(); i++)
+      bias_2_mat->set(i, bias_2_values[i%layer2_size]);
+
+  
+    auto featureArrayVector = maker.arrayVector<float>(data.features , REAL());
+    auto inputRowVector = maker.rowVector({"x"}, {featureArrayVector});
+
+    std::string compute =  NNBuilder()
+                          .denseLayer(layer1_size ,input_size, data.weights[0], 
+                            bias_1_mat->values()->asMutable<float>(), NNBuilder::RELU)
+                          .denseLayer(layer2_size ,layer1_size, data.weights[1], 
+                            bias_2_mat->values()->asMutable<float>(), NNBuilder::SOFTMAX)
+                          .build();
+
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    core::PlanNodeId p0;
+  
+    std::cout << compute << std::endl; 
+    auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(asRowType(inputRowVector->type()))
+                  .capturePlanNodeId(p0)
+                  .project({fmt::format(compute, "x")}) 
+		              .planFragment();
+  
+    execute_plan(plan, p0, inputRowVector, confs);
+}
+
+
 void MLFunctionsTest::run() {
-  // test_mnist_multithreading();
-  test_torch_dense_layer_multithreading();
+  // Large
+  //ffnn(597540,1024,14588);
+  // small
+  //ffnn(784,1024,10);
+
+  //large
+  torch_ffnn(597540,1024,14588);
+  // small
+  // torch_ffnn(784,1024,10);
 }
 
 int main(int argc, char** argv) {
