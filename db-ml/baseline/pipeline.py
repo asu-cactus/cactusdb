@@ -154,7 +154,7 @@ def get_test_var_feature(data, col, key2index, max_len):
 
 class TwoTowerModelPipelineTorch(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
-        super(TwoTowerModelPipelineTorch, self).__init__("two-tower-model", num_loop, num_sample)
+        super(TwoTowerModelPipelineTorch, self).__init__("two-tower-model-pytorch", num_loop, num_sample)
         self.postgres_conn = utils.get_postgres_connection_config()
 
     def loading_meta_impl(self):
@@ -269,7 +269,7 @@ class TwoTowerModelPipelineTorch(Pipeline):
 
 class TwoTowerModelPipelineTF(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
-        super(TwoTowerModelPipelineTF, self).__init__("two-tower-model", num_loop, num_sample)
+        super(TwoTowerModelPipelineTF, self).__init__("two-tower-model-tensorflow", num_loop, num_sample)
         # self.model = None  # TODO
         # self.model.eval()
         # self.num_sample = num_sample
