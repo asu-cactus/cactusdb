@@ -12,7 +12,7 @@ def load_movielens_to_postgres():
     db = create_engine(conn_string)
     conn = db.connect()
     
-    data = pd.read_csv('data/movielens.txt')
+    data = pd.read_csv('data/movielens_processed.csv')
     a = LabelEncoder().fit(data['movie_id'])
     b = a.transform(data['movie_id'])
     data['movie_id'] = b+1
