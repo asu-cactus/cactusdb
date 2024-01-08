@@ -36,7 +36,7 @@ RUN apt-get install -y python3-pip
 RUN apt-get install -y tmux
 RUN apt-get install -y sudo
 RUN apt-get install -y libpq-dev
-RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf
+RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
 

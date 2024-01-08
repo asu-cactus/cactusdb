@@ -2,12 +2,13 @@ import utils
 import pandas as pd
 import numpy as np
 import connectorx as cx
+import tensorflow as tf
 from tqdm.auto import tqdm
 from abc import ABC, abstractmethod
 from sklearn.preprocessing import LabelEncoder
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from models.preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
-from models.dssm import DSSM
+from models.dssm import DSSM_Torch, DSSM_TF
 
 
 class Pipeline(object):
@@ -151,9 +152,124 @@ def get_test_var_feature(data, col, key2index, max_len):
     test_hist = pad_sequences(test_hist, maxlen=max_len, padding='post')
     return test_hist
 
-class TwoTowerModelPipeline(Pipeline):
+class TwoTowerModelPipelineTorch(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
-        super(TwoTowerModelPipeline, self).__init__("two-tower-model", num_loop, num_sample)
+        super(TwoTowerModelPipelineTorch, self).__init__("two-tower-model", num_loop, num_sample)
+        self.postgres_conn = utils.get_postgres_connection_config()
+
+    def loading_meta_impl(self):
+        embedding_dim = 32
+        epoch = 15
+        batch_size = 2048
+        lr = 0.001
+        seed = 1023
+        dropout = 0.3
+
+        ori_data = pd.read_csv('data/movielens_processed.csv')
+
+        sparse_features = ["user_id", "movie_id", "gender", "age", "occupation"]
+        dense_features = ["user_mean_rating", "movie_mean_rating"]
+        target = ["rating"]
+        device = "cpu"
+        user_sparse_features, user_dense_features = [
+            "user_id",
+            "gender",
+            "age",
+            "occupation",
+        ], ["user_mean_rating"]
+        item_sparse_features, item_dense_features = [
+            "movie_id",
+        ], ["movie_mean_rating"]
+        dict_encoder = dict()
+        for feat in sparse_features:
+            lbe = LabelEncoder()
+            lbe.fit(ori_data[feat])
+            dict_encoder[feat] = lbe
+
+        genres_key2index, train_genres_list, genres_maxlen = get_var_feature(
+            ori_data, "genres"
+        )
+
+        user_feature_columns = [
+            SparseFeat(feat, ori_data[feat].nunique(), embedding_dim=embedding_dim)
+            for i, feat in enumerate(user_sparse_features)
+        ] + [
+            DenseFeat(
+                feat,
+                1,
+            )
+            for feat in user_dense_features
+        ]
+        item_feature_columns = [
+            SparseFeat(feat, ori_data[feat].nunique(), embedding_dim=embedding_dim)
+            for i, feat in enumerate(item_sparse_features)
+        ] + [
+            DenseFeat(
+                feat,
+                1,
+            )
+            for feat in item_dense_features
+        ]
+        model = DSSM_Torch(
+            user_feature_columns, item_feature_columns, task="binary", device=device
+        )
+        model.compile(
+            "adam", "binary_crossentropy", metrics=["auc", "accuracy", "logloss"], lr=lr
+        )
+        self.model = model
+        self.meta['model'] = model
+        self.meta['sparse_features'] = sparse_features
+        self.meta['dense_features'] = dense_features
+        self.meta['dict_encoder'] = dict_encoder
+        self.meta['genres_key2index'] = genres_key2index
+        self.meta['genres_maxlen'] = genres_maxlen
+
+
+
+    def data_loading_impl(self):
+        sampledUserId = np.random.randint(1, 6041, self.num_sample)
+        sampledMovieId = np.random.randint(1, 3707, self.num_sample)
+        query_df = pd.DataFrame(
+            {"q_user_id": sampledUserId, "q_movie_id": sampledMovieId}
+        )
+        query_df.to_sql(
+            "movielens_q_temp", self.postgres_conn, index=False, if_exists="replace"
+        )
+        data = utils.fetch_data_from_postgres_via_sql(sql_movielens_integrated_result)
+        return data
+
+    def data_processing_impl(self, data):
+        sparse_features = self.meta['sparse_features']
+        dense_features = self.meta['dense_features']
+        dict_encoder = self.meta['dict_encoder']
+        genres_key2index = self.meta['genres_key2index']
+        genres_maxlen = self.meta['genres_maxlen']
+        
+        data["user_mean_rating"] = data["user_mean_rating"].astype(np.float64)
+        data["movie_mean_rating"] = data["movie_mean_rating"].astype(np.float64)
+
+        for feat in sparse_features:
+            lbe = dict_encoder[feat]
+            data[feat] = lbe.transform(data[feat])
+
+        test_genres_list = get_test_var_feature(
+            data, "genres", genres_key2index, genres_maxlen
+        )
+        test_model_input = {
+            name: data[name] for name in sparse_features + dense_features
+        }
+        test_model_input["genres"] = test_genres_list
+        # data['COL1'] = label_encoder.transform(data['COL1'])
+        return test_model_input
+
+    def model_inference_impl(self, data):
+        y_preds = self.model.predict(data)
+        return y_preds
+
+
+class TwoTowerModelPipelineTF(Pipeline):
+    def __init__(self, num_sample=500, num_loop=10):
+        super(TwoTowerModelPipelineTF, self).__init__("two-tower-model", num_loop, num_sample)
         # self.model = None  # TODO
         # self.model.eval()
         # self.num_sample = num_sample
@@ -212,12 +328,13 @@ class TwoTowerModelPipeline(Pipeline):
             )
             for feat in item_dense_features
         ]
-        model = DSSM(
-            user_feature_columns, item_feature_columns, task="binary", device=device
+        #FIXME
+        model = DSSM_TF(
+            ['user_id'], ['movie_id']
         )
-        model.compile(
-            "adam", "binary_crossentropy", metrics=["auc", "accuracy", "logloss"], lr=lr
-        )
+        # model.compile(
+        #     "adam", "binary_crossentropy", metrics=["auc", "accuracy", "logloss"], lr=lr
+        # )
         self.model = model
         self.meta['model'] = model
         self.meta['sparse_features'] = sparse_features
@@ -262,8 +379,16 @@ class TwoTowerModelPipeline(Pipeline):
         }
         test_model_input["genres"] = test_genres_list
         # data['COL1'] = label_encoder.transform(data['COL1'])
-        return test_model_input
+
+        test_data = dict()
+        for k, v in test_model_input.items():
+            if 'rating' in k:
+                test_data[k] = tf.convert_to_tensor(value=v, dtype='float64')
+            else:
+                test_data[k] = tf.convert_to_tensor(value=v, dtype='int64')
+            
+        return test_data
 
     def model_inference_impl(self, data):
-        y_preds = self.model.predict(data)
+        y_preds = self.model(data)
         return y_preds
