@@ -3,6 +3,7 @@ import numpy as np
 import psycopg2
 import pandas as pd
 import os
+import evadb
 
 
 def mkdir(dir_path):
@@ -73,3 +74,16 @@ class Timer(object):
         """
         self.end = time.perf_counter()
         return (self.end - self.start) * 1000
+
+
+def setup_postgres_for_evadb():
+    params = {
+        "user": "postgresdb",
+        "password": "postgresdb",
+        "host": "localhost",
+        "port": "5432",
+        "database": "postgresdb",
+    }
+    query = f"CREATE DATABASE IF NOT EXISTS postgres_data WITH ENGINE = 'postgres', PARAMETERS = {params};"
+    cursor = evadb.connect().cursor()
+    cursor.query(query).df()

@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import connectorx as cx
 import tensorflow as tf
+import evadb
 from tqdm.auto import tqdm
 from abc import ABC, abstractmethod
 from sklearn.preprocessing import LabelEncoder
@@ -136,11 +137,12 @@ def get_var_feature(data, col):
     )
     return key2index, var_feature, max_len
 
+
 def get_test_var_feature(data, col, key2index, max_len):
     # print("user_hist_list: \n")
 
     def split(x):
-        key_ans = x.split('|')
+        key_ans = x.split("|")
         for key in key_ans:
             if key not in key2index:
                 # Notice : input value 0 is a special "padding",
@@ -149,12 +151,15 @@ def get_test_var_feature(data, col, key2index, max_len):
         return list(map(lambda x: key2index[x], key_ans))
 
     test_hist = list(map(split, data[col].values))
-    test_hist = pad_sequences(test_hist, maxlen=max_len, padding='post')
+    test_hist = pad_sequences(test_hist, maxlen=max_len, padding="post")
     return test_hist
+
 
 class TwoTowerModelPipelineTorch(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
-        super(TwoTowerModelPipelineTorch, self).__init__("two-tower-model-pytorch", num_loop, num_sample)
+        super(TwoTowerModelPipelineTorch, self).__init__(
+            "two-tower-model-pytorch", num_loop, num_sample
+        )
         self.postgres_conn = utils.get_postgres_connection_config()
 
     def loading_meta_impl(self):
@@ -165,7 +170,7 @@ class TwoTowerModelPipelineTorch(Pipeline):
         seed = 1023
         dropout = 0.3
 
-        ori_data = pd.read_csv('data/movielens_processed.csv')
+        ori_data = pd.read_csv("data/movielens_processed.csv")
 
         sparse_features = ["user_id", "movie_id", "gender", "age", "occupation"]
         dense_features = ["user_mean_rating", "movie_mean_rating"]
@@ -217,14 +222,12 @@ class TwoTowerModelPipelineTorch(Pipeline):
             "adam", "binary_crossentropy", metrics=["auc", "accuracy", "logloss"], lr=lr
         )
         self.model = model
-        self.meta['model'] = model
-        self.meta['sparse_features'] = sparse_features
-        self.meta['dense_features'] = dense_features
-        self.meta['dict_encoder'] = dict_encoder
-        self.meta['genres_key2index'] = genres_key2index
-        self.meta['genres_maxlen'] = genres_maxlen
-
-
+        self.meta["model"] = model
+        self.meta["sparse_features"] = sparse_features
+        self.meta["dense_features"] = dense_features
+        self.meta["dict_encoder"] = dict_encoder
+        self.meta["genres_key2index"] = genres_key2index
+        self.meta["genres_maxlen"] = genres_maxlen
 
     def data_loading_impl(self):
         sampledUserId = np.random.randint(1, 6041, self.num_sample)
@@ -239,12 +242,12 @@ class TwoTowerModelPipelineTorch(Pipeline):
         return data
 
     def data_processing_impl(self, data):
-        sparse_features = self.meta['sparse_features']
-        dense_features = self.meta['dense_features']
-        dict_encoder = self.meta['dict_encoder']
-        genres_key2index = self.meta['genres_key2index']
-        genres_maxlen = self.meta['genres_maxlen']
-        
+        sparse_features = self.meta["sparse_features"]
+        dense_features = self.meta["dense_features"]
+        dict_encoder = self.meta["dict_encoder"]
+        genres_key2index = self.meta["genres_key2index"]
+        genres_maxlen = self.meta["genres_maxlen"]
+
         data["user_mean_rating"] = data["user_mean_rating"].astype(np.float64)
         data["movie_mean_rating"] = data["movie_mean_rating"].astype(np.float64)
 
@@ -269,7 +272,9 @@ class TwoTowerModelPipelineTorch(Pipeline):
 
 class TwoTowerModelPipelineTF(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
-        super(TwoTowerModelPipelineTF, self).__init__("two-tower-model-tensorflow", num_loop, num_sample)
+        super(TwoTowerModelPipelineTF, self).__init__(
+            "two-tower-model-tensorflow", num_loop, num_sample
+        )
         # self.model = None  # TODO
         # self.model.eval()
         # self.num_sample = num_sample
@@ -283,7 +288,7 @@ class TwoTowerModelPipelineTF(Pipeline):
         seed = 1023
         dropout = 0.3
 
-        ori_data = pd.read_csv('data/movielens_processed.csv')
+        ori_data = pd.read_csv("data/movielens_processed.csv")
 
         sparse_features = ["user_id", "movie_id", "gender", "age", "occupation"]
         dense_features = ["user_mean_rating", "movie_mean_rating"]
@@ -328,22 +333,18 @@ class TwoTowerModelPipelineTF(Pipeline):
             )
             for feat in item_dense_features
         ]
-        #FIXME
-        model = DSSM_TF(
-            ['user_id'], ['movie_id']
-        )
+        # FIXME
+        model = DSSM_TF(["user_id"], ["movie_id"])
         # model.compile(
         #     "adam", "binary_crossentropy", metrics=["auc", "accuracy", "logloss"], lr=lr
         # )
         self.model = model
-        self.meta['model'] = model
-        self.meta['sparse_features'] = sparse_features
-        self.meta['dense_features'] = dense_features
-        self.meta['dict_encoder'] = dict_encoder
-        self.meta['genres_key2index'] = genres_key2index
-        self.meta['genres_maxlen'] = genres_maxlen
-
-
+        self.meta["model"] = model
+        self.meta["sparse_features"] = sparse_features
+        self.meta["dense_features"] = dense_features
+        self.meta["dict_encoder"] = dict_encoder
+        self.meta["genres_key2index"] = genres_key2index
+        self.meta["genres_maxlen"] = genres_maxlen
 
     def data_loading_impl(self):
         sampledUserId = np.random.randint(1, 6041, self.num_sample)
@@ -358,12 +359,12 @@ class TwoTowerModelPipelineTF(Pipeline):
         return data
 
     def data_processing_impl(self, data):
-        sparse_features = self.meta['sparse_features']
-        dense_features = self.meta['dense_features']
-        dict_encoder = self.meta['dict_encoder']
-        genres_key2index = self.meta['genres_key2index']
-        genres_maxlen = self.meta['genres_maxlen']
-        
+        sparse_features = self.meta["sparse_features"]
+        dense_features = self.meta["dense_features"]
+        dict_encoder = self.meta["dict_encoder"]
+        genres_key2index = self.meta["genres_key2index"]
+        genres_maxlen = self.meta["genres_maxlen"]
+
         data["user_mean_rating"] = data["user_mean_rating"].astype(np.float64)
         data["movie_mean_rating"] = data["movie_mean_rating"].astype(np.float64)
 
@@ -382,13 +383,104 @@ class TwoTowerModelPipelineTF(Pipeline):
 
         test_data = dict()
         for k, v in test_model_input.items():
-            if 'rating' in k:
-                test_data[k] = tf.convert_to_tensor(value=v, dtype='float64')
+            if "rating" in k:
+                test_data[k] = tf.convert_to_tensor(value=v, dtype="float64")
             else:
-                test_data[k] = tf.convert_to_tensor(value=v, dtype='int64')
-            
+                test_data[k] = tf.convert_to_tensor(value=v, dtype="int64")
+
         return test_data
 
     def model_inference_impl(self, data):
         y_preds = self.model(data)
         return y_preds
+
+
+class FFNNEvaDB(Pipeline):
+    def __init__(self, num_sample=500, num_loop=10):
+        super(FFNNEvaDB, self).__init__("ffnn-evadb", num_loop, num_sample)
+        # deregister function
+        # register function
+        self.cursor = evadb.connect().cursor()
+        self.cursor.query("DROP FUNCTION IF EXISTS FFNN_EVADB;").df()
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS FFNN_EVADB
+            IMPL './ffnn_evadb.py';
+            """
+        ).df()
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self):
+        return None
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        return data
+        # y_preds = self.cursor.query(
+        #     """
+        #     SELECT FFNN_EVADB(val).label
+        #     FROM postgres_data.ffnn_data
+        #     LIMIT {};
+        #     """.format(self.num_sample)
+        # ).df()
+        # return y_preds
+
+    def run_pipeline(self):
+        self.loading_meta_impl()
+
+        timer_end_end = utils.Timer()
+        timer_data_loading = utils.Timer()
+        timer_data_processing = utils.Timer()
+        timer_model_inference = utils.Timer()
+        t_end_end = 0
+        t_data_loading = 0
+        t_data_processing = 0
+        t_model_inference = 0
+
+        data = None
+        timer_end_end.tic()
+        for _ in tqdm(range(self.num_loop)):
+            timer_data_loading.tic()
+            data = self.data_loading_impl()
+            t_data_loading += timer_data_loading.toc()
+
+            timer_data_processing.tic()
+            data = self.data_processing_impl(data)
+            t_data_processing += timer_data_processing.toc()
+
+            timer_model_inference.tic()
+            data = self.model_inference_impl(data)
+            t_model_inference += timer_model_inference.toc()
+
+            y_preds = self.cursor.query(
+                """
+            SELECT FFNN_EVADB(val).label
+            FROM postgres_data.ffnn_data
+            LIMIT {};
+            """.format(
+                    self.num_sample
+                )
+            ).df()
+
+        t_end_end += timer_end_end.toc() / self.num_loop
+        t_data_loading /= self.num_loop
+        t_data_processing /= self.num_loop
+        t_model_inference /= self.num_loop
+
+        result_df = pd.DataFrame(
+            {
+                "config_name": self.name,
+                "num_sample": self.num_sample,
+                "t_data_load": t_data_loading,
+                "t_data_process": t_data_processing,
+                "t_model": t_model_inference,
+                "t_end_end": t_end_end,
+            },
+            index=[0],
+        )
+        return result_df
