@@ -8,6 +8,7 @@ from .preprocessing.inputs import combined_dnn_input, compute_input_dim
 from .layers.core import DNN
 import torch
 import tensorflow as tf
+import numpy as np
 from .preprocessing.utils import Cosine_Similarity
 from .preprocessing.utils import col_score
 from .preprocessing.utils import col_score_2
@@ -15,6 +16,46 @@ from .preprocessing.utils import single_score
 from .preprocessing.utils import Timer
 from .layers.interaction import SENETLayer
 from .layers.interaction import LightSE
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+def get_var_feature(data, col):
+    key2index = {}
+
+    def split(x):
+        key_ans = x.split("|")
+        for key in key_ans:
+            if key not in key2index:
+                # Notice : input value 0 is a special "padding",\
+                # so we do not use 0 to encode valid feature for sequence input
+                key2index[key] = len(key2index) + 1
+        return list(map(lambda x: key2index[x], key_ans))
+
+    var_feature = list(map(split, data[col].values))
+    var_feature_length = np.array(list(map(len, var_feature)))
+    max_len = max(var_feature_length)
+    var_feature = pad_sequences(
+        var_feature,
+        maxlen=max_len,
+        padding="post",
+    )
+    return key2index, var_feature, max_len
+
+
+def get_test_var_feature(data, col, key2index, max_len):
+    # print("user_hist_list: \n")
+
+    def split(x):
+        key_ans = x.split("|")
+        for key in key_ans:
+            if key not in key2index:
+                # Notice : input value 0 is a special "padding",
+                # so we do not use 0 to encode valid feature for sequence input
+                key2index[key] = len(key2index) + 1
+        return list(map(lambda x: key2index[x], key_ans))
+
+    test_hist = list(map(split, data[col].values))
+    test_hist = pad_sequences(test_hist, maxlen=max_len, padding="post")
+    return test_hist
 
 class DSSM_Torch(BaseTower):
     """DSSM Two Tower Model"""

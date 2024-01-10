@@ -15,6 +15,11 @@ def benchmark_two_tower_model_pipeline_tf(num_loop=10, num_sample=500):
     benchmark_result = two_tower_model_pipeline.run_pipeline()
     return benchmark_result
 
+def benchmark_two_tower_model_pipeline_evadb(num_loop=10, num_sample=50):
+    two_tower_model_pipeline = pipeline.TowTowerModelPipelineEvaDB(num_loop, num_sample)
+    benchmark_result = two_tower_model_pipeline.run_pipeline()
+    return benchmark_result
+
 def benchmark_ffnn_pipeline_evadb(num_loop=10, num_sample=50):
     ffnn_pipeline = pipeline.FFNNEvaDB(num_loop, num_sample)
     benchmark_result = ffnn_pipeline.run_pipeline()
@@ -22,7 +27,8 @@ def benchmark_ffnn_pipeline_evadb(num_loop=10, num_sample=50):
 
 def main():
     # list_benchmark = [benchmark_two_tower_model_pipeline_pytorch, benchmark_two_tower_model_pipeline_tf]
-    list_benchmark = [benchmark_ffnn_pipeline_evadb]
+    # list_benchmark = [benchmark_ffnn_pipeline_evadb]
+    list_benchmark = [benchmark_two_tower_model_pipeline_evadb]
     result_df = None
     num_loop = 10
     num_sample = 50
