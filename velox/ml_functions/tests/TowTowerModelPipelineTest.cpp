@@ -665,21 +665,21 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   uint64_t kSizeKB = 1024UL;
 
   auto userHiveSplits = makeHiveConnectorSplits(
-      {"/home/velox/data/movielens_user_s_8192.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_user_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
   auto movieHiveSplits = makeHiveConnectorSplits(
-      {"/home/velox/data/movielens_movie_s_8192.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_movie_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingUserHiveSplits = makeHiveConnectorSplits(
-      {"/home/velox/data/movielens_rating_s_8192.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingMovieHiveSplits = makeHiveConnectorSplits(
-      {"/home/velox/data/movielens_rating_s_8192.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
@@ -1387,26 +1387,26 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   // queryCtx_->testingOverrideMemoryPool(rootPool);
   //   int numSplit = 2;
   auto queryDataHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/query_data.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/query_data.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
   auto userHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_user_s_8192.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_user_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
   auto movieHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_movie_s_8192.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_movie_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingUserHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_rating_s_8192.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingMovieHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_rating_s_8192.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
@@ -1435,7 +1435,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   // FIXME refactor the code to generate query parquet file via velox parquet
   // writer, ref: SinkTests.cpp
   std::string cmdToGenData = fmt::format(
-      "python3 /root/velox_latest/data/gen_data.py -n {}", numSamples);
+      "python3 /home/local/ASUAD/qlin36/velox/data/gen_data.py -n {}", numSamples);
   int returnCode = system(cmdToGenData.c_str());
 
   core::PlanNodeId readQueryDataPlanNodeId;
@@ -2154,11 +2154,11 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
 
   //   int numSplit = 2;
   auto userRatingHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_user_rating.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_user_rating.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
   auto movieRatingHiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens_movie_rating.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens_movie_rating.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
