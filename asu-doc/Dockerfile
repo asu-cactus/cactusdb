@@ -61,6 +61,13 @@ WORKDIR /home
 RUN wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.0.1%2Bcpu.zip
 RUN unzip libtorch-cxx11-abi-shared-with-deps-2.0.1+cpu.zip
 ENV Torch_DIR=/home/libtorch
+# set up evadb
+RUN git clone https://github.com/lixi-zhou/evadb.git
+WORKDIR /home/evadb
+RUN git checkout array
+RUN pip install ./[ray]
+
+# set up velox
 RUN git clone https://github.com/facebookincubator/velox.git
 WORKDIR /home/velox
 
