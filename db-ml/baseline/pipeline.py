@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from sklearn.preprocessing import LabelEncoder
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from models.preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
-from models.dssm import DSSM_Torch, DSSM_TF
+from models.dssm import DSSM_Torch, DSSM_TF, get_var_feature, get_test_var_feature
 
 
 class Pipeline(object):
@@ -114,45 +114,6 @@ from movielens_q_temp mqt, t_user_rating tur, t_movie_rating tmr
 where mqt.q_user_id = tur.user_id AND mqt.q_movie_id = tmr.movie_id;
 """
 
-
-def get_var_feature(data, col):
-    key2index = {}
-
-    def split(x):
-        key_ans = x.split("|")
-        for key in key_ans:
-            if key not in key2index:
-                # Notice : input value 0 is a special "padding",\
-                # so we do not use 0 to encode valid feature for sequence input
-                key2index[key] = len(key2index) + 1
-        return list(map(lambda x: key2index[x], key_ans))
-
-    var_feature = list(map(split, data[col].values))
-    var_feature_length = np.array(list(map(len, var_feature)))
-    max_len = max(var_feature_length)
-    var_feature = pad_sequences(
-        var_feature,
-        maxlen=max_len,
-        padding="post",
-    )
-    return key2index, var_feature, max_len
-
-
-def get_test_var_feature(data, col, key2index, max_len):
-    # print("user_hist_list: \n")
-
-    def split(x):
-        key_ans = x.split("|")
-        for key in key_ans:
-            if key not in key2index:
-                # Notice : input value 0 is a special "padding",
-                # so we do not use 0 to encode valid feature for sequence input
-                key2index[key] = len(key2index) + 1
-        return list(map(lambda x: key2index[x], key_ans))
-
-    test_hist = list(map(split, data[col].values))
-    test_hist = pad_sequences(test_hist, maxlen=max_len, padding="post")
-    return test_hist
 
 
 class TwoTowerModelPipelineTorch(Pipeline):
@@ -459,8 +420,146 @@ class FFNNEvaDB(Pipeline):
                 )
             ).df()
 
-            t_data_processing += result_df['t_process'].values[-1]
-            t_model_inference += result_df['t_model_inference'].values[-1]
+            t_data_processing += result_df["t_process"].values[-1]
+            t_model_inference += result_df["t_model_inference"].values[-1]
+
+        t_end_end += timer_end_end.toc() / self.num_loop
+        t_data_loading /= self.num_loop
+        t_data_processing /= self.num_loop
+        t_model_inference /= self.num_loop
+
+        result_df = pd.DataFrame(
+            {
+                "config_name": self.name,
+                "num_sample": self.num_sample,
+                "t_data_load": t_data_loading,
+                "t_data_process": t_data_processing,
+                "t_model": t_model_inference,
+                "t_end_end": t_end_end,
+            },
+            index=[0],
+        )
+        return result_df
+
+
+class TowTowerModelPipelineEvaDB(Pipeline):
+    def __init__(self, num_sample=500, num_loop=10):
+        super(TowTowerModelPipelineEvaDB, self).__init__(
+            "two-tower-evadb", num_loop, num_sample
+        )
+        self.cursor = evadb.connect().cursor()
+        # create changed_rating_view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_v_changed_rating AS
+            SELECT *,
+                CASE
+                    WHEN rating > 3 THEN 1
+                    ELSE 0
+                END AS changed_rating
+            FROM movielens_rating
+            };
+        """
+        ).df()
+        # create user_rating_view 
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_v_user_rating AS
+            SELECT mu.user_id, gender, age, occupation, avg(tcr.changed_rating) AS user_mean_rating
+                FROM movielens_user mu, evadb_v_changed_rating tcr
+                WHERE mu.user_id = tcr.user_id
+                GROUP BY mu.user_id, gender, age, occupation
+            };
+        """
+        ).df()
+        # create movie_rating_view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_v_movie_rating AS
+            SELECT mm.movie_id, genres, avg(tcr.changed_rating) AS movie_mean_rating
+                FROM movielens_movie mm , evadb_v_changed_rating tcr
+                WHERE mm.movie_id = tcr.movie_id
+                GROUP BY mm.movie_id, genres
+            };
+        """
+        ).df()
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS DSSM_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS DSSM_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+        self.postgres_conn = utils.get_postgres_connection_config()
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self):
+        sampledUserId = np.random.randint(1, 6041, self.num_sample)
+        sampledMovieId = np.random.randint(1, 3707, self.num_sample)
+        query_df = pd.DataFrame(
+            {"q_user_id": sampledUserId, "q_movie_id": sampledMovieId}
+        )
+        # Note: for EvaDB, here we only store the query data in db. We don't fetch data.
+        query_df.to_sql(
+            "movielens_q_temp", self.postgres_conn, index=False, if_exists="replace"
+        )
+
+        return None
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        return data
+
+    def run_pipeline(self):
+        self.loading_meta_impl()
+
+        timer_end_end = utils.Timer()
+        timer_data_loading = utils.Timer()
+        timer_data_processing = utils.Timer()
+        timer_model_inference = utils.Timer()
+        t_end_end = 0
+        t_data_loading = 0
+        t_data_processing = 0
+        t_model_inference = 0
+
+        data = None
+        timer_end_end.tic()
+        for _ in tqdm(range(self.num_loop)):
+            timer_data_loading.tic()
+            data = self.data_loading_impl()
+            t_data_loading += timer_data_loading.toc()
+
+            timer_data_processing.tic()
+            data = self.data_processing_impl(data)
+            t_data_processing += timer_data_processing.toc()
+
+            timer_model_inference.tic()
+            data = self.model_inference_impl(data)
+            t_model_inference += timer_model_inference.toc()
+
+            result_df = self.cursor.query(
+                """
+            select DSSM_EVADB(user_id, gender, age, occupation, user_mean_rating, movie_id, genres, movie_mean_rating)
+            from postgres_data.movielens_q_temp mqt JOIN postgres_data.evadb_v_user_rating tur
+            ON mqt.q_user_id=tur.user_id JOIN postgres_data.evadb_v_movie_rating tmr
+            ON mqt.q_movie_id=tmr.movie_id;
+            """.format(
+                    self.num_sample
+                )
+            ).df()
+
+            t_data_processing += result_df["t_process"].values[-1]
+            t_model_inference += result_df["t_model_inference"].values[-1]
 
         t_end_end += timer_end_end.toc() / self.num_loop
         t_data_loading /= self.num_loop
