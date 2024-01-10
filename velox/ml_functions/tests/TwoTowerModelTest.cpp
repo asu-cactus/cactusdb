@@ -638,7 +638,7 @@ void TowTowerModelTest::testStringEncoder() {
   auto addSplits = [&](exec::Task* task) {
     if (!noMoreSplits) {
       auto const splits = HiveConnectorTestBase::makeHiveConnectorSplits(
-          {"/root/velox_latest/data/movielens.parquet"},
+          {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
           numSplitsPerFile,
           dwio::common::FileFormat::PARQUET);
       for (const auto& split : splits) {
@@ -1231,7 +1231,7 @@ void TowTowerModelTest::testDataProcessing() {
   auto addSplits = [&](exec::Task* task) {
     if (!noMoreSplits) {
       auto const splits = HiveConnectorTestBase::makeHiveConnectorSplits(
-          {"/root/velox_latest/data/movielens.parquet"},
+          {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
           numSplitsPerFile,
           dwio::common::FileFormat::PARQUET);
       for (const auto& split : splits) {
@@ -2634,7 +2634,7 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
   auto addSplits = [&](exec::Task* task) {
     if (!noMoreSplits) {
       auto const splits = HiveConnectorTestBase::makeHiveConnectorSplits(
-          {"/root/velox_latest/data/movielens.parquet"},
+          {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
           numSplitsPerFile,
           dwio::common::FileFormat::PARQUET);
       for (const auto& split : splits) {
@@ -3372,11 +3372,11 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
 
   //   int numSplit = 2;
   auto hiveSplits = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
   auto hiveSplits1 = makeHiveConnectorSplits(
-      {"/root/velox_latest/data/movielens.parquet"},
+      {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
   //   int concurrency = 2;
