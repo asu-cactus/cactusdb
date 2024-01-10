@@ -45,7 +45,8 @@ public:
 	       VectorMaker & maker,
 	       PlanBuilder & planBuilder,
 	       std::shared_ptr<memory::MemoryPool> pool_,
-	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator ) override {
+	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+		   std::string target ) override {
 
         if (curNode) {
 
@@ -58,20 +59,13 @@ public:
             const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
 
             for (auto expression : projections) {
-		 
+				while (expression->inputs().size() > 0) {
 		        if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)) {
 
 			        std::string callName = call->name();
 
-					if (callName.find("softmax") != std::string::npos){
-
-						auto call2 = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0]->inputs()[0]->inputs()[0]);
-
-						std::string callName2 = call2->name();
-
-			        	if (callName2.find("relu") != std::string::npos) {
-			     
-			      /* 
+					if (callName.find(target) != std::string::npos){
+			      /*
 			       * Case I: If this function call is two layer expression in the projection (e.g.,project({"softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))"})), 
 			       * we need to merge it to the compact expression, (e.g.,project({"torch(v)"})).
 			       */
@@ -83,11 +77,17 @@ public:
 
                             core::QueryConfig config({});
 							// TODO: replace by call and call2, std::dynamic_pointer_cast<const core::CallTypedExpr>(call->inputs()[0])->name() ---mat_add4
-							std::shared_ptr<VectorFunction> myMul1 = getVectorFunction("mat_mul0", {ARRAY(REAL())}, {}, config);
-							std::shared_ptr<VectorFunction> myMul2 = getVectorFunction("mat_mul3", {ARRAY(REAL())}, {}, config);
+							std::string firstMatMulName = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0]->inputs()[0])->name();
+							std::string firstMatAddName = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0])->name();
 
-							std::shared_ptr<VectorFunction> myAdd1 = getVectorFunction("mat_add1", {ARRAY(REAL())}, {}, config);
-							std::shared_ptr<VectorFunction> myAdd2 = getVectorFunction("mat_add4", {ARRAY(REAL())}, {}, config);
+							std::string secondMatMulName = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0])->name();
+							std::string secondMatAddName = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0])->name();
+
+							std::shared_ptr<VectorFunction> myMul1 = getVectorFunction(secondMatMulName, {ARRAY(REAL())}, {}, config);
+							std::shared_ptr<VectorFunction> myMul2 = getVectorFunction(firstMatMulName, {ARRAY(REAL())}, {}, config);
+
+							std::shared_ptr<VectorFunction> myAdd1 = getVectorFunction(secondMatAddName, {ARRAY(REAL())}, {}, config);
+							std::shared_ptr<VectorFunction> myAdd2 = getVectorFunction(firstMatAddName, {ARRAY(REAL())}, {}, config);
 
 
 				            if (myMul1 && myMul2 && myAdd1 && myAdd2) {
@@ -154,22 +154,134 @@ public:
 			        
 
 
-			  }
+			  
 			}
-		 
-		     }
-		 
-		 }		 
+
+		     	}
+				expression = expression->inputs()[0];
+				}
+		 	}
 		     
-            }
-	
+        }
+
+		// if (nodeName == "Filter") {
+		 
+        //     std::shared_ptr<const FilterNode> myFilterNode = std::dynamic_pointer_cast<const FilterNode> (curNode);
+
+        //     const TypedExprPtr & filterExpr = myFilterNode->filter();
+
+		// 	while (filterExpr->inputs().size() > 0) {
+		 
+		//         if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(filterExpr)) {
+
+		// 	        std::string callName = call->name();
+
+		// 			if (callName.find(target) != std::string::npos){
+			     
+		// 	      /* 
+		// 	       * Case I: If this function call is two layer expression in the projection (e.g.,project({"softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))"})), 
+		// 	       * we need to merge it to the compact expression, (e.g.,project({"torch(v)"})).
+		// 	       */
+			       
+		// 	            // We are the only expression in the project operator
+
+
+        //                     core::QueryConfig config({});
+		// 					// TODO: replace by call and call2, std::dynamic_pointer_cast<const core::CallTypedExpr>(call->inputs()[0])->name() ---mat_add4
+		// 					std::string firstMatMulName = std::dynamic_pointer_cast<const core::CallTypedExpr>(filterExpr->inputs()[0]->inputs()[0])->name();
+		// 					std::string firstMatAddName = std::dynamic_pointer_cast<const core::CallTypedExpr>(filterExpr->inputs()[0])->name();
+
+		// 					std::string secondMatMulName = std::dynamic_pointer_cast<const core::CallTypedExpr>(filterExpr->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0])->name();
+		// 					std::string secondMatAddName = std::dynamic_pointer_cast<const core::CallTypedExpr>(filterExpr->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0])->name();
+
+		// 					std::shared_ptr<VectorFunction> myMul1 = getVectorFunction(secondMatMulName, {ARRAY(REAL())}, {}, config);
+		// 					std::shared_ptr<VectorFunction> myMul2 = getVectorFunction(firstMatMulName, {ARRAY(REAL())}, {}, config);
+
+		// 					std::shared_ptr<VectorFunction> myAdd1 = getVectorFunction(secondMatAddName, {ARRAY(REAL())}, {}, config);
+		// 					std::shared_ptr<VectorFunction> myAdd2 = getVectorFunction(firstMatAddName, {ARRAY(REAL())}, {}, config);
+
+
+		// 		            if (myMul1 && myMul2 && myAdd1 && myAdd2) {
+		// 						std::shared_ptr<MatrixMultiply> myMul1UDF = std::dynamic_pointer_cast<MatrixMultiply>(myMul1);
+		// 						std::shared_ptr<MatrixMultiply> myMul2UDF = std::dynamic_pointer_cast<MatrixMultiply>(myMul2);
+
+		// 						std::shared_ptr<MatrixAddition> myAdd1UDF = std::dynamic_pointer_cast<MatrixAddition>(myAdd1);
+		// 						std::shared_ptr<MatrixAddition> myAdd2UDF = std::dynamic_pointer_cast<MatrixAddition>(myAdd2);
+
+		// 			            if (myMul1UDF && myMul2UDF && myAdd1UDF && myAdd2UDF) {
+					 
+		// 							dims.push_back(myMul1UDF->getDims()[0]);
+		// 							dims.push_back(myMul1UDF->getDims()[1]);
+		// 							dims.push_back(myMul2UDF->getDims()[1]);
+
+		// 							weights[0] = myMul1UDF->getTensor();
+		// 							weights[1] = myMul2UDF->getTensor();
+
+		// 							bias[0] = myAdd1UDF->getTensor();
+		// 							bias[1] = myAdd2UDF->getTensor();
+
+		// 							registerVectorFunction(
+		// 							  "torchDNN",
+		// 							  TorchDNN::signatures(),
+		// 							  std::make_unique<TorchDNN>(weights, bias, dims)
+		// 							);
+		// 			            }
+				   
+		// 		            }
+
+        //                            // We remove the current node from the plan
+		// 		   //
+        //                     if (curNode->sources().size() > 0) {
+
+        //                         planBuilder = planBuilder.setRoot(curNode->sources()[0]);
+
+        //                             // We build the plan from this point
+
+        //                         planBuilder = planBuilder.project({"torchDNN(v)"});
+
+
+        //                         return true;
+        //                     }
+			       
+			       
+                                                                                             			       
+
+		//                /*
+		// 		* Case II: If this function call is the only expression in the projection (e.g.,project({"dense1(relu(mat_add(mat_mul(v))))))"})) 
+		// 		* or ({"softmax(mat_add(mat_mul(dense0(v))))"}), 
+		// 		* we need to merge it to one compact expression (e.g.,project({"torch(v)"}))
+		// 		* 
+		// 		*/
+
+		// 	       //TODO
+
+
+		// 	    /*
+        //         * Case III: If this function call is the only expression in the projection (e.g.,project({"dense1(dense0(v))"})), 
+		// 		* we need to merge it to one compact expressions, (e.g.,project({"torch(v)"})),
+        //         */
+
+		// 	       //TODO
+			        
+
+
+			  
+		// 	}
+		 
+		//      }
+		// 	 filterExpr = filterExpr->inputs()[0];
+		 
+		// 	} 
+		     
+        //     }
+
 	    std::vector<std::shared_ptr<const PlanNode>> sources = curNode->sources();
 
             if (sources.size() == 0) return false;
 
             for (auto source : sources)       		 
             
-	         apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator);
+	         apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, target);
 	
 	}
     
@@ -182,6 +294,44 @@ public:
         return "Merge2SingleRewriteAction";
     
     }
+
+	bool check(TypedExprPtr expression) override {
+		if (auto call0 = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)) {
+			std::string callName0 = call0->name();
+			if (auto call1 = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0]->inputs()[0])) {
+				std::string callName1 = call1->name();
+				if ((callName0.find("softmax") != std::string::npos) && (callName1.find("mat_mul") != std::string::npos)) {
+					if (auto call2 = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0]->inputs()[0]->inputs()[0])) {
+						std::string callName2 = call2->name();
+						if (auto call3 = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0])) {
+							std::string callName3 = call3->name();
+							if ((callName2.find("relu") != std::string::npos) && (callName3.find("mat_mul")!= std::string::npos)) {
+								return true;
+							}
+							else {
+								return false;
+							}
+						}
+						else {
+							return false;
+						}
+					}
+					else {
+						return false;
+					}
+				}
+				else {
+					return false;
+				}
+			}
+			else {
+				return false;
+			}
+		}
+		else {
+			return false;
+		}
+	}
 
 
 private: 

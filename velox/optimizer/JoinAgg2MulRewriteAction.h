@@ -45,7 +45,8 @@ public:
 	       VectorMaker & maker,
 	       PlanBuilder & planBuilder,
 	       std::shared_ptr<memory::MemoryPool> pool_,
-	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator ) override {
+	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+		   std::string target) override {
 
         if (curNode) {
 
@@ -159,7 +160,7 @@ public:
 
             for (auto source : sources)       		 
             
-	         apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator);
+	         apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, target);
 	
 	}
     
@@ -172,6 +173,10 @@ public:
         return "JoinAgg2MulRewriteAction";
     
     }
+
+	bool check(TypedExprPtr expression) override {
+		return true;
+	}
 
 
 private: 

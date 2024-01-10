@@ -38,9 +38,12 @@ public:
 		        VectorMaker & maker,
 		        PlanBuilder & planBuilder,
 		        std::shared_ptr<memory::MemoryPool> pool_,
-		        std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator ) = 0;
+		        std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator, 
+				std::string target) = 0;
 
     virtual std::string name() = 0;
+
+	virtual bool check(core::TypedExprPtr expression) = 0;
 
 
 
