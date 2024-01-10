@@ -421,14 +421,6 @@ class FFNNEvaDB(Pipeline):
 
     def model_inference_impl(self, data):
         return data
-        # y_preds = self.cursor.query(
-        #     """
-        #     SELECT FFNN_EVADB(val).label
-        #     FROM postgres_data.ffnn_data
-        #     LIMIT {};
-        #     """.format(self.num_sample)
-        # ).df()
-        # return y_preds
 
     def run_pipeline(self):
         self.loading_meta_impl()
@@ -457,15 +449,18 @@ class FFNNEvaDB(Pipeline):
             data = self.model_inference_impl(data)
             t_model_inference += timer_model_inference.toc()
 
-            y_preds = self.cursor.query(
+            result_df = self.cursor.query(
                 """
-            SELECT FFNN_EVADB(val).label
+            SELECT FFNN_EVADB(val)
             FROM postgres_data.ffnn_data
             LIMIT {};
             """.format(
                     self.num_sample
                 )
             ).df()
+
+            t_data_processing += result_df['t_process'].values[-1]
+            t_model_inference += result_df['t_model_inference'].values[-1]
 
         t_end_end += timer_end_end.toc() / self.num_loop
         t_data_loading /= self.num_loop

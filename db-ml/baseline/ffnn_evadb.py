@@ -17,6 +17,7 @@ from collections import OrderedDict
 import pandas as pd
 import numpy as np
 import torch
+import utils
 from evadb.functions.decorators.decorators import forward, setup
 from evadb.catalog.catalog_type import NdArrayType
 from evadb.functions.abstract.abstract_function import AbstractFunction
@@ -59,12 +60,17 @@ class FFNN_EVADB(AbstractFunction):
                 x = self.fc2(x)
                 return x
 
-        self.model = FFNNModel(597540, 1024, 14588)
+        self.model = FFNNModel(597540, 1, 10)
         self.model.eval()
+        self.timer_process = utils.Timer()
+        self.timer_model_inference = utils.Timer()
+        self.t_process = 0
+        self.t_model_inference = 0
+
 
     @property
     def labels(self):
-        return list([str(num) for num in range(14588)])
+        return list([str(num) for num in range(10)])
 
     @forward(
         input_signatures=[
@@ -76,22 +82,28 @@ class FFNN_EVADB(AbstractFunction):
         ],
         output_signatures=[
             PandasDataframe(
-                columns=["label"],
+                columns=["label", "t_process", "t_model_inference"],
                 column_types=[
-                    NdArrayType.STR
+                    NdArrayType.STR,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
                 ],
-                column_shapes=[(None,)],
+                column_shapes=[(None,),(None,),(None,)],
             )
         ],
     )
     def forward(self, data) -> pd.DataFrame:
         outcome = []
+        self.timer_process.tic()
         data = np.ravel(data.to_numpy())
         list_data = [arr for arr in data]
         list_data = np.array(list_data).astype(np.float32)
+        self.t_process += self.timer_process.toc()
+        self.timer_model_inference.tic()
         predictions = self.model(torch.tensor(list_data))
+        self.t_model_inference += self.timer_model_inference.toc()
         for prediction in predictions:
             label = self.as_numpy(prediction.data.argmax())
-            outcome.append({"label": str(label)})
-
-        return pd.DataFrame(outcome, columns=["label"])
+            outcome.append({"label": str(label), "t_process": self.t_process, "t_model_inference":self.t_model_inference})
+        result_df = pd.DataFrame(outcome, columns=["label", "t_process", "t_model_inference"])
+        return result_df
