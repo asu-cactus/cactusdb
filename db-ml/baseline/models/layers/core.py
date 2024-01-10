@@ -4,7 +4,7 @@ https://github.com/archersama/IntTower/tree/main
 """
 import torch
 import torch.nn as nn
-from layers.activation import activation_layer
+from ..layers.activation import activation_layer
 from tensorflow.python.keras.layers import Layer
 import tensorflow as tf
 
