@@ -37,6 +37,9 @@
 #include "Merge2SingleRewriteAction.h"
 #include "Mul2JoinAggRewriteAction.h"
 #include "JoinAgg2MulRewriteAction.h"
+
+#include "PlanState.h"
+#include "RuleManager.h"
 // #define EIGEN_USE_BLAS
 
 using namespace facebook::velox;
@@ -1056,7 +1059,7 @@ void rewrite_test_split2multi(int argc, char** argv){
   float* bias[2] = {data.bias[0], data.bias[1]};
 
   exec::registerVectorFunction(
-    "torchDNN",
+    "torchDNN0",
     TorchDNN::signatures(),
     std::make_unique<TorchDNN>(weights, bias, dimensions)
   );
@@ -1065,17 +1068,24 @@ void rewrite_test_split2multi(int argc, char** argv){
   auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator)
                 .tableScan(asRowType(inputRowVector->type()))
                 .capturePlanNodeId(p0)
-                .project({"torchDNN(v)"})
+                .project({"torchDNN0(v)"})
                 .planBuild();
 
   auto planNode = myPlan.planNode();
   
-  std::shared_ptr<optimization::Split2MultiRewriteAction>
-          myAction = std::make_shared<
-              optimization::Split2MultiRewriteAction>();
+  // std::shared_ptr<optimization::Split2MultiRewriteAction>
+  //         myAction = std::make_shared<
+  //             optimization::Split2MultiRewriteAction>();
   
-  myAction->apply(
-          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator);
+  // myAction->apply(
+  //         planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "torchDNN0");
+
+  RuleManager ruleManager;
+  PlanState planState(ruleManager);
+  planState.getPossibleActions(planNode);
+  planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "torchDNN0", "Split2MultiRewriteAction");
+  planState.update(myPlan);
+
 
   int numSplits = 8;
   int veloxThreads = 8;
@@ -1190,7 +1200,7 @@ void rewrite_test_merge2single(int argc, char** argv){
               optimization::Merge2SingleRewriteAction>();
   
   myAction->apply(
-          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator);
+          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "");
 
 
   int numSplits = 8;
@@ -1315,7 +1325,7 @@ void rewrite_test_mul2joinagg(int argc, char** argv, int blocks){
               optimization::Mul2JoinAggRewriteAction>(blocks, &p1, &p2, inputs.schema, weights.schema);
   
   myAction->apply(
-          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator);
+          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "");
 
 
   int veloxThreads = 4;
@@ -1449,14 +1459,14 @@ void rewrite_test_joinagg2mul(int argc, char** argv){
               optimization::Mul2JoinAggRewriteAction>(4, &p1, &p2, inputs.schema, weights.schema);
   
   myAction->apply(
-          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator); //rewrite mul2joinagg
+          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, ""); //rewrite mul2joinagg
 
   auto planNode2 = myPlan.planNode();
   core::PlanNodeId p3;
   std::shared_ptr<optimization::JoinAgg2MulRewriteAction> 
           myAction2 = std::make_shared<optimization::JoinAgg2MulRewriteAction>(&p3, valueSchema);
 
-  myAction2->apply(planNode2, nullptr, maker, myPlan, pool_, planNodeIdGenerator); //rewrite joinagg2mul
+  myAction2->apply(planNode2, nullptr, maker, myPlan, pool_, planNodeIdGenerator, ""); //rewrite joinagg2mul
 
 
   int numSplits = 8;
@@ -1526,9 +1536,9 @@ void rewrite_test_joinagg2mul(int argc, char** argv){
 int main(int argc, char** argv) {
     // test_optimizer_demo(argc, argv);
     // test_optimizer_mcts(argc, argv);
-    // rewrite_test_split2multi(argc, argv);
+    rewrite_test_split2multi(argc, argv);
     // rewrite_test_merge2single(argc, argv);
     // rewrite_test_mul2joinagg(argc, argv, 4);
-    rewrite_test_joinagg2mul(argc, argv);
+    // rewrite_test_joinagg2mul(argc, argv);
     // test_connecter();
 }

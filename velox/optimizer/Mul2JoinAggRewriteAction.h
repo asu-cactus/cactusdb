@@ -45,7 +45,8 @@ public:
 	       VectorMaker & maker,
 	       PlanBuilder & planBuilder,
 	       std::shared_ptr<memory::MemoryPool> pool_,
-	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator ) override {
+	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+		   std::string target ) override {
 
         if (curNode) {
 
@@ -63,7 +64,7 @@ public:
 
 			        std::string callName = call->name();
 
-			        if (callName.find("softmax") != std::string::npos) {
+			        if ((callName.find(target) != std::string::npos) && (expression->inputs()[0]->inputs().size() == 0)) {
 			     
 			      /* 
 			       * Case I: If this function call is the only expression in the projection (e.g.,project({"torch(v)"})), 
@@ -77,34 +78,33 @@ public:
 				        // We shall extract the path
                             core::QueryConfig config({});
 
-				            std::shared_ptr<VectorFunction> myMul1 = getVectorFunction("mat_mul0", {ARRAY(REAL())}, {}, config);
-							std::shared_ptr<VectorFunction> myMul2 = getVectorFunction("mat_mul3", {ARRAY(REAL())}, {}, config);
+				            std::shared_ptr<VectorFunction> myMul = getVectorFunction(callName, {ARRAY(REAL())}, {}, config);
 
-				            if (myMul1 && myMul2) {
+				            if (myMul) {
 				   
-				                std::shared_ptr<MatrixMultiply> myMul1UDF = std::dynamic_pointer_cast<MatrixMultiply>(myMul1);
-								std::shared_ptr<MatrixMultiply> myMul2UDF = std::dynamic_pointer_cast<MatrixMultiply>(myMul2);
+				                std::shared_ptr<MatrixMultiply> myMulUDF = std::dynamic_pointer_cast<MatrixMultiply>(myMul);
 
-					            if (myMul1UDF && myMul2UDF) {
+					            if (myMulUDF) {
 					 
-					                dims = myMul1UDF->getDims();
-									weights = myMul1UDF->getTensor();
+					                dims = myMulUDF->getDims();
+									weights = myMulUDF->getTensor();
 									registerVectorFunction(
 										"mat_mul_b",
 										MatrixMultiply_b::signatures(),
 										std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], 1000, weights, blocks)
 									);
 
-									str.push_back(expression->toString());
+									str.push_back("result");
+									// str.push_back(expression->toString());
 
-									std::string searchString = "mat_mul0(ROW[\"v\"])";
-      								std::string replaceString = "result";
+									// std::string searchString = "mat_mul0(ROW[\"v\"])";
+      								// std::string replaceString = "result";
 
-									std::size_t found = str[0].find(searchString);
-									while (found != std::string::npos) {
-										str[0].replace(found, searchString.length(), replaceString);
-										found = str[0].find(searchString, found + replaceString.length());
-									}
+									// std::size_t found = str[0].find(searchString);
+									// while (found != std::string::npos) {
+									// 	str[0].replace(found, searchString.length(), replaceString);
+									// 	found = str[0].find(searchString, found + replaceString.length());
+									// }
 
 					            }
 				   
@@ -157,6 +157,10 @@ public:
 
 			  }
 		 
+		 			if ((callName.find(target) != std::string::npos) && (expression->inputs()[0]->inputs().size() > 0)) {
+
+			  		}
+		 
 		     }
 		 
 		 }		 
@@ -169,7 +173,7 @@ public:
 
             for (auto source : sources)       		 
             
-	         apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator);
+	         apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, target);
 	
 	}
     
@@ -182,6 +186,10 @@ public:
         return "Mul2JoinAggRewriteAction";
     
     }
+
+	bool check(TypedExprPtr expression) override {
+		return true;
+	}
 
 
 private: 
