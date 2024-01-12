@@ -26,67 +26,53 @@
 namespace optimization {
 
 class PlanState {
-
 public:
+    PlanState(RuleManager ruleManager) : ruleManager(ruleManager) {}
 
-    PlanState(RuleManager ruleManager):ruleManager(ruleManager){}
-
-    void getPossibleActions(std::shared_ptr<const core::PlanNode> curNode){
-        if (curNode) {
-            std::string_view nodeName = curNode->name();
-            if (nodeName == "Project") {
-                std::shared_ptr<const ProjectNode> myProjectNode = std::dynamic_pointer_cast<const ProjectNode> (curNode);
-                const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
-                for (auto expression : projections) {
-                    while (expression->inputs().size() > 0) {
-                        for (auto& rulePtr : ruleManager.rules) {
-                            auto& rule = *rulePtr;
-                            if (rule.check(expression)) {
-                                std::string key = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)->name();
-                                std::string value = rule.name();
-                                auto it = actions.find(key);
-                                if (it != actions.end()) {
-                                    // Key already exists, append the value to the set
-                                    it->second.insert(value);
-                                } else {
-                                    // Key doesn't exist, insert a new key-value pair
-                                    actions[key] = {value};
-                                }
-                            }
-                        }
-                        expression = expression->inputs()[0];
-                    }
+    void getPossibleActions(std::shared_ptr<const core::PlanNode> rootNode) {
+        for (auto& rulePair : ruleManager.rules) {
+            auto& rule = *rulePair.second;
+            if (rule.check(rootNode, actions)) {
+                for (const auto& action : actions) {
+                    actionsPair[action] = rulePair.first;
                 }
+                actions.clear();
             }
         }
     }
 
-    void takeAction(std::shared_ptr<const core::PlanNode> curNode, 
-	       std::shared_ptr<const core::PlanNode> prevNode, 
-	       VectorMaker & maker,
-	       PlanBuilder & planBuilder,
-	       std::shared_ptr<memory::MemoryPool> pool_,
-	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-		   std::string targetString, 
-           std::string tagetRule){
+    void takeAction(std::shared_ptr<const core::PlanNode> curNode,
+                    std::shared_ptr<const core::PlanNode> prevNode,
+                    VectorMaker& maker,
+                    PlanBuilder& planBuilder,
+                    std::shared_ptr<memory::MemoryPool> pool_,
+                    std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+                    const std::vector<std::string>& targetString) {
 
-        auto rule = ruleManager.pickRule(tagetRule);
-        (*rule).apply(curNode, nullptr, maker, planBuilder, pool_, planNodeIdGenerator, targetString);
-        preAction = tagetRule;
-        actions.erase(targetString);
+        std::string targetRule = actionsPair[targetString[0]];
+        auto rule = ruleManager.pickRule(targetRule);
+        if (rule) {
+            rule->apply(curNode, nullptr, maker, planBuilder, pool_, planNodeIdGenerator, targetString);
+            preAction = targetRule;
+            //TODO: forbidden preAction in next step.
+        } else {
+            // Handle the case when the rule is not found
+            std::cerr << "Error: Rule not found for targetString: " << targetString[0] << std::endl;
+
+        }
+
+        actionsPair.clear();
     }
 
-    void update(PlanBuilder & planBuilder){
+    void update(PlanBuilder& planBuilder) {
         auto curNode = planBuilder.planNode();
         getPossibleActions(curNode);
     }
 
-
-
-    std::map<std::string, std::set<std::string>> actions;
+    std::map<std::string, std::string> actionsPair;
+    std::vector<std::string> actions;
     RuleManager ruleManager;
     std::string preAction;
-
 };
 
 

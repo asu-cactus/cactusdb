@@ -33,19 +33,17 @@ class RewriteAction {
 
 public:
 
-    virtual bool apply( std::shared_ptr<const core::PlanNode> curNode,
+    virtual bool apply(std::shared_ptr<const core::PlanNode> curNode,
 		        std::shared_ptr<const core::PlanNode> prevNode,
 		        VectorMaker & maker,
 		        PlanBuilder & planBuilder,
 		        std::shared_ptr<memory::MemoryPool> pool_,
 		        std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator, 
-				std::string target) = 0;
+				std::vector<std::string> targets) = 0;
 
     virtual std::string name() = 0;
 
-	virtual bool check(core::TypedExprPtr expression) = 0;
-
-
+	virtual bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions) = 0;
 
 };
 

@@ -22,10 +22,12 @@
 #include "velox/core/PlanNode.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "RewriteAction.h"
-#include "Split2MultiRewriteAction.h"
-#include "Merge2SingleRewriteAction.h"
+// #include "Split2MultiRewriteAction.h"
+// #include "Merge2SingleRewriteAction.h"
 // #include "Mul2JoinAggRewriteAction.h"
 // #include "JoinAgg2MulRewriteAction.h"
+#include "TorchNN2TwoLayerUDFRewriteAction.h"
+#include "TwoLayerUDF2TorchNNRewriteAction.h"
 
 using namespace optimization;
 
@@ -35,17 +37,17 @@ class RuleManager {
 public:
     RuleManager() {
         // Initialize the rules
-        rules.push_back(std::make_shared<optimization::Split2MultiRewriteAction>());
-        rules.push_back(std::make_shared<optimization::Merge2SingleRewriteAction>());
+        rules.emplace("TorchNN2TwoLayerUDFRewriteAction", std::make_shared<optimization::TorchNN2TwoLayerUDFRewriteAction>());
+        rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
+        // rules.emplace("Merge2Single", std::make_shared<optimization::Merge2SingleRewriteAction>());
         // Add more rules if needed
     }
 
     std::shared_ptr<optimization::RewriteAction> pickRule(const std::string& ruleName) {
         // Search for the rule by name
-        for (const auto& rule : rules) {
-            if (rule->name() == ruleName) {
-                return rule;
-            }
+        auto it = rules.find(ruleName);
+        if (it != rules.end()) {
+            return it->second;
         }
 
         // Rule not found, handle the case (you can throw an exception, return a default rule, etc.)
@@ -53,9 +55,7 @@ public:
         return nullptr;
     }
 
-
-
-    std::vector<std::shared_ptr<optimization::RewriteAction>> rules;
+    std::map<std::string, std::shared_ptr<optimization::RewriteAction>> rules;
 };
 
 
