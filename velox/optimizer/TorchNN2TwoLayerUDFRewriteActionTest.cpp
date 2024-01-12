@@ -13,52 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// #include <boost/interprocess/sync/interprocess_semaphore.hpp>
-// #include <fcntl.h>
-// #include <folly/init/Init.h>
-// #include <stdlib.h>
-// #include <torch/torch.h>
-// #include <unistd.h>
-// #include <cmath>
-// #include <cstdlib>
-// #include <cstring>
-// #include <iostream>
-// #include <memory>
-// #include <random>
-// #include <string>
-
-// #include <iostream>
-// #include <folly/init/Init.h>
-// #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
-// #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-// #include "velox/functions/Macros.h"
-// #include "velox/functions/Registerer.h"
-// #include "velox/parse/Expressions.h"
-// #include "velox/parse/ExpressionsParser.h"
-// #include "velox/parse/TypeResolver.h"
-// #include "velox/type/Type.h"
-// #include "velox/expression/VectorFunction.h"
-// #include "velox/exec/tests/utils/PlanBuilder.h"
-// #include "velox/vector/tests/utils/VectorMaker.h"
-// #include "velox/exec/tests/utils/AssertQueryBuilder.h"
-// #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
-// #include <boost/interprocess/sync/interprocess_semaphore.hpp>
-// #include "velox/exec/tests/utils/TempDirectoryPath.h"
-// #include "velox/common/memory/MemoryArbitrator.h"
-// #include "velox/vector/fuzzer/VectorFuzzer.h"
-
-// #include "velox/ml_functions/NNBuilder.h"
-// #include <fstream>
-// #include <sstream>
-// #include <random>
-
-// #include "velox/exec/FilterProject.h"
-// #include "velox/common/file/FileSystems.h"
-// #include "velox/dwio/dwrf/reader/DwrfReader.h"
-// #include "RewriteAction.h"
-// #include "TorchNN2TwoLayerUDFRewriteAction.h"
-// #include "RuleManager.h"
-// #include "PlanState.h"
 
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
 #include <fcntl.h>
