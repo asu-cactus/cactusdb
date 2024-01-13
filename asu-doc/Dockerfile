@@ -36,6 +36,10 @@ RUN apt-get install -y python3-pip
 RUN apt-get install -y tmux
 RUN apt-get install -y sudo
 RUN apt-get install -y libpq-dev
+RUN apt-get install -y libjsoncpp-dev
+RUN apt-get install -y libxsimd-dev
+RUN apt-get install -y curl
+RUN apt-get install -y zip
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
@@ -56,7 +60,7 @@ RUN service postgresql start \
 COPY pg_hba.conf /etc/postgresql/$PG_MAJOR/main/pg_hba.conf
 RUN echo "service postgresql start" >> /etc/bash.bashrc
 
-
+# setup libtorch
 WORKDIR /home
 RUN wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.0.1%2Bcpu.zip
 RUN unzip libtorch-cxx11-abi-shared-with-deps-2.0.1+cpu.zip
@@ -66,6 +70,22 @@ RUN git clone https://github.com/lixi-zhou/evadb.git
 WORKDIR /home/evadb
 RUN git checkout array
 RUN pip install ./[ray]
+
+# set up duckdb
+WORKDIR /home
+RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
+    && tar -xf v0.8.1.tar.gz \
+    && cd duckdb-0.8.1 \
+    && mkdir build && cd build \
+    && CMAKE_FLAGS=(
+        "-DBUILD_UNITTESTS=OFF"
+        "-DENABLE_SANITIZER=OFF"
+        "-DENABLE_UBSAN=OFF"
+        "-DBUILD_SHELL=OFF"
+        "-DEXPORT_DLL_SYMBOLS=OFF"
+    ) \
+    && cmake ${CMAKE_FLAGS[*]}  .. \
+    && make install -j 16
 
 # set up velox
 RUN git clone https://github.com/facebookincubator/velox.git
