@@ -101,7 +101,9 @@ public:
 										}
 
 										if (curNode->sources().size() > 0) {
-
+                                            // only focus on inner case :project({torchnnx(v)}) ---> project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))})
+                                            //TODO: medi case: project(func1(torchnnx(func2())))
+                                            //      outer case: project({torchnnx(func1(func2()))})
 											planBuilder = planBuilder.setRoot((curNode->sources())[0]);
 
 											std::string twoLayers = fmt::format(compute, "v");

@@ -29,6 +29,7 @@
 #include "velox/parse/TypeResolver.h"
 #include "velox/ml_functions/VeloxDecisionTree.h"
 #include "velox/core/ITypedExpr.h"
+#include <regex>
 
 using namespace ml;
 using namespace facebook::velox;
@@ -52,149 +53,148 @@ public:
 	       VectorMaker & maker,
 	       PlanBuilder & planBuilder,
 	       std::shared_ptr<memory::MemoryPool> pool_,
-	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator ) override {
+	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+		   std::vector<std::string> targets) override {
 
-        if (curNode) {
+			for (auto target : targets) {
 
-            std::string_view nodeName = curNode->name();
+        		if (curNode) {
 
-	    if (nodeName == "Project") {
+            		std::string_view nodeName = curNode->name();
+
+	    			if (nodeName == "Project") {
 		 
-                 std::shared_ptr<const ProjectNode> myProjectNode = std::dynamic_pointer_cast<const ProjectNode> (curNode);
+            			std::shared_ptr<const ProjectNode> myProjectNode = std::dynamic_pointer_cast<const ProjectNode> (curNode);
 
-                 const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
+            			const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
 
-                 for (auto expression : projections) {
+            			for (auto expression : projections) {
 		 
-		     if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)) {
+		     				if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)) {
 
-			  std::string callName = call->name();
+			  					std::string callName = call->name();
 
-			  if (callName.find("decision_forest_predict") != std::string::npos) {
+			  					if (callName.find(target) != std::string::npos) {
 			     
-			      /* 
-			       * Case I: If this function call is the only expression in the projection (e.g.,project({"decision_forest_predict(x)"})), 
-			       * we need to extract the model path from the expression to initialize treeRowVector as a member of this object, 
-			       * and then replace this node by the following plan:
-			       *
-			       * nestedLoopJoin(
-                               *    exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                               *    .values({treeRowVector})
-                               *    .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
-                               *    .planNode(), {"row_id", "x", "tree_id", "tree"})
-                               *    .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
-                               *    .aggregation({"row_id"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
-                               *    .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
-			       */
-                              
-			       if (projections.size() == 1) {
-			       
-			           // We are the only expression in the project operator
+									/* "decision_forest_predict"
+									* Case I: If this function call is the only expression in the projection (e.g.,project({"decision_forest_predict(x)"})), 
+									* we need to extract the model path from the expression to initialize treeRowVector as a member of this object, 
+									* and then replace this node by the following plan:
+									*
+									* nestedLoopJoin(
+												*    exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+												*    .values({treeRowVector})
+												*    .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
+												*    .planNode(), {"row_id", "x", "tree_id", "tree"})
+												*    .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
+												*    .aggregation({"row_id"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
+												*    .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
+									*/
+												
+									if (projections.size() == 1) {
+									
+										// We are the only expression in the project operator
 
-				   // We shall extract the path
-                                   core::QueryConfig config({});
+										// We shall extract the path
+										core::QueryConfig config({});
 
-				   std::shared_ptr<VectorFunction> myUDF = getVectorFunction(callName, {ARRAY(REAL())}, {}, config);
+										std::shared_ptr<VectorFunction> myUDF = getVectorFunction(callName, {ARRAY(REAL())}, {}, config);
 
-				   if (myUDF) {
-				   
-				         std::shared_ptr<ForestPrediction> myDecisionForestUDF = dynamic_pointer_cast<ForestPrediction>(myUDF);
+										if (myUDF) {
+									
+											std::shared_ptr<ForestPrediction> myDecisionForestUDF = dynamic_pointer_cast<ForestPrediction>(myUDF);
 
-					 if (myDecisionForestUDF) {
-					 
-					     std::string modelPath = myDecisionForestUDF->getForestPath();
+											if (myDecisionForestUDF) {
+										
+												std::string modelPath = myDecisionForestUDF->getForestPath();
 
-                                             std::vector<std::string> pathVectors;
-                                             
-					     Forest::vectorizeForestFolder(modelPath, pathVectors);
+												std::vector<std::string> pathVectors;
+																
+												Forest::vectorizeForestFolder(modelPath, pathVectors);
 
-                                             int numTrees = pathVectors.size();
+												int numTrees = pathVectors.size();
 
-                                             auto model = maker.flatVector<StringView> (pathVectors.size());
+												auto model = maker.flatVector<StringView> (pathVectors.size());
 
-                                             for (int i = 0; i < numTrees; i++) {
+												for (int i = 0; i < numTrees; i++) {
 
-                                                   model->set(i, StringView(pathVectors[i].c_str()));
+													model->set(i, StringView(pathVectors[i].c_str()));
 
-                                             }
+												}
 
-                                             auto treeIndexVector = maker.flatVector<int16_t>(numTrees);
+												auto treeIndexVector = maker.flatVector<int16_t>(numTrees);
 
-                                             for (int i = 0; i < numTrees; i++) {
+												for (int i = 0; i < numTrees; i++) {
 
-                                                  treeIndexVector->set(i, i);
+													treeIndexVector->set(i, i);
 
-                                             }
+												}
 
-                                             treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
-					 
-					 }
-				   
-				   }
+												treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
+										
+											}
+									
+										}
 
-                                   // We remove the current node from the plan
-				   //
-				   if (curNode->sources().size() > 0) {
+													// We remove the current node from the plan
+									//
+										if (curNode->sources().size() > 0) {
 
-				        planBuilder = planBuilder.setRoot((curNode->sources())[0]);
+											planBuilder = planBuilder.setRoot((curNode->sources())[0]);
 
-				        // We build the plan from this point
-				   
-				       planBuilder = planBuilder.nestedLoopJoin(
-                                           exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                                           .values({treeRowVector})
-                                           .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
-                                           .planNode(), {"row_id", "x", "tree_id", "tree"})
-                                           .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
-                                           .aggregation({"row_id"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
-                                           .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"});
+											// We build the plan from this point
+									
+											planBuilder = planBuilder.nestedLoopJoin(exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+															.values({treeRowVector})
+															.project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
+															.planNode(), {"row_id", "x", "tree_id", "tree"})
+															.project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
+															.aggregation({"row_id"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
+															.project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"});
 
+											return true;
+										}
+									
+									}
+																																
 
-			               return true;
-				   }
-			       
-			       }
-                                                                                             			       
+										/*
+									* Case II: If this function call is the last expression in the projection (e.g., project({"decision_forest_predict(func1(func2(x)))"})), 
+									* we need to split this project node into two project nodes (e.g., project({"func1(func2(x)) as y"}).project("decision_forest_predict(y)"))
+									* Then, we apply the rewrite action as described in Case I.
+									*/
 
-		               /*
-				* Case II: If this function call is the last expression in the projection (e.g., project({"decision_forest_predict(func1(func2(x)))"})), 
-				* we need to split this project node into two project nodes (e.g., project({"func1(func2(x)) as y"}).project("decision_forest_predict(y)"))
-				* Then, we apply the rewrite action as described in Case I.
-				*/
-
-			       //TODO
+									//TODO
 
 
-			       /*
-                                * Case III: If this function call is a middle expression in the projection 
-				* (e.g., project({"func4(func3(decision_forest_predict(func1(func2(x)))))"})), 
-                                * we need to split this project node into three project nodes 
-				* (e.g., project({"func1(func2(x)) as z0"}).project("decision_forest_predict(z0) as z1").project("func4(func3(z1))"))
-                                * Then, we apply the rewrite action as described in Case I.
-                                */
+									/*
+									* Case III: If this function call is a middle expression in the projection 
+									* (e.g., project({"func4(func3(decision_forest_predict(func1(func2(x)))))"})), 
+									* we need to split this project node into three project nodes 
+									* (e.g., project({"func1(func2(x)) as z0"}).project("decision_forest_predict(z0) as z1").project("func4(func3(z1))"))
+									* Then, we apply the rewrite action as described in Case I.
+									*/
 
-			       //TODO
+									//TODO
 			        
-
-
-			  }
+			  					}
 		 
-		     }
+		     				}
 		 
-		 }		 
+		 				}		 
 		     
-            }
-	
-	    std::vector<std::shared_ptr<const PlanNode>> sources = curNode->sources();
+            		}
 
-            if (sources.size() == 0) return false;
+	    			std::vector<std::shared_ptr<const PlanNode>> sources = curNode->sources();
 
-            for (auto source : sources)       		 
+            		if (sources.size() == 0) return false;
+
+            		for (auto source : sources)       		 
             
-	         apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator);
+	         			apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets);
 	
-	}
-    
+				}
+			}
     
     }
 
@@ -204,6 +204,79 @@ public:
         return "DecisionForestUDF2RelationRewriteAction";
     
     }
+
+	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions) override {
+		try {
+			if (!rootNode) {
+				throw std::invalid_argument("rootNode is null");
+			}
+
+			std::string_view nodeName = rootNode->name();
+
+			if (nodeName == "Project") {
+				auto myProjectNode = std::dynamic_pointer_cast<const ProjectNode>(rootNode);
+
+				if (!myProjectNode) {
+					throw std::runtime_error("Failed to cast to ProjectNode");
+				}
+
+				const std::vector<TypedExprPtr> &projections = myProjectNode->projections();
+
+				for (const auto &expression : projections) {
+					std::string expr = expression->toString();
+					std::regex pattern(R"(decision_forest_predict)");
+					auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+					auto wordsEnd = std::sregex_iterator();
+
+					for (auto it = wordsBegin; it != wordsEnd; ++it) {
+						targetActions.push_back(it->str());
+					}
+				}
+
+				return true;  // Return true for successful execution
+			}
+
+			if (nodeName == "Filter") {
+				auto myFilterNode = std::dynamic_pointer_cast<const FilterNode>(rootNode);
+
+				if (!myFilterNode) {
+					throw std::runtime_error("Failed to cast to FilterNode");
+				}
+
+				const TypedExprPtr &filterExpr = myFilterNode->filter();
+				std::string expr = filterExpr->toString();
+				std::regex pattern(R"(decision_forest_predict)");
+				auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+				auto wordsEnd = std::sregex_iterator();
+
+				for (auto it = wordsBegin; it != wordsEnd; ++it) {
+					targetActions.push_back(it->str());
+				}
+
+				return true;  // Return true for successful execution
+			}
+
+			std::vector<std::shared_ptr<const core::PlanNode>> sources = rootNode->sources();
+
+			if (sources.empty()) {
+				// Safe exit for leaf node
+				return true;
+			}
+
+			for (const auto &source : sources) {
+				if (!check(source, targetActions)) {
+					// Propagate false if any child node returns false
+					return false;
+				}
+			}
+
+			return true;  // Return true for successful execution
+		} catch (const std::exception &e) {
+			std::cerr << "Error in check function: " << e.what() << std::endl;
+			return false;  // Return false for any error
+		}
+	}
+
 
 
 private: 

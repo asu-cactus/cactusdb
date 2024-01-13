@@ -122,7 +122,9 @@ public:
 											}
 																	
 											if (curNode->sources().size() > 0) {
-
+                                            // only focus on inner case :project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))}) ---> project({torchnnx(v)})
+                                            //TODO: medi case: project(func1(twolayer(func2())))
+                                            //      outer case: project({twolayer(func1(func2()))})
 												planBuilder = planBuilder.setRoot(curNode->sources()[0]);
 
 												std::regex pattern(R"(softmax\d+\(mat_add\d+\(mat_mul\d+\(relu\d+\(mat_add\d+\(mat_mul\d+.*\)\)\)\)\))");
