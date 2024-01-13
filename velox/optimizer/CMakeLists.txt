@@ -107,4 +107,22 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+
+add_executable(decisionforest2rel_test DecisionForestUDF2RelationRewriteActionTest.cpp)
+target_link_libraries(
+  decisionforest2rel_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
 # set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")

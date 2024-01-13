@@ -33,10 +33,10 @@
 #include <json/json.h>
 
 #include "RewriteAction.h"
-#include "Split2MultiRewriteAction.h"
-#include "Merge2SingleRewriteAction.h"
-#include "Mul2JoinAggRewriteAction.h"
-#include "JoinAgg2MulRewriteAction.h"
+#include "TorchNN2TwoLayerUDFRewriteAction.h"
+// #include "Merge2SingleRewriteAction.h"
+// #include "Mul2JoinAggRewriteAction.h"
+// #include "JoinAgg2MulRewriteAction.h"
 
 #include "PlanState.h"
 #include "RuleManager.h"
@@ -1080,11 +1080,11 @@ void rewrite_test_split2multi(int argc, char** argv){
   // myAction->apply(
   //         planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "torchDNN0");
 
-  RuleManager ruleManager;
-  PlanState planState(ruleManager);
-  planState.getPossibleActions(planNode);
-  planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "torchDNN0", "Split2MultiRewriteAction");
-  planState.update(myPlan);
+      RuleManager ruleManager;
+      PlanState planState(ruleManager);
+      planState.getPossibleActions(planNode);
+      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {"torchdnn0"});
+      planState.update(myPlan);
 
 
   int numSplits = 8;
@@ -1195,12 +1195,12 @@ void rewrite_test_merge2single(int argc, char** argv){
 
   auto planNode = myPlan.planNode();
   
-  std::shared_ptr<optimization::Merge2SingleRewriteAction>
-          myAction = std::make_shared<
-              optimization::Merge2SingleRewriteAction>();
+  // std::shared_ptr<optimization::Merge2SingleRewriteAction>
+  //         myAction = std::make_shared<
+  //             optimization::Merge2SingleRewriteAction>();
   
-  myAction->apply(
-          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "");
+  // myAction->apply(
+  //         planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "");
 
 
   int numSplits = 8;
@@ -1320,12 +1320,12 @@ void rewrite_test_mul2joinagg(int argc, char** argv, int blocks){
   auto planNode = myPlan.planNode();
   core::PlanNodeId p1;
   core::PlanNodeId p2;
-  std::shared_ptr<optimization::Mul2JoinAggRewriteAction>
-          myAction = std::make_shared<
-              optimization::Mul2JoinAggRewriteAction>(blocks, &p1, &p2, inputs.schema, weights.schema);
+  // std::shared_ptr<optimization::Mul2JoinAggRewriteAction>
+  //         myAction = std::make_shared<
+  //             optimization::Mul2JoinAggRewriteAction>(blocks, &p1, &p2, inputs.schema, weights.schema);
   
-  myAction->apply(
-          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "");
+  // myAction->apply(
+  //         planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, "");
 
 
   int veloxThreads = 4;
@@ -1454,19 +1454,19 @@ void rewrite_test_joinagg2mul(int argc, char** argv){
   auto planNode = myPlan.planNode();
   core::PlanNodeId p1;
   core::PlanNodeId p2;
-  std::shared_ptr<optimization::Mul2JoinAggRewriteAction>
-          myAction = std::make_shared<
-              optimization::Mul2JoinAggRewriteAction>(4, &p1, &p2, inputs.schema, weights.schema);
+  // std::shared_ptr<optimization::Mul2JoinAggRewriteAction>
+  //         myAction = std::make_shared<
+  //             optimization::Mul2JoinAggRewriteAction>(4, &p1, &p2, inputs.schema, weights.schema);
   
-  myAction->apply(
-          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, ""); //rewrite mul2joinagg
+  // myAction->apply(
+  //         planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, ""); //rewrite mul2joinagg
 
   auto planNode2 = myPlan.planNode();
   core::PlanNodeId p3;
-  std::shared_ptr<optimization::JoinAgg2MulRewriteAction> 
-          myAction2 = std::make_shared<optimization::JoinAgg2MulRewriteAction>(&p3, valueSchema);
+  // std::shared_ptr<optimization::JoinAgg2MulRewriteAction> 
+  //         myAction2 = std::make_shared<optimization::JoinAgg2MulRewriteAction>(&p3, valueSchema);
 
-  myAction2->apply(planNode2, nullptr, maker, myPlan, pool_, planNodeIdGenerator, ""); //rewrite joinagg2mul
+  // myAction2->apply(planNode2, nullptr, maker, myPlan, pool_, planNodeIdGenerator, ""); //rewrite joinagg2mul
 
 
   int numSplits = 8;

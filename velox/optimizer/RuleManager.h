@@ -22,12 +22,10 @@
 #include "velox/core/PlanNode.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "RewriteAction.h"
-// #include "Split2MultiRewriteAction.h"
-// #include "Merge2SingleRewriteAction.h"
-// #include "Mul2JoinAggRewriteAction.h"
-// #include "JoinAgg2MulRewriteAction.h"
+
 #include "TorchNN2TwoLayerUDFRewriteAction.h"
 #include "TwoLayerUDF2TorchNNRewriteAction.h"
+#include "DecisionForestUDF2RelationRewriteAction.h"
 
 using namespace optimization;
 
@@ -39,7 +37,7 @@ public:
         // Initialize the rules
         rules.emplace("TorchNN2TwoLayerUDFRewriteAction", std::make_shared<optimization::TorchNN2TwoLayerUDFRewriteAction>());
         rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
-        // rules.emplace("Merge2Single", std::make_shared<optimization::Merge2SingleRewriteAction>());
+        rules.emplace("DecisionForestUDF2RelationRewriteAction", std::make_shared<optimization::DecisionForestUDF2RelationRewriteAction>());
         // Add more rules if needed
     }
 
