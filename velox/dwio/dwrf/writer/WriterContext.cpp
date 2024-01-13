@@ -19,7 +19,7 @@
 
 namespace facebook::velox::dwrf {
 namespace {
-constexpr uint32_t MIN_INDEX_STRIDE = 1000;
+constexpr uint32_t MIN_INDEX_STRIDE = 100;
 }
 
 WriterContext::WriterContext(

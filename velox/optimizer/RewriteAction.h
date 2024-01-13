@@ -26,6 +26,12 @@
 #include <cstring>
 #include "velox/core/PlanNode.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/vector/tests/utils/VectorMaker.h"
+
+using namespace facebook::velox;
+using namespace facebook::velox::memory;
+using namespace facebook::velox::test;
+using namespace facebook::velox::exec::test;
 
 namespace optimization {
 
@@ -40,6 +46,7 @@ public:
 		        std::shared_ptr<memory::MemoryPool> pool_,
 		        std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator, 
 				std::vector<std::string> targets) = 0;
+
 
     virtual std::string name() = 0;
 

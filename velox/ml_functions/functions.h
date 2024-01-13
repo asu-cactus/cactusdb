@@ -1,5 +1,6 @@
 #pragma once
 #include "velox/expression/VectorFunction.h"
+#include "velox/vector/DictionaryVector.h"
 #include <Eigen/Dense>
 #include <cblas.h>
 #include <chrono>
