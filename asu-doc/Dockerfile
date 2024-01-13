@@ -35,7 +35,8 @@ RUN apt-get install -y libprotobuf-dev protobuf-compiler
 RUN apt-get install -y python3-pip
 RUN apt-get install -y tmux
 RUN apt-get install -y sudo
-RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf
+RUN apt-get install -y libpq-dev
+RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
 
@@ -60,6 +61,13 @@ WORKDIR /home
 RUN wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.0.1%2Bcpu.zip
 RUN unzip libtorch-cxx11-abi-shared-with-deps-2.0.1+cpu.zip
 ENV Torch_DIR=/home/libtorch
+# set up evadb
+RUN git clone https://github.com/lixi-zhou/evadb.git
+WORKDIR /home/evadb
+RUN git checkout array
+RUN pip install ./[ray]
+
+# set up velox
 RUN git clone https://github.com/facebookincubator/velox.git
 WORKDIR /home/velox
 
