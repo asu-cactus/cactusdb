@@ -56,6 +56,24 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(optimizer_test OptimizerTest.cpp)
+target_link_libraries(
+  optimizer_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  jsoncpp_lib
+  ${TORCH_LIBRARIES}
+)
+
 # add_executable(rewrite_test RewriteTest.cpp)
 # target_link_libraries(
 #   rewrite_test
