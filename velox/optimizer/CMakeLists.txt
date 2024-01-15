@@ -56,22 +56,7 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
-# add_executable(rewrite_test RewriteTest.cpp)
-# target_link_libraries(
-#   rewrite_test
-#   velox_aggregates
-#   velox_type
-#   velox_vector
-#   velox_vector_test_lib
-#   velox_exec
-#   velox_exec_test_lib
-#   velox_tpch_connector
-#   velox_memory
-#   velox_common_base
-#   velox_vector_fuzzer
-#   velox_dwio_parquet_reader
-#   ${TORCH_LIBRARIES}
-# )
+
 
 add_executable(torch2twolayer_test TorchNN2TwoLayerUDFRewriteActionTest.cpp)
 target_link_libraries(
