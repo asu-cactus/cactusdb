@@ -214,6 +214,7 @@ public:
 			std::string_view nodeName = rootNode->name();
 
 			if (nodeName == "Project") {
+
 				auto myProjectNode = std::dynamic_pointer_cast<const ProjectNode>(rootNode);
 
 				if (!myProjectNode) {
@@ -223,12 +224,17 @@ public:
 				const std::vector<TypedExprPtr> &projections = myProjectNode->projections();
 
 				for (const auto &expression : projections) {
-					std::string expr = expression->toString();
-					std::regex pattern(R"(decision_forest_predict)");
-					auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
-					auto wordsEnd = std::sregex_iterator();
 
+					std::string expr = expression->toString();
+					// For this rule, we only check wheather decision_forest_predict UDF function is in expressions
+					std::regex pattern(R"(decision_forest_predict)");
+
+					auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+
+					auto wordsEnd = std::sregex_iterator();
+					// Find applicable UDF name and store in targetActions
 					for (auto it = wordsBegin; it != wordsEnd; ++it) {
+
 						targetActions.push_back(it->str());
 					}
 				}
@@ -237,6 +243,7 @@ public:
 			}
 
 			if (nodeName == "Filter") {
+
 				auto myFilterNode = std::dynamic_pointer_cast<const FilterNode>(rootNode);
 
 				if (!myFilterNode) {
@@ -244,12 +251,17 @@ public:
 				}
 
 				const TypedExprPtr &filterExpr = myFilterNode->filter();
-				std::string expr = filterExpr->toString();
-				std::regex pattern(R"(decision_forest_predict)");
-				auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
-				auto wordsEnd = std::sregex_iterator();
 
+				std::string expr = filterExpr->toString();
+				// For this rule, we only check wheather decision_forest_predict UDF function is in expressions
+				std::regex pattern(R"(decision_forest_predict)");
+
+				auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+
+				auto wordsEnd = std::sregex_iterator();
+				// Find applicable UDF name and store in targetActions
 				for (auto it = wordsBegin; it != wordsEnd; ++it) {
+
 					targetActions.push_back(it->str());
 				}
 

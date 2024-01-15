@@ -257,18 +257,23 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
     auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
 
     auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+
     auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
 
     auto file = TempFilePath::create();
+
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
+
     writeToFile(file->path, {inputRowVector}, config);
 
     std::vector<int> dimensions;
+
     dimensions.push_back(input_features_size);
     dimensions.push_back(first_layer_output_size);
     dimensions.push_back(second_layer_output_size);
 
     float* weights[2] = {data.weights[0], data.weights[1]};
+
     float* bias[2] = {data.bias[0], data.bias[1]};
 
     exec::registerVectorFunction(
@@ -288,23 +293,26 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
                 .planBuild();
 
     auto planNode = myPlan.planNode();
-
+    // Create ruleManager
     RuleManager ruleManager;
+    // Create planState
     PlanState planState(ruleManager);
 
     if (rewrite) {
-      // Create a rewrite action for this plan
+      // Get possible actions for this plan
       planState.getPossibleActions(planNode);
       // Print possible actions
       for (const auto& entry : planState.actionsPair) {
         std::cout << entry.first << ": " << entry.second << std::endl;
       }
+      // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
       std::string testAction  = it->first;
-
+      // Take the action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction});
+      // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan);
-      // Apply the rewrite action
+
     }
 
     // Run the rewritten plan

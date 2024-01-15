@@ -30,12 +30,18 @@ public:
     PlanState(RuleManager ruleManager) : ruleManager(ruleManager) {}
 
     void getPossibleActions(std::shared_ptr<const core::PlanNode> rootNode) {
+        // Search for each rule
         for (auto& rulePair : ruleManager.rules) {
+            // Get the pointers for rules
             auto& rule = *rulePair.second;
+            // Check if rule can be applied in this plan, store target UDF name in actions
             if (rule.check(rootNode, actions)) {
+                // Create a map to store actions and target UDF names, key is UDF name, value is rule name
                 for (const auto& action : actions) {
+
                     actionsPair[action] = rulePair.first;
                 }
+                // clear target UDF name, prepare for next rule
                 actions.clear();
             }
         }
@@ -48,13 +54,18 @@ public:
                     std::shared_ptr<memory::MemoryPool> pool_,
                     std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
                     const std::vector<std::string>& targetString) {
-
+        
+        // Get the rule name for target action
         std::string targetRule = actionsPair[targetString[0]];
+        // Get the pointer for this rule
         auto rule = ruleManager.pickRule(targetRule);
+
         if (rule) {
+            // Apply rule on this plan
             rule->apply(curNode, nullptr, maker, planBuilder, pool_, planNodeIdGenerator, targetString);
+            // Store this rule name, prepare for next rewritten
             preAction = targetRule;
-            //TODO: forbidden preAction in next step.
+            //TODO: forbidden preAction in next step. (Avoid cycle)
         } else {
             // Handle the case when the rule is not found
             std::cerr << "Error: Rule not found for targetString: " << targetString[0] << std::endl;
@@ -65,7 +76,9 @@ public:
     }
 
     void update(PlanBuilder& planBuilder) {
+        // Get the current plan
         auto curNode = planBuilder.planNode();
+        // renew possible actions in new state
         getPossibleActions(curNode);
     }
 
