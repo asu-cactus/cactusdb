@@ -171,6 +171,7 @@ struct DataFrame {
 };
 
 DataFrame data_generate(int features, int samples, int first_layer, int second_layer){
+
   int input_features_size = features;
   int num_samples = samples;
 
@@ -257,10 +258,13 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
     auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
 
     auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+
     auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
 
     auto file = TempFilePath::create();
+
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
+
     writeToFile(file->path, {inputRowVector}, config);
 
     std::string compute =  NNBuilder()
@@ -269,7 +273,7 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
                         .build();
 
 
-    // create a plan for decision forest using UDF-centric style
+    // create a plan for FFNN using two layers UDF style
     core::PlanNodeId p0;
 
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
@@ -281,23 +285,26 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
                 .planBuild();
 
     auto planNode = myPlan.planNode();
-
+    // Create ruleManager
     RuleManager ruleManager;
+    // Create planState
     PlanState planState(ruleManager);
 
     if (rewrite) {
-      // Create a rewrite action for this plan
+      // Get possible actions for this plan
       planState.getPossibleActions(planNode);
       // Print possible actions
       for (const auto& entry : planState.actionsPair) {
         std::cout << entry.first << ": " << entry.second << std::endl;
       }
+      // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
       std::string testAction  = it->first;
-
+      // Take the action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction});
+      // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan);
-      // Apply the rewrite action
+
     }
 
     // Run the rewritten plan

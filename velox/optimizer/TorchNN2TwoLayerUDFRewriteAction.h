@@ -55,9 +55,9 @@ public:
 				if (curNode) {
 
 					std::string_view nodeName = curNode->name();
-
+				// We frist search project node
 				if (nodeName == "Project") {
-				
+					// Cast node as project node
 					if (auto myProjectNode = std::dynamic_pointer_cast<const ProjectNode> (curNode)){
 
 						const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
@@ -69,7 +69,7 @@ public:
 						while (expression->inputs().size() > 0) {
 
 							if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)) {
-
+								// Torchdnn is a single UDF name, we can compare it by call->name()
 								std::string callName = call->name();
 
 								if (callName == target) {
@@ -77,7 +77,7 @@ public:
 									if (projections.size() == 1) {
 							
 										core::QueryConfig config({});
-
+										// Get the specific torchdnn UDF function
 										std::shared_ptr<VectorFunction> UDF = getVectorFunction(target, {ARRAY(REAL())}, {}, config);
 
 										if (UDF) {
@@ -91,7 +91,7 @@ public:
 												float** weights = TorchUDF->getWeights();
 
 												float** bias = TorchUDF->getBias();
-												
+												// Create two layers UDF
 												compute =  NNBuilder()
 												.denseLayer(dims[1], dims[0], weights[0], bias[0], NNBuilder::RELU)
 												.denseLayer(dims[2], dims[1], weights[1], bias[1], NNBuilder::SOFTMAX)
@@ -102,6 +102,9 @@ public:
 
 										if (curNode->sources().size() > 0) {
                                             // only focus on inner case :project({torchnnx(v)}) ---> project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))})
+											// The rewritten plan should be project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))} AS R1).Project(R1)
+											// Such design would inspire TODO tasks, later maybe changed
+
                                             //TODO: medi case: project(func1(torchnnx(func2())))
                                             //      outer case: project({torchnnx(func1(func2()))})
 											planBuilder = planBuilder.setRoot((curNode->sources())[0]);
@@ -223,6 +226,7 @@ bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::stri
         std::string_view nodeName = rootNode->name();
 
         if (nodeName == "Project") {
+
             auto myProjectNode = std::dynamic_pointer_cast<const ProjectNode>(rootNode);
 
             if (!myProjectNode) {
@@ -232,12 +236,17 @@ bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::stri
             const std::vector<TypedExprPtr> &projections = myProjectNode->projections();
 
             for (const auto &expression : projections) {
-                std::string expr = expression->toString();
-                std::regex pattern(R"(torchdnn\d+)");
-                auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
-                auto wordsEnd = std::sregex_iterator();
 
+                std::string expr = expression->toString();
+				// For this rule, we only check wheather torchnn UDF function is in expressions
+                std::regex pattern(R"(torchdnn\d+)");
+
+                auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+
+                auto wordsEnd = std::sregex_iterator();
+				// Find applicable UDF name and store in targetActions
                 for (auto it = wordsBegin; it != wordsEnd; ++it) {
+
                     targetActions.push_back(it->str());
                 }
             }
@@ -246,6 +255,7 @@ bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::stri
         }
 
         if (nodeName == "Filter") {
+
             auto myFilterNode = std::dynamic_pointer_cast<const FilterNode>(rootNode);
 
             if (!myFilterNode) {
@@ -253,12 +263,17 @@ bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::stri
             }
 
             const TypedExprPtr &filterExpr = myFilterNode->filter();
+
             std::string expr = filterExpr->toString();
+
             std::regex pattern(R"(torchdnn\d+)");
+
             auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+
             auto wordsEnd = std::sregex_iterator();
 
             for (auto it = wordsBegin; it != wordsEnd; ++it) {
+
                 targetActions.push_back(it->str());
             }
 
@@ -281,7 +296,9 @@ bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::stri
 
         return true;  // Return true for successful execution
     } catch (const std::exception &e) {
+
         std::cerr << "Error in check function: " << e.what() << std::endl;
+
         return false;  // Return false for any error
     }
 }

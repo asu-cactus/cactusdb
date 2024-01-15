@@ -36,7 +36,9 @@ public:
     RuleManager() {
         // Initialize the rules
         rules.emplace("TorchNN2TwoLayerUDFRewriteAction", std::make_shared<optimization::TorchNN2TwoLayerUDFRewriteAction>());
+
         rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
+
         rules.emplace("DecisionForestUDF2RelationRewriteAction", std::make_shared<optimization::DecisionForestUDF2RelationRewriteAction>());
         // Add more rules if needed
     }
@@ -44,8 +46,11 @@ public:
     std::shared_ptr<optimization::RewriteAction> pickRule(const std::string& ruleName) {
         // Search for the rule by name
         auto it = rules.find(ruleName);
+
         if (it != rules.end()) {
+
             return it->second;
+            
         }
 
         // Rule not found, handle the case (you can throw an exception, return a default rule, etc.)

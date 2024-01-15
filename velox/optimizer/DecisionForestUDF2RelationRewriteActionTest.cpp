@@ -346,21 +346,24 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
                       .project({"decision_forest_predict(x)"});
 
     auto planNode = myPlan.planNode();
-
+    // Create ruleManager
     RuleManager ruleManager;
+    // Create planState
     PlanState planState(ruleManager);
 
     if (rewrite) {
-      // Create a rewrite action for this plan
+      // Get possible actions for this plan
       planState.getPossibleActions(planNode);
       // Print possible actions
       for (const auto& entry : planState.actionsPair) {
         std::cout << entry.first << ": " << entry.second << std::endl;
       }
+      // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
       std::string testAction  = it->first;
-
+      // Take the action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction});
+      // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan);
     }
 

@@ -42,7 +42,9 @@ public:
 				std::vector<std::string> targets) = 0;
 
     virtual std::string name() = 0;
-
+	// rootNode is the root node of the original plan;
+	// targetAction is the vector of possible rewritten UDF name (such as torchdnn0)
+	// check function will search the whole plan start by rootNode, storing the applicable UDF name that can apply such a rule at targetActions
 	virtual bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions) = 0;
 
 };
