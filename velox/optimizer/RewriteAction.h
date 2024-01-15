@@ -47,11 +47,6 @@ public:
 		        std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator, 
 				std::vector<std::string> targets) = 0;
 
-<<<<<<< HEAD
-=======
-
-    virtual std::string name() = 0;
->>>>>>> 6286b5dc17740428b22b8396623779d5c45d184f
 
     virtual std::string name() = 0;
 	// rootNode is the root node of the original plan;
