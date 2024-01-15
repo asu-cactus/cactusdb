@@ -3,24 +3,66 @@ CREDIT: the following code implementation is original from the following link:
 https://github.com/archersama/IntTower/tree/main
 """
 
-from model.base_tower import BaseTower
-from preprocessing.inputs import combined_dnn_input, compute_input_dim
-from layers.core import DNN
+from .base_tower import BaseTower
+from .preprocessing.inputs import combined_dnn_input, compute_input_dim
+from .layers.core import DNN
 import torch
-from preprocessing.utils import Cosine_Similarity
-from preprocessing.utils import col_score
-from preprocessing.utils import col_score_2
-from preprocessing.utils import single_score
-from preprocessing.utils import Timer
-from layers.interaction import SENETLayer
-from layers.interaction import LightSE
+import tensorflow as tf
+import numpy as np
+from .preprocessing.utils import Cosine_Similarity
+from .preprocessing.utils import col_score
+from .preprocessing.utils import col_score_2
+from .preprocessing.utils import single_score
+from .preprocessing.utils import Timer
+from .layers.interaction import SENETLayer
+from .layers.interaction import LightSE
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-class DSSM(BaseTower):
+def get_var_feature(data, col):
+    key2index = {}
+
+    def split(x):
+        key_ans = x.split("|")
+        for key in key_ans:
+            if key not in key2index:
+                # Notice : input value 0 is a special "padding",\
+                # so we do not use 0 to encode valid feature for sequence input
+                key2index[key] = len(key2index) + 1
+        return list(map(lambda x: key2index[x], key_ans))
+
+    var_feature = list(map(split, data[col].values))
+    var_feature_length = np.array(list(map(len, var_feature)))
+    max_len = max(var_feature_length)
+    var_feature = pad_sequences(
+        var_feature,
+        maxlen=max_len,
+        padding="post",
+    )
+    return key2index, var_feature, max_len
+
+
+def get_test_var_feature(data, col, key2index, max_len):
+    # print("user_hist_list: \n")
+
+    def split(x):
+        key_ans = x.split("|")
+        for key in key_ans:
+            if key not in key2index:
+                # Notice : input value 0 is a special "padding",
+                # so we do not use 0 to encode valid feature for sequence input
+                key2index[key] = len(key2index) + 1
+        return list(map(lambda x: key2index[x], key_ans))
+
+    test_hist = list(map(split, data[col].values))
+    test_hist = pad_sequences(test_hist, maxlen=max_len, padding="post")
+    return test_hist
+
+class DSSM_Torch(BaseTower):
     """DSSM Two Tower Model"""
     def __init__(self, user_dnn_feature_columns, item_dnn_feature_columns, gamma=1, dnn_use_bn=True,
                  dnn_hidden_units=(300, 300, 128), dnn_activation='relu', l2_reg_dnn=0, l2_reg_embedding=1e-5,
                  dnn_dropout = 0, init_std=0.0001, seed=124, task='binary', device='cpu', gpus=None):
-        super(DSSM, self).__init__(user_dnn_feature_columns, item_dnn_feature_columns,
+        super(DSSM_Torch, self).__init__(user_dnn_feature_columns, item_dnn_feature_columns,
                                     l2_reg_embedding=l2_reg_embedding, init_std=init_std, seed=seed, task=task,
                                     device=device, gpus=gpus)
 
@@ -187,3 +229,105 @@ class DSSM(BaseTower):
             raise Exception("input Error! user and item feature columns are empty.")
 
 
+class CosineSimilarityLayer(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(CosineSimilarityLayer, self).__init__(**kwargs)
+
+    def call(self, inputs, **kwargs):
+        x, y = inputs
+        x_normalized = tf.nn.l2_normalize(x, axis=-1)
+        y_normalized = tf.nn.l2_normalize(y, axis=-1)
+        cosine_similarity = tf.reduce_sum(tf.multiply(x_normalized, y_normalized), axis=-1)
+        return cosine_similarity
+
+class ActivationLayer(tf.keras.layers.Layer):
+    def __init__(self, activation, units, dice_dim):
+        super(ActivationLayer, self).__init__()
+        self.activation = tf.keras.layers.Activation(activation)
+        self.dense = tf.keras.layers.Dense(units)
+        self.dice_dim = dice_dim
+
+    def call(self, inputs):
+        x = self.dense(inputs)
+        x = self.activation(x)
+        return x
+
+class DNN_TF(tf.keras.Model):
+    def __init__(self, inputs_dim, hidden_units, activation='relu', l2_reg=0, dropout_rate=0, use_bn=True,
+                 init_std=0.0001, dice_dim=3, seed=1024, device='cpu'):
+        super(DNN_TF, self).__init__()
+
+        self.dropout_rate = dropout_rate
+        self.dropout = tf.keras.layers.Dropout(dropout_rate)
+        self.seed = seed
+        self.l2_reg = l2_reg
+        self.use_bn = use_bn
+
+        if len(hidden_units) == 0:
+            raise ValueError("hidden_units is empty!!")
+        if inputs_dim > 0:
+            hidden_units = [inputs_dim] + list(hidden_units)
+        else:
+            hidden_units = list(hidden_units)
+
+        self.linears = [tf.keras.layers.Dense(hidden_units[i+1], kernel_initializer=tf.keras.initializers.RandomNormal(mean=0, stddev=init_std),
+                              kernel_regularizer=tf.keras.regularizers.l2(l2_reg)) for i in range(len(hidden_units) - 1)]
+
+        if self.use_bn:
+            self.bn = [tf.keras.layers.BatchNormalization() for _ in range(len(hidden_units) - 1)]
+
+        self.activation_layers = [ActivationLayer(activation, hidden_units[i+1], dice_dim) for i in range(len(hidden_units) - 1)]
+
+    def call(self, inputs):
+        deep_input = inputs
+        for i in range(len(self.linears)):
+            fc = self.linears[i](deep_input)
+
+            if self.use_bn:
+                fc = self.bn[i](fc)
+
+            fc = self.activation_layers[i](fc)
+
+            fc = self.dropout(fc)
+            deep_input = fc
+        return deep_input
+    
+class DSSM_TF(tf.keras.Model):
+    def __init__(self, user_dnn_feature_columns, item_dnn_feature_columns, l2_reg_embedding=1e-5,
+                 init_std=0.0001, seed=1024, task='binary'):
+        super(DSSM_TF, self).__init__()
+        self.user_dnn_feature_columns = user_dnn_feature_columns
+        self.item_dnn_feature_columns = item_dnn_feature_columns
+
+        self.user_dnn = DNN_TF(129, hidden_units=(300, 300, 128), activation='relu')
+        self.item_dnn = DNN_TF(33, hidden_units=(300, 300, 128), activation='relu')
+        self.embedding_dict = dict()
+        self.embedding_dict['user_id'] = tf.keras.layers.Embedding(6040, 32)
+        self.embedding_dict['gender'] = tf.keras.layers.Embedding(2, 32)
+        self.embedding_dict['age'] = tf.keras.layers.Embedding(7, 32)
+        self.embedding_dict['occupation'] = tf.keras.layers.Embedding(21, 32)
+        self.embedding_dict['movie_id'] = tf.keras.layers.Embedding(3706, 32)
+        
+
+        self.concat_layer = tf.keras.layers.Concatenate(axis=1)
+        self.cosine_similarity_layer = CosineSimilarityLayer()
+
+    def call(self, inputs, training=None, mask=None):
+
+        user_id_embed = self.embedding_dict['user_id'](inputs['user_id'])
+        gender_embed = self.embedding_dict['gender'](inputs['gender'])
+        age_embed = self.embedding_dict['age'](inputs['age'])
+        occupation_embed = self.embedding_dict['occupation'](inputs['occupation'])
+        movie_id_embed = self.embedding_dict['movie_id'](inputs['movie_id'])
+
+        user_dnn_input = self.concat_layer([user_id_embed,gender_embed,age_embed,occupation_embed, tf.expand_dims(inputs['user_mean_rating'], axis=-1)])
+        item_dnn_input = self.concat_layer([movie_id_embed, tf.expand_dims(inputs['movie_mean_rating'], axis=-1)])
+        # Tower 1 (User Tower)
+        user_output = self.user_dnn(user_dnn_input)
+
+        # Tower 2 (Item Tower)
+        item_output = self.item_dnn(item_dnn_input)
+
+        output = self.cosine_similarity_layer([user_output, item_output])
+
+        return output

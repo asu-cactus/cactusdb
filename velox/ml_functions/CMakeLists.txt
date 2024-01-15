@@ -36,6 +36,23 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(nn_tests tests/NNTest.cpp)
+target_link_libraries(
+  nn_tests
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base 
+  velox_vector_fuzzer
+  openblas
+  ${TORCH_LIBRARIES}
+)
+
 add_executable(embedding_test tests/EmbeddingTest.cpp)
 target_link_libraries(
   embedding_test

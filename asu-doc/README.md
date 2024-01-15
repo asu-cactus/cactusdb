@@ -44,6 +44,16 @@ git switch origin/main
 make release
 ```
 
+3rd-party dependecies 
+
+EvaDB with modification to support `ARRAY` in Postgres.
+```
+git clone https://github.com/lixi-zhou/evadb.git
+git checkout array
+cd evadb
+pip install ./[ray]
+```
+
 ### Develop with Visual Studio Code
 
 It is recommended to code with Visual Studio Code. You can use the following script to start a VS Code Tunnel for remote development. If you want to keep the tunnel alive in the background, you can first launch a `tmux` session and then execute the following command.

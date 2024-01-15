@@ -4,7 +4,7 @@ https://github.com/archersama/IntTower/tree/main
 """
 import torch
 import torch.nn as nn
-from layers.core import LocalActivationUnit
+from ..layers.core import LocalActivationUnit
 
 
 class SequencePoolingLayer(nn.Module):
