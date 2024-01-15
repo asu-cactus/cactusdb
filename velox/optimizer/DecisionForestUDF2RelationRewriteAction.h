@@ -82,13 +82,13 @@ public:
 									* and then replace this node by the following plan:
 									*
 									* nestedLoopJoin(
-												*    exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-												*    .values({treeRowVector})
-												*    .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
-												*    .planNode(), {"row_id", "x", "tree_id", "tree"})
-												*    .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
-												*    .aggregation({"row_id"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
-												*    .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
+									*    exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+									*    .values({treeRowVector})
+									*    .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
+									*    .planNode(), {"row_id", "x", "tree_id", "tree"})
+									*    .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
+									*    .aggregation({"row_id"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
+									*    .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
 									*/
 												
 									if (projections.size() == 1) {
