@@ -69,7 +69,7 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
 
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
-
+    // Register hiveconnector for file splits.
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
@@ -88,33 +88,43 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
   }
 
   void TestBody() override {}
-
+  // Wait for all drivers to finish work.
   void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
     while (!task->isFinished()) {
       usleep(1000); // 0.01 second.
     }
   }
 
+  /**
+   * @brief A function to run logical plan.
+   * 
+   * @param filePath The file path for the data source file to be split.
+   * @param numThreads The number of Velox executor threads.
+   * @param numSplits The number of file splits.
+   * @param myPlan The pointer to the planBuilder which builds the logical plan.
+   * @param p0 The planNodeID for the plan node that needs to add file splits.
+  */
   void runPlan(
       std::string filePath,
       int numThreads,
       int numSplits,
       PlanBuilder& myPlan,
       core::PlanNodeId p0) {
+    // Create hivesplits for file.
     auto hiveSplits = makeHiveConnectorSplits(
         filePath, numSplits, dwio::common::FileFormat::DWRF);
-
+    // Initializes executor.
     std::shared_ptr<folly::Executor> executor_{
         std::make_shared<folly::CPUThreadPoolExecutor>(
             std::thread::hardware_concurrency())};
-
+    // Initializes queryCtx.
     std::shared_ptr<core::QueryCtx> queryCtx_{
         std::make_shared<core::QueryCtx>(executor_.get())};
-
+    // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
-
+    // Create task for logical plan.
     auto task = exec::Task::create(
         "0",
         myPlan.planFragment(),
@@ -127,7 +137,7 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
         });
 
     std::cout << "Hive splits:" << std::endl;
-
+    // Add hivesplits to the target plan node (data source node).
     for (auto& split : hiveSplits) {
       // std::cout << split->toString() << std::endl;
       task->addSplit(p0, exec::Split(std::move(split)));
@@ -136,13 +146,11 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
         std::chrono::steady_clock::now();
 
 
-
+    // Start the task by setting the number of drivers.
     task->start(numThreads);
-
+    // Add all splits.
     task->noMoreSplits(p0);
-
-    // Start task with 2 as maximum drivers and wait for execution to finish
-
+    // Wait for all drivers to finish.
     waitForFinishedDrivers(task);
 
     std::chrono::steady_clock::time_point end =
@@ -163,141 +171,184 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
               << " secs" << std::endl;
   }
 
-struct DataFrame {
-    std::vector<std::vector<float>> features;
-    std::vector<float*> weights;
-    std::vector<float*> bias;
-    float* featuresFloat;
-};
+  struct DataFrame {
+      std::vector<std::vector<float>> features;
+      std::vector<float*> weights;
+      std::vector<float*> bias;
+      float* featuresFloat;
+  };
 
-DataFrame data_generate(int features, int samples, int first_layer, int second_layer){
-  int input_features_size = features;
-  int num_samples = samples;
+/**
+ * @brief A function generates random data source.
+ * 
+ * @param features The number of features (column count) in the data source.
+ * @param samples The number of samples (row count) in the data source.
+ * @param first_layer The output size of the first layer in the network.
+ * @param second_layer The output size of the second layer in the network.
+ * 
+ * @return DataFrame The structure used to denote the generated data.
+*/
+  DataFrame data_generate(
+      int features, 
+      int samples, 
+      int first_layer, 
+      int second_layer){
+    // Example:
+    // ( 1000 * 597540 x 597540 * 1024 + 1000*1024) first layer, data x weights + bias.
+    // ( 1000 * 1024 x 1024 * 14588 + 1000*14588) second layer, data x weights + bias.
+    int input_features_size = features;
+    int num_samples = samples;
 
-  int first_layer_output_size = first_layer;
-  int second_layer_output_size = second_layer;
-  // ( 1000 * 597540 x 597540 * 1024 + 1000*1024) first layer
-  // ( 1000 * 1024 x 1024 * 14588 + 1000*14588) second layer
-  int input_total_size = input_features_size * num_samples;
+    int first_layer_output_size = first_layer;
+    int second_layer_output_size = second_layer;
 
-  int weight_layer1_size = input_features_size * first_layer_output_size;
-  int weight_layer2_size = first_layer_output_size * second_layer_output_size;
+    int input_total_size = input_features_size * num_samples;
 
-  int bias_layer1_size = num_samples * first_layer_output_size;
-  int bias_layer2_size = num_samples * second_layer_output_size;
+    int weight_layer1_size = input_features_size * first_layer_output_size;
+    int weight_layer2_size = first_layer_output_size * second_layer_output_size;
 
-  std::random_device rd;  // Seed the random number generator
-  std::mt19937 gen(rd()); // Initialize the Mersenne Twister engine
-  // std::uniform_real_distribution<float> distribution(0.00000009, 0.00000011); // Define the range
-  std::uniform_real_distribution<float> distribution(0.0009, 0.0011);
+    int bias_layer1_size = num_samples * first_layer_output_size;
+    int bias_layer2_size = num_samples * second_layer_output_size;
+    // Seed the random number generator
+    std::random_device rd; 
+    // Initialize the Mersenne Twister engine
+    std::mt19937 gen(rd()); 
+    // Define the range
+    std::uniform_real_distribution<float> distribution(0.0009, 0.0011);
 
-  //generate input
-  std::vector<std::vector<float>> featureVectors;
-  for (int i = 0; i < num_samples; i++) {
-        std::vector<float> featureVector;
-        for (int j = 0; j < input_features_size; j++) {
-                featureVector.push_back(i*input_features_size+j);
+    //Generate input
+    std::vector<std::vector<float>> featureVectors;
+
+    for (int i = 0; i < num_samples; i++) {
+
+          std::vector<float> featureVector;
+
+          for (int j = 0; j < input_features_size; j++) {
+
+                  featureVector.push_back(i*input_features_size+j);
+
+          }
+
+          featureVectors.push_back(featureVector);
+
+      }
+
+    float* floatArray = new float[num_samples * input_features_size];
+
+    int index = 0;
+
+    for (const auto& row : featureVectors) {
+
+        for (const float& value : row) {
+
+            floatArray[index++] = value;
+
         }
-        featureVectors.push_back(featureVector);
     }
 
-  float* floatArray = new float[num_samples * input_features_size];
-  int index = 0;
+    //Generate weight
+    float* weight_layer1 = new float[weight_layer1_size];
 
-  for (const auto& row : featureVectors) {
-      for (const float& value : row) {
-          floatArray[index++] = value;
-      }
+    for (int i = 0; i < weight_layer1_size; ++i) {
+
+        weight_layer1[i] = 0.000001; 
+    }
+    float* weight_layer2 = new float[weight_layer2_size];
+
+    for (int i = 0; i < weight_layer2_size; ++i) {
+
+        weight_layer2[i] = 0.000001; 
+    }
+
+    std::vector<float*> weights;
+    weights.push_back(weight_layer1);
+    weights.push_back(weight_layer2);
+
+    //Generate bias
+    float* bias_layer1 = new float[bias_layer1_size];
+
+    for (int i = 0; i < bias_layer1_size; ++i) {
+      
+        bias_layer1[i] = 0.00001; 
+    }
+    float* bias_layer2 = new float[bias_layer2_size];
+
+    for (int i = 0; i < bias_layer2_size; ++i) {
+
+        bias_layer2[i] = 0.00001; 
+    }
+
+    std::vector<float*> bias;
+    bias.push_back(bias_layer1);
+    bias.push_back(bias_layer2);
+    // Create dataframe
+    DataFrame data;
+    data.features = featureVectors;
+    data.weights = weights;
+    data.bias = bias;
+    data.featuresFloat = floatArray;
+
+    return data;
   }
 
-  //generate weight
-  float* weight_layer1 = new float[weight_layer1_size];
-  for (int i = 0; i < weight_layer1_size; ++i) {
-      weight_layer1[i] = 0.000001; 
-  }
-  float* weight_layer2 = new float[weight_layer2_size];
-  for (int i = 0; i < weight_layer2_size; ++i) {
-      weight_layer2[i] = 0.000001; 
-  }
-  std::vector<float*> weights;
-  weights.push_back(weight_layer1);
-  weights.push_back(weight_layer2);
-
-  //generate bias
-  float* bias_layer1 = new float[bias_layer1_size];
-  for (int i = 0; i < bias_layer1_size; ++i) {
-      bias_layer1[i] = 0.00001; 
-  }
-  float* bias_layer2 = new float[bias_layer2_size];
-  for (int i = 0; i < bias_layer2_size; ++i) {
-      bias_layer2[i] = 0.00001; 
-  }
-  std::vector<float*> bias;
-  bias.push_back(bias_layer1);
-  bias.push_back(bias_layer2);
-  // create dataframe
-  DataFrame data;
-  data.features = featureVectors;
-  data.weights = weights;
-  data.bias = bias;
-  data.featuresFloat = floatArray;
-
-  return data;
-}
-
-
+  /**
+   * @brief A test function to test the rewrite rule of TorchNN2TwoLayerUDF.
+   * 
+   * @param rewrite A boolean value indicating whether to perform a rewrite.
+  */
   void testTorchNN2TwoLayerUDFPlan(bool rewrite) {
-
+    // Set data source config.
     int input_features_size = 800;//597540
     int num_samples = 1000;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
+    // Set splits number
     int num_splits = 4;
-
+    // Generate data source
     auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
-
+    // Create arrayVector for data source
     auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
-
+    // Create rowVector for data source
     auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-
+    // Create file path
     auto file = TempFilePath::create();
-
+    // Create file config
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
-
+    // Write the data source to a file, with the format defined by the rowVector
     writeToFile(file->path, {inputRowVector}, config);
-
+    // Define the dimensions for torchdnn UDF
     std::vector<int> dimensions;
 
     dimensions.push_back(input_features_size);
     dimensions.push_back(first_layer_output_size);
     dimensions.push_back(second_layer_output_size);
-
+    // Create weights for torchdnn UDF
     float* weights[2] = {data.weights[0], data.weights[1]};
-
+    // Create bias for torchdnn UDF
     float* bias[2] = {data.bias[0], data.bias[1]};
-
+    // Register torchdnn UDF
     exec::registerVectorFunction(
       "torchDNN0",
       TorchDNN::signatures(),
       std::make_unique<TorchDNN>(weights, bias, dimensions)
     );
-    // create a plan for decision forest using UDF-centric style
+    // Initialize planNodeID
     core::PlanNodeId p0;
-
+    // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-
+    // Create a plan for FFNN using torchdnn UDF
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                 .tableScan(asRowType(inputRowVector->type()))
                 .capturePlanNodeId(p0)
                 .project({"torchDNN0(v)"})
                 .planBuild();
-
+    // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
     RuleManager ruleManager;
     // Create planState
     PlanState planState(ruleManager);
-
+    // Run rewriten rule
     if (rewrite) {
       // Get possible actions for this plan
       planState.getPossibleActions(planNode);
@@ -308,7 +359,7 @@ DataFrame data_generate(int features, int samples, int first_layer, int second_l
       // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
       std::string testAction  = it->first;
-      // Take the action
+      // Take one rewritten action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction});
       // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan);

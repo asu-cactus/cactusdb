@@ -41,7 +41,19 @@ public:
 
     TwoLayerUDF2TorchNNRewriteAction () {}
 
-
+	/**
+	 * @brief A function to apply a rule for rewriting the logical plan.
+	 * 
+	 * @param curNode A pointer to the current plan node, usually point to the last node of logical plan.
+	 * @param prevNode A pointer to the previous plan node, usually point to the previous node before current node.
+	 * @param maker A pointer to the VectorMaker, which is a helper class used to build the data source vector.
+	 * @param planBuilder A pointer to the planBuilder, which is a helper class used to build the logical plan.
+	 * @param pool_ A pointer to the memory pool, which is used to build the logical plan.
+	 * @param planNodeIdGenerator A pointer to the planNodeIdGenerator, which is used to track the ID of the plan Node.
+	 * @param targets A vector for multiple strings, representing the target UDF name that can apply this rewritten rule.
+	 * 
+	 * @return A boolean value indicating whether the rewrite was successful.
+	*/
     bool apply(std::shared_ptr<const core::PlanNode> curNode, 
 	       std::shared_ptr<const core::PlanNode> prevNode, 
 	       VectorMaker & maker,
@@ -49,11 +61,11 @@ public:
 	       std::shared_ptr<memory::MemoryPool> pool_,
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
 		   std::vector<std::string> targets) override {
-
+			// Iterate over each target in the targets container
 			for (auto target : targets) {
-
+				// Start from the current node
 				if (curNode) {
-
+					// Get the name of node
 					std::string_view nodeName = curNode->name();
 				// We frist search project node
 				if (nodeName == "Project") {
@@ -67,15 +79,15 @@ public:
 							exprStr = expression->toString();
 							// Tree serach in one expression until leaf expression (size == 0)
 							while (expression->inputs().size() > 0) {
-								// String match the target action
+								// String match the target UDF name
 								if (exprStr == target) {
-
+									// Cast this matched expression to CallTypedExpr, which is used to get the pointer for the UDF functions
 									if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)) {
-								
+										// We only consider one projection expression in the project node.
 										if (projections.size() == 1) {
 								
                             				core::QueryConfig config({});
-											// Cast 4 callTypedExprs, two layers of add and multiply
+											// Cast 4 callTypedExprs, consisting of two addition UDF functions and two multiplication UDF functions.
 											if (auto call1 = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0])) {
 
 												std::string firstMatAddName = call1->name();
@@ -91,7 +103,7 @@ public:
 														if (auto call4 = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0]->inputs()[0])) {
 
 															std::string secondMatMulName = call4->name();
-															// Search UDF function by name
+															// Search for UDF functions by names, where the names are derived from the above four casts.
 															std::shared_ptr<VectorFunction> myMul1 = getVectorFunction(secondMatMulName, {ARRAY(REAL())}, {}, config);
 
 															std::shared_ptr<VectorFunction> myMul2 = getVectorFunction(firstMatMulName, {ARRAY(REAL())}, {}, config);
@@ -109,7 +121,7 @@ public:
 																		if (auto myAdd1UDF = std::dynamic_pointer_cast<MatrixAddition>(myAdd1)) {
 
 																			if (auto myAdd2UDF = std::dynamic_pointer_cast<MatrixAddition>(myAdd2)) {
-																				// Get the dimensions, weights and bias.
+																				// Get the dimensions, weights and bias from these addition UDF functions and multiplication UDF functions.
 																				dims.push_back(myMul1UDF->getDims()[0]);
 
 																				dims.push_back(myMul1UDF->getDims()[1]);
@@ -123,7 +135,7 @@ public:
 																				bias[0] = myAdd1UDF->getTensor();
 
 																				bias[1] = myAdd2UDF->getTensor();
-																				// Register new function
+																				// Register new torchdnn UDF function
 																				registerVectorFunction(
 																				"torchDNN",
 																				TorchDNN::signatures(),
@@ -142,15 +154,18 @@ public:
 											}
 																	
 											if (curNode->sources().size() > 0) {
-                                            // only focus on inner case :project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))}) ---> project({torchnnx(v)})
-                                            //TODO: med case: project(func1(twolayer(func2())))
-                                            //      outer case: project({twolayer(func1(func2()))})
+											// Here, we focus on the inner case. For example:
+											// project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))}) ---> project({torchnnx(v)})
+											// The format for inner case is project(twolayer())
+											// TODO: Medium case - project(func1(twolayer(func2())))
+											// TODO: Outer case - project({twolayer(func1(func2()))})
+												// Plan Builder start from the previous node.
 												planBuilder = planBuilder.setRoot(curNode->sources()[0]);
 												// Regular expression match
 												std::regex pattern(R"(softmax\d+\(mat_add\d+\(mat_mul\d+\(relu\d+\(mat_add\d+\(mat_mul\d+.*\)\)\)\)\))");
-
+												// Replace the expression
 												exprStr = std::regex_replace(exprStr, pattern, "torchDNN(v)");
-												// replace the node
+												// Plan Builder add the new node.
 												planBuilder = planBuilder.project({exprStr});
 
 												return true;
@@ -160,7 +175,7 @@ public:
 									}
 
 								}
-								// Search the lower level expression
+								// Search the lower level expression in the same plan node
 								expression = expression->inputs()[0];
 							}
 				
@@ -168,7 +183,7 @@ public:
 					
 					}
 				}
-				// Search for filter node
+				// Search for a filter node, which is similar to the project node
 				if (nodeName == "Filter") {
 		 
             		std::shared_ptr<const FilterNode> myFilterNode = std::dynamic_pointer_cast<const FilterNode> (curNode);
@@ -249,7 +264,12 @@ public:
 							}
 													
 							if (curNode->sources().size() > 0) {
-
+							// Here, we focus on the inner case. For example:
+							// project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))}) ---> project({torchnnx(v)})
+							// The format for inner case is project(twolayer())
+							// TODO: Medium case - project(func1(twolayer(func2())))
+							// TODO: Outer case - project({twolayer(func1(func2()))})
+								// Plan Builder start from the previous node.
 								planBuilder = planBuilder.setRoot(curNode->sources()[0]);
 
 								std::regex pattern(R"(softmax\d+\(mat_add\d+\(mat_mul\d+\(relu\d+\(mat_add\d+\(mat_mul\d+.*\)\)\)\)\))");
@@ -271,9 +291,9 @@ public:
 	    		std::vector<std::shared_ptr<const PlanNode>> sources = curNode->sources();
 				// Until leaf node
             	if (sources.size() == 0) return false;
-
+				// recursive search
             	for (auto source : sources)       		 
-            
+	
 	         		apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets);
 	
 				}
@@ -281,110 +301,122 @@ public:
     
     }
 
-
+	/**
+	 * @brief A function to get the name of rewritten rule.
+	 * 
+	 * @return A string value denoting the name of the rule
+	*/
     std::string name() override {
     
         return "TwoLayerUDF2TorchNNRewriteAction";
     
     }
+	
+	/**
+	 * @brief A function to check if this rule can be applied in a logical plan and to store the possible UDF name.
+	 * 
+	 * @param rootNode A pointer to the logical plan.
+	 * @param targetActions A pointer to the vector used to store possible UDF names applicable for this rule.
+	 * 
+	 * @return A boolean value indicating whether the check was successful.
+	*/
+	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions) override {
+		try {
+			if (!rootNode) {
 
-bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions) override {
-    try {
-        if (!rootNode) {
+				throw std::invalid_argument("rootNode is null");
 
-            throw std::invalid_argument("rootNode is null");
+			}
 
-        }
+			std::string_view nodeName = rootNode->name();
+			// We first check the project node
+			if (nodeName == "Project") {
 
-        std::string_view nodeName = rootNode->name();
+				auto myProjectNode = std::dynamic_pointer_cast<const ProjectNode>(rootNode);
 
-        if (nodeName == "Project") {
+				if (!myProjectNode) {
 
-            auto myProjectNode = std::dynamic_pointer_cast<const ProjectNode>(rootNode);
+					throw std::runtime_error("Failed to cast to ProjectNode");
 
-            if (!myProjectNode) {
+				}
 
-                throw std::runtime_error("Failed to cast to ProjectNode");
+				const std::vector<TypedExprPtr> &projections = myProjectNode->projections();
+				// Search each expressions
+				for (const auto &expression : projections) {
 
-            }
+					std::string expr = expression->toString();
+					// Regular expression match
+					std::regex pattern(R"(softmax\d+\(mat_add\d+\(mat_mul\d+\(relu\d+\(mat_add\d+\(mat_mul\d+.*\)\)\)\)\))");
 
-            const std::vector<TypedExprPtr> &projections = myProjectNode->projections();
+					auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
 
-            for (const auto &expression : projections) {
+					auto wordsEnd = std::sregex_iterator();
+					// Retrieve the possible UDF name applicable for this rule, stored in targetAction.
+					for (auto it = wordsBegin; it != wordsEnd; ++it) {
 
-                std::string expr = expression->toString();
+						targetActions.push_back(it->str());
+
+					}
+				}
+
+				return true;  // Return true for successful execution
+			}
+			// We then check the filter node
+			if (nodeName == "Filter") {
+
+				auto myFilterNode = std::dynamic_pointer_cast<const FilterNode>(rootNode);
+
+				if (!myFilterNode) {
+
+					throw std::runtime_error("Failed to cast to FilterNode");
+				}
+
+				const TypedExprPtr &filterExpr = myFilterNode->filter();
+
+				std::string expr = filterExpr->toString();
 				// Regular expression match
 				std::regex pattern(R"(softmax\d+\(mat_add\d+\(mat_mul\d+\(relu\d+\(mat_add\d+\(mat_mul\d+.*\)\)\)\)\))");
 
-                auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+				auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
 
-                auto wordsEnd = std::sregex_iterator();
-				// Get target UDF name which can apply this rule, stored in targetAction
-                for (auto it = wordsBegin; it != wordsEnd; ++it) {
+				auto wordsEnd = std::sregex_iterator();
+				// Retrieve the possible UDF name applicable for this rule, stored in targetAction.
+				for (auto it = wordsBegin; it != wordsEnd; ++it) {
 
-                    targetActions.push_back(it->str());
+					targetActions.push_back(it->str());
 
-                }
-            }
+				}
 
-            return true;  // Return true for successful execution
-        }
+				return true;  // Return true for successful execution
+			}
 
-        if (nodeName == "Filter") {
+			std::vector<std::shared_ptr<const core::PlanNode>> sources = rootNode->sources();
 
-            auto myFilterNode = std::dynamic_pointer_cast<const FilterNode>(rootNode);
+			if (sources.empty()) {
+				// Safe exit for leaf node
+				return true;
 
-            if (!myFilterNode) {
+			}
 
-                throw std::runtime_error("Failed to cast to FilterNode");
-            }
+			for (const auto &source : sources) {
 
-            const TypedExprPtr &filterExpr = myFilterNode->filter();
+				if (!check(source, targetActions)) {
+					// Propagate false if any child node returns false
+					return false;
 
-            std::string expr = filterExpr->toString();
+				}
+			}
 
-            std::regex pattern(R"(softmax\d+\(mat_add\d+\(mat_mul\d+\(relu\d+\(mat_add\d+\(mat_mul\d+.*\)\)\)\)\))");
+			return true;  // Return true for successful execution
 
-            auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+		} catch (const std::exception &e) {
 
-            auto wordsEnd = std::sregex_iterator();
+			std::cerr << "Error in check function: " << e.what() << std::endl;
 
-            for (auto it = wordsBegin; it != wordsEnd; ++it) {
+			return false;  // Return false for any error
 
-                targetActions.push_back(it->str());
-
-            }
-
-            return true;  // Return true for successful execution
-        }
-
-        std::vector<std::shared_ptr<const core::PlanNode>> sources = rootNode->sources();
-
-        if (sources.empty()) {
-            // Safe exit for leaf node
-            return true;
-
-        }
-
-        for (const auto &source : sources) {
-
-            if (!check(source, targetActions)) {
-                // Propagate false if any child node returns false
-                return false;
-
-            }
-        }
-
-        return true;  // Return true for successful execution
-
-    } catch (const std::exception &e) {
-
-        std::cerr << "Error in check function: " << e.what() << std::endl;
-
-        return false;  // Return false for any error
-
-    }
-}
+		}
+	}
 
 private: 
 

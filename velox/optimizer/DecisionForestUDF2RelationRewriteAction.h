@@ -47,7 +47,19 @@ public:
 
     DecisionForestUDF2RelationRewriteAction () {}
 
-
+	/**
+	 * @brief A function to apply a rule for rewriting the logical plan.
+	 * 
+	 * @param curNode A pointer to the current plan node, usually point to the last node of logical plan.
+	 * @param prevNode A pointer to the previous plan node, usually point to the previous node before current node.
+	 * @param maker A pointer to the VectorMaker, which is a helper class used to build the data source vector.
+	 * @param planBuilder A pointer to the planBuilder, which is a helper class used to build the logical plan.
+	 * @param pool_ A pointer to the memory pool, which is used to build the logical plan.
+	 * @param planNodeIdGenerator A pointer to the planNodeIdGenerator, which is used to track the ID of the plan Node.
+	 * @param targets A vector for multiple strings, representing the target UDF name that can apply this rewritten rule.
+	 * 
+	 * @return A boolean value indicating whether the rewrite was successful.
+	*/
     bool apply(std::shared_ptr<const core::PlanNode> curNode, 
 	       std::shared_ptr<const core::PlanNode> prevNode, 
 	       VectorMaker & maker,
@@ -198,13 +210,25 @@ public:
     
     }
 
-
+	/**
+	 * @brief A function to get the name of rewritten rule.
+	 * 
+	 * @return A string value denoting the name of the rule
+	*/
     std::string name() override {
     
         return "DecisionForestUDF2RelationRewriteAction";
     
     }
 
+	/**
+	 * @brief A function to check if this rule can be applied in a logical plan and to store the possible UDF name.
+	 * 
+	 * @param rootNode A pointer to the logical plan.
+	 * @param targetActions A pointer to the vector used to store possible UDF names applicable for this rule.
+	 * 
+	 * @return A boolean value indicating whether the check was successful.
+	*/
 	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions) override {
 		try {
 			if (!rootNode) {
