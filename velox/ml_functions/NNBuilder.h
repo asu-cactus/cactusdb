@@ -1,3 +1,4 @@
+#pragma once
 #include <folly/init/Init.h>
 #include "velox/connectors/tpch/TpchConnector.h"
 #include "velox/connectors/tpch/TpchConnectorSplit.h"

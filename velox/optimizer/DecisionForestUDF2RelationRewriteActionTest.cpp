@@ -16,8 +16,6 @@
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
 #include <fcntl.h>
 #include <folly/init/Init.h>
-#include <stdlib.h>
-#include <torch/torch.h>
 #include <unistd.h>
 #include <cmath>
 #include <cstdlib>
@@ -26,6 +24,34 @@
 #include <memory>
 #include <random>
 #include <string>
+
+// Velox headers
+#include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
+#include "velox/functions/prestosql/registration/RegistrationFunctions.h"
+#include "velox/functions/Macros.h"
+#include "velox/functions/Registerer.h"
+#include "velox/parse/Expressions.h"
+#include "velox/parse/ExpressionsParser.h"
+#include "velox/parse/TypeResolver.h"
+#include "velox/type/Type.h"
+#include "velox/expression/VectorFunction.h"
+#include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/vector/tests/utils/VectorMaker.h"
+#include "velox/exec/tests/utils/AssertQueryBuilder.h"
+#include "velox/exec/tests/utils/HiveConnectorTestBase.h"
+#include "velox/exec/tests/utils/TempDirectoryPath.h"
+#include "velox/common/memory/MemoryArbitrator.h"
+#include "velox/vector/fuzzer/VectorFuzzer.h"
+#include "velox/ml_functions/NNBuilder.h"
+#include "velox/exec/FilterProject.h"
+#include "velox/common/file/FileSystems.h"
+#include "velox/dwio/dwrf/reader/DwrfReader.h"
+
+// Custom headers
+#include "RewriteAction.h"
+#include "TwoLayerUDF2TorchNNRewriteAction.h"
+#include "RuleManager.h"
+#include "PlanState.h"
 #include "DecisionForestUDF2RelationRewriteAction.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/connectors/hive/HiveConfig.h"
@@ -44,6 +70,11 @@
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
 
+#include "RewriteAction.h"
+#include "RuleManager.h"
+#include "PlanState.h"
+#include "DecisionForestUDF2RelationRewriteAction.h"
+
 using namespace std;
 using namespace ml;
 using namespace facebook::velox;
@@ -52,9 +83,9 @@ using namespace facebook::velox::exec;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::core;
 
-class RewriteTest : public HiveConnectorTestBase {
+class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase {
  public:
-  RewriteTest() {
+  DecisionForestUDF2RelationRewriteActionTest() {
     // Register Presto scalar functions.
     functions::prestosql::registerAllScalarFunctions();
 
@@ -63,7 +94,7 @@ class RewriteTest : public HiveConnectorTestBase {
 
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
-
+    // Register hiveconnector for file splits.
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
@@ -71,7 +102,7 @@ class RewriteTest : public HiveConnectorTestBase {
     connector::registerConnector(hiveConnector);
   }
 
-  ~RewriteTest() {
+  ~DecisionForestUDF2RelationRewriteActionTest() {
     TearDown();
   }
 
@@ -212,26 +243,36 @@ class RewriteTest : public HiveConnectorTestBase {
     writeToFile(filePath, {rowVectors}, config);
   }
 
+  /**
+   * @brief A function to run logical plan.
+   * 
+   * @param filePath The file path for the data source file to be split.
+   * @param numRows The number of rows for data source.
+   * @param numSplits The number of file splits.
+   * @param myPlan The pointer to the planBuilder which builds the logical plan.
+   * @param p0 The planNodeID for the plan node that needs to add file splits.
+  */
   void runDecisionForestPlan(
       std::string filePath,
       int numRows,
       int numSplits,
       PlanBuilder& myPlan,
       core::PlanNodeId p0) {
+    // Create hivesplits for file.
     auto hiveSplits = makeHiveConnectorSplits(
         filePath, numSplits, dwio::common::FileFormat::DWRF);
-
+    // Initializes executor.
     std::shared_ptr<folly::Executor> executor_{
         std::make_shared<folly::CPUThreadPoolExecutor>(
             std::thread::hardware_concurrency())};
-
+    // Initializes queryCtx.
     std::shared_ptr<core::QueryCtx> queryCtx_{
         std::make_shared<core::QueryCtx>(executor_.get())};
-
+    // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
-
+    // Create task for logical plan.
     auto task = exec::Task::create(
         "0",
         myPlan.planFragment(),
@@ -244,7 +285,7 @@ class RewriteTest : public HiveConnectorTestBase {
         });
 
     std::cout << "Hive splits:" << std::endl;
-
+    // Add hivesplits to the target plan node (data source node).
     for (auto& split : hiveSplits) {
       // std::cout << split->toString() << std::endl;
       task->addSplit(p0, exec::Split(std::move(split)));
@@ -253,13 +294,11 @@ class RewriteTest : public HiveConnectorTestBase {
         std::chrono::steady_clock::now();
 
     int veloxThreads = 8;
-
+    // Start the task by setting the number of drivers.
     task->start(veloxThreads);
-
+    // Add all splits.
     task->noMoreSplits(p0);
-
-    // Start task with 2 as maximum drivers and wait for execution to finish
-
+    // Wait for all drivers to finish.
     waitForFinishedDrivers(task);
 
     std::chrono::steady_clock::time_point end =
@@ -315,16 +354,25 @@ class RewriteTest : public HiveConnectorTestBase {
                       .project({"decision_forest_predict(x)"});
 
     auto planNode = myPlan.planNode();
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
 
     if (rewrite) {
-      // Create a rewrite action for this plan
-      std::shared_ptr<optimization::DecisionForestUDF2RelationRewriteAction>
-          myAction = std::make_shared<
-              optimization::DecisionForestUDF2RelationRewriteAction>();
-
-      // Apply the rewrite action
-      myAction->apply(
-          planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator);
+      // Get possible actions for this plan
+      planState.getPossibleActions(planNode);
+      // Print possible actions
+      for (const auto& entry : planState.actionsPair) {
+        std::cout << entry.first << ": " << entry.second << std::endl;
+      }
+      // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
+      auto it = planState.actionsPair.begin();
+      std::string testAction  = it->first;
+      // Take one rewritten action
+      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction});
+      // Update the planState (getPossibleAction after apply one action)
+      planState.update(myPlan);
     }
 
     // Run the rewritten plan
@@ -341,7 +389,7 @@ class RewriteTest : public HiveConnectorTestBase {
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
 
-  RewriteTest demo;
+  DecisionForestUDF2RelationRewriteActionTest demo;
 
   bool rewrite = true;
 
