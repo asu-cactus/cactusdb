@@ -42,7 +42,13 @@ public:
         rules.emplace("DecisionForestUDF2RelationRewriteAction", std::make_shared<optimization::DecisionForestUDF2RelationRewriteAction>());
         // Add more rules if needed
     }
-
+    /**
+     * @brief A function to obtain the pointer for a rule given its name.
+     * 
+     * @param ruleName A string for the rule name.
+     * 
+     * @return A pointer to the rule.
+    */
     std::shared_ptr<optimization::RewriteAction> pickRule(const std::string& ruleName) {
         // Search for the rule by name
         auto it = rules.find(ruleName);
@@ -53,7 +59,7 @@ public:
             
         }
 
-        // Rule not found, handle the case (you can throw an exception, return a default rule, etc.)
+        // Rule not found, handle the case (throw an exception, return a default rule, etc.)
         // For now, just return nullptr
         return nullptr;
     }

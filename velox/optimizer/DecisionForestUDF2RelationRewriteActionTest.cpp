@@ -94,7 +94,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
 
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
-
+    // Register hiveconnector for file splits.
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
@@ -243,26 +243,36 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     writeToFile(filePath, {rowVectors}, config);
   }
 
+  /**
+   * @brief A function to run logical plan.
+   * 
+   * @param filePath The file path for the data source file to be split.
+   * @param numRows The number of rows for data source.
+   * @param numSplits The number of file splits.
+   * @param myPlan The pointer to the planBuilder which builds the logical plan.
+   * @param p0 The planNodeID for the plan node that needs to add file splits.
+  */
   void runDecisionForestPlan(
       std::string filePath,
       int numRows,
       int numSplits,
       PlanBuilder& myPlan,
       core::PlanNodeId p0) {
+    // Create hivesplits for file.
     auto hiveSplits = makeHiveConnectorSplits(
         filePath, numSplits, dwio::common::FileFormat::DWRF);
-
+    // Initializes executor.
     std::shared_ptr<folly::Executor> executor_{
         std::make_shared<folly::CPUThreadPoolExecutor>(
             std::thread::hardware_concurrency())};
-
+    // Initializes queryCtx.
     std::shared_ptr<core::QueryCtx> queryCtx_{
         std::make_shared<core::QueryCtx>(executor_.get())};
-
+    // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
-
+    // Create task for logical plan.
     auto task = exec::Task::create(
         "0",
         myPlan.planFragment(),
@@ -275,7 +285,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
         });
 
     std::cout << "Hive splits:" << std::endl;
-
+    // Add hivesplits to the target plan node (data source node).
     for (auto& split : hiveSplits) {
       // std::cout << split->toString() << std::endl;
       task->addSplit(p0, exec::Split(std::move(split)));
@@ -284,13 +294,11 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
         std::chrono::steady_clock::now();
 
     int veloxThreads = 8;
-
+    // Start the task by setting the number of drivers.
     task->start(veloxThreads);
-
+    // Add all splits.
     task->noMoreSplits(p0);
-
-    // Start task with 2 as maximum drivers and wait for execution to finish
-
+    // Wait for all drivers to finish.
     waitForFinishedDrivers(task);
 
     std::chrono::steady_clock::time_point end =
@@ -361,7 +369,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
       // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
       std::string testAction  = it->first;
-      // Take the action
+      // Take one rewritten action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction});
       // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan);
