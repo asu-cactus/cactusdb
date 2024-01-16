@@ -1,5 +1,6 @@
 #pragma once
 #include "velox/expression/VectorFunction.h"
+#include "velox/vector/DictionaryVector.h"
 #include <Eigen/Dense>
 #include <cblas.h>
 #include <chrono>
@@ -135,10 +136,11 @@ private:
 
 class MatrixMultiply_b: public MLFunction {
 public:
-    MatrixMultiply_b(int num_rows, int num_cols, int num_samples, float* weights) {
+    MatrixMultiply_b(int num_rows, int num_cols, int num_samples, float* weights, int blocks) {
         dims.push_back(num_rows);
         dims.push_back(num_cols);
         dims.push_back(num_samples);
+        dims.push_back(blocks);
         weights_ = weights;
     }
 
@@ -553,6 +555,16 @@ public:
     // getters for metadata to be used by optimiser
     float* getTensor() const override {
         return new float[0];
+    }
+    
+    // Getter method for weights
+    float** getWeights() const {
+        return weights;
+    }
+
+    // Getter method for bias
+    float** getBias() const {
+        return bias;
     }
 
     private:

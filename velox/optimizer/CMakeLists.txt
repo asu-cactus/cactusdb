@@ -18,7 +18,7 @@ set(SOURCES
 )
 
 set(Torch_DIR "$HOME/libtorch/share/cmake/Torch")
-#set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
+# set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 
 find_package(jsoncpp REQUIRED)
@@ -74,21 +74,58 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
-# add_executable(rewrite_test RewriteTest.cpp)
-# target_link_libraries(
-#   rewrite_test
-#   velox_aggregates
-#   velox_type
-#   velox_vector
-#   velox_vector_test_lib
-#   velox_exec
-#   velox_exec_test_lib
-#   velox_tpch_connector
-#   velox_memory
-#   velox_common_base
-#   velox_vector_fuzzer
-#   velox_dwio_parquet_reader
-#   ${TORCH_LIBRARIES}
-# )
+
+
+add_executable(torch2twolayer_test TorchNN2TwoLayerUDFRewriteActionTest.cpp)
+target_link_libraries(
+  torch2twolayer_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(twolayer2torch_test TwoLayerUDF2TorchNNRewriteActionTest.cpp)
+target_link_libraries(
+  twolayer2torch_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+
+add_executable(decisionforest2rel_test DecisionForestUDF2RelationRewriteActionTest.cpp)
+target_link_libraries(
+  decisionforest2rel_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
 
 # set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")
