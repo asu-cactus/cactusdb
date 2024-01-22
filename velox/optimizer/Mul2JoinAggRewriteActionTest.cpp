@@ -50,18 +50,18 @@
 
 // Custom headers
 #include "RewriteAction.h"
-#include "TwoLayerUDF2TorchNNRewriteAction.h"
+#include "Mul2JoinAggRewriteAction.h"
 #include "RuleManager.h"
 #include "PlanState.h"
-#include "CataLog.h"
+#include "Register.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
-class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
+class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
  public:
- TwoLayerUDF2TorchNNRewriteActionTest() {
+ Mul2JoinAggRewriteActionTest() {
     // Register Presto scalar functions.
     functions::prestosql::registerAllScalarFunctions();
 
@@ -78,7 +78,7 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     connector::registerConnector(hiveConnector);
   }
 
-  ~TwoLayerUDF2TorchNNRewriteActionTest() {
+  ~Mul2JoinAggRewriteActionTest() {
     TearDown();
   }
 
@@ -106,14 +106,12 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
    * @param p0 The planNodeID for the plan node that needs to add file splits.
   */
   void runPlan(
-      std::string filePath,
       int numThreads,
       int numSplits,
       PlanBuilder& myPlan,
-      core::PlanNodeId p0) {
+      CataLog &cataLog) {
     // Create hivesplits for file.
-    auto hiveSplits = makeHiveConnectorSplits(
-        filePath, numSplits, dwio::common::FileFormat::DWRF);
+
     // Initializes executor.
     std::shared_ptr<folly::Executor> executor_{
         std::make_shared<folly::CPUThreadPoolExecutor>(
@@ -137,12 +135,21 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
           return exec::BlockingReason::kNotBlocked;
         });
 
+    auto idFileAddrMap = cataLog.getIdAddressMap();
+    std::vector<core::PlanNodeId> ids;
     std::cout << "Hive splits:" << std::endl;
-    // Add hivesplits to the target plan node (data source node).
-    for (auto& split : hiveSplits) {
+    for (const auto& entry : idFileAddrMap) {
+      core::PlanNodeId key = entry.first;
+      const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+      auto hiveSplits = makeHiveConnectorSplits(fileAddr);
+      for (auto& split : hiveSplits) {
       // std::cout << split->toString() << std::endl;
-      task->addSplit(p0, exec::Split(std::move(split)));
+      task->addSplit(key, exec::Split(std::move(split)));
+      }
+      ids.push_back(key);
     }
+
+    // Add hivesplits to the target plan node (data source node).
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
 
@@ -150,7 +157,10 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     // Start the task by setting the number of drivers.
     task->start(numThreads);
     // Add all splits.
-    task->noMoreSplits(p0);
+    for (auto id: ids){
+      task->noMoreSplits(id);
+    }
+
     // Wait for all drivers to finish.
     waitForFinishedDrivers(task);
 
@@ -296,15 +306,72 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
 
     return data;
   }
+  
+  std::string registerFunctions(int units1, int units2, int input_size1, int input_size2, float* weightsFile_1, float* weightsFile_2, float* biasFile_1, float* biasFile_2, CataLog &catalog) {
+    optimization::registerVectorFunction(
+        "mat_mul0",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1),
+        {},
+        true,
+        catalog
+    );
 
+    optimization::registerVectorFunction(
+        "mat_add0",
+        MatrixAddition::signatures(),
+        std::make_unique<MatrixAddition>(biasFile_1, units1),
+        {},
+        true,
+        catalog
+    );
+
+    optimization::registerVectorFunction(
+        "relu0",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog
+     );
+
+    optimization::registerVectorFunction(
+        "mat_mul1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(weightsFile_2, input_size2, units2),
+        {},
+        true,
+        catalog
+    );
+
+    optimization::registerVectorFunction(
+        "mat_add1",
+        MatrixAddition::signatures(),
+        std::make_unique<MatrixAddition>(biasFile_2, units2),
+        {},
+        true,
+        catalog
+    );
+
+    optimization::registerVectorFunction(
+        "softmax0",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog
+     );
+
+     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
+  }
   /**
    * @brief A test function to test the rewrite rule of TwoLayerUDF2TorchNN.
    * 
    * @param rewrite A boolean value indicating whether to perform a rewrite.
   */
-  void testTwoLayerUDF2TorchNNPlan(bool rewrite) {
+  void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 800;//597540
+    int input_features_size = 3000;//597540
     int num_samples = 1000;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
@@ -323,11 +390,28 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
     // Write the data source to a file, with the format defined by the rowVector
     writeToFile(file->path, {inputRowVector}, config);
+
+    if (input_features_size > cataLog.getBlockingThreshold()) {
+      std::vector<std::vector<float>> valuesBlock = optimization::create_input_block(input_features_size*num_samples, data.features, cataLog.getDefaultBlocksNum());
+      optimization::FileStructure values = optimization::block_to_files(valuesBlock, cataLog.getDefaultBlocksNum(), 0);
+      cataLog.setDataSourceBlocks(values.schema, values.paths);
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+    }
+    else {
+      cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+    }
     // Build two dense layers UDFs
-    std::string compute =  NNBuilder()
-                        .denseLayer(first_layer_output_size, input_features_size, data.weights[0], data.bias[0], NNBuilder::RELU)
-                        .denseLayer(second_layer_output_size, first_layer_output_size, data.weights[1], data.bias[1], NNBuilder::SOFTMAX)
-                        .build();
+    std::string compute = registerFunctions(first_layer_output_size, 
+                            second_layer_output_size, 
+                            input_features_size, 
+                            first_layer_output_size, 
+                            data.weights[0], 
+                            data.weights[1],  
+                            data.bias[0], 
+                            data.bias[1],
+                            cataLog);
+
 
 
     // Initialize planNodeID
@@ -340,6 +424,9 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
                 .capturePlanNodeId(p0)
                 .project({fmt::format(compute, "v")}) 
                 .planBuild();
+
+    cataLog.setIdAddressMap(p0, {file});
+    cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -365,7 +452,7 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     }
 
     // Run the rewritten plan
-    runPlan(file->path, 8, 8, myPlan, p0);
+    runPlan(8, 8, myPlan, cataLog);
   }
 
  private:
@@ -378,7 +465,7 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
 
-  TwoLayerUDF2TorchNNRewriteActionTest demo;
+  Mul2JoinAggRewriteActionTest demo;
 
   bool rewrite = true;
 
@@ -394,7 +481,7 @@ int main(int argc, char** argv) {
         << std::endl
         << std::endl;
 
-    demo.testTwoLayerUDF2TorchNNPlan(true);
+    demo.testMul2JoinAggPlan(true);
 
   } else {
     std::cout
@@ -402,7 +489,7 @@ int main(int argc, char** argv) {
         << std::endl
         << std::endl;
 
-    demo.testTwoLayerUDF2TorchNNPlan(false);
+    demo.testMul2JoinAggPlan(false);
   }
 
   std::cout

@@ -13,31 +13,31 @@
 # limitations under the License.
 
 #include_directories(/home/linqi/velox/velox)
-set(SOURCES
-  OptimizerTest.cpp
-)
+# set(SOURCES
+#   OptimizerTest.cpp
+# )
 
-set(Torch_DIR "$HOME/libtorch/share/cmake/Torch")
-# set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
+# set(Torch_DIR "$HOME/libtorch/share/cmake/Torch")
+set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 
 find_package(jsoncpp REQUIRED)
 
 
-add_executable(velox_op ${SOURCES})
-target_link_libraries(
-  velox_op
-  velox_type
-  velox_vector
-  velox_exec
-  velox_exec_test_lib
-  velox_memory
-  velox_vector_test_lib
-  pthread
-  jsoncpp_lib
-  # openblas
-  ${TORCH_LIBRARIES}
-)
+# add_executable(velox_op ${SOURCES})
+# target_link_libraries(
+#   velox_op
+#   velox_type
+#   velox_vector
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_memory
+#   velox_vector_test_lib
+#   pthread
+#   jsoncpp_lib
+#   # openblas
+#   ${TORCH_LIBRARIES}
+# )
 
 add_executable(traversal_test TraversalTest.cpp)
 target_link_libraries(
@@ -96,6 +96,23 @@ target_link_libraries(
 add_executable(decisionforest2rel_test DecisionForestUDF2RelationRewriteActionTest.cpp)
 target_link_libraries(
   decisionforest2rel_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(mul2joinagg_test Mul2JoinAggRewriteActionTest.cpp)
+target_link_libraries(
+  mul2joinagg_test
   velox_aggregates
   velox_type
   velox_vector

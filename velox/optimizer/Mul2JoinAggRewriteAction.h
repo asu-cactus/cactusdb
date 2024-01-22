@@ -22,6 +22,7 @@
 #include "velox/core/PlanNode.h"
 #include "velox/core/Expressions.h"
 #include "velox/core/ITypedExpr.h"
+#include <regex>
 
 // using namespace ml;
 using namespace facebook::velox;
@@ -37,7 +38,7 @@ class Mul2JoinAggRewriteAction : public RewriteAction {
 
 public:
 
-    Mul2JoinAggRewriteAction (int blocks, core::PlanNodeId* p1, core::PlanNodeId* p2, RowTypePtr v, RowTypePtr w): blocks(blocks), p1(p1), p2(p2), valueSchema(v), weightSchema(w){}
+    Mul2JoinAggRewriteAction (){}
 
 
     bool apply(std::shared_ptr<const core::PlanNode> curNode, 
@@ -46,139 +47,95 @@ public:
 	       PlanBuilder & planBuilder,
 	       std::shared_ptr<memory::MemoryPool> pool_,
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-		   std::string target ) override {
+		   std::vector<std::string> targets,
+		   CataLog &cataLog) override {
+			for (auto target : targets) {
+				if (curNode) {
 
-        if (curNode) {
+					std::string_view nodeName = curNode->name();
 
-            std::string_view nodeName = curNode->name();
-
-	    if (nodeName == "Project") {
-		 
-            std::shared_ptr<const ProjectNode> myProjectNode = std::dynamic_pointer_cast<const ProjectNode> (curNode);
-
-            const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
-
-            for (auto expression : projections) {
-		 
-		        if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)) {
-
-			        std::string callName = call->name();
-
-			        if ((callName.find(target) != std::string::npos) && (expression->inputs()[0]->inputs().size() == 0)) {
-			     
-			      /* 
-			       * Case I: If this function call is the only expression in the projection (e.g.,project({"torch(v)"})), 
-			       * we need to split it to the fully extended expression, (e.g.,project({"softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))"})).
-			       */
-                              
-			            if (projections.size() == 1) {
-			       
-			            // We are the only expression in the project operator
-
-				        // We shall extract the path
-                            core::QueryConfig config({});
-
-				            std::shared_ptr<VectorFunction> myMul = getVectorFunction(callName, {ARRAY(REAL())}, {}, config);
-
-				            if (myMul) {
-				   
-				                std::shared_ptr<MatrixMultiply> myMulUDF = std::dynamic_pointer_cast<MatrixMultiply>(myMul);
-
-					            if (myMulUDF) {
-					 
-					                dims = myMulUDF->getDims();
-									weights = myMulUDF->getTensor();
-									registerVectorFunction(
-										"mat_mul_b",
-										MatrixMultiply_b::signatures(),
-										std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], 1000, weights, blocks)
-									);
-
-									str.push_back("result");
-									// str.push_back(expression->toString());
-
-									// std::string searchString = "mat_mul0(ROW[\"v\"])";
-      								// std::string replaceString = "result";
-
-									// std::size_t found = str[0].find(searchString);
-									// while (found != std::string::npos) {
-									// 	str[0].replace(found, searchString.length(), replaceString);
-									// 	found = str[0].find(searchString, found + replaceString.length());
-									// }
-
-					            }
-				   
-				            }
-
-                                   // We remove the current node from the plan
-				   //
-                            if (curNode->sources().size() > 0) {
-
-									planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
-													.tableScan(valueSchema)
-													.capturePlanNodeId(*p1)
-													.hashJoin(
-														{"v_col"},
-														{"w_row"},
-														exec::test::PlanBuilder(planNodeIdGenerator)
-													.tableScan(weightSchema)
-													.capturePlanNodeId(*p2)
-													.planNode(),
-														"", // extra filter
-														{"v_row", "w_col", "v", "w"})
-													.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
-													.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS result"})
-													.project({str[0]});
-
-                                return true;
-                            }
-			       
-			       }
-                                                                                             			       
-
-		               /*
-				* Case II: If this function call is the only expression in the projection (e.g.,project({"torch(v)"})), 
-				* we need to split it to one dense layer expression and multi core functions expression, (e.g.,project({"dense1(relu(mat_add(mat_mul(v))))))"})), 
-                * or project({"softmax(mat_add(mat_mul(dense0(v))))"})
-				* 
-				*/
-
-			       //TODO
+					if (nodeName == "Project") {
+					
+						if (auto myProjectNode = std::dynamic_pointer_cast<const ProjectNode> (curNode)) {
+							const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
+							for (auto expression : projections) {
+								exprStr = expression->toString();
+								if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)){
+									std::string callName = call->name();
+									if (exprStr.find(target) != std::string::npos) {
+										if (projections.size() == 1) {
+											core::QueryConfig config({});
+											std::shared_ptr<VectorFunction> myMul = getVectorFunction(target, {ARRAY(REAL())}, {}, config);
+											if (myMul) {
+												std::shared_ptr<MatrixMultiply> myMulUDF = std::dynamic_pointer_cast<MatrixMultiply>(myMul);
+												if (myMulUDF) {
+													dims = myMulUDF->getDims();
+													weights = myMulUDF->getTensor();
+													int blocks = cataLog.getDefaultBlocksNum();
+													int samples = cataLog.getDataSourceStat("values")[0];
 
 
-			    /*
-                * Case III: If this function call is the only expression in the projection (e.g.,project({"torch(v)"})), 
-				* we need to split it to two dense layer expressions, (e.g.,project({"dense1(dense0(v))"})),
-                */
+													registerVectorFunction(
+														"mat_mul_b",
+														MatrixMultiply_b::signatures(),
+														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
+													);
 
-			       //TODO
-			        
+													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
 
+												}
+											}
+											if (curNode->sources().size() > 0) {
+												core::PlanNodeId p1;
+												core::PlanNodeId p2;
+												valueSchema = cataLog.getUDFSchema(target+"_values");
+												weightSchema = cataLog.getUDFSchema(target+"_weights");
 
-			  }
-		 
-		 			if ((callName.find(target) != std::string::npos) && (expression->inputs()[0]->inputs().size() > 0)) {
+												std::regex pattern(target + R"(\([^)]+\))");
+												exprStr = std::regex_replace(exprStr, pattern, "R1");
+												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
+																.tableScan(valueSchema)
+																.capturePlanNodeId(p1)
+																.hashJoin(
+																	{"v_col"},
+																	{"w_row"},
+																	exec::test::PlanBuilder(planNodeIdGenerator)
+																.tableScan(weightSchema)
+																.capturePlanNodeId(p2)
+																.planNode(),
+																	"", // extra filter
+																	{"v_row", "w_col", "v", "w"})
+																.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+																.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
+																.project({exprStr});
 
-			  		}
-		 
-		     }
-		 
-		 }		 
-		     
-            }
-	
-	    std::vector<std::shared_ptr<const PlanNode>> sources = curNode->sources();
+												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
+												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
+												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
 
-            if (sources.size() == 0) return false;
+											return true;
+											}
+										}
+										
+									}
 
-            for (auto source : sources)       		 
-            
-	         apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, target);
-	
-	}
-    
-    
-    }
+								}
+							}
+						}						
+					}
+				
+					std::vector<std::shared_ptr<const PlanNode>> sources = curNode->sources();
+
+					if (sources.size() == 0) return false;
+
+						for (auto source : sources)       		 
+						
+							apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
+			
+				}
+			
+			}
+    	}
 
 
     std::string name() override {
@@ -187,19 +144,121 @@ public:
     
     }
 
-	bool check(TypedExprPtr expression) override {
-		return true;
+	/**
+	 * @brief A function to check if this rule can be applied in a logical plan and to store the possible UDF name.
+	 * 
+	 * @param rootNode A pointer to the logical plan.
+	 * @param targetActions A pointer to the vector used to store possible UDF names applicable for this rule.
+	 * 
+	 * @return A boolean value indicating whether the check was successful.
+	*/
+	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog &cataLog) override {
+		try {
+			if (!rootNode) {
+
+				throw std::invalid_argument("rootNode is null");
+
+			}
+
+			std::string_view nodeName = rootNode->name();
+			// We first check the project node
+			if (nodeName == "Project") {
+
+				auto myProjectNode = std::dynamic_pointer_cast<const ProjectNode>(rootNode);
+
+				if (!myProjectNode) {
+
+					throw std::runtime_error("Failed to cast to ProjectNode");
+
+				}
+
+				const std::vector<TypedExprPtr> &projections = myProjectNode->projections();
+				// Search each expressions
+				for (const auto &expression : projections) {
+
+					std::string expr = expression->toString();
+					// Regular expression match
+					std::regex pattern(R"(mat_mul\d+)");
+
+					auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+
+					auto wordsEnd = std::sregex_iterator();
+					// Retrieve the possible UDF name applicable for this rule, stored in targetAction.
+					for (auto it = wordsBegin; it != wordsEnd; ++it) {
+						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
+							targetActions.push_back(it->str());
+						}
+					}
+				}
+
+				return true;  // Return true for successful execution
+			}
+			// We then check the filter node
+			if (nodeName == "Filter") {
+
+				auto myFilterNode = std::dynamic_pointer_cast<const FilterNode>(rootNode);
+
+				if (!myFilterNode) {
+
+					throw std::runtime_error("Failed to cast to FilterNode");
+				}
+
+				const TypedExprPtr &filterExpr = myFilterNode->filter();
+
+				std::string expr = filterExpr->toString();
+				// Regular expression match
+				std::regex pattern(R"(mat_mul\d+)");
+
+				auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
+
+				auto wordsEnd = std::sregex_iterator();
+				// Retrieve the possible UDF name applicable for this rule, stored in targetAction.
+				for (auto it = wordsBegin; it != wordsEnd; ++it) {
+
+					if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
+						targetActions.push_back(it->str());
+					}
+
+				}
+
+				return true;  // Return true for successful execution
+			}
+
+			std::vector<std::shared_ptr<const core::PlanNode>> sources = rootNode->sources();
+
+			if (sources.empty()) {
+				// Safe exit for leaf node
+				return true;
+
+			}
+
+			for (const auto &source : sources) {
+
+				if (!check(source, targetActions, cataLog)) {
+					// Propagate false if any child node returns false
+					return false;
+
+				}
+			}
+
+			return true;  // Return true for successful execution
+
+		} catch (const std::exception &e) {
+
+			std::cerr << "Error in check function: " << e.what() << std::endl;
+
+			return false;  // Return false for any error
+
+		}
 	}
 
 
 private: 
 
     std::vector<int> dims;
-    std::vector<std::string> str;
+    std::string exprStr;
 	int blocks;
 	float* weights;
-	core::PlanNodeId* p1;
-	core::PlanNodeId* p2;
 	RowTypePtr valueSchema;
 	RowTypePtr weightSchema;
 
