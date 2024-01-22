@@ -40,6 +40,8 @@ public:
         rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
 
         rules.emplace("DecisionForestUDF2RelationRewriteAction", std::make_shared<optimization::DecisionForestUDF2RelationRewriteAction>());
+
+        rules.emplace("Mul2JoinAggRewriteAction", std::make_shared<optimization::Mul2JoinAggRewriteAction>());
         // Add more rules if needed
     }
     /**

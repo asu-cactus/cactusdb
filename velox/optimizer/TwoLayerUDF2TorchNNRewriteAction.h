@@ -60,7 +60,8 @@ public:
 	       PlanBuilder & planBuilder,
 	       std::shared_ptr<memory::MemoryPool> pool_,
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-		   std::vector<std::string> targets) override {
+		   std::vector<std::string> targets,
+		   CataLog& cataLog) override {
 			// Iterate over each target in the targets container
 			for (auto target : targets) {
 				// Start from the current node
@@ -294,7 +295,7 @@ public:
 				// recursive search
             	for (auto source : sources)       		 
 	
-	         		apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets);
+	         		apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
 	
 				}
 			}
@@ -320,7 +321,7 @@ public:
 	 * 
 	 * @return A boolean value indicating whether the check was successful.
 	*/
-	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions) override {
+	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog& cataLog) override {
 		try {
 			if (!rootNode) {
 
@@ -400,7 +401,7 @@ public:
 
 			for (const auto &source : sources) {
 
-				if (!check(source, targetActions)) {
+				if (!check(source, targetActions, cataLog)) {
 					// Propagate false if any child node returns false
 					return false;
 
