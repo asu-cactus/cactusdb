@@ -27,6 +27,7 @@
 #include "velox/core/PlanNode.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
+#include "CataLog.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::memory;
@@ -58,7 +59,8 @@ public:
 		        PlanBuilder & planBuilder,
 		        std::shared_ptr<memory::MemoryPool> pool_,
 		        std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator, 
-				std::vector<std::string> targets) = 0;
+				std::vector<std::string> targets,
+				CataLog &cataLog) = 0;
 
 	/**
 	 * @brief A virtual function to get the name of rewritten rule.
@@ -75,7 +77,7 @@ public:
 	 * 
 	 * @return A boolean value indicating whether the check was successful.
 	*/
-	virtual bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions) = 0;
+	virtual bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog &cataLog) = 0;
 
 };
 

@@ -22,7 +22,7 @@
 #include "velox/core/PlanNode.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "RuleManager.h"
-
+#include "CataLog.h"
 namespace optimization {
 
 class PlanState {
@@ -45,13 +45,13 @@ public:
      *
      * @param rootNode A shared pointer to the root node of the plan.
      */
-    void getPossibleActions(std::shared_ptr<const core::PlanNode> rootNode) {
+    void getPossibleActions(std::shared_ptr<const core::PlanNode> rootNode, CataLog &cataLog) {
         // Search for each rule
         for (auto& rulePair : ruleManager.rules) {
             // Get the pointers for rules
             auto& rule = *rulePair.second;
             // Check if rule can be applied in this plan, store target UDF name in actions
-            if (rule.check(rootNode, actions)) {
+            if (rule.check(rootNode, actions, cataLog)) {
                 // Create a map to store actions and target UDF names, key is UDF name, value is rule name
                 for (const auto& action : actions) {
 
@@ -82,7 +82,8 @@ public:
                     PlanBuilder& planBuilder,
                     std::shared_ptr<memory::MemoryPool> pool_,
                     std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-                    const std::vector<std::string>& targetString) {
+                    const std::vector<std::string>& targetString,
+                    CataLog &cataLog) {
         
         // Get the rule name for target action
         std::string targetRule = actionsPair[targetString[0]];
@@ -91,7 +92,7 @@ public:
 
         if (rule) {
             // Apply rule on this plan
-            rule->apply(curNode, nullptr, maker, planBuilder, pool_, planNodeIdGenerator, targetString);
+            rule->apply(curNode, nullptr, maker, planBuilder, pool_, planNodeIdGenerator, targetString, cataLog);
             // Store this rule name as the previous action, prepare for next rewritten
             preAction = targetRule;
             //TODO: forbidden preAction in next step. (Avoid cycle)
@@ -112,11 +113,11 @@ public:
      *
      * @param planBuilder The PlanBuilder used to construct and modify the plan.
      */
-    void update(PlanBuilder& planBuilder) {
+    void update(PlanBuilder& planBuilder, CataLog &cataLog) {
         // Get the current plan
         auto curNode = planBuilder.planNode();
         // renew possible actions in new state
-        getPossibleActions(curNode);
+        getPossibleActions(curNode, cataLog);
     }
 
     std::map<std::string, std::string> actionsPair;
