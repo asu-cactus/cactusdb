@@ -99,18 +99,16 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   /**
    * @brief A function to run logical plan.
    * 
-   * @param filePath The file path for the data source file to be split.
    * @param numThreads The number of Velox executor threads.
    * @param numSplits The number of file splits.
    * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param p0 The planNodeID for the plan node that needs to add file splits.
+   * @param cataLog A class storing metadata and information related to UDFs and data sources.
   */
   void runPlan(
       int numThreads,
       int numSplits,
       PlanBuilder& myPlan,
       CataLog &cataLog) {
-    // Create hivesplits for file.
 
     // Initializes executor.
     std::shared_ptr<folly::Executor> executor_{
@@ -134,18 +132,26 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
             std::cout << result->toString() << std::endl;
           return exec::BlockingReason::kNotBlocked;
         });
-
+    // Get optimized idFileAddr map from cataLog
     auto idFileAddrMap = cataLog.getIdAddressMap();
+
     std::vector<core::PlanNodeId> ids;
+
     std::cout << "Hive splits:" << std::endl;
+    // Create hivesplits for each entry in idFileAddr map, add splits to task
     for (const auto& entry : idFileAddrMap) {
+
       core::PlanNodeId key = entry.first;
+
       const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+
       auto hiveSplits = makeHiveConnectorSplits(fileAddr);
+
       for (auto& split : hiveSplits) {
-      // std::cout << split->toString() << std::endl;
-      task->addSplit(key, exec::Split(std::move(split)));
+
+        task->addSplit(key, exec::Split(std::move(split)));
       }
+
       ids.push_back(key);
     }
 
@@ -156,8 +162,9 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     // Start the task by setting the number of drivers.
     task->start(numThreads);
-    // Add all splits.
+    // Wait for no more splits.
     for (auto id: ids){
+
       task->noMoreSplits(id);
     }
 
@@ -307,7 +314,23 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     return data;
   }
   
+  /**
+   * @brief Registers a series of vector functions in the optimization namespace.
+   * 
+   * @param units1 Number of units in the first layer.
+   * @param units2 Number of units in the second layer.
+   * @param input_size1 Size of the input for the first layer.
+   * @param input_size2 Size of the input for the second layer.
+   * @param weightsFile_1 Pointer to the weights for the first layer.
+   * @param weightsFile_2 Pointer to the weights for the second layer.
+   * @param biasFile_1 Pointer to the bias for the first layer.
+   * @param biasFile_2 Pointer to the bias for the second layer.
+   * @param catalog Reference to a CataLog object to store metadata and information.
+   * 
+   * @return A string representing the composed vector function expression.
+   */
   std::string registerFunctions(int units1, int units2, int input_size1, int input_size2, float* weightsFile_1, float* weightsFile_2, float* biasFile_1, float* biasFile_2, CataLog &catalog) {
+    // Register matrix multiplication function for the first layer
     optimization::registerVectorFunction(
         "mat_mul0",
         MatrixMultiply::signatures(),
@@ -316,7 +339,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         true,
         catalog
     );
-
+    // Register matrix addition function for the first layer
     optimization::registerVectorFunction(
         "mat_add0",
         MatrixAddition::signatures(),
@@ -325,7 +348,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         true,
         catalog
     );
-
+    // Register ReLU activation function for the first layer
     optimization::registerVectorFunction(
         "relu0",
         Relu::signatures(),
@@ -334,7 +357,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         true,
         catalog
      );
-
+    // Register matrix multiplication function for the second layer
     optimization::registerVectorFunction(
         "mat_mul1",
         MatrixMultiply::signatures(),
@@ -343,7 +366,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         true,
         catalog
     );
-
+    // Register matrix addition function for the second layer
     optimization::registerVectorFunction(
         "mat_add1",
         MatrixAddition::signatures(),
@@ -352,7 +375,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         true,
         catalog
     );
-
+    // Register softmax activation function for the second layer
     optimization::registerVectorFunction(
         "softmax0",
         Softmax::signatures(),
@@ -361,11 +384,11 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         true,
         catalog
      );
-
+      // Compose and return the vector function expression
      return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
   }
   /**
-   * @brief A test function to test the rewrite rule of TwoLayerUDF2TorchNN.
+   * @brief A test function to test the rewrite rule of Mul2JoinAggRewriteAction.
    * 
    * @param rewrite A boolean value indicating whether to perform a rewrite.
   */
@@ -377,6 +400,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     int second_layer_output_size = 14588;
     // Set splits number
     int num_splits = 4;
+    // Initialize CataLog
     CataLog cataLog;
     // Generate data source
     auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
@@ -390,27 +414,35 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
     // Write the data source to a file, with the format defined by the rowVector
     writeToFile(file->path, {inputRowVector}, config);
-
+    //  Check the input size against the blocking threshold in cataLog.
+    //  If yes, preblock the input vector, store it, and add information in cataLog.
+    //  If not, set dataSource in cataLog.
     if (input_features_size > cataLog.getBlockingThreshold()) {
+      // If input size is larger than blocking threshold, preblock and store in cataLog
       std::vector<std::vector<float>> valuesBlock = optimization::create_input_block(input_features_size*num_samples, data.features, cataLog.getDefaultBlocksNum());
       optimization::FileStructure values = optimization::block_to_files(valuesBlock, cataLog.getDefaultBlocksNum(), 0);
+      // Set data source blocks in cataLog
       cataLog.setDataSourceBlocks(values.schema, values.paths);
+      // Set data source statistics in cataLog
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
     else {
+      // If input size is not larger than blocking threshold, set dataSource in cataLog
       cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+      // Set data source statistics in cataLog
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
-    // Build two dense layers UDFs
-    std::string compute = registerFunctions(first_layer_output_size, 
-                            second_layer_output_size, 
-                            input_features_size, 
-                            first_layer_output_size, 
-                            data.weights[0], 
-                            data.weights[1],  
-                            data.bias[0], 
-                            data.bias[1],
-                            cataLog);
+    // Build two dense layers UDFs using registerFunction in optimization namespace
+    std::string compute = registerFunctions(
+      first_layer_output_size, 
+      second_layer_output_size, 
+      input_features_size, 
+      first_layer_output_size, 
+      data.weights[0], 
+      data.weights[1],  
+      data.bias[0], 
+      data.bias[1],
+      cataLog);
 
 
 
@@ -424,8 +456,9 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
                 .capturePlanNodeId(p0)
                 .project({fmt::format(compute, "v")}) 
                 .planBuild();
-
+    // Set original plan nodeId and file address of data source
     cataLog.setIdAddressMap(p0, {file});
+    // Set vector name and nodeId of data source
     cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan
     auto planNode = myPlan.planNode();
