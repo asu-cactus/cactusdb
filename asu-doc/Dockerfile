@@ -77,14 +77,8 @@ RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
     && tar -xf v0.8.1.tar.gz \
     && cd duckdb-0.8.1 \
     && mkdir build && cd build \
-    && CMAKE_FLAGS=(
-        "-DBUILD_UNITTESTS=OFF"
-        "-DENABLE_SANITIZER=OFF"
-        "-DENABLE_UBSAN=OFF"
-        "-DBUILD_SHELL=OFF"
-        "-DEXPORT_DLL_SYMBOLS=OFF"
-    ) \
-    && cmake ${CMAKE_FLAGS[*]}  .. \
+    && CMAKE_FLAGS="-DBUILD_UNITTESTS=OFF -DENABLE_SANITIZER=OFF -DENABLE_UBSAN=OFF -DBUILD_SHELL=OFF -DEXPORT_DLL_SYMBOLS=OFF" \
+    && cmake ${CMAKE_FLAGS}  .. \
     && make install -j 16
 
 # set up velox
