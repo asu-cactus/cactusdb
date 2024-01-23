@@ -353,7 +353,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
                       .tableScan(asRowType(inputRowVector->type()))
                       .capturePlanNodeId(p0)
                       .project({"decision_forest_predict(x)"});
-
+    // Get the logical plan                  
     auto planNode = myPlan.planNode();
     // Create ruleManager
     RuleManager ruleManager;

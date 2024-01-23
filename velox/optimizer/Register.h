@@ -18,34 +18,50 @@
 #include <unordered_map>
 #include "Helper.h"
 #include "CataLog.h"
-// #include "folly/Singleton.h"
-// #include "folly/Synchronized.h"
-// #include "velox/expression/SignatureBinder.h"
+
 
 
 namespace optimization {
-
+/**
+ * @brief Update the CataLog based on the registered vector function.
+ * 
+ * @param name Name of the registered vector function.
+ * @param sharedFunc Shared pointer to the registered vector function.
+ * @param cataLog Reference to a CataLog object to store metadata and information.
+ */
 void updateCataLog(const std::string& name, std::shared_ptr<VectorFunction> sharedFunc, CataLog& cataLog) {
+    // TODO:Finish all branches, here we only complete mat_mul
+    // Check if the registered vector function is a TorchDNN, here
     if (name.find("torchDNN") != std::string::npos) {
-            std::shared_ptr<TorchDNN> TorchUDF = std::dynamic_pointer_cast<TorchDNN>(sharedFunc);
-        }
+        // Dynamic cast to TorchDNN
+        std::shared_ptr<TorchDNN> TorchUDF = std::dynamic_pointer_cast<TorchDNN>(sharedFunc);
+    }
+    // Check if the registered vector function is a MatrixMultiply (mat_mul)
     else if (name.find("mat_mul") != std::string::npos) {
+        // Dynamic cast to MatrixMultiply
         std::shared_ptr<MatrixMultiply> MulUDF = std::dynamic_pointer_cast<MatrixMultiply>(sharedFunc);
-        std::vector<int> dims = MulUDF->getDims();
-		float* weights = MulUDF->getTensor();
-        int blockingThreshold = cataLog.getBlockingThreshold();
-        int blocksNum = cataLog.getDefaultBlocksNum();
-        if (dims[0] > blockingThreshold) {
-            auto weightBlocks = create_weight_block(dims[0]*dims[1], weights, blocksNum);
-            auto weights = block_to_files(weightBlocks, blocksNum, 1);
-            cataLog.add(name, weights.schema, weights.paths, 1);
+        if (MulUDF) {
+            // Retrieve dimensions and weights from MatrixMultiply UDF
+            std::vector<int> dims = MulUDF->getDims();
+            float* weights = MulUDF->getTensor();
+            // Get blocking threshold and default blocks number from cataLog
+            int blockingThreshold = cataLog.getBlockingThreshold();
+            int blocksNum = cataLog.getDefaultBlocksNum();
+            // Check if blocking is required based on dimensions
+            if (dims[0] > blockingThreshold) {
+                // Create weight blocks and convert to files
+                auto weightBlocks = create_weight_block(dims[0]*dims[1], weights, blocksNum);
+                auto weights = block_to_files(weightBlocks, blocksNum, 1);
+                // Add the updated information to cataLog
+                cataLog.add(name, weights.schema, weights.paths, 1);
+            }
         }
     }
     else {
-        std::cerr << "Error: No update for mat_mul catalog: "  << std::endl;
+        std::cerr << name << ": No update for catalog: "  << std::endl;
     }
 }
-// Returns true iff an insertion actually happened
+// We encapsulate the original registerFunction, adding a step to update the catalog when registering functions.
 bool registerVectorFunction(
     const std::string& name,
     std::vector<FunctionSignaturePtr> signatures,
@@ -54,14 +70,15 @@ bool registerVectorFunction(
     bool overwrite,
     CataLog& cataLog) {
         
-  std::shared_ptr<VectorFunction> sharedFunc = std::move(func);
-  updateCataLog(name, sharedFunc, cataLog);
-  auto factory = [sharedFunc](
-                     const auto& /*name*/,
-                     const auto& /*vectorArg*/,
-                     const auto& /*config*/) { return sharedFunc; };
-  return facebook::velox::exec::registerStatefulVectorFunction(
-      name, signatures, factory, metadata, overwrite);
+    std::shared_ptr<VectorFunction> sharedFunc = std::move(func);
+    // Only added this update step 
+    updateCataLog(name, sharedFunc, cataLog);
+    auto factory = [sharedFunc](
+                        const auto& /*name*/,
+                        const auto& /*vectorArg*/,
+                        const auto& /*config*/) { return sharedFunc; };
+    return facebook::velox::exec::registerStatefulVectorFunction(
+        name, signatures, factory, metadata, overwrite);
 }
 
 

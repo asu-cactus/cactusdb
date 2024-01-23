@@ -40,7 +40,20 @@ public:
 
     Mul2JoinAggRewriteAction (){}
 
-
+	/**
+	 * @brief A function to apply a rule for rewriting the logical plan.
+	 * 
+	 * @param curNode A pointer to the current plan node, usually point to the last node of logical plan.
+	 * @param prevNode A pointer to the previous plan node, usually point to the previous node before current node.
+	 * @param maker A pointer to the VectorMaker, which is a helper class used to build the data source vector.
+	 * @param planBuilder A pointer to the planBuilder, which is a helper class used to build the logical plan.
+	 * @param pool_ A pointer to the memory pool, which is used to build the logical plan.
+	 * @param planNodeIdGenerator A pointer to the planNodeIdGenerator, which is used to track the ID of the plan Node.
+	 * @param targets A vector for multiple strings, representing the target UDF name that can apply this rewritten rule.
+	 * @param cataLog A class storing metadata and information related to UDFs and data sources.
+	 * 
+	 * @return A boolean value indicating whether the rewrite was successful.
+	*/
     bool apply(std::shared_ptr<const core::PlanNode> curNode, 
 	       std::shared_ptr<const core::PlanNode> prevNode, 
 	       VectorMaker & maker,
@@ -49,50 +62,69 @@ public:
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
 		   std::vector<std::string> targets,
 		   CataLog &cataLog) override {
+			// Iterate over each target in the targets container
 			for (auto target : targets) {
+				// Start from the current node
 				if (curNode) {
-
+					// Get the name of node
 					std::string_view nodeName = curNode->name();
-
+					// We frist search project node
 					if (nodeName == "Project") {
-					
+						// Cast node as project node
 						if (auto myProjectNode = std::dynamic_pointer_cast<const ProjectNode> (curNode)) {
+							// Get projections in project node
 							const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
+							// Search each expression in projections
 							for (auto expression : projections) {
+								// Get the string of expression
 								exprStr = expression->toString();
+
 								if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)){
+
 									std::string callName = call->name();
+									// String match the target UDF name
 									if (exprStr.find(target) != std::string::npos) {
+										// We only consider one projection expression in the project node.
 										if (projections.size() == 1) {
+
 											core::QueryConfig config({});
+											// Search for UDF functions by names
 											std::shared_ptr<VectorFunction> myMul = getVectorFunction(target, {ARRAY(REAL())}, {}, config);
+
 											if (myMul) {
+												// Get the specific MatrixMultiply UDF
 												std::shared_ptr<MatrixMultiply> myMulUDF = std::dynamic_pointer_cast<MatrixMultiply>(myMul);
+
 												if (myMulUDF) {
+													// Get the dimensions, weights from this MatrixMultiply UDF
 													dims = myMulUDF->getDims();
 													weights = myMulUDF->getTensor();
+													// Get information (defaultBlocksnumber, number of samples) from cataLog
 													int blocks = cataLog.getDefaultBlocksNum();
 													int samples = cataLog.getDataSourceStat("values")[0];
 
-
+													// Register matrix blocks multiply function
 													registerVectorFunction(
 														"mat_mul_b",
 														MatrixMultiply_b::signatures(),
 														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
 													);
-
+													// Add UDF associate information (UDF with input values) to cataLog
 													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
 
 												}
 											}
 											if (curNode->sources().size() > 0) {
+												// Initial PlanNode Id for splits
 												core::PlanNodeId p1;
 												core::PlanNodeId p2;
+												// Get schema of values and weights from cataLog
 												valueSchema = cataLog.getUDFSchema(target+"_values");
 												weightSchema = cataLog.getUDFSchema(target+"_weights");
-
+												// Regular expression match
 												std::regex pattern(target + R"(\([^)]+\))");
 												exprStr = std::regex_replace(exprStr, pattern, "R1");
+												// Build new plan
 												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
 																.tableScan(valueSchema)
 																.capturePlanNodeId(p1)
@@ -108,8 +140,9 @@ public:
 																.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
 																.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
 																.project({exprStr});
-
+												// Delete old nodeId-fileAddress map
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
+												// Insert new nodeId-fileAddress maps
 												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
 												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
 
@@ -124,10 +157,91 @@ public:
 						}						
 					}
 				
+					// Search for a filter node, which is similar to the project node
+					if (nodeName == "Filter") {
+
+						std::shared_ptr<const FilterNode> myFilterNode = std::dynamic_pointer_cast<const FilterNode> (curNode);
+
+            			const TypedExprPtr & filterExpr = myFilterNode->filter();
+
+						exprStr = filterExpr->toString();
+		 			
+		        		if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(filterExpr)) {
+							
+							if (exprStr.find(target) != std::string::npos) {
+
+								core::QueryConfig config({});
+								// Search for UDF functions by names
+								std::shared_ptr<VectorFunction> myMul = getVectorFunction(target, {ARRAY(REAL())}, {}, config);
+
+								if (myMul) {
+									// Get the specific MatrixMultiply UDF
+									std::shared_ptr<MatrixMultiply> myMulUDF = std::dynamic_pointer_cast<MatrixMultiply>(myMul);
+
+									if (myMulUDF) {
+										// Get the dimensions, weights from this MatrixMultiply UDF
+										dims = myMulUDF->getDims();
+										weights = myMulUDF->getTensor();
+										// Get information (defaultBlocksnumber, number of samples) from cataLog
+										int blocks = cataLog.getDefaultBlocksNum();
+										int samples = cataLog.getDataSourceStat("values")[0];
+
+										// Register matrix blocks multiply function
+										registerVectorFunction(
+											"mat_mul_b",
+											MatrixMultiply_b::signatures(),
+											std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
+										);
+										// Add UDF associate information (UDF with input values) to cataLog
+										cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
+
+									}
+								}
+								if (curNode->sources().size() > 0) {
+									// Initial PlanNode Id for splits
+									core::PlanNodeId p1;
+									core::PlanNodeId p2;
+									// Get schema of values and weights from cataLog
+									valueSchema = cataLog.getUDFSchema(target+"_values");
+									weightSchema = cataLog.getUDFSchema(target+"_weights");
+									// Regular expression match
+									std::regex pattern(target + R"(\([^)]+\))");
+									exprStr = std::regex_replace(exprStr, pattern, "R1");
+									// Build new plan
+									planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
+													.tableScan(valueSchema)
+													.capturePlanNodeId(p1)
+													.hashJoin(
+														{"v_col"},
+														{"w_row"},
+														exec::test::PlanBuilder(planNodeIdGenerator)
+													.tableScan(weightSchema)
+													.capturePlanNodeId(p2)
+													.planNode(),
+														"", // extra filter
+														{"v_row", "w_col", "v", "w"})
+													.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+													.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
+													.project({exprStr});
+									// Delete old nodeId-fileAddress map
+									cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
+									// Insert new nodeId-fileAddress maps
+									cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
+									cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
+
+								return true;
+								}
+
+								
+							}
+
+						}
+					}
+					// Serach lower level plan node
 					std::vector<std::shared_ptr<const PlanNode>> sources = curNode->sources();
-
+					// Until leaf node
 					if (sources.size() == 0) return false;
-
+						// recursive search
 						for (auto source : sources)       		 
 						
 							apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
@@ -149,6 +263,7 @@ public:
 	 * 
 	 * @param rootNode A pointer to the logical plan.
 	 * @param targetActions A pointer to the vector used to store possible UDF names applicable for this rule.
+	 * @param cataLog A class storing metadata and information related to UDFs and data sources.
 	 * 
 	 * @return A boolean value indicating whether the check was successful.
 	*/
@@ -183,9 +298,11 @@ public:
 					auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
 
 					auto wordsEnd = std::sregex_iterator();
-					// Retrieve the possible UDF name applicable for this rule, stored in targetAction.
+					// Retrieve the possible UDF name applicable for this rule, and check if there existed block files, stored in targetAction.
 					for (auto it = wordsBegin; it != wordsEnd; ++it) {
+
 						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
+
 							targetActions.push_back(it->str());
 						}
 					}
@@ -212,10 +329,11 @@ public:
 				auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
 
 				auto wordsEnd = std::sregex_iterator();
-				// Retrieve the possible UDF name applicable for this rule, stored in targetAction.
+				// Retrieve the possible UDF name applicable for this rule, and check if there existed block files, stored in targetAction.
 				for (auto it = wordsBegin; it != wordsEnd; ++it) {
 
 					if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
+
 						targetActions.push_back(it->str());
 					}
 

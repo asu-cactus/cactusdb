@@ -26,6 +26,7 @@
 #include "TorchNN2TwoLayerUDFRewriteAction.h"
 #include "TwoLayerUDF2TorchNNRewriteAction.h"
 #include "DecisionForestUDF2RelationRewriteAction.h"
+#include "Mul2JoinAggRewriteAction.h"
 
 using namespace optimization;
 

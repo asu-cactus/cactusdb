@@ -44,6 +44,7 @@ public:
      * then it maps each action to its corresponding rule name in 'actionsPair'.
      *
      * @param rootNode A shared pointer to the root node of the plan.
+     * @param cataLog A class storing metadata and information related to UDFs and data sources.
      */
     void getPossibleActions(std::shared_ptr<const core::PlanNode> rootNode, CataLog &cataLog) {
         // Search for each rule
@@ -75,6 +76,7 @@ public:
 	 * @param pool_ A pointer to the memory pool, which is used to build the logical plan.
 	 * @param planNodeIdGenerator A pointer to the planNodeIdGenerator, which is used to track the ID of the plan Node.
 	 * @param targets A vector for multiple strings, representing the target UDF name that can apply this rewritten rule.
+     * @param cataLog A class storing metadata and information related to UDFs and data sources.
      */
     void takeAction(std::shared_ptr<const core::PlanNode> curNode,
                     std::shared_ptr<const core::PlanNode> prevNode,
@@ -112,6 +114,7 @@ public:
      * based on the updated plan state.
      *
      * @param planBuilder The PlanBuilder used to construct and modify the plan.
+     * @param cataLog A class storing metadata and information related to UDFs and data sources.
      */
     void update(PlanBuilder& planBuilder, CataLog &cataLog) {
         // Get the current plan

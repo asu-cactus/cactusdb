@@ -49,6 +49,7 @@ public:
 	 * @param pool_ A pointer to the memory pool, which is used to build the logical plan.
 	 * @param planNodeIdGenerator A pointer to the planNodeIdGenerator, which is used to track the ID of the plan Node.
 	 * @param targets A vector for multiple strings, representing the target UDF name that can apply this rewritten rule.
+	 * @param cataLog Reference to a CataLog object to store metadata and information.
 	 * 
 	 * @return A boolean value indicating whether the rewrite was successful.
 	 * 
@@ -74,6 +75,7 @@ public:
 	 * 
 	 * @param rootNode A pointer to the logical plan.
 	 * @param targetActions A pointer to the vector used to store possible UDF names applicable for this rule.
+	 * @param cataLog Reference to a CataLog object to store metadata and information.
 	 * 
 	 * @return A boolean value indicating whether the check was successful.
 	*/
