@@ -21,12 +21,13 @@
 
 
 namespace optimization {
-
+    // Structure to represent the file structure with paths and schema
     struct FileStructure {
         std::vector<std::shared_ptr<TempFilePath>> paths;
         RowTypePtr schema;
     };
 
+    // Test class inheriting from HiveConnectorTestBase
     class MyFileTest : public HiveConnectorTestBase {
         public:
             MyFileTest(){
@@ -43,16 +44,17 @@ namespace optimization {
 
     };
 
+    // Function to create a block index based on parts and flag
     std::vector<std::vector<float>> create_block_index(int parts, int flag){
         std::vector<std::vector<float>> indexs;
         if (flag == 0){
             std::vector<float> indexs_row;
             std::vector<float> indexs_col;
             for (int i = 0; i < parts; i++){
-            indexs_row.push_back(0);
+                indexs_row.push_back(0);
             }
             for (int i = 0; i < parts; i++){
-            indexs_col.push_back(i);
+                indexs_col.push_back(i);
             }
             indexs.push_back(indexs_row);
             indexs.push_back(indexs_col);
@@ -61,10 +63,10 @@ namespace optimization {
             std::vector<float> indexs_row;
             std::vector<float> indexs_col;
             for (int i = 0; i < parts; i++){
-            indexs_row.push_back(i);
+                indexs_row.push_back(i);
             }
             for (int i = 0; i < parts; i++){
-            indexs_col.push_back(0);
+                indexs_col.push_back(0);
             }
             indexs.push_back(indexs_row);
             indexs.push_back(indexs_col);
@@ -72,6 +74,7 @@ namespace optimization {
         return indexs;
     }
 
+    // Function to create input block based on total_size, values, and block_numbers
     std::vector<std::vector<float>> create_input_block(int total_size, std::vector<std::vector<float>>& values, int block_numbers){
         std::vector<std::vector<float>> valuesArray;
         std::vector<float> flattened;
@@ -83,14 +86,14 @@ namespace optimization {
         for (int i = 0; i < block_numbers; i++) {
             std::vector<float> valuesArraySingleBlock;
             for (int j = 0; j < block_size; j++) {
-                    valuesArraySingleBlock.push_back(flattened[i*block_size+j]);
+                valuesArraySingleBlock.push_back(flattened[i*block_size+j]);
             }
             valuesArray.push_back(valuesArraySingleBlock);
         }
         return valuesArray;
     }
 
-
+    // Function to create weight block based on total_size, values, and block_numbers
     std::vector<std::vector<float>> create_weight_block(int total_size, float* values, int block_numbers){
         std::vector<std::vector<float>> valuesArray;
         auto block_size = total_size / block_numbers;
@@ -104,6 +107,7 @@ namespace optimization {
         return valuesArray;
     }
 
+    // Function to convert block data to files and return FileStructure
     FileStructure block_to_files(std::vector<std::vector<float>> valuesArray, int parts, int flag){
         optimization::MyFileTest myFile;
         optimization::FileStructure myFileStructure;
@@ -112,28 +116,41 @@ namespace optimization {
         VectorMaker maker{pool_.get()};
         RowVectorPtr input;
         if (flag == 0){
+            // Create indexs for blocks
             auto indexs = create_block_index(parts, flag);
+            // Use maker to create rowVector for "v", "v_row", and "v_col"
             for (int i = 0; i < parts; i++){
-            input = maker.rowVector({"v", "v_row", "v_col"}, 
-            {maker.arrayVector<float>({valuesArray[i]}, REAL()), maker.flatVector({indexs[0][i]}), maker.flatVector({indexs[1][i]})});
+                input = maker.rowVector({"v", "v_row", "v_col"}, 
+                    {maker.arrayVector<float>({valuesArray[i]}, REAL()), maker.flatVector({indexs[0][i]}), maker.flatVector({indexs[1][i]})});
+            
             auto file = TempFilePath::create();
+            // Store blocks to file
             myFile.writeToFile(file->path, {input});
+            // Store file object to paths
             paths.push_back(file);
         }
         myFileStructure.paths = paths;
+        // Store schema
         myFileStructure.schema = asRowType(input->type());
+
         return myFileStructure;
         }
         else {
+            // Create indexs for blocks
             auto indexs = create_block_index(parts, flag);
+            // Use maker to create rowVector for "w", "w_row", and "w_col"
             for (int i = 0; i < parts; i++){
-            input = maker.rowVector({"w", "w_row", "w_col"}, 
-            {maker.arrayVector<float>({valuesArray[i]}, REAL()), maker.flatVector({indexs[0][i]}), maker.flatVector({indexs[1][i]})});
+                input = maker.rowVector({"w", "w_row", "w_col"}, 
+                    {maker.arrayVector<float>({valuesArray[i]}, REAL()), maker.flatVector({indexs[0][i]}), maker.flatVector({indexs[1][i]})});
+
             auto file = TempFilePath::create();
+            // Store blocks to file
             myFile.writeToFile(file->path, {input});
+            // Store file object to paths
             paths.push_back(file);
         }
         myFileStructure.paths = paths;
+        // Store schema
         myFileStructure.schema = asRowType(input->type());
         return myFileStructure;
         }
