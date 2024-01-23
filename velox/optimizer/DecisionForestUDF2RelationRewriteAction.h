@@ -69,7 +69,7 @@ public:
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
 		   std::vector<std::string> targets,
 		   CataLog &cataLog) override {
-
+			bool transformationApplied = false;
 			for (auto target : targets) {
 
         		if (curNode) {
@@ -166,7 +166,7 @@ public:
 															.aggregation({"row_id"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
 															.project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"});
 
-											return true;
+											transformationApplied = true;
 										}
 									
 									}
@@ -205,11 +205,11 @@ public:
 
             		for (auto source : sources)       		 
             
-	         			apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
+	         			transformationApplied |= apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
 	
 				}
 			}
-    
+		return transformationApplied;
     }
 
 	/**
@@ -234,6 +234,7 @@ public:
 	*/
 	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog &cataLog) override {
 		try {
+			bool checkApplied = true;
 			if (!rootNode) {
 				throw std::invalid_argument("rootNode is null");
 			}
@@ -265,8 +266,6 @@ public:
 						targetActions.push_back(it->str());
 					}
 				}
-
-				return true;  // Return true for successful execution
 			}
 
 			if (nodeName == "Filter") {
@@ -291,8 +290,6 @@ public:
 
 					targetActions.push_back(it->str());
 				}
-
-				return true;  // Return true for successful execution
 			}
 
 			std::vector<std::shared_ptr<const core::PlanNode>> sources = rootNode->sources();
@@ -303,13 +300,10 @@ public:
 			}
 
 			for (const auto &source : sources) {
-				if (!check(source, targetActions, cataLog)) {
-					// Propagate false if any child node returns false
-					return false;
-				}
+				checkApplied &= check(source, targetActions, cataLog);
 			}
 
-			return true;  // Return true for successful execution
+			return checkApplied;
 		} catch (const std::exception &e) {
 			std::cerr << "Error in check function: " << e.what() << std::endl;
 			return false;  // Return false for any error
