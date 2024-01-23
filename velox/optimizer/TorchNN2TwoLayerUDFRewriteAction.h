@@ -63,6 +63,7 @@ public:
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
 		   std::vector<std::string> targets,
 		   CataLog& cataLog) override {
+			bool transformationApplied = false;
 			// Iterate over each target in the targets container
 			for (auto target : targets) {
 				// Start from the current node
@@ -135,7 +136,7 @@ public:
 												// Plan Builder add the new node.
 												planBuilder = planBuilder.project({twoLayers}).project({exprStr});
 									
-												return true;
+												transformationApplied = true;
 											}
 								
 										}
@@ -204,7 +205,7 @@ public:
 
 								planBuilder = planBuilder.project({twoLayers}).filter({exprStr});
 							
-                                return true;
+                                transformationApplied = true;
                             }			       			                                                                                                    			
 			        
 			  			}
@@ -219,11 +220,11 @@ public:
 				// recursive search
             	for (auto source : sources)       		 
             
-	         		apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
+	         		transformationApplied |= apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
 	
 				}
 			}
-    
+		return transformationApplied;
     }
 
 	/**
@@ -248,6 +249,7 @@ public:
 	*/
 	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog& cataLog) override {
 		try {
+			bool checkApplied = true;
 			if (!rootNode) {
 				throw std::invalid_argument("rootNode is null");
 			}
@@ -279,8 +281,6 @@ public:
 						targetActions.push_back(it->str());
 					}
 				}
-
-				return true;  // Return true for successful execution
 			}
 			// We then check the filter node
 			if (nodeName == "Filter") {
@@ -305,8 +305,6 @@ public:
 
 					targetActions.push_back(it->str());
 				}
-
-				return true;  // Return true for successful execution
 			}
 
 			std::vector<std::shared_ptr<const core::PlanNode>> sources = rootNode->sources();
@@ -317,13 +315,10 @@ public:
 			}
 
 			for (const auto &source : sources) {
-				if (!check(source, targetActions, cataLog)) {
-					// Propagate false if any child node returns false
-					return false;
-				}
+				checkApplied &= check(source, targetActions, cataLog);
 			}
 
-			return true;  // Return true for successful execution
+			return checkApplied;
 		} catch (const std::exception &e) {
 
 			std::cerr << "Error in check function: " << e.what() << std::endl;
