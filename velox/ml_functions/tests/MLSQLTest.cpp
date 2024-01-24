@@ -233,7 +233,7 @@ void MLSQLTest::run() {
       std::cout << "Please check whether folder exists in resources/model/fraud_xgboost_10_8 under the velox root directory.\n"
               << "Also, you need to execute the test from the velox root directory like the following:\n"
               << "cd velox\n"
-              << "./_build/release/velox/ml_functions/decision_forest_prediction_test\n"
+              << "./_build/release/velox/ml_functions/ml_sql_test\n"
               << std::endl;
       
       exit(1);
