@@ -17,8 +17,8 @@
 #   OptimizerTest.cpp
 # )
 
-set(Torch_DIR "$HOME/libtorch/share/cmake/Torch")
-# set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
+# set(Torch_DIR "$HOME/libtorch/share/cmake/Torch")
+set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 
 find_package(jsoncpp REQUIRED)
