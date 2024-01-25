@@ -29,7 +29,18 @@ class Timer(object):
 
 
 class MCTSTreeNode:
-    def __init__(self, state: dict, parent: Optional["MCTSTreeNode"] = None):
+    # Static variable
+    node_id = 0
+
+    def __init__(
+        self,
+        state: dict,
+        client_socket: socket.socket,
+        is_terminal: bool = None,
+        from_action: tuple = None,
+        is_temp_node: bool = False,  # temp node is created during rollout
+        parent: Optional["MCTSTreeNode"] = None,
+    ):
         """The state is dictionary where key is the expression and the value is
         the action that will be taken.
         For example: {'mat_mul0(ROW["v"])': 'Mul2JoinAgg'}
@@ -39,12 +50,27 @@ class MCTSTreeNode:
         self.num_visit = 0
         self.reward = 0
         self.parent = parent
+        self.client_socket = client_socket
         self.action_space = self.get_action_space()
-        self.is_terminal = self.check_terminal()
+        self.is_terminal = (
+            is_terminal if is_terminal is not None else self.check_terminal()
+        )
         self.is_fully_expanded = self.check_and_update_is_fully_expanded()
+        self.from_action = from_action
+        if is_temp_node:
+            self.node_id = -1
+        else:
+            self.node_id = MCTSTreeNode.node_id
+            MCTSTreeNode.node_id += 1
+
+        print(
+            "[INFO] node states: id: {} \n \t\t terminal: {} \n  \t\t parsed action space: {}".format(
+                self.node_id, self.is_terminal, self.action_space
+            )
+        )
 
     def check_terminal(self):
-        if len(self.get_action_space()) == 0:
+        if len(self.action_space) == 0:
             return True
         return False
 
@@ -55,8 +81,24 @@ class MCTSTreeNode:
         {('mat_mul0(ROW["v"])', 'Mul2JoinAgg'): false, ...}
         the boolean flag is used to indicate whether this action has been taken
         """
-        pass
-        # TODO
+
+        send_message = dict()
+        send_message["mctsAction"] = "getActionSpace"
+        send_message["optimizationIsFinished"] = False
+        if self.parent is None:
+            send_message["isRootNode"] = True
+        else:
+            send_message["isRootNode"] = False
+        send_message_by_socket(send_message, self.client_socket)
+        received_message = receive_message_by_socket(self.client_socket)
+        received_action_space = received_message["actionSpace"]
+        action_space = dict()
+        for action_pair in received_action_space:
+            action_space[(action_pair["expression"], action_pair["action"])] = False
+        # add no-action state for the root node
+        if self.parent is None:
+            action_space[("None", "None")] = False
+        return action_space
 
     def check_and_update_is_fully_expanded(self) -> bool:
         """Check if the current node is fully expanded and update the flag"""
@@ -70,8 +112,11 @@ class MCTSTreeNode:
 class MCTS:
     def __init__(
         self,
+        client_socket: socket.socket,
         max_iteration_num: int = 2000,
-        max_iteration_time: int = None,
+        max_iteration_time: int = 1 * 60 * 1000,  # 1 mins
+        max_sim_iteration_num: int = 100,
+        max_sim_iteration_time: int = 30 * 1000,  # 30 seconds
         exploration_weight: float = math.sqrt(2),
         rollout_policy: str = "random",
     ):
@@ -86,9 +131,12 @@ class MCTS:
             raise ValueError("Must have either a time limit or an iteration limit")
         if max_iteration_num < 1:
             raise ValueError("Iteration limit must be greater than one")
+        self.client_socket = client_socket
         self.max_iteration_num = max_iteration_num
         self.max_iteration_time = max_iteration_time
         self.exploration_weight = exploration_weight
+        self.max_sim_iteration_num = max_sim_iteration_num
+        self.max_sim_iteration_time = max_sim_iteration_time
         self.rollout_policy = rollout_policy
         self.iteration_count = 0
         self.timer = Timer()
@@ -96,9 +144,10 @@ class MCTS:
     def search(self, root_node: MCTSTreeNode):
         """MCTS search algorithm"""
         self.root_node = root_node
-        node = self.root_node
         self.timer.tic()
-        for iter_idx in tqdm(self.max_iteration_num):
+        for iter_idx in tqdm(range(self.max_iteration_num)):
+            print("[INFO] search iteration idx: ", iter_idx)
+            node = self.root_node
             t_elapsed_time = self.timer.toc()
             if t_elapsed_time >= self.max_iteration_time:
                 # exist search if exceeds the maximum search time
@@ -111,6 +160,7 @@ class MCTS:
 
             # check if the current node is terminal node
             while not node.is_terminal:
+                print("[INFO] curr node id: ", node.node_id)
                 node.check_and_update_is_fully_expanded()
                 if node.is_fully_expanded:
                     # select the best node based on UCT
@@ -118,10 +168,8 @@ class MCTS:
                 else:
                     # expand the node if the node is not fully expanded
                     new_node = self.expand(node)
-                    # run simulation after expand
-                    reward = self.simulate(new_node)
-                    self.back_propagate(new_node, reward)
-                    continue
+                    node = new_node
+                    break
             # get reward via simulation after reaching the terminal state
             reward = self.simulate(node)
             self.back_propagate(node, reward)
@@ -135,6 +183,18 @@ class MCTS:
             * math.sqrt(math.log(node.num_visit) / child.num_visit),
         )
         # child num_visit will be updated during back-propagation
+        selected_expression, selected_action = selected_node.from_action
+        send_message = dict()
+        send_message["mctsAction"] = "takeAction"
+        send_message["selectedAction"] = selected_expression
+        send_message["optimizationIsFinished"] = False
+        send_message_by_socket(send_message, self.client_socket)
+
+        print(
+            "[INFO] performed SELECTION, selected action: {}".format(
+                (selected_expression, selected_action)
+            )
+        )
         return selected_node
 
     def expand(self, node: MCTSTreeNode) -> MCTSTreeNode:
@@ -145,33 +205,82 @@ class MCTS:
         selected_expression, selected_action = random.choice(unexplorered_action)
         new_state = node.state.copy()
         new_state[selected_expression] = selected_action
-        new_node = MCTSTreeNode(new_state, parent=node)
+        node.action_space[(selected_expression, selected_action)] = True
+        send_message = dict()
+        send_message["mctsAction"] = "takeAction"
+        send_message["selectedAction"] = selected_expression
+        send_message["optimizationIsFinished"] = False
+        send_message_by_socket(send_message, self.client_socket)
+        is_terminal = True if selected_expression == "None" else None
+        print(
+            "[INFO] performed EXPAND, selected action: {}".format(
+                (selected_expression, selected_action)
+            )
+        )
+        new_node = MCTSTreeNode(
+            new_state,
+            parent=node,
+            client_socket=self.client_socket,
+            is_terminal=is_terminal,
+            from_action=(selected_expression, selected_action),
+        )
         node.children.append(new_node)
+
         return new_node
 
     def simulate(self, node: MCTSTreeNode) -> float:
         """Run simulation to get reward"""
-        while not node.is_terminal():
+        simulation_count = 0
+        timer_simulation = Timer()
+        timer_simulation.tic()
+        while not node.check_terminal():
+            if (
+                simulation_count > self.max_sim_iteration_num
+                or timer_simulation.toc() > self.max_sim_iteration_time
+            ):
+                break
             # randomly select an action
             possible_actions = list(node.action_space.keys())
-            selected_action = random.choice(possible_actions)
+            selected_expression, selected_action = random.choice(possible_actions)
             new_state = node.state.copy()
-            new_state[selected_action] = selected_action
-            node = MCTSTreeNode(new_state)
+            new_state[selected_expression] = selected_action
+            send_message = dict()
+            send_message["mctsAction"] = "takeAction"
+            send_message["selectedAction"] = selected_expression
+            send_message["optimizationIsFinished"] = False
+            send_message_by_socket(send_message, self.client_socket)
+            node = MCTSTreeNode(
+                new_state,
+                client_socket=self.client_socket,
+                from_action=(selected_expression, selected_action),
+                is_temp_node=True,
+            )
+
+            simulation_count += 1
         # get reward of terminal node
         reward = self.get_reward(node)
         return reward
 
     def get_reward(self, node: MCTSTreeNode) -> float:
         """Communicate with Velox to get reward with given state"""
-        # TODO
-        return 0
+        send_message = dict()
+        send_message["mctsAction"] = "getCost"
+        send_message_by_socket(send_message, self.client_socket)
+        received_message = receive_message_by_socket(self.client_socket)
+        # TODO: Current reward is the latency, should be changed once integrated with cost model
+        reward = -received_message["reward"]
+        return reward
 
     def back_propagate(self, node: MCTSTreeNode, reward: float):
         """Back propagate to update reward and num_visit through the path"""
         while node is not None:
             node.num_visit += 1
             node.reward += reward
+            print(
+                "[INFO] current iterated node: num_visit {}, reward {}".format(
+                    node.num_visit, node.reward
+                )
+            )
             node = node.parent
 
 
@@ -179,9 +288,11 @@ def send_message_by_socket(message, client_socket):
     client_socket.sendall(json.dumps(message).encode("utf-8"))
 
 
-def receive_message_by_socket(client_socket):
+def receive_message_by_socket(client_socket, printout=False):
     received_message_str = client_socket.recv(1024).decode("utf-8")
     json_message = json.loads(received_message_str)
+    if printout:
+        print("[INFO] Received Message: ", json_message)
     return json_message
 
 
@@ -200,17 +311,23 @@ if __name__ == "__main__":
     optimization_is_finished = False
     while not optimization_is_finished:
         # Receive message
-        received_json_message = receive_message_by_socket(client_socket)
-        print("[INFO] Recevied message", received_json_message)
+        received_json_message = receive_message_by_socket(client_socket, printout=True)
         # Do something
         send_message = dict()
         mctsAction = received_json_message["mctsAction"]
+        print("[DEBUG]: ", mctsAction)
         if mctsAction == "start":
             initQueryPlan = received_json_message["queryPlan"]
-            rootNode = MCTSTreeNode({"queryPlan": initQueryPlan})
+            rootNode = MCTSTreeNode(
+                state={"queryPlan": initQueryPlan}, client_socket=client_socket
+            )
+            mcts = MCTS(
+                client_socket=client_socket,
+                max_iteration_num=3,
+                max_sim_iteration_num=1,
+            )
+            mcts.search(rootNode)
             optimization_is_finished = True
-            send_message = {"optimizationIsFinished": True}
-        # elif mctsAction == 'recQueryPlan':
-        #     send_message = {"mctsAction": "", "optimizationIsFinished": True}
+            send_message = {"optimizationIsFinished": True, "mctsAction": "finished"}
         # Send message
         send_message_by_socket(send_message, client_socket)

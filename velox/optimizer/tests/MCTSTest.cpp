@@ -47,7 +47,7 @@ using namespace facebook::velox::test;
 
 Json::Value receiveJsonFromSocket(int clientSocket) {
   char messageBuffer[BUFFER_SIZE];
-  memset(messageBuffer, 0 , BUFFER_SIZE);
+  memset(messageBuffer, 0, BUFFER_SIZE);
   recv(clientSocket, messageBuffer, BUFFER_SIZE, 0);
   Json::CharReaderBuilder jsonReader;
   Json::Value receivedJsonMessage;
@@ -61,7 +61,7 @@ void sendJsonBySocket(Json::Value jsonMessage, int clientSocket) {
   send(clientSocket, jsonMessageStr.c_str(), jsonMessageStr.length(), 0);
 }
 
-class IntegratedMCTSTest: public HiveConnectorTestBase {
+class IntegratedMCTSTest : public HiveConnectorTestBase {
  public:
   IntegratedMCTSTest() {
     // Register Presto scalar functions.
@@ -107,7 +107,7 @@ class IntegratedMCTSTest: public HiveConnectorTestBase {
    * @param myPlan The pointer to the planBuilder which builds the logical plan.
    * @param p0 The planNodeID for the plan node that needs to add file splits.
    */
-  void runPlan(
+  float runPlan(
       std::string filePath,
       int numThreads,
       int numSplits,
@@ -135,11 +135,11 @@ class IntegratedMCTSTest: public HiveConnectorTestBase {
         queryCtx_,
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
           if (result)
-            std::cout << result->toString() << std::endl;
-          return exec::BlockingReason::kNotBlocked;
+            // std::cout << result->toString() << std::endl;
+            return exec::BlockingReason::kNotBlocked;
         });
 
-    std::cout << "Hive splits:" << std::endl;
+    // std::cout << "Hive splits:" << std::endl;
     // Add hivesplits to the target plan node (data source node).
     for (auto& split : hiveSplits) {
       // std::cout << split->toString() << std::endl;
@@ -170,6 +170,9 @@ class IntegratedMCTSTest: public HiveConnectorTestBase {
                       .count()) /
             1000000.0
               << " secs" << std::endl;
+    return (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
+                .count()) /
+        1000000.0;
   }
 
   struct DataFrame {
@@ -448,7 +451,7 @@ class IntegratedMCTSTest: public HiveConnectorTestBase {
     }
 
     std::cout << "Start optimization." << std::endl;
-    
+
     // send start message to start MCTS optimization
     // start flag and initial query plan
     Json::Value startJsonMessage;
@@ -457,56 +460,80 @@ class IntegratedMCTSTest: public HiveConnectorTestBase {
     sendJsonBySocket(startJsonMessage, clientSocket);
     bool optimizationIsFinished = false;
     while (!optimizationIsFinished) {
+      planNode = myPlan.planNode();
       // received json message from MCTS
       Json::Value receivedJsonMessage = receiveJsonFromSocket(clientSocket);
       std::string mctsAction = receivedJsonMessage["mctsAction"].asString();
+      std::cout << "Received message with mcts action: " << mctsAction
+                << std::endl;
       if (mctsAction == "getQueryPlan") {
         Json::Value jsonMessage;
         jsonMessage["communicateFlag"] = true;
         jsonMessage["mctsAction"] = "recQueryPlan";
-        // jsonMessage["queryPlan"] = queryPlanStr;
+        jsonMessage["queryPlan"] = myPlan.planNode()->toString(true, true);;
         sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "getActionSpace") {
+        if (receivedJsonMessage["isRootNode"].asBool() == true) {
+          // if it is root node, it needs to start with original plan
+          myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                       .tableScan(asRowType(inputRowVector->type()))
+                       .capturePlanNodeId(p0)
+                       .project({fmt::format(compute, "v")})
+                       .planBuild();
+          planNode = myPlan.planNode();
+        }
+        planState.getPossibleActions(planNode);
+        Json::Value jsonMessage;
+        jsonMessage["actionSpace"] = Json::arrayValue;
+        for (const auto& entry : planState.actionsPair) {
+          Json::Value jsonEntry;
+          jsonEntry["expression"] = entry.first;
+          jsonEntry["action"] = entry.second;
+          jsonMessage["actionSpace"].append(jsonEntry);
+        }
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "takeAction") {
+        std::string selectedAction =
+            receivedJsonMessage["selectedAction"].asString();
+        std::cout << "[INFO] take action: " << selectedAction << std::endl;
+        if (selectedAction != "None") {
+          // None action is selected
+          planState.takeAction(
+              planNode,
+              nullptr,
+              maker,
+              myPlan,
+              pool_,
+              planNodeIdGenerator,
+              {selectedAction});
+          planState.update(myPlan);
+        }
+        std::cout << "[INFO] current my query plan"
+                  << myPlan.planNode()->toString(true, true) << std::endl;
+      } else if (mctsAction == "getCost") {
+        float executeTime = runPlan(file->path, 8, 8, myPlan, p0);
+        Json::Value jsonMessage;
+        jsonMessage["reward"] = executeTime;
+        std::cout << "[INFO] get Cost: "
+                  << " time: " << executeTime << std::endl;
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "finished") {
+        // finished
+        // nothing to do
       }
 
-      optimizationIsFinished = receivedJsonMessage["optimizationIsFinished"].asBool();
+      optimizationIsFinished =
+          receivedJsonMessage["optimizationIsFinished"].asBool();
+      std::cout << "[INFO] reached end of the loop, current opt flag: "
+                << optimizationIsFinished << std::endl;
     };
 
-
-    bool MCTSDone = false;
-    while (!MCTSDone) {
-      MCTSDone = true;
-    }
-
-    // jsonMessage["communicateFlag"] = false;
-    // jsonMessageStr = jsonMessage.toStyledString();
-    // send(clientSocket, jsonMessageStr.c_str(), jsonMessageStr.length(), 0);
-
-    // if (rewrite) {
-    //   // Get possible actions for this plan
-    //   planState.getPossibleActions(planNode);
-    //   // Print possible actions
-    //   for (const auto& entry : planState.actionsPair) {
-    //     std::cout << entry.first << ": " << entry.second << std::endl;
-    //   }
-    //   // Choose one action from possible actions (Now we only pick the first
-    //   // one, later it would be choosen by MCTS)
-    //   auto it = planState.actionsPair.begin();
-    //   std::string testAction = it->first;
-    //   // Take one rewritten action
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction});
-    //   // Update the planState (getPossibleAction after apply one action)
-    //   planState.update(myPlan);
-    // }
-
-    // // Run the rewritten plan
-    // runPlan(file->path, 8, 8, myPlan, p0);
+    // Run the rewritten plan
+    std::cout << "[INFO] MCTS finished, run the optimized query plan"
+              << std::endl;
+    std::cout << "[INFO] Optimized query plan"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+    runPlan(file->path, 8, 8, myPlan, p0);
   }
 
  private:
