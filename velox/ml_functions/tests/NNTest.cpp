@@ -91,6 +91,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   void run();
   void ffnn(int input_size, int layer1_size, int layer2_size);
   void torch_ffnn(int input_size, int layer1_size, int layer2_size);
+  void traverse(std::shared_ptr<const core::PlanNode>& node);
 
   FlatVectorPtr<float> get_tensor(std::ifstream& file, int size, int lines);
   FlatVectorPtr<float> get_tensor(VectorMaker& m, std::ifstream& file, int size, int lines);
@@ -103,6 +104,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
     std::vector<float> confs_vector(confs, confs + size);
     return confs_vector;
   }
+
 
   void execute_plan(core::PlanFragment plan, PlanNodeId p0, RowVectorPtr inputRowVector, std::vector<float> confs) {
 
@@ -389,25 +391,79 @@ void MLFunctionsTest::ffnn(int input_size, int layer1_size, int layer2_size) {
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     core::PlanNodeId p0;
   
-    std::cout << compute << std::endl; 
+    //std::cout << compute << std::endl; 
     auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                   .tableScan(asRowType(inputRowVector->type()))
                   .capturePlanNodeId(p0)
                   .project({fmt::format(compute, "x")}) 
-		              .planFragment();
+		              .planNode();
   
-    execute_plan(plan, p0, inputRowVector, confs);
+
+    //execute_plan(plan, p0, inputRowVector, confs);
 }
 
+void MLFunctionsTest::traverse(std::shared_ptr<const core::PlanNode>& node) {
+  if(!node)
+    return;
+  
+  std::vector<std::string> vec;
+  for (auto source : node->sources()) {
+        // store node stat in vector
+        // returned by this call
+        std::string temp(source->name());
+        vec.push_back(temp + ":" + source->id() + " ");
+        traverse(source);
+  }
+  std::cout << "Sources for " << node->name() << " - " << node->id() << std::endl;
+  for(std::string v : vec){
+    std::cout << v << " ";
+  }
+  std::cout << std::endl;
+}
 
 void MLFunctionsTest::run() {
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  core::PlanNodeId nationScanId;
+  core::PlanNodeId regionScanId;
+  auto plan = PlanBuilder(planNodeIdGenerator)
+             .tpchTableScan(
+                 tpch::Table::TBL_NATION, {"n_regionkey"}, 1 /*scaleFactor*/)
+             .capturePlanNodeId(nationScanId)
+             .hashJoin(
+                 {"n_regionkey"},
+                 {"r_regionkey"},
+                 PlanBuilder(planNodeIdGenerator)
+                     .tpchTableScan(
+                         tpch::Table::TBL_REGION,
+                         {"r_regionkey", "r_name"},
+                         1 /*scaleFactor*/)
+                     .capturePlanNodeId(regionScanId)
+                     .planNode(),
+                 "", // extra filter
+                 {"r_name"})
+             .singleAggregation({"r_name"}, {"count(1) as nation_cnt"})
+             .orderBy({"r_name"}, false)
+             .planNode();
+
+    
+    traverse(plan);
+    // std::cout << "Here is the source" << std::endl;
+    // std::cout << plan->name();
+    // for (auto source : plan->sources()) {
+    //     std::cout << source->name() << std::endl;
+      
+    // }     
+
+
+
   // Large
   //ffnn(597540,1024,14588);
   // small
-  //ffnn(784,1024,10);
+  ffnn(784,1024,10);
 
   //large
-  torch_ffnn(597540,1024,14588);
+  //torch_ffnn(597540,1024,14588);
   // small
   // torch_ffnn(784,1024,10);
 }

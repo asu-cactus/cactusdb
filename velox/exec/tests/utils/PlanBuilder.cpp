@@ -91,7 +91,7 @@ PlanBuilder& PlanBuilder::tableScan(
       .endTableScan();
 }
 
-PlanBuilder& PlanBuilder::tableScan(
+PlanBuilder& PlanBuilder::tableScan(  
     const std::string& tableName,
     const RowTypePtr& outputType,
     const std::unordered_map<std::string, std::string>& columnAliases,
