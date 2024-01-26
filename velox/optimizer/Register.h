@@ -58,7 +58,7 @@ void updateCataLog(const std::string& name, std::shared_ptr<VectorFunction> shar
         }
     }
     else {
-        std::cerr << name << ": No update for catalog: "  << std::endl;
+        std::cout << "Warning: " << name << ": No update for catalog." << std::endl;
     }
 }
 // We encapsulate the original registerFunction, adding a step to update the catalog when registering functions.

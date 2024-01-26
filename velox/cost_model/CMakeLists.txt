@@ -14,8 +14,8 @@
 
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 # find_package(Torch REQUIRED)
-# set(Torch_DIR "$HOME/libtorch")
-set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
+set(Torch_DIR "$HOME/libtorch")
+# set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 
 add_executable(nn_test tests/NNTests.cpp)
