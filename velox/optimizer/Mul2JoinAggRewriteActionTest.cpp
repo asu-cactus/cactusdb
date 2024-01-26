@@ -476,7 +476,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       }
       // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
-      std::string testAction  = it->first;
+      std::pair<std::string, std::string> testAction = *it;
       // Take one rewritten action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
       // Update the planState (getPossibleAction after apply one action)
