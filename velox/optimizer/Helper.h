@@ -43,8 +43,14 @@ namespace optimization {
             void TestBody() override {}
 
     };
-
-    // Function to create a block index based on parts and flag
+    /**
+     * @brief A function to create a block index based on parts and flag
+     * 
+     * @param parts The number of blocks
+     * @param flag The flag to denote the left side or right side of multiplication. 0 denotes the left side, usually values; 1 denotes the right side, usually weights.
+     * 
+     * @return indexs of blocks
+    */
     std::vector<std::vector<float>> create_block_index(int parts, int flag){
         std::vector<std::vector<float>> indexs;
         if (flag == 0){
