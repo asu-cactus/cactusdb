@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <iostream>
+#include <fmt/core.h>
 #include "velox/core/PlanNode.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "RuleManager.h"
@@ -67,8 +68,12 @@ public:
     /**
      * @brief Take action based on the specified target strings to rewrite the logical plan.
      *
-     * This function applies a rule to the current plan node based on the target strings and rewrites the plan accordingly.
+     * This function applies rules to the current plan node based on the target strings and rewrites the plan accordingly.
      *
+     * Target actions come with [(expr1, action1), (expr2, action2), (expr3, action1)].
+     * It laters will be grouped by the action, hence each rule.apply() will be called only 
+     * once.
+     * 
 	 * @param curNode A pointer to the current plan node, usually point to the last node of logical plan.
 	 * @param prevNode A pointer to the previous plan node, usually point to the previous node before current node.
 	 * @param maker A pointer to the VectorMaker, which is a helper class used to build the data source vector.
@@ -84,25 +89,34 @@ public:
                     PlanBuilder& planBuilder,
                     std::shared_ptr<memory::MemoryPool> pool_,
                     std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-                    const std::vector<std::string>& targetString,
+                    const std::vector<std::pair<std::string, std::string>>& targetActions,
                     CataLog &cataLog) {
-        
-        // Get the rule name for target action
-        std::string targetRule = actionsPair[targetString[0]];
-        // Get the pointer for this rule
-        auto rule = ruleManager.pickRule(targetRule);
-
-        if (rule) {
-            // Apply rule on this plan
-            rule->apply(curNode, nullptr, maker, planBuilder, pool_, planNodeIdGenerator, targetString, cataLog);
-            // Store this rule name as the previous action, prepare for next rewritten
-            preAction = targetRule;
-            //TODO: forbidden preAction in next step. (Avoid cycle)
-        } else {
-            // Handle the case when the rule is not found
-            std::cerr << "Error: Rule not found for targetString: " << targetString[0] << std::endl;
-
-        }
+    
+       // Group by actions and expressions by action
+       std::unordered_map<std::string, std::vector<std::string>> groupedActions;
+       for (auto targetAction: targetActions) {
+           auto [targetString, targetRule] = targetAction;
+           groupedActions[targetRule].push_back(targetString);
+       }
+       
+       // Apply selected rules
+       for (auto groupedAction: groupedActions) {
+           std::string targetRule = groupedAction.first;
+           std::vector<std::string> targetStrings = groupedAction.second;
+           // Get the pointer for this rule
+           auto rule = ruleManager.pickRule(targetRule);
+            
+           if (rule) {
+               // Apply rule on this plan
+               rule->apply(curNode, nullptr, maker, planBuilder, pool_, planNodeIdGenerator, targetStrings, cataLog);
+               // Store this rule name as the previous action, prepare for next rewritten
+               preAction = targetRule;
+               // TODO: forbidden preAction in next step. (Avoid cycle)
+           } else {
+               // Handle the case when the rule is not found
+               std::cerr << fmt::format("Error: Rule {} not found for targetString: {}", targetRule, targetStrings) << std::endl;
+           }
+        }        
 
         actionsPair.clear();
     }

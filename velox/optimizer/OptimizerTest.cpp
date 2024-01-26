@@ -1100,7 +1100,8 @@ void rewrite_test_split2multi(int argc, char** argv){
       RuleManager ruleManager;
       PlanState planState(ruleManager);
       planState.getPossibleActions(planNode,cataLog);
-      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {"torchdnn0"}, cataLog);
+      std::pair<std::string, std::string> testAction("torchdnn0", "Split2MultiRewriteAction");
+      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
       planState.update(myPlan,cataLog);
 
 
