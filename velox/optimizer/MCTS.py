@@ -186,7 +186,8 @@ class MCTS:
         selected_expression, selected_action = selected_node.from_action
         send_message = dict()
         send_message["mctsAction"] = "takeAction"
-        send_message["selectedAction"] = selected_expression
+        send_message["targetString"] = selected_expression
+        send_message["targetAction"] = selected_action
         send_message["optimizationIsFinished"] = False
         send_message_by_socket(send_message, self.client_socket)
 
@@ -208,7 +209,8 @@ class MCTS:
         node.action_space[(selected_expression, selected_action)] = True
         send_message = dict()
         send_message["mctsAction"] = "takeAction"
-        send_message["selectedAction"] = selected_expression
+        send_message["targetString"] = selected_expression
+        send_message["targetAction"] = selected_action
         send_message["optimizationIsFinished"] = False
         send_message_by_socket(send_message, self.client_socket)
         is_terminal = True if selected_expression == "None" else None
@@ -246,7 +248,8 @@ class MCTS:
             new_state[selected_expression] = selected_action
             send_message = dict()
             send_message["mctsAction"] = "takeAction"
-            send_message["selectedAction"] = selected_expression
+            send_message["targetString"] = selected_expression
+            send_message["targetAction"] = selected_action
             send_message["optimizationIsFinished"] = False
             send_message_by_socket(send_message, self.client_socket)
             node = MCTSTreeNode(
