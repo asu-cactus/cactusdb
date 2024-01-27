@@ -116,17 +116,20 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
       int numSamples,
       int numSplit,
       int batchSize,
-      int numDriver);
+      int numDriver,
+      std::string dataPath);
 
   int64_t testEndtoEndPipelineFusedMultiThreading(
       int numSamples,
       int numSplit,
       int batchSize,
-      int numDriver);
+      int numDriver, 
+      std::string dataPath);
 
   int64_t testEndtoEndPipelineMultiThreadingmaterialize(
       int numSamples,
-      int numSplit);
+      int numSplit, 
+      std::string dataPath);
 
   void TestBody() override {}
 
@@ -147,7 +150,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
     int numSamples,
     int numSplit,
     int batchSize,
-    int numDriver) {
+    int numDriver,
+    std::string dataPath) {
   VectorMaker maker{pool_.get()};
   std::cout
       << "[INFO]: TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading"
@@ -665,21 +669,21 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   uint64_t kSizeKB = 1024UL;
 
   auto userHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_user_s_8192.parquet"},
+      {fmt::format("file:{}/movielens_user_s_8192.parquet", dataPath)},
       1,
       dwio::common::FileFormat::PARQUET);
   auto movieHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_movie_s_8192.parquet"},
+      {fmt::format("file:{}/movielens_movie_s_8192.parquet", dataPath)},
       1,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingUserHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
+      {fmt::format("file:{}/movielens_rating_s_8192.parquet", dataPath)},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingMovieHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
+      {fmt::format("file:{}/movielens_rating_s_8192.parquet", dataPath)},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
@@ -926,7 +930,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
     int numSamples,
     int numSplit,
     int batchSize,
-    int numDriver) {
+    int numDriver,
+    std::string dataPath) {
   VectorMaker maker{pool_.get()};
   std::cout
       << "[INFO]: TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading"
@@ -1386,57 +1391,52 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   //     memory::defaultMemoryManager().addRootPool("root", 5000 * MB)};
   // queryCtx_->testingOverrideMemoryPool(rootPool);
   //   int numSplit = 2;
-  auto queryDataHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/query_data.parquet"},
-      numSplit,
-      dwio::common::FileFormat::PARQUET);
 
   auto userHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_user_s_8192.parquet"},
+      {fmt::format("file:{}/movielens_user_s_8192.parquet", dataPath)},
       1,
       dwio::common::FileFormat::PARQUET);
   auto movieHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_movie_s_8192.parquet"},
+      {fmt::format("file:{}/movielens_movie_s_8192.parquet", dataPath)},
       1,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingUserHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
+      {fmt::format("file:{}/movielens_rating_s_8192.parquet", dataPath)},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingMovieHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
+      {fmt::format("file:{}/movielens_rating_s_8192.parquet", dataPath)},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
-  //   std::vector<RowVectorPtr> queryDataRowVector;
-  //   std::vector<int> userIds;
-  //   int numBatch = int(numSamples / batchSize);
-  //   for (int i = 0; i < numBatch; i++) {
-  //     std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1,
-  //     6040); auto userIdFlatVector = maker.flatVector<int>(userIds,
-  //     INTEGER()); std::vector<int> movieIds =
-  //     randomGenerator.gen1DInt(batchSize, 1, 3706); auto movieIdFlatVector =
-  //     maker.flatVector<int>(movieIds, INTEGER()); auto
-  //     queryDataRowVectorBatch = maker.rowVector(
-  //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
-  //         movieIdFlatVector});
-  //     queryDataRowVector.push_back(queryDataRowVectorBatch);
-  //   }
-  //   std::vector<int> userIds = randomGenerator.gen1DInt(batchSize, 1, 6040);
-  //   auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
-  //   std::vector<int> movieIds = randomGenerator.gen1DInt(batchSize, 1, 3706);
-  //   auto movieIdFlatVector = maker.flatVector<int>(movieIds, INTEGER());
-  //   auto queryDataRowVector = maker.rowVector(
-  //         {"q_user_id", "q_movie_id"}, {userIdFlatVector,
-  //         movieIdFlatVector});
-  // use python script to generate splitted query table
-  // FIXME refactor the code to generate query parquet file via velox parquet
-  // writer, ref: SinkTests.cpp
-  std::string cmdToGenData = fmt::format(
-      "python3 /home/local/ASUAD/qlin36/velox/data/gen_data.py -n {}", numSamples);
-  int returnCode = system(cmdToGenData.c_str());
+  std::vector<int> userIds = randomGenerator.gen1DInt(numSamples, 1, 6040);
+  auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
+  std::vector<int> movieIds = randomGenerator.gen1DInt(numSamples, 1, 3706);
+  auto movieIdFlatVector = maker.flatVector<int>(movieIds, INTEGER());
+  auto queryDataRowVector = maker.rowVector(
+      {"q_user_id", "q_movie_id"}, {userIdFlatVector, movieIdFlatVector});
+
+  auto tempPath = exec::test::TempDirectoryPath::create();
+  auto filePath = fs::path(fmt::format("{}/query_data_test.parquet", tempPath->path));
+  auto sink = createSink(filePath);
+  auto sinkPtr = sink.get();
+  uint64_t kRowsInRowGroup = 1000;
+  uint64_t kBytesInRowGroup = 128 * 1024 * 1024;
+  auto writer = createWriter(std::move(sink), [&]() {
+    return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
+        kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
+  });
+  writer->write(queryDataRowVector);
+  writer->flush();
+  writer->close();
+
+  auto queryDataHiveSplits = makeHiveConnectorSplits(
+      //   {"/root/velox_latest/data/query_data.parquet"},
+      {filePath},
+      numSplit,
+      dwio::common::FileFormat::PARQUET);
 
   core::PlanNodeId readQueryDataPlanNodeId;
   core::PlanNodeId readUserDataPlanNodeId;
@@ -1647,7 +1647,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
 int64_t
 TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
     int numSamples,
-    int numSplit) {
+    int numSplit,
+    std::string dataPath) {
   VectorMaker maker{pool_.get()};
   std::cout
       << "[INFO]: TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize"
@@ -2154,11 +2155,11 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
 
   //   int numSplit = 2;
   auto userRatingHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_user_rating.parquet"},
+      {fmt::format("file:{}/movielens_user_rating.parquet", dataPath)},
       numSplit,
       dwio::common::FileFormat::PARQUET);
   auto movieRatingHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_movie_rating.parquet"},
+      {fmt::format("file:{}/movielens_movie_rating.parquet", dataPath)},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
@@ -2296,15 +2297,16 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
   return time;
 }
 
-DEFINE_int32(num_sample, 500, "Number of samples");
-DEFINE_int32(num_split, 1, "Number of drivers");
+DEFINE_string(data_path, "../../../../data", "Path to data dir");
+DEFINE_int32(num_sample, 50000, "Number of samples");
+DEFINE_int32(num_split, 10, "Number of splits");
 DEFINE_int32(
     benchmark_mode,
     0,
     "Benchmark Mode, 0-non-materialize, 1-materialize, 2-both");
-DEFINE_int32(batch_size, 500, "Batch size");
-DEFINE_int32(num_repeat, 1, "Number of repeat run");
-DEFINE_int32(num_driver, 1, "Number of driver");
+DEFINE_int32(batch_size, 5000, "Batch size");
+DEFINE_int32(num_repeat, 5, "Number of repeat run");
+DEFINE_int32(num_driver, 8, "Number of driver");
 
 int main(int argc, char** argv) {
   Eigen::setNbThreads(16);
@@ -2318,6 +2320,7 @@ int main(int argc, char** argv) {
   int batchSize = FLAGS_batch_size; // default 500
   int numRepeat = FLAGS_num_repeat; // default 1
   int numDriver = FLAGS_num_driver;
+  std::string dataPath =  FLAGS_data_path;
 
   std::cout
       << fmt::format(
@@ -2337,7 +2340,7 @@ int main(int argc, char** argv) {
   if (benchmarkMode == 0 or benchmarkMode == 2) {
     for (int i = 0; i < numRepeat; i++) {
       nonMaterializeLatency += demo.testEndtoEndPipelineMultiThreading(
-          numSamples, numSplit, batchSize, numDriver);
+          numSamples, numSplit, batchSize, numDriver, dataPath);
     }
     nonMaterializeLatency = nonMaterializeLatency / numRepeat;
   }
@@ -2345,7 +2348,7 @@ int main(int argc, char** argv) {
   if (benchmarkMode == 1 or benchmarkMode == 2) {
     for (int i = 0; i < numRepeat; i++) {
       materializeLatency += demo.testEndtoEndPipelineMultiThreadingmaterialize(
-          numSamples, numSplit);
+          numSamples, numSplit, dataPath);
     }
     materializeLatency = materializeLatency / numRepeat;
   }
