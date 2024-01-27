@@ -294,6 +294,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int num_samples = 1000;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
+    CataLog cataLog;
     // Set splits number
     int num_splits = 4;
     // Generate data source
@@ -347,7 +348,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Run rewriten rule
     if (rewrite) {
       // Get possible actions for this plan
-      planState.getPossibleActions(planNode);
+      planState.getPossibleActions(planNode, cataLog);
       // Print possible actions
       for (const auto& entry : planState.actionsPair) {
         std::cout << "[INFO] print action pair\n";
@@ -356,7 +357,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // Choose one action from possible actions (Now we only pick the first
       // one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
-      std::string testAction = it->first;
+      std::pair<std::string, std::string> testAction = *it;
       // Take one rewritten action
       planState.takeAction(
           planNode,
@@ -365,9 +366,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           myPlan,
           pool_,
           planNodeIdGenerator,
-          {testAction});
+          {testAction}, 
+          cataLog);
       // Update the planState (getPossibleAction after apply one action)
-      planState.update(myPlan);
+      planState.update(myPlan, cataLog);
     }
 
     // Run the rewritten plan
@@ -380,6 +382,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int num_samples = 1000;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
+    CataLog cataLog;
     // Set splits number
     int num_splits = 4;
     // Generate data source
@@ -482,7 +485,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                        .planBuild();
           planNode = myPlan.planNode();
         }
-        planState.getPossibleActions(planNode);
+        planState.getPossibleActions(planNode, cataLog);
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
         for (const auto& entry : planState.actionsPair) {
@@ -493,10 +496,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         }
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "takeAction") {
-        std::string selectedAction =
-            receivedJsonMessage["selectedAction"].asString();
-        std::cout << "[INFO] take action: " << selectedAction << std::endl;
-        if (selectedAction != "None") {
+        std::pair<std::string, std::string> targetAction;
+        targetAction.first = receivedJsonMessage["targetString"].asString();
+        targetAction.second = receivedJsonMessage["targetAction"].asString();
+
+        std::cout << "[INFO] take action: " << targetAction << std::endl;
+        if (targetAction.first != "None") {
           // None action is selected
           planState.takeAction(
               planNode,
@@ -505,8 +510,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               myPlan,
               pool_,
               planNodeIdGenerator,
-              {selectedAction});
-          planState.update(myPlan);
+              {targetAction}, cataLog);
+          planState.update(myPlan, cataLog);
         }
         std::cout << "[INFO] current my query plan"
                   << myPlan.planNode()->toString(true, true) << std::endl;
