@@ -26,6 +26,7 @@
 #include "TorchNN2TwoLayerUDFRewriteAction.h"
 #include "TwoLayerUDF2TorchNNRewriteAction.h"
 #include "DecisionForestUDF2RelationRewriteAction.h"
+#include "Mul2JoinAggRewriteAction.h"
 
 using namespace optimization;
 
@@ -40,6 +41,8 @@ public:
         rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
 
         rules.emplace("DecisionForestUDF2RelationRewriteAction", std::make_shared<optimization::DecisionForestUDF2RelationRewriteAction>());
+
+        rules.emplace("Mul2JoinAggRewriteAction", std::make_shared<optimization::Mul2JoinAggRewriteAction>());
         // Add more rules if needed
     }
     /**
