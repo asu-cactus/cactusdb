@@ -74,6 +74,7 @@
 #include "RuleManager.h"
 #include "PlanState.h"
 #include "DecisionForestUDF2RelationRewriteAction.h"
+#include "CataLog.h"
 
 using namespace std;
 using namespace ml;
@@ -352,27 +353,27 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
                       .tableScan(asRowType(inputRowVector->type()))
                       .capturePlanNodeId(p0)
                       .project({"decision_forest_predict(x)"});
-
+    // Get the logical plan                  
     auto planNode = myPlan.planNode();
     // Create ruleManager
     RuleManager ruleManager;
     // Create planState
     PlanState planState(ruleManager);
-
+    CataLog cataLog;
     if (rewrite) {
       // Get possible actions for this plan
-      planState.getPossibleActions(planNode);
+      planState.getPossibleActions(planNode, cataLog);
       // Print possible actions
       for (const auto& entry : planState.actionsPair) {
         std::cout << entry.first << ": " << entry.second << std::endl;
       }
       // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
-      std::string testAction  = it->first;
+      std::pair<std::string, std::string> testAction = *it;
       // Take one rewritten action
-      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction});
+      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
       // Update the planState (getPossibleAction after apply one action)
-      planState.update(myPlan);
+      planState.update(myPlan, cataLog);
     }
 
     // Run the rewritten plan
