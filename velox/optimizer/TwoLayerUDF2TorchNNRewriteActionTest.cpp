@@ -53,6 +53,7 @@
 #include "TwoLayerUDF2TorchNNRewriteAction.h"
 #include "RuleManager.h"
 #include "PlanState.h"
+#include "CataLog.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
@@ -309,6 +310,7 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     int second_layer_output_size = 14588;
     // Set splits number
     int num_splits = 4;
+    CataLog cataLog;
     // Generate data source
     auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
     // Create arrayVector for data source
@@ -347,18 +349,18 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     // Run rewriten rule
     if (rewrite) {
       // Get possible actions for this plan
-      planState.getPossibleActions(planNode);
+      planState.getPossibleActions(planNode, cataLog);
       // Print possible actions
       for (const auto& entry : planState.actionsPair) {
         std::cout << entry.first << ": " << entry.second << std::endl;
       }
       // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
-      std::string testAction  = it->first;
+      std::pair<std::string, std::string> testAction = *it;
       // Take one rewritten action
-      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction});
+      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
       // Update the planState (getPossibleAction after apply one action)
-      planState.update(myPlan);
+      planState.update(myPlan, cataLog);
 
     }
 

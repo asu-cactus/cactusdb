@@ -51,6 +51,7 @@ public:
 	 * @param pool_ A pointer to the memory pool, which is used to build the logical plan.
 	 * @param planNodeIdGenerator A pointer to the planNodeIdGenerator, which is used to track the ID of the plan Node.
 	 * @param targets A vector for multiple strings, representing the target UDF name that can apply this rewritten rule.
+     * @param cataLog Reference to a CataLog object to store metadata and information.
 	 * 
 	 * @return A boolean value indicating whether the rewrite was successful.
 	*/
@@ -60,7 +61,9 @@ public:
 	       PlanBuilder & planBuilder,
 	       std::shared_ptr<memory::MemoryPool> pool_,
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-		   std::vector<std::string> targets) override {
+		   std::vector<std::string> targets,
+		   CataLog& cataLog) override {
+			bool transformationApplied = false;
 			// Iterate over each target in the targets container
 			for (auto target : targets) {
 				// Start from the current node
@@ -168,7 +171,7 @@ public:
 												// Plan Builder add the new node.
 												planBuilder = planBuilder.project({exprStr});
 
-												return true;
+												transformationApplied = true;
 											}
 										}
 																															
@@ -278,7 +281,7 @@ public:
 
 								planBuilder = planBuilder.project({exprStr});
 
-								return true;
+								transformationApplied = true;
 							}
 						
 																												
@@ -294,11 +297,11 @@ public:
 				// recursive search
             	for (auto source : sources)       		 
 	
-	         		apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets);
+	         		transformationApplied |= apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
 	
 				}
 			}
-    
+		return transformationApplied;
     }
 
 	/**
@@ -317,11 +320,13 @@ public:
 	 * 
 	 * @param rootNode A pointer to the logical plan.
 	 * @param targetActions A pointer to the vector used to store possible UDF names applicable for this rule.
+     * @param cataLog Reference to a CataLog object to store metadata and information.
 	 * 
 	 * @return A boolean value indicating whether the check was successful.
 	*/
-	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions) override {
+	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog& cataLog) override {
 		try {
+			bool checkSuccess = true;
 			if (!rootNode) {
 
 				throw std::invalid_argument("rootNode is null");
@@ -358,8 +363,6 @@ public:
 
 					}
 				}
-
-				return true;  // Return true for successful execution
 			}
 			// We then check the filter node
 			if (nodeName == "Filter") {
@@ -386,8 +389,6 @@ public:
 					targetActions.push_back(it->str());
 
 				}
-
-				return true;  // Return true for successful execution
 			}
 
 			std::vector<std::shared_ptr<const core::PlanNode>> sources = rootNode->sources();
@@ -399,15 +400,10 @@ public:
 			}
 
 			for (const auto &source : sources) {
-
-				if (!check(source, targetActions)) {
-					// Propagate false if any child node returns false
-					return false;
-
-				}
+				checkSuccess &= check(source, targetActions, cataLog);
 			}
 
-			return true;  // Return true for successful execution
+			return checkSuccess; 
 
 		} catch (const std::exception &e) {
 

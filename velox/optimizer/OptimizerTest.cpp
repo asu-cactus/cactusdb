@@ -40,6 +40,7 @@
 
 #include "PlanState.h"
 #include "RuleManager.h"
+#include "Register.h"
 // #define EIGEN_USE_BLAS
 
 using namespace facebook::velox;
@@ -67,7 +68,7 @@ static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task);
 std::vector<std::vector<float>> create_input_block(int total_size, std::vector<std::vector<float>>& values, int block_numbers);
 std::vector<std::vector<float>> create_weight_block(int total_size, float* values, int block_numbers);
 std::vector<std::vector<float>> create_block_index(int parts, int flag);
-FileStructure block_to_files(std::vector<std::vector<float>> valuesArray, int parts, int flag);
+::FileStructure block_to_files(std::vector<std::vector<float>> valuesArray, int parts, int flag);
 DataFrame data_generate(int features, int samples, int first_layer, int second_layer);
 PlanBuilderExec build_plan_udf(DataFrame data, int features, int first_layer, int second_layer);
 PlanBuilderExec build_plan_udf_torch(DataFrame data, int features, int first_layer, int second_layer, int memoryLimit, std::vector<std::vector<float>> feature, int splitsNum, int threadsNum);
@@ -229,13 +230,13 @@ std::vector<std::vector<float>> create_block_index(int parts, int flag){
   return indexs;
 }
 
-FileStructure block_to_files(std::vector<std::vector<float>> valuesArray, int parts, int flag){
-  MyFileTest myFile;
-  FileStructure myFileStructure;
+::FileStructure block_to_files(std::vector<std::vector<float>> valuesArray, int parts, int flag){
+  ::MyFileTest myFile;
+  ::FileStructure myFileStructure;
   std::vector<std::shared_ptr<TempFilePath>> paths;
   RowVectorPtr input;
   if (flag == 0){
-    auto indexs = create_block_index(parts, flag);
+    auto indexs = ::create_block_index(parts, flag);
     for (int i = 0; i < parts; i++){
       input = maker.rowVector({"v", "v_row", "v_col"}, 
       {maker.arrayVector<float>({valuesArray[i]}, REAL()), maker.flatVector({indexs[0][i]}), maker.flatVector({indexs[1][i]})});
@@ -248,7 +249,7 @@ FileStructure block_to_files(std::vector<std::vector<float>> valuesArray, int pa
   return myFileStructure;
   }
   else {
-    auto indexs = create_block_index(parts, flag);
+    auto indexs = ::create_block_index(parts, flag);
     for (int i = 0; i < parts; i++){
       input = maker.rowVector({"w", "w_row", "w_col"}, 
       {maker.arrayVector<float>({valuesArray[i]}, REAL()), maker.flatVector({indexs[0][i]}), maker.flatVector({indexs[1][i]})});
@@ -412,7 +413,7 @@ void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector
   auto featureArrayVector = maker.arrayVector<float>(features, REAL());
   auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
   auto file = TempFilePath::create();
-  MyFileTest myFile;
+  ::MyFileTest myFile;
 
   auto config = std::make_shared<facebook::velox::dwrf::Config>();
   uint64_t kSizeKB = 1024UL;
@@ -554,11 +555,11 @@ PlanBuilderExec build_plan_op(float* weight, int row, int col, int samples, RowT
 OptOutput optiming_plan(PlanBuilder& planBuilder, DataFrame data, int num_samples, int features_size, int first_layer_size, int second_layer_size){
   auto dyDecision = decision_maker(planBuilder);
   if (dyDecision.replaceFlag) {
-    auto inputBlocks = create_input_block(num_samples*features_size, data.features, dyDecision.blocksNum);
+    auto inputBlocks = ::create_input_block(num_samples*features_size, data.features, dyDecision.blocksNum);
     //here is only for layer 1
-    auto weightBlocks = create_weight_block(features_size*first_layer_size, data.weights[0], dyDecision.blocksNum);
-    auto inputs = block_to_files(inputBlocks, dyDecision.blocksNum, 0);//0 denote values, 1 denote weight
-    auto weights = block_to_files(weightBlocks, dyDecision.blocksNum, 1);
+    auto weightBlocks = ::create_weight_block(features_size*first_layer_size, data.weights[0], dyDecision.blocksNum);
+    auto inputs = ::block_to_files(inputBlocks, dyDecision.blocksNum, 0);//0 denote values, 1 denote weight
+    auto weights = ::block_to_files(weightBlocks, dyDecision.blocksNum, 1);
     auto nodeid = planBuilder.planNode()->id();
     // auto str = planBuilder.findExprStrings(nodeid);
     // "softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0(ROW[\"v\"]))))))"
@@ -585,7 +586,7 @@ std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
   queryCtx_->testingOverrideMemoryPool(rootPool);
   queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}});
   auto planFragmentOpt = planBuilderOpt.planBuilder->planFragment();
-  MyFileTest myFile;
+  ::MyFileTest myFile;
   auto inputHiveSplits = myFile.makeHiveConnectorSplits(inputPaths);
   auto weightHiveSplits = myFile.makeHiveConnectorSplits(weightPaths);
 
@@ -1044,7 +1045,7 @@ void rewrite_test_split2multi(int argc, char** argv){
   auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
   auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
   auto file = TempFilePath::create();
-  MyFileTest myFile;
+  ::MyFileTest myFile;
   auto config = std::make_shared<facebook::velox::dwrf::Config>();
   myFile.writeToFile(file->path, {inputRowVector}, config);
 
@@ -1064,6 +1065,22 @@ void rewrite_test_split2multi(int argc, char** argv){
     std::make_unique<TorchDNN>(weights, bias, dimensions)
   );
 
+    // optimization::registerVectorFunction(
+    //     "torchDNN0",
+    //     TorchDNN::signatures(),
+    //     std::make_unique<TorchDNN>(weights, bias, dimensions),
+    //     {},
+    //     true
+    // );
+  // Register reg;
+  // reg.registerVectorFunction(
+  //   "torchDNN0",
+  //   TorchDNN::signatures(),
+  //   std::make_unique<TorchDNN>(weights, bias, dimensions),
+  //   {},
+  //   true
+  // );
+
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator)
                 .tableScan(asRowType(inputRowVector->type()))
@@ -1072,7 +1089,7 @@ void rewrite_test_split2multi(int argc, char** argv){
                 .planBuild();
 
   auto planNode = myPlan.planNode();
-  
+  CataLog cataLog;
   // std::shared_ptr<optimization::Split2MultiRewriteAction>
   //         myAction = std::make_shared<
   //             optimization::Split2MultiRewriteAction>();
@@ -1082,9 +1099,10 @@ void rewrite_test_split2multi(int argc, char** argv){
 
       RuleManager ruleManager;
       PlanState planState(ruleManager);
-      planState.getPossibleActions(planNode);
-      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {"torchdnn0"});
-      planState.update(myPlan);
+      planState.getPossibleActions(planNode,cataLog);
+      std::pair<std::string, std::string> testAction("torchdnn0", "Split2MultiRewriteAction");
+      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
+      planState.update(myPlan,cataLog);
 
 
   int numSplits = 8;
@@ -1175,7 +1193,7 @@ void rewrite_test_merge2single(int argc, char** argv){
   auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
   auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
   auto file = TempFilePath::create();
-  MyFileTest myFile;
+  ::MyFileTest myFile;
   auto config = std::make_shared<facebook::velox::dwrf::Config>();
   myFile.writeToFile(file->path, {inputRowVector}, config);
 
@@ -1292,13 +1310,13 @@ void rewrite_test_mul2joinagg(int argc, char** argv, int blocks){
 
 
   
-  auto inputBlocks = create_input_block(num_samples*input_features_size, data.features, blocks);
-  auto weightBlocks = create_weight_block(input_features_size*first_layer_output_size, data.weights[0], blocks);
-  auto inputs = block_to_files(inputBlocks, blocks, 0);//0 denote values, 1 denote weight
-  auto weights = block_to_files(weightBlocks, blocks, 1);
+  auto inputBlocks = ::create_input_block(num_samples*input_features_size, data.features, blocks);
+  auto weightBlocks = ::create_weight_block(input_features_size*first_layer_output_size, data.weights[0], blocks);
+  auto inputs = ::block_to_files(inputBlocks, blocks, 0);//0 denote values, 1 denote weight
+  auto weights = ::block_to_files(weightBlocks, blocks, 1);
 
   auto file = TempFilePath::create();
-  MyFileTest myFile;
+  ::MyFileTest myFile;
   auto config = std::make_shared<facebook::velox::dwrf::Config>();
   myFile.writeToFile(file->path, {inputRowVector}, config);
 
@@ -1426,13 +1444,13 @@ void rewrite_test_joinagg2mul(int argc, char** argv){
 
   auto valueSchema = asRowType(inputRowVector->type());
   
-  auto inputBlocks = create_input_block(num_samples*input_features_size, data.features, 4);
-  auto weightBlocks = create_weight_block(input_features_size*first_layer_output_size, data.weights[0], 4);
-  auto inputs = block_to_files(inputBlocks, 4, 0);//0 denote values, 1 denote weight
-  auto weights = block_to_files(weightBlocks, 4, 1);
+  auto inputBlocks = ::create_input_block(num_samples*input_features_size, data.features, 4);
+  auto weightBlocks = ::create_weight_block(input_features_size*first_layer_output_size, data.weights[0], 4);
+  auto inputs = ::block_to_files(inputBlocks, 4, 0);//0 denote values, 1 denote weight
+  auto weights = ::block_to_files(weightBlocks, 4, 1);
 
   auto file = TempFilePath::create();
-  MyFileTest myFile;
+  ::MyFileTest myFile;
   auto config = std::make_shared<facebook::velox::dwrf::Config>();
   myFile.writeToFile(file->path, {inputRowVector}, config);
 

@@ -50,19 +50,18 @@
 
 // Custom headers
 #include "RewriteAction.h"
-#include "TorchNN2TwoLayerUDFRewriteAction.h"
+#include "Mul2JoinAggRewriteAction.h"
 #include "RuleManager.h"
 #include "PlanState.h"
-#include "CataLog.h"
-#include "Helper.h"
+#include "Register.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
-class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
+class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
  public:
-  TorchNN2TwoLayerUDFRewriteActionTest() {
+ Mul2JoinAggRewriteActionTest() {
     // Register Presto scalar functions.
     functions::prestosql::registerAllScalarFunctions();
 
@@ -79,7 +78,7 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
     connector::registerConnector(hiveConnector);
   }
 
-  ~TorchNN2TwoLayerUDFRewriteActionTest() {
+  ~Mul2JoinAggRewriteActionTest() {
     TearDown();
   }
 
@@ -100,21 +99,17 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
   /**
    * @brief A function to run logical plan.
    * 
-   * @param filePath The file path for the data source file to be split.
    * @param numThreads The number of Velox executor threads.
    * @param numSplits The number of file splits.
    * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param p0 The planNodeID for the plan node that needs to add file splits.
+   * @param cataLog A class storing metadata and information related to UDFs and data sources.
   */
   void runPlan(
-      std::string filePath,
       int numThreads,
       int numSplits,
       PlanBuilder& myPlan,
-      core::PlanNodeId p0) {
-    // Create hivesplits for file.
-    auto hiveSplits = makeHiveConnectorSplits(
-        filePath, numSplits, dwio::common::FileFormat::DWRF);
+      CataLog &cataLog) {
+
     // Initializes executor.
     std::shared_ptr<folly::Executor> executor_{
         std::make_shared<folly::CPUThreadPoolExecutor>(
@@ -125,7 +120,7 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
     // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
-         {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
+          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
     // Create task for logical plan.
     auto task = exec::Task::create(
         "0",
@@ -137,21 +132,42 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
             std::cout << result->toString() << std::endl;
           return exec::BlockingReason::kNotBlocked;
         });
+    // Get optimized idFileAddr map from cataLog
+    auto idFileAddrMap = cataLog.getIdAddressMap();
+
+    std::vector<core::PlanNodeId> ids;
 
     std::cout << "Hive splits:" << std::endl;
-    // Add hivesplits to the target plan node (data source node).
-    for (auto& split : hiveSplits) {
-      // std::cout << split->toString() << std::endl;
-      task->addSplit(p0, exec::Split(std::move(split)));
+    // Create hivesplits for each entry in idFileAddr map, add splits to task
+    for (const auto& entry : idFileAddrMap) {
+
+      core::PlanNodeId key = entry.first;
+
+      const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+
+      auto hiveSplits = makeHiveConnectorSplits(fileAddr);
+
+      for (auto& split : hiveSplits) {
+
+        task->addSplit(key, exec::Split(std::move(split)));
+      }
+
+      ids.push_back(key);
     }
+
+    // Add hivesplits to the target plan node (data source node).
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
 
 
     // Start the task by setting the number of drivers.
     task->start(numThreads);
-    // Add all splits.
-    task->noMoreSplits(p0);
+    // Wait for no more splits.
+    for (auto id: ids){
+
+      task->noMoreSplits(id);
+    }
+
     // Wait for all drivers to finish.
     waitForFinishedDrivers(task);
 
@@ -212,9 +228,9 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
     int bias_layer1_size = num_samples * first_layer_output_size;
     int bias_layer2_size = num_samples * second_layer_output_size;
     // Seed the random number generator
-    std::random_device rd; 
+    std::random_device rd;  
     // Initialize the Mersenne Twister engine
-    std::mt19937 gen(rd()); 
+    std::mt19937 gen(rd());
     // Define the range
     std::uniform_real_distribution<float> distribution(0.0009, 0.0011);
 
@@ -254,12 +270,14 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
     for (int i = 0; i < weight_layer1_size; ++i) {
 
         weight_layer1[i] = 0.000001; 
+
     }
     float* weight_layer2 = new float[weight_layer2_size];
 
     for (int i = 0; i < weight_layer2_size; ++i) {
 
         weight_layer2[i] = 0.000001; 
+
     }
 
     std::vector<float*> weights;
@@ -270,20 +288,23 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
     float* bias_layer1 = new float[bias_layer1_size];
 
     for (int i = 0; i < bias_layer1_size; ++i) {
-      
+
         bias_layer1[i] = 0.00001; 
+
     }
     float* bias_layer2 = new float[bias_layer2_size];
 
     for (int i = 0; i < bias_layer2_size; ++i) {
 
         bias_layer2[i] = 0.00001; 
+
     }
 
     std::vector<float*> bias;
     bias.push_back(bias_layer1);
     bias.push_back(bias_layer2);
-    // Create dataframe
+
+    // Create DataFrame
     DataFrame data;
     data.features = featureVectors;
     data.weights = weights;
@@ -292,20 +313,94 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
 
     return data;
   }
-
+  
   /**
-   * @brief A test function to test the rewrite rule of TorchNN2TwoLayerUDF.
+   * @brief Registers a series of vector functions in the optimization namespace.
+   * 
+   * @param units1 Number of units in the first layer.
+   * @param units2 Number of units in the second layer.
+   * @param input_size1 Size of the input for the first layer.
+   * @param input_size2 Size of the input for the second layer.
+   * @param weightsFile_1 Pointer to the weights for the first layer.
+   * @param weightsFile_2 Pointer to the weights for the second layer.
+   * @param biasFile_1 Pointer to the bias for the first layer.
+   * @param biasFile_2 Pointer to the bias for the second layer.
+   * @param catalog Reference to a CataLog object to store metadata and information.
+   * 
+   * @return A string representing the composed vector function expression.
+   */
+  std::string registerFunctions(int units1, int units2, int input_size1, int input_size2, float* weightsFile_1, float* weightsFile_2, float* biasFile_1, float* biasFile_2, CataLog &catalog) {
+    // Register matrix multiplication function for the first layer
+    optimization::registerVectorFunction(
+        "mat_mul0",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1),
+        {},
+        true,
+        catalog
+    );
+    // Register matrix addition function for the first layer
+    optimization::registerVectorFunction(
+        "mat_add0",
+        MatrixAddition::signatures(),
+        std::make_unique<MatrixAddition>(biasFile_1, units1),
+        {},
+        true,
+        catalog
+    );
+    // Register ReLU activation function for the first layer
+    optimization::registerVectorFunction(
+        "relu0",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog
+     );
+    // Register matrix multiplication function for the second layer
+    optimization::registerVectorFunction(
+        "mat_mul1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(weightsFile_2, input_size2, units2),
+        {},
+        true,
+        catalog
+    );
+    // Register matrix addition function for the second layer
+    optimization::registerVectorFunction(
+        "mat_add1",
+        MatrixAddition::signatures(),
+        std::make_unique<MatrixAddition>(biasFile_2, units2),
+        {},
+        true,
+        catalog
+    );
+    // Register softmax activation function for the second layer
+    optimization::registerVectorFunction(
+        "softmax0",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog
+     );
+      // Compose and return the vector function expression
+     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
+  }
+  /**
+   * @brief A test function to test the rewrite rule of Mul2JoinAggRewriteAction.
    * 
    * @param rewrite A boolean value indicating whether to perform a rewrite.
   */
-  void testTorchNN2TwoLayerUDFPlan(bool rewrite) {
+  void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 800;//597540
+    int input_features_size = 3000;//597540
     int num_samples = 1000;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
     // Set splits number
     int num_splits = 4;
+    // Initialize CataLog
     CataLog cataLog;
     // Generate data source
     auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
@@ -319,32 +414,52 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
     // Write the data source to a file, with the format defined by the rowVector
     writeToFile(file->path, {inputRowVector}, config);
-    // Define the dimensions for torchdnn UDF
-    std::vector<int> dimensions;
+    //  Check the input size against the blocking threshold in cataLog.
+    //  If yes, preblock the input vector, store it, and add information in cataLog.
+    //  If not, set dataSource in cataLog.
+    if (input_features_size > cataLog.getBlockingThreshold()) {
+      // If input size is larger than blocking threshold, preblock and store in cataLog
+      std::vector<std::vector<float>> valuesBlock = optimization::create_input_block(input_features_size*num_samples, data.features, cataLog.getDefaultBlocksNum());
+      optimization::FileStructure values = optimization::block_to_files(valuesBlock, cataLog.getDefaultBlocksNum(), 0);
+      // Set data source blocks in cataLog
+      cataLog.setDataSourceBlocks(values.schema, values.paths);
+      // Set data source statistics in cataLog
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+    }
+    else {
+      // If input size is not larger than blocking threshold, set dataSource in cataLog
+      cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+      // Set data source statistics in cataLog
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+    }
+    // Build two dense layers UDFs using registerFunction in optimization namespace
+    std::string compute = registerFunctions(
+      first_layer_output_size, 
+      second_layer_output_size, 
+      input_features_size, 
+      first_layer_output_size, 
+      data.weights[0], 
+      data.weights[1],  
+      data.bias[0], 
+      data.bias[1],
+      cataLog);
 
-    dimensions.push_back(input_features_size);
-    dimensions.push_back(first_layer_output_size);
-    dimensions.push_back(second_layer_output_size);
-    // Create weights for torchdnn UDF
-    float* weights[2] = {data.weights[0], data.weights[1]};
-    // Create bias for torchdnn UDF
-    float* bias[2] = {data.bias[0], data.bias[1]};
-    // Register torchdnn UDF
-    exec::registerVectorFunction(
-      "torchDNN0",
-      TorchDNN::signatures(),
-      std::make_unique<TorchDNN>(weights, bias, dimensions)
-    );
+
+
     // Initialize planNodeID
     core::PlanNodeId p0;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    // Create a plan for FFNN using torchdnn UDF
+    // Create a plan for FFNN using two dense layers UDFs
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                 .tableScan(asRowType(inputRowVector->type()))
                 .capturePlanNodeId(p0)
-                .project({"torchDNN0(v)"})
+                .project({fmt::format(compute, "v")}) 
                 .planBuild();
+    // Set original plan nodeId and file address of data source
+    cataLog.setIdAddressMap(p0, {file});
+    // Set vector name and nodeId of data source
+    cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -370,7 +485,7 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
     }
 
     // Run the rewritten plan
-    runPlan(file->path, 8, 8, myPlan, p0);
+    runPlan(8, 8, myPlan, cataLog);
   }
 
  private:
@@ -383,7 +498,7 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
 
-  TorchNN2TwoLayerUDFRewriteActionTest demo;
+  Mul2JoinAggRewriteActionTest demo;
 
   bool rewrite = true;
 
@@ -399,7 +514,7 @@ int main(int argc, char** argv) {
         << std::endl
         << std::endl;
 
-    demo.testTorchNN2TwoLayerUDFPlan(true);
+    demo.testMul2JoinAggPlan(true);
 
   } else {
     std::cout
@@ -407,15 +522,15 @@ int main(int argc, char** argv) {
         << std::endl
         << std::endl;
 
-    demo.testTorchNN2TwoLayerUDFPlan(false);
+    demo.testMul2JoinAggPlan(false);
   }
 
   std::cout
       << "--" << std::endl
       << "[Usage] " << std::endl
-      << "./_build/release/velox/optimizer/torch2twolayer_test Y  //run FFNN model with rewriting rule 1"
+      << "./_build/release/velox/optimizer/torch2twolayer_test Y  //run FFNN model with rewriting rule 2"
       << std::endl
-      << "./_build/release/velox/optimizer/torch2twolayer_test N  //run FFNN model with rewriting rule 1"
+      << "./_build/release/velox/optimizer/torch2twolayer_test N  //run FFNN model with rewriting rule 2"
       << std::endl
       << "By default: Y is used" << std::endl;
 }
