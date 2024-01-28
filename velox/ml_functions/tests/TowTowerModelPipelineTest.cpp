@@ -701,7 +701,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
       {"q_user_id", "q_movie_id"}, {userIdFlatVector, movieIdFlatVector});
 
   auto tempPath = exec::test::TempDirectoryPath::create();
-  auto filePath = fs::path(fmt::format("{}/query_data_test.parquet", tempPath->path));
+  auto filePath =
+      fs::path(fmt::format("{}/query_data_test.parquet", tempPath->path));
   auto sink = createSink(filePath);
   auto sinkPtr = sink.get();
   uint64_t kRowsInRowGroup = 1000;
@@ -825,7 +826,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                "sequence_pooling(genres_embedding(genres)) as genres",
                "movie_mean_rating"})
           .project( // concate embedding vectors
-              {"concat4(concat3(concat2(concat1(user_id, gender),age),occupation), user_mean_rating) as user_tower_features",
+              {"concat4(concat3(concat2(concat1(user_id,gender),age),occupation), user_mean_rating) as user_tower_features",
                "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
           .project( // user/movie tower inference
               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
@@ -1419,7 +1420,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
       {"q_user_id", "q_movie_id"}, {userIdFlatVector, movieIdFlatVector});
 
   auto tempPath = exec::test::TempDirectoryPath::create();
-  auto filePath = fs::path(fmt::format("{}/query_data_test.parquet", tempPath->path));
+  auto filePath =
+      fs::path(fmt::format("{}/query_data_test.parquet", tempPath->path));
   auto sink = createSink(filePath);
   auto sinkPtr = sink.get();
   uint64_t kRowsInRowGroup = 1000;
@@ -2320,7 +2322,7 @@ int main(int argc, char** argv) {
   int batchSize = FLAGS_batch_size; // default 500
   int numRepeat = FLAGS_num_repeat; // default 1
   int numDriver = FLAGS_num_driver;
-  std::string dataPath =  FLAGS_data_path;
+  std::string dataPath = FLAGS_data_path;
 
   std::cout
       << fmt::format(
