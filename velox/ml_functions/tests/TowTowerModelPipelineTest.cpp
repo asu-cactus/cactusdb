@@ -123,12 +123,12 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
       int numSamples,
       int numSplit,
       int batchSize,
-      int numDriver, 
+      int numDriver,
       std::string dataPath);
 
   int64_t testEndtoEndPipelineMultiThreadingmaterialize(
       int numSamples,
-      int numSplit, 
+      int numSplit,
       std::string dataPath);
 
   void TestBody() override {}
@@ -657,7 +657,6 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
       ROW({"q_user_id", "q_movie_id"}, {INTEGER(), INTEGER()});
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  CursorParameters params;
 
   constexpr int64_t KB = 1024L;
   constexpr int64_t MB = 1024L * KB;
@@ -831,86 +830,67 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
           .project( // user/movie tower inference
               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
                "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
-          .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
-          .planFragment();
+          .project({"cosine_similarity(user_nn_out, movie_nn_out)"});
 
-  std::vector<RowVectorPtr> resultUserData;
-  boost::interprocess::interprocess_semaphore semaphore(2);
-  auto taskUser = exec::Task::create(
-      "0",
-      joinedUserAndMovieDataPlan,
-      0,
-      queryCtx_,
-      [&resultUserData, &semaphore](
-          RowVectorPtr vector, ContinueFuture* future) {
-        if (vector) {
-          semaphore.post();
-          //   for (auto& child : vector->children()) {
-          //   child->loadedVector();
-          // }
-          resultUserData.push_back(vector);
-        }
-        return exec::BlockingReason::kNotBlocked;
-      });
+  auto end2endPlanNodeFragment = joinedUserAndMovieDataPlan.planFragment();
 
   std::chrono::steady_clock::time_point begin =
       std::chrono::steady_clock::now();
-  taskUser->start(numDriver);
-  //   taskReadRating->start(taskReadRating, numSplit);
 
-  for (auto& split : queryDataHiveSplits) {
-    // semaphore.wait();
-    taskUser->addSplit(readQueryDataPlanNodeId, exec::Split(std::move(split)));
-  }
-  taskUser->noMoreSplits(readQueryDataPlanNodeId);
+  // TODO: Here we change how the plan is executed by using Velox's built-in
+  // Cursor to execute it. We observed using task->start() will sometimes lead
+  // to segmentation fault error for some reason. The previous implementation is
+  // attached as a comment at the end of this function for future debugging
+  // purposes.
 
-  for (auto& split : userHiveSplits) {
-    // semaphore.wait();
-    taskUser->addSplit(readUserDataPlanNodeId, exec::Split(std::move(split)));
-  }
-  taskUser->noMoreSplits(readUserDataPlanNodeId);
+  CursorParameters params;
+  params.maxDrivers = numDriver;
+  params.planNode = joinedUserAndMovieDataPlan.planNode();
+  bool noMoreSplits = false;
+  auto addSplits = [&](exec::Task* task) {
+    if (!noMoreSplits) {
+      for (auto& split : queryDataHiveSplits) {
+        task->addSplit(readQueryDataPlanNodeId, exec::Split(std::move(split)));
+      }
+      task->noMoreSplits(readQueryDataPlanNodeId);
 
-  for (auto& split : movieHiveSplits) {
-    // semaphore.wait();
-    taskUser->addSplit(readMovieDataPlanNodeId, exec::Split(std::move(split)));
-  }
-  taskUser->noMoreSplits(readMovieDataPlanNodeId);
+      for (auto& split : userHiveSplits) {
+        task->addSplit(readUserDataPlanNodeId, exec::Split(std::move(split)));
+      }
+      task->noMoreSplits(readUserDataPlanNodeId);
 
-  for (auto& split : ratingUserHiveSplits) {
-    // semaphore.wait();
-    taskUser->addSplit(
-        readRatingDataPlanNodeId1, exec::Split(std::move(split)));
-  }
-  taskUser->noMoreSplits(readRatingDataPlanNodeId1);
+      for (auto& split : movieHiveSplits) {
+        task->addSplit(readMovieDataPlanNodeId, exec::Split(std::move(split)));
+      }
+      task->noMoreSplits(readMovieDataPlanNodeId);
 
-  for (auto& split : ratingMovieHiveSplits) {
-    // semaphore.wait();
-    taskUser->addSplit(
-        readRatingDataPlanNodeId2, exec::Split(std::move(split)));
-  }
-  taskUser->noMoreSplits(readRatingDataPlanNodeId2);
+      for (auto& split : ratingUserHiveSplits) {
+        task->addSplit(
+            readRatingDataPlanNodeId1, exec::Split(std::move(split)));
+      }
+      task->noMoreSplits(readRatingDataPlanNodeId1);
 
-  waitForFinishedDrivers(taskUser);
+      for (auto& split : ratingMovieHiveSplits) {
+        task->addSplit(
+            readRatingDataPlanNodeId2, exec::Split(std::move(split)));
+      }
+      task->noMoreSplits(readRatingDataPlanNodeId2);
+    }
+    noMoreSplits = true;
+  };
 
+  auto [cursor, actualResults] = readCursor(params, addSplits);
+  waitForTaskCompletion(cursor->task().get());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
-  auto movedData = std::move(resultUserData);
   int totalNumOfRecord = 0;
-  for (auto batchData : movedData) {
+  for (auto batchData : actualResults) {
     totalNumOfRecord += batchData->size();
   }
 
-  //   for (int i = 0; i < movedData.size(); i++) {
-  //     RowVectorPtr printData = movedData[i];
-  //     std::cout << "[DEBUG], batch : " << i << "\n"
-  //                 << printData->toString(0, printData->size())
-  //                 << std::endl;
-  //   }
-
-  //    std::move(resultUserData);
   std::cout << fmt::format(
                    "[DEBUG] # Batches: {}, # TotalRecords: {}",
-                   movedData.size(),
+                   actualResults.size(),
                    totalNumOfRecord)
             << std::endl;
 
@@ -918,13 +898,98 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
       (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
            .count());
 
-  //   std::cout << "End-End Time (sec) = "
-  //             << (std::chrono::duration_cast<std::chrono::microseconds>(
-  //                     end - begin)
-  //                     .count()) /
-  //           1e6
-  //             << std::endl;
   return time;
+
+  /* Previous implmentation for debugging purpose.
+    std::vector<RowVectorPtr> resultUserData;
+    boost::interprocess::interprocess_semaphore semaphore(2);
+    std::shared_ptr<TaskQueue> taskQueue =
+        std::make_shared<TaskQueue>(512 * 1024);
+    auto taskUser = exec::Task::create(
+        "0",
+        std::move(end2endPlanNodeFragment),
+        0,
+        std::move(queryCtx_),
+        [&resultUserData, &semaphore, &taskQueue, this](
+            RowVectorPtr vector, ContinueFuture* future) {
+          if (vector) {
+            //   semaphore.post();
+            //   for (auto& child : vector->children()) {
+            //   child->loadedVector();
+            // }
+            for (auto& child : vector->children()) {
+              child->loadedVector();
+            }
+            auto copy = BaseVector::create<RowVector>(
+                vector->type(), vector->size(), pool_.get());
+            copy->copy(vector.get(), 0, 0, vector->size());
+            resultUserData.push_back(std::move(copy));
+            //   taskQueue->enqueue(std::move(copy), future);
+          }
+          return exec::BlockingReason::kNotBlocked;
+        });
+    taskUser->start(numDriver);
+
+    for (auto& split : queryDataHiveSplits) {
+      // semaphore.wait();
+      taskUser->addSplit(readQueryDataPlanNodeId,
+      exec::Split(std::move(split)));
+    }
+    taskUser->noMoreSplits(readQueryDataPlanNodeId);
+
+    for (auto& split : userHiveSplits) {
+      // semaphore.wait();
+      taskUser->addSplit(readUserDataPlanNodeId,
+      exec::Split(std::move(split)));
+    }
+    taskUser->noMoreSplits(readUserDataPlanNodeId);
+
+    for (auto& split : movieHiveSplits) {
+      // semaphore.wait();
+      taskUser->addSplit(readMovieDataPlanNodeId,
+      exec::Split(std::move(split)));
+    }
+    taskUser->noMoreSplits(readMovieDataPlanNodeId);
+
+    for (auto& split : ratingUserHiveSplits) {
+      // semaphore.wait();
+      taskUser->addSplit(
+          readRatingDataPlanNodeId1, exec::Split(std::move(split)));
+    }
+    taskUser->noMoreSplits(readRatingDataPlanNodeId1);
+
+    for (auto& split : ratingMovieHiveSplits) {
+      // semaphore.wait();
+      taskUser->addSplit(
+          readRatingDataPlanNodeId2, exec::Split(std::move(split)));
+    }
+    taskUser->noMoreSplits(readRatingDataPlanNodeId2);
+
+    waitForFinishedDrivers(taskUser);
+    std::vector<RowVectorPtr> result;
+    taskQueue->setNumProducers(1 * taskUser->numOutputDrivers());
+    auto current_ = taskQueue->dequeue();
+    int totalSize = 0;
+    while (current_ != nullptr) {
+      totalSize += current_->size();
+      result.push_back(current_);
+      current_ = taskQueue->dequeue();
+    }
+
+    waitForTaskCompletion(taskUser.get());
+
+    auto movedData = std::move(resultUserData);
+    int totalNumOfRecord = 0;
+    for (auto batchData : movedData) {
+      totalNumOfRecord += batchData->size();
+    }
+
+    std::cout << fmt::format(
+                     "[DEBUG] # Batches: {}, # TotalRecords: {}",
+                     movedData.size(),
+                     totalNumOfRecord)
+              << std::endl;
+    */
 }
 
 int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
@@ -1191,7 +1256,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
           float(1e-5),
           129,
           300));
-  
+
   exec::registerVectorFunction(
       "fully_layer_with_batch_norm2",
       FullyConnectWithBatchNormAndRelu::signatures(),
@@ -1350,7 +1415,6 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
           float(1e-5),
           300,
           128));
-
 
   exec::registerVectorFunction(
       "cosine_similarity",
