@@ -127,4 +127,9 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(conv_test ConvTest.cpp)
+target_link_libraries(
+  conv_test
+)
+
 # set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")

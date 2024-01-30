@@ -1,0 +1,563 @@
+#include <iostream>
+#include <random>
+#include <functional>
+#include <cassert>
+#include <map>
+#include <memory>
+
+class Matrix3D {
+public:
+
+  int x;
+  int y;
+  int z;
+  std::vector<float*> matrices; // size z
+
+  Matrix3D() {}
+  Matrix3D(int x, int y, int z) : x(x), y(y), z(z) { matrices.resize(z); }
+
+  void addChannel(float* data) {
+    matrices.push_back(data);
+  }
+
+  void setMatrixAtIndex(int i, float* data) {
+    assert(i < z);
+    matrices[i] = data;
+  }
+
+  float* getMatrixAtIndex(int i) {
+    assert(i < z);
+    return matrices[i];
+  }
+};
+
+class Image : public Matrix3D {
+public:
+  int index;
+
+  Image() {}
+  Image(int index, int x, int y, int z) : index(index), Matrix3D(x, y, z) {}
+
+  int &getKey() { return index; }
+
+  Image &getValue() { return *this; }
+
+  int get_x(int padding) { return x + padding * 2; }
+
+  int get_y(int padding) { return y + padding * 2; }
+
+  int get_h_slides(int padding, int kernel_size, int stride) {
+    return floor((get_y(padding) - kernel_size) / stride) + 1;
+  }
+
+  int get_v_slides(int padding, int kernel_size, int stride) {
+    return floor((get_x(padding) - kernel_size) / stride) + 1;
+  }
+
+  float get_win_value(int window, int i, int j, int stride, int channel,
+                       int kernel_size, int padding) {
+    int h_slides = get_h_slides(padding, kernel_size, stride);
+    int v_slides = get_v_slides(padding, kernel_size, stride);
+
+    // calculate window origin
+    int r = floor(window / h_slides);
+    int c = window % h_slides;
+
+    // Find where i,j lies in the kernel window
+    // Also adjust for padding
+    // We assume that padding is out of bounds of the actual array
+    int x_index = ((r * stride) + i) - padding;
+    int y_index = ((c * stride) + j) - padding;
+
+    if (padding > 0 &&
+        (x_index < 0 || y_index < 0 || x_index >= x || y_index >= y))
+      return 0;
+
+    int flat_index = x_index * y + y_index;
+    return matrices[channel][flat_index];
+  }
+
+  int get_conv2d_matrix_rows(int kernel_size, int stride, int padding) {
+    int v_slides = get_v_slides(padding, kernel_size, stride);
+    int h_slides = get_h_slides(padding, kernel_size, stride);
+
+    return v_slides * h_slides;
+  }
+
+  int get_conv2d_matrix_cols(int kernel_size, int stride, int padding) {
+    return z * kernel_size * kernel_size;
+  }
+
+  int get_conv2d_window_count(int kernel_size, int stride, int padding) {
+    int h_slides = get_h_slides(padding, kernel_size, stride);
+    int v_slides = get_v_slides(padding, kernel_size, stride);
+    std::cout << "[IMAGE] h_slides: " << h_slides << ", v_slides: " << v_slides << std::endl;
+    std::cout << "[IMAGE] kernel: " << kernel_size << ", strides: " << stride << ", padding: " << padding << std::endl;
+
+    return h_slides * v_slides;
+  }
+
+  int get_num_channels() { return z; }
+
+};
+
+class ImageChunk {
+public:
+  int block_row;
+  int y_index;
+  std::vector<float> chunk;
+  int chunk_size;
+  int y_size;
+
+  int block_row_start;
+
+  ImageChunk() {}
+
+  ImageChunk(int size, int y_size, int block_row, int y_index, int block_row_start)
+      : chunk_size(size), y_size(y_size), block_row(block_row),
+        y_index(y_index), block_row_start(block_row_start) {
+    chunk.reserve(size);
+  }
+
+  int getChunkActualRowIndex() { return block_row_start + block_row; }
+
+  std::vector<float> &getChunk() { return chunk; }
+
+  int getSize() { return chunk.size(); }
+};
+
+class ImageBlock {
+
+public:
+  int block_x_index;
+  int block_x_size;
+  int block_y_size;
+  int block_y_index;
+  std::map<int, std::vector<float>> chunks;
+  long key;
+
+  int feature_count;
+
+  // Default constructor:
+  ImageBlock() {}
+
+  // Default destructor:
+  ~ImageBlock() {}
+
+  // Constructor with arguments:
+  ImageBlock(ImageChunk &chunk, int block_x_size)
+      : block_y_size(chunk.y_size), block_y_index(chunk.y_index),
+        block_x_size(block_x_size),
+        block_x_index((int)(chunk.getChunkActualRowIndex() / block_x_size)) {
+    feature_count = chunk.getSize();
+    chunks[chunk.getChunkActualRowIndex()] = chunk.getChunk();
+    key = block_x_index * 10000 + block_y_index;
+  }
+
+  std::map<int, std::vector<float>> &getBlock() { return chunks; }
+
+  long &getKey() { return key; }
+
+  ImageBlock &getValue() { return *this; }
+
+  int getActualBlockSize() { return chunks.size(); }
+
+  int getActualBlockChunksSize() { return chunks.begin()->second.size();}
+
+  void merge(ImageBlock &addMeIn) {
+    std::map<int, std::vector<float>> &rhs = addMeIn.getBlock();
+    auto iter = rhs.begin();
+    while (iter != rhs.end()) {
+      int myKey = (*iter).first;
+      if (chunks.count(myKey) == 0) {
+        chunks[myKey] = (*iter).second;
+        //std::cout << "[ImageBlock] Merging bucket " << key << " adding key "
+                  //<< myKey << std::endl;
+      } else {
+        //std::cout << "[ImageBlock] Merging bucket " << key << " NOT adding key "
+                  //<< myKey << std::endl;
+      }
+      ++iter;
+    }
+  }
+};
+
+class ImageMatrix {
+
+public:
+  int num_row;
+  int num_col;
+  float* data;
+
+  // Default constructor:
+  ImageMatrix() {}
+
+  // Default destructor:
+  ~ImageMatrix() {}
+
+  // Constructor with arguments:
+  ImageMatrix(int num_row, int num_col)
+      : num_row(num_row), num_col(num_col) {}
+
+
+  int getRowSize() { return num_row; }
+
+  int getColSize() { return num_col; }
+
+  float* getData() { return data; }
+
+};
+
+std::vector<Image> loadRandomImages(int width, int height, int channels, int numOfImages) {
+    std::random_device rd;
+    std::mt19937 e2(rd());
+    std::uniform_real_distribution<> distp(0.0001, 0.5);
+    std::uniform_real_distribution<> distn(0.0001, 0.5);
+    auto gen = std::bind(std::uniform_int_distribution<>(0, 1), std::default_random_engine());
+
+    // Vector to store images
+    std::vector<Image> images;
+    int imageSize = width * height;
+    for (int imageCount = 0; imageCount < numOfImages; imageCount++) {
+        // Create a new Image object
+        Image newImage(imageCount, width, height, channels);
+
+        for (int c = 0; c < channels; c++) {
+            float* imageData = new float[imageSize];
+            // Generate random data for the channel
+            for (int i = 0; i < width * height; i++) {
+                // Generate random data based on gen()
+                float data = (bool)gen() ? distn(e2) : distp(e2);
+                // Store the data in the image data array
+                imageData[i] = data;
+            }
+            // Add channel to the image
+            newImage.setMatrixAtIndex(c, imageData);
+        }
+
+        // Add the constructed image to the vector
+        images.push_back(newImage);
+    }
+
+    return images;
+}
+
+std::vector<ImageChunk> img_to_chunks(Image& image, int block_y, int strides, int kernel, int padding) {
+    std::vector<ImageChunk> result;
+
+    // int num_y_blocks = ceil(image.get_conv2d_matrix_cols(kernel, strides, padding) / static_cast<float>(block_y));//2*3*3 /32 = 1
+    int windows = image.get_conv2d_window_count(kernel, strides, padding); //4*4 = 16, each chunk denotes each window
+    // result.resize(windows);
+
+    std::cout << "[img_to_chunks] windows: " << windows << ", kernel: " << kernel << ", strides: " << strides << ", padding: " << padding << std::endl;
+
+    int channels = image.get_num_channels();//2
+    int row_start = image.getKey() * windows; // 0*16, 1*16, 2*16, for each image
+    int counter = 0;
+    std::shared_ptr<ImageChunk> chunk = nullptr;
+
+    for (int w = 0; w < windows; w++) {
+        counter = 0;
+        chunk = std::make_shared<ImageChunk>(block_y, block_y, w, counter, row_start);//32,32,0,0,0 for first window
+
+        for (int c = 0; c < channels; c++) {
+            for (int i = 0; i < kernel; i++) {
+                for (int j = 0; j < kernel; j++) {
+
+                    if (chunk->getSize() > 0 && chunk->getSize() % block_y == 0) {
+                        std::cout << chunk->getSize() << std::endl;
+                        result.push_back(*chunk);
+                        counter++;
+                        chunk = std::make_shared<ImageChunk>(block_y, block_y, w, counter, row_start);
+                    }
+
+                    chunk->getChunk().push_back(image.get_win_value(w, i, j, strides, c, kernel, padding));
+                }
+            }
+        }
+
+        if (chunk != nullptr) {
+            if (chunk->getSize() % block_y == 0) {
+                result.push_back(*chunk);
+                counter++;
+                chunk = std::make_shared<ImageChunk>(block_y, block_y, w, counter, row_start);
+            }
+
+            chunk->getChunk().push_back(1);
+            result.push_back(*chunk);
+        }
+    }
+
+    if (chunk->getSize() % block_y == 0) {
+        result.push_back(*chunk);
+        counter++;
+        chunk = std::make_shared<ImageChunk>(block_y, block_y, windows - 1, counter, row_start);
+    }
+
+    chunk->getChunk().push_back(1);
+    result.push_back(*chunk);
+
+    return result;
+}
+
+
+std::vector<ImageChunk> kernel_to_chunks(Image& kernel, int block_y) {
+    std::vector<ImageChunk> result;
+
+    int y_index = 0;
+
+    int row_width = kernel.x * kernel.y * kernel.z;
+    int block_row = 0;
+    int block_row_start = kernel.getKey();
+    int channels = kernel.get_num_channels();
+    int size = kernel.x * kernel.y;
+    std::shared_ptr<ImageChunk> chunk = std::make_shared<ImageChunk>(block_y, block_y, block_row, y_index, block_row_start);
+    // chunk->getChunk().reserve(9);
+
+    for (int c = 0; c < channels; c++) {
+        float* data = kernel.getMatrixAtIndex(c);
+
+        for (int i = 0; i < size; i++) {
+          if (chunk->getSize() > 0 && chunk->getSize() % block_y == 0) {
+            result.push_back(*chunk);
+            y_index++;
+            chunk = std::make_shared<ImageChunk>(block_y, block_y, block_row, y_index, block_row_start);
+          }
+          std::cout << chunk->getChunk().capacity() << std::endl;
+          chunk->getChunk().push_back(data[i]);
+        }
+      }
+
+      // Add the last chunk of last row
+      // Set placeholder for bias
+      if (chunk->getSize() % block_y == 0) {
+        result.push_back(*chunk);
+        y_index++;
+        chunk = std::make_shared<ImageChunk>(block_y, block_y, block_row_start, y_index, block_row_start);
+      }
+
+      chunk->getChunk().push_back(0);
+      result.push_back(*chunk);
+
+      return result;
+}
+
+std::vector<ImageBlock*> chunks_to_blocks(std::vector<ImageChunk>& chunks, int block_x) {
+    std::vector<ImageBlock*> blocks;
+    blocks.reserve(chunks.size());
+    std::map<long, std::vector<ImageBlock*>> blockMap;
+    std::vector<ImageBlock*> mergedBlocks;
+
+    // Group chunks by their actual row index
+    for (auto& chunk : chunks) {
+      ImageBlock* block = new ImageBlock(chunk, block_x);
+      blocks.push_back(block);
+    }
+    for (auto& block: blocks){
+      blockMap[block->getKey()].push_back(block);
+    }
+    mergedBlocks.reserve(blockMap.size());
+    for (auto& entry: blockMap){
+      ImageBlock* mergedBlock = entry.second[0];
+      for (size_t i = 1; i < entry.second.size(); ++i) {
+        mergedBlock->merge(*entry.second[i]);
+      }
+      mergedBlocks.push_back(mergedBlock);
+    }
+
+
+    return mergedBlocks;
+}
+
+std::vector<ImageBlock*> kernelchunks_to_blocks(std::vector<ImageChunk>& chunks, int block_x) {
+    std::vector<ImageBlock*> blocks;
+    blocks.reserve(chunks.size());
+    std::map<long, std::vector<ImageBlock*>> blockMap;
+    std::vector<ImageBlock*> mergedBlocks;
+    // Group chunks by their actual row index
+    for (auto& chunk : chunks) {
+      ImageBlock* block = new ImageBlock(chunk, block_x);
+      blocks.push_back(block);
+    }
+    for (auto& block: blocks){
+      blockMap[block->getKey()].push_back(block);
+    }
+
+    for (auto& entry: blockMap){
+      ImageBlock* mergedBlock = entry.second[0];
+      for (size_t i = 1; i < entry.second.size(); ++i) {
+        mergedBlock->merge(*entry.second[i]);
+      }
+      mergedBlocks.push_back(mergedBlock);
+    }
+
+
+
+    return mergedBlocks;
+}
+
+ImageMatrix blocks_to_matrix(std::vector<ImageBlock*>& blocks, int block_x, int block_y, bool padding, int total_features, int total_rows) {
+
+    int total_cols = total_features; // Assuming total_features represents the number of columns
+    float* data = new float[total_rows * total_cols]; // Allocate memory for the data array
+
+    int current_row = 0; // Keep track of the current row position in the data array
+
+    for (auto& block_ptr : blocks) {
+      ImageBlock& block = *block_ptr;
+        int real_block_x = padding ? block_x : block.getActualBlockSize();
+        int real_block_y = padding ? block_y : std::min(block_y, total_features - block.block_y_index * block_y);
+
+        const auto& chunk = block.getBlock();
+        int offset = block.block_x_index * block.block_x_size;
+
+        // Copy data from the block into the data array
+        for (int x = 0; x < real_block_x; x++) {
+            for (int y = 0; y < real_block_y; y++) {
+                float value = (x >= block.getActualBlockSize() || y >= block.feature_count) ? 0 : chunk.at(offset + x).at(y);
+                data[current_row * total_cols + y] = value;
+            }
+            current_row++;
+        }
+    }
+
+    ImageMatrix myData(total_rows, total_cols); // Create an ImageMatrix object
+    myData.data = data; // Assign the data array to the ImageMatrix object
+
+    return myData;
+
+}
+
+ImageMatrix kernelblocks_to_matrix(std::vector<ImageBlock*>& blocks, int block_x, int block_y, bool padding, int total_features, int total_rows) {
+
+    int total_cols = total_features; // Assuming total_features represents the number of columns
+    float* data = new float[total_rows * total_cols]; // Allocate memory for the data array
+
+    int current_row = 0; // Keep track of the current row position in the data array
+
+    for (auto& block_ptr : blocks) {
+      ImageBlock& block = *block_ptr;
+        int real_block_x = padding ? block_x : block.getActualBlockSize();
+        int real_block_y = padding ? block_y : std::min(block_y, total_features - block.block_y_index * block_y);
+
+        const auto& chunk = block.getBlock();
+        int offset = block.block_x_index * block.block_x_size;
+
+        // Copy data from the block into the data array
+        for (int x = 0; x < real_block_x; x++) {
+            for (int y = 0; y < real_block_y; y++) {
+                float value = (x >= block.getActualBlockSize() || y >= block.feature_count) ? 0 : chunk.at(offset + x).at(y);
+                data[current_row * total_cols + y] = value;
+            }
+            current_row++;
+        }
+    }
+
+    ImageMatrix myData(total_rows, total_cols); // Create an ImageMatrix object
+    myData.data = data; // Assign the data array to the ImageMatrix object
+
+    return myData;
+
+}
+
+ImageMatrix copy_bias_to_matrix(ImageMatrix kernelMatrix, float* bias){
+    int lastRow = kernelMatrix.getRowSize() - 1;
+    int numCols = kernelMatrix.getColSize();
+    for (int i = 0; i < numCols; ++i) {
+        kernelMatrix.data[lastRow * numCols + i] = bias[i];
+    }
+    return kernelMatrix;
+}
+
+float* loadRandomBias(int size) {
+    // Create a random number generator
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> dis(0.0f, 1.0f); // Range of random float values
+
+    // Allocate memory for the array
+    float* arr = new float[size];
+
+    // Fill the array with random float values
+    for (int i = 0; i < size; ++i) {
+        arr[i] = dis(gen);
+    }
+
+    return arr;
+}
+
+float* extraimage(Image& image) {
+    int block_x = 32;
+    int block_y = 9;
+    int kernel = 3;//kernel shape should be $kernelx$kernel (e.g., 7x7)
+    int window_items = 9;
+    int strides = 1;
+    int padding = 0;
+    bool block_padding = true;
+
+    int height = 6, width = 6, channels = 2, numOfImages = 1;
+    int kHeight = 3, kWidth = 3, kChannels = 2, numOfFilters = 3;
+
+    auto chunks = img_to_chunks(image, window_items, strides, kWidth, padding);
+    auto blocks = chunks_to_blocks(chunks, block_x);
+    auto matrix = blocks_to_matrix(blocks, block_x, block_y, padding, 19, 16);// 2*3*3+1=19, kChannels*kHeight*kWidth+1=19; get_conv2d_window_count() = 16
+    return matrix.data;
+}
+
+float* extrakernel(Image& kernel) {
+    int block_x = 32;
+    int block_y = 9;
+
+    int window_items = 9;
+    int strides = 1;
+    int padding = 0;
+    bool block_padding = true;
+
+    int height = 6, width = 6, channels = 2, numOfImages = 1;
+    int kHeight = 3, kWidth = 3, kChannels = 2, numOfFilters = 3;
+
+    float* bias = loadRandomBias(numOfFilters);
+    
+    auto kernelChunks = kernel_to_chunks(kernel, kHeight*kWidth);
+    auto kernelBlocks = kernelchunks_to_blocks(kernelChunks, block_x);
+    auto kernelMatrix = kernelblocks_to_matrix(kernelBlocks, block_x, block_y, block_padding, 1, 19);
+    auto kernelBiasMatrix = copy_bias_to_matrix(kernelMatrix, bias);
+
+    return kernelBiasMatrix.data;
+}
+
+int main(int argc, char** argv) {
+    int block_x = 32;
+    int block_y = 9;
+    int kernel = 3;//kernel shape should be $kernelx$kernel (e.g., 7x7)
+    int window_items = 9;
+    int strides = 1;
+    int padding = 0;
+    bool block_padding = true;
+
+    int height = 6, width = 6, channels = 2, numOfImages = 1;
+    int kHeight = 3, kWidth = 3, kChannels = 2, numOfFilters = 3;
+    std::cout << "Loading images....." << std::endl;
+    auto images = loadRandomImages(width, height, channels, numOfImages);
+    std::cout << "Loading kernel....." << std::endl;
+    auto kernels = loadRandomImages(kHeight, kWidth, kChannels, numOfFilters);
+    std::cout << "Loading bias data..." << std::endl;
+    float* bias = loadRandomBias(numOfFilters);
+
+
+    // Image image = images[0];
+    // auto chunks = img_to_chunks(image, window_items, strides, kWidth, padding);
+    // auto blocks = chunks_to_blocks(chunks, block_x);
+    // auto matrix = blocks_to_matrix(blocks, block_x, block_y, padding, 19, 16);// 2*3*3+1=19, kChannels*kHeight*kWidth+1=19; get_conv2d_window_count() = 16
+
+
+    // auto kernelChunks = kernel_to_chunks(kernels[0], kHeight*kWidth);
+    // auto kernelBlocks = kernelchunks_to_blocks(kernelChunks, block_x);
+    // auto kernelMatrix = kernelblocks_to_matrix(kernelBlocks, block_x, block_y, block_padding, 1, 19);
+    // auto kernelBiasMatrix = copy_bias_to_matrix(kernelMatrix, bias);
+    auto imagedata = extraimage(images[0]);
+    auto kerneldata = extrakernel(kernels[0]);
+
+    std::cout << "Finished converting" << std::endl;
+
+}
