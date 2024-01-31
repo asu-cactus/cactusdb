@@ -5,6 +5,7 @@ from tqdm.auto import tqdm
 from typing import Optional
 import socket
 import json
+import os
 
 
 class Timer(object):
@@ -63,10 +64,11 @@ class MCTSTreeNode:
             self.node_id = MCTSTreeNode.node_id
             MCTSTreeNode.node_id += 1
 
-        print(
-            "[INFO] node states: id: {} \n \t\t terminal: {} \n  \t\t parsed action space: {}".format(
-                self.node_id, self.is_terminal, self.action_space
-            )
+        if os.environ['mcts_debug'] == "True":
+            print(
+                "[INFO] node states: id: {} \n \t\t terminal: {} \n  \t\t parsed action space: {}".format(
+                    self.node_id, self.is_terminal, self.action_space
+                )
         )
 
     def check_terminal(self):
@@ -119,6 +121,7 @@ class MCTS:
         max_sim_iteration_time: int = 30 * 1000,  # 30 seconds
         exploration_weight: float = math.sqrt(2),
         rollout_policy: str = "random",
+        reward_mode: str = "offline",
     ):
         """
         Args:
@@ -139,6 +142,7 @@ class MCTS:
         self.max_sim_iteration_time = max_sim_iteration_time
         self.rollout_policy = rollout_policy
         self.iteration_count = 0
+        self.reward_mode = reward_mode
         self.timer = Timer()
 
     def search(self, root_node: MCTSTreeNode):
@@ -146,7 +150,8 @@ class MCTS:
         self.root_node = root_node
         self.timer.tic()
         for iter_idx in tqdm(range(self.max_iteration_num)):
-            print("[INFO] search iteration idx: ", iter_idx)
+            if os.environ['mcts_debug'] == "True":
+                print("[INFO] search iteration idx: ", iter_idx)
             node = self.root_node
             t_elapsed_time = self.timer.toc()
             if t_elapsed_time >= self.max_iteration_time:
@@ -160,7 +165,8 @@ class MCTS:
 
             # check if the current node is terminal node
             while not node.is_terminal:
-                print("[INFO] curr node id: ", node.node_id)
+                if os.environ['mcts_debug'] == "True":
+                    print("[INFO] curr node id: ", node.node_id)
                 node.check_and_update_is_fully_expanded()
                 if node.is_fully_expanded:
                     # select the best node based on UCT
@@ -173,6 +179,8 @@ class MCTS:
             # get reward via simulation after reaching the terminal state
             reward = self.simulate(node)
             self.back_propagate(node, reward)
+        t_elapsed_time = self.timer.toc()
+        print("[INFO] MCTS finished, elapsed time: {} ms".format(t_elapsed_time))
 
     def select(self, node: MCTSTreeNode) -> MCTSTreeNode:
         """Select best node based on UCT"""
@@ -191,11 +199,12 @@ class MCTS:
         send_message["optimizationIsFinished"] = False
         send_message_by_socket(send_message, self.client_socket)
 
-        print(
-            "[INFO] performed SELECTION, selected action: {}".format(
-                (selected_expression, selected_action)
+        if os.environ['mcts_debug'] == "True":
+            print(
+                "[INFO] performed SELECTION, selected action: {}".format(
+                    (selected_expression, selected_action)
+                )
             )
-        )
         return selected_node
 
     def expand(self, node: MCTSTreeNode) -> MCTSTreeNode:
@@ -214,11 +223,12 @@ class MCTS:
         send_message["optimizationIsFinished"] = False
         send_message_by_socket(send_message, self.client_socket)
         is_terminal = True if selected_expression == "None" else None
-        print(
-            "[INFO] performed EXPAND, selected action: {}".format(
-                (selected_expression, selected_action)
+        if os.environ['mcts_debug'] == "True":
+            print(
+                "[INFO] performed EXPAND, selected action: {}".format(
+                    (selected_expression, selected_action)
+                )
             )
-        )
         new_node = MCTSTreeNode(
             new_state,
             parent=node,
@@ -268,6 +278,7 @@ class MCTS:
         """Communicate with Velox to get reward with given state"""
         send_message = dict()
         send_message["mctsAction"] = "getCost"
+        send_message["costMode"] = self.reward_mode
         send_message_by_socket(send_message, self.client_socket)
         received_message = receive_message_by_socket(self.client_socket)
         # TODO: Current reward is the latency, should be changed once integrated with cost model
@@ -279,11 +290,12 @@ class MCTS:
         while node is not None:
             node.num_visit += 1
             node.reward += reward
-            print(
-                "[INFO] current iterated node: num_visit {}, reward {}".format(
-                    node.num_visit, node.reward
+            if os.environ['mcts_debug'] == "True":
+                print(
+                    "[INFO] current iterated node: num_visit {}, reward {}".format(
+                        node.num_visit, node.reward
+                    )
                 )
-            )
             node = node.parent
 
 
@@ -310,7 +322,7 @@ if __name__ == "__main__":
     client_socket, client_address = server_socket.accept()
 
     print(f"Connected to C++ client: {client_address}")
-
+    os.environ['mcts_debug'] = "True"
     optimization_is_finished = False
     while not optimization_is_finished:
         # Receive message
@@ -318,7 +330,8 @@ if __name__ == "__main__":
         # Do something
         send_message = dict()
         mctsAction = received_json_message["mctsAction"]
-        print("[DEBUG]: ", mctsAction)
+        if os.environ['mcts_debug'] == "True":
+            print("[DEBUG]: ", mctsAction)
         if mctsAction == "start":
             initQueryPlan = received_json_message["queryPlan"]
             rootNode = MCTSTreeNode(
@@ -328,6 +341,7 @@ if __name__ == "__main__":
                 client_socket=client_socket,
                 max_iteration_num=3,
                 max_sim_iteration_num=1,
+                reward_mode="online",
             )
             mcts.search(rootNode)
             optimization_is_finished = True
