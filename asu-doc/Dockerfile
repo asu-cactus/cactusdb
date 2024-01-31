@@ -42,6 +42,13 @@ RUN apt-get install -y curl
 RUN apt-get install -y zip
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
 RUN ln -s /usr/bin/python3 /usr/bin/python
+# install github option (optional)
+# RUN type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
+# RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+#     && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+#     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+#     && sudo apt update \
+#     && sudo apt install gh -y
 
 
 # set-up eigen
