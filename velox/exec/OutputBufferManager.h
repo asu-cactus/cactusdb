@@ -27,7 +27,7 @@ class OutputBufferManager {
       int numDestinations,
       int numDrivers);
 
-  /// Updates the number of buffers. Return true if the buffer exists for a
+  /// Updates the number of buffers. Returns true if the buffer exists for a
   /// given taskId, else returns false.
   bool updateOutputBuffers(
       const std::string& taskId,
@@ -36,7 +36,8 @@ class OutputBufferManager {
 
   /// When we understand the final number of split groups (for grouped
   /// execution only), we need to update the number of producing drivers here.
-  void updateNumDrivers(const std::string& taskId, uint32_t newNumDrivers);
+  /// Returns true if the buffer exists for a given taskId, else returns false.
+  bool updateNumDrivers(const std::string& taskId, uint32_t newNumDrivers);
 
   // Adds data to the outgoing queue for 'destination'. 'data' must not be
   // nullptr. 'data' is always added but if the buffers are full the future is
@@ -107,6 +108,9 @@ class OutputBufferManager {
   // If the output buffer from a task of taskId is over-utilized and blocks its
   // producers. When the task of this taskId is not found, return false.
   bool isOverutilized(const std::string& taskId);
+
+  // Returns nullopt when the specified output buffer doesn't exist.
+  std::optional<OutputBuffer::Stats> stats(const std::string& taskId);
 
   // Retrieves the set of buffers for a query if exists.
   // Returns NULL if task not found.

@@ -24,21 +24,35 @@
 #include "velox/common/base/CheckedArithmetic.h"
 #include "velox/type/StringView.h"
 
+namespace facebook::velox {
+
 namespace date {
 class time_zone;
 }
 
-namespace facebook::velox {
-
 struct TimestampToStringOptions {
   enum class Precision : int8_t {
-    kMilliseconds = 3,
-    kNanoseconds = 9,
+    kMilliseconds = 3, // 10^3 milliseconds are equal to one second.
+    kMicroseconds = 6, // 10^6 microseconds are equal to one second.
+    kNanoseconds = 9, // 10^9 nanoseconds are equal to one second.
   };
 
   Precision precision = Precision::kNanoseconds;
 
+  // Whether to add a leading '+' when year is greater than 9999.
+  bool leadingPositiveSign = false;
+
+  /// Whether to skip trailing zeros of fractional part. E.g. when true,
+  /// '2000-01-01 12:21:56.129000' becomes '2000-01-01 12:21:56.129'.
+  bool skipTrailingZeros = false;
+
+  /// Whether padding zeros are added when the digits of year is less than 4.
+  /// E.g. when true, '1-01-01 05:17:32.000' becomes '0001-01-01 05:17:32.000',
+  /// '-03-24 13:20:00.000' becomes '0000-03-24 13:20:00.000', and '-1-11-29
+  /// 19:33:20.000' becomes '-0001-11-29 19:33:20.000'.
   bool zeroPaddingYear = false;
+
+  // The separator of date and time.
   char dateTimeSeparator = 'T';
 
   enum class Mode : int8_t {
@@ -261,6 +275,9 @@ struct Timestamp {
   // Same as above, but accepts PrestoDB time zone ID.
   void toTimezone(int16_t tzID);
 
+  /// A default time zone that is same across the process.
+  static const date::time_zone& defaultTimezone();
+
   bool operator==(const Timestamp& b) const {
     return seconds_ == b.seconds_ && nanos_ == b.nanos_;
   }
@@ -318,7 +335,7 @@ struct Timestamp {
   // Needed for serialization of FlatVector<Timestamp>
   operator StringView() const {
     return StringView("TODO: Implement");
-  };
+  }
 
   std::string toString(const TimestampToStringOptions& options = {}) const {
     std::tm tm;
