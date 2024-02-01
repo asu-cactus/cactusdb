@@ -109,7 +109,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
       int64_t memoryCapacity) {
     
     std::unordered_map<std::string, std::shared_ptr<Config>> configs;
-    std::shared_ptr<MemoryPool> pool = memory::defaultMemoryManager().addRootPool(
+    std::shared_ptr<MemoryPool> pool = memory::MemoryManager::getInstance()->addRootPool(
         "", memoryCapacity, memory::MemoryReclaimer::create());
    std::unordered_map<std::string, std::string> myMapWithValues = {{core::QueryConfig::kSpillEnabled, "true"}, 
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
@@ -162,7 +162,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   std::shared_ptr<folly::Executor> executor_{std::make_shared<folly::CPUThreadPoolExecutor>(std::thread::hardware_concurrency())};
   std::shared_ptr<core::QueryCtx> queryCtx_{std::make_shared<core::QueryCtx>(executor_.get())};
   
-  std::shared_ptr<memory::MemoryPool> pool_ =  memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_ =  memory::MemoryManager::getInstance()->addLeafPool();
   //std::shared_ptr<memory::MemoryPool> childPool = rootPool_->addAggregateChild("HiveConnectorTestBase.Writer");
   VectorMaker maker{pool_.get()};
 
@@ -650,7 +650,7 @@ void MLFunctionsTest::test_multithreading() {
                   .planFragment();
 
   
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 500 * MB)};
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", 500 * MB)};
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
   auto file = TempFilePath::create();
@@ -733,7 +733,7 @@ void MLFunctionsTest::mytest() {
     auto tempDirectory = exec::test::TempDirectoryPath::create();
     auto queryCtx = std::make_shared<core::QueryCtx>(executor_.get());
     queryCtx->testingOverrideMemoryPool(
-        memory::defaultMemoryManager().addRootPool(
+        memory::MemoryManager::getInstance()->addRootPool(
             queryCtx->queryId(), kMaxBytes));
     auto results =
         AssertQueryBuilder(
@@ -816,7 +816,7 @@ void MLFunctionsTest::test_multithreading_oom() {
   // queryCtx_->testingOverrideConfigUnsafe(
   //     {{core::QueryConfig::kPreferredOutputBatchRows, "400"}, {core::QueryConfig::kPreferredOutputBatchBytes, "2000000"},  {core::QueryConfig::kMaxOutputBatchRows, "300"}});
   // Create task
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 500 * MB)};
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", 500 * MB)};
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
   queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
@@ -904,7 +904,7 @@ void MLFunctionsTest::test_batching() {
   queryCtx_->testingOverrideConfigUnsafe(
       {{core::QueryConfig::kPreferredOutputBatchBytes, "4000000"}, {core::QueryConfig::kMaxOutputBatchRows, "300"}});
   // Create task
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 500 * MB)};
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", 500 * MB)};
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
   auto file = TempFilePath::create();
@@ -974,7 +974,7 @@ void MLFunctionsTest::test_spill(){
   const auto spillDirectory = exec::test::TempDirectoryPath::create();
 
   auto qctx = newQueryCtx(27 * MB);
-  queryCtx_->testingOverrideMemoryPool(memory::defaultMemoryManager().addRootPool("root", 28 * MB));
+  queryCtx_->testingOverrideMemoryPool(memory::MemoryManager::getInstance()->addRootPool("root", 28 * MB));
   queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}, 
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
                                       {core::QueryConfig::kJoinSpillMemoryThreshold, std::to_string(27 * MB)},
@@ -1313,7 +1313,7 @@ void MLFunctionsTest::test_mnist_oom_weights() {
     core::PlanNodeId p0;
 
     // total memory is 5MB
-    std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 4 * MB)};
+    std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", 4 * MB)};
     auto childPool = rootPool->addLeafChild("leaf");
     queryCtx_->testingOverrideMemoryPool(rootPool);
 
@@ -1746,6 +1746,7 @@ void MLFunctionsTest::run() {
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
   MLFunctionsTest demo;
   demo.run();
 }
