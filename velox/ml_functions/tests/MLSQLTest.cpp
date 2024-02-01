@@ -73,7 +73,7 @@ class MLSQLTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
 
 
@@ -109,8 +109,7 @@ class MLSQLTest : public HiveConnectorTestBase {
   std::shared_ptr<core::QueryCtx> queryCtx_{
       std::make_shared<core::QueryCtx>(executor_.get())};
 
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
 
   VectorMaker maker{pool_.get()};
 
@@ -248,6 +247,7 @@ void MLSQLTest::run() {
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
   MLSQLTest demo;
   demo.run();
 }

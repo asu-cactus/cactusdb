@@ -57,10 +57,10 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr, ioExecutor_.get());
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>(), ioExecutor_.get());
     connector::registerConnector(hiveConnector);
 
-    rootPool_ = memory::defaultMemoryManager().addRootPool("TwoTowerTest");
+    rootPool_ = memory::MemoryManager::getInstance()->addRootPool("TwoTowerTest");
     pool_ = rootPool_->addLeafChild("TwoTowerTest");
 
     // SetUp();
@@ -86,6 +86,7 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
       std::function<
           std::unique_ptr<facebook::velox::parquet::DefaultFlushPolicy>()>
           flushPolicy,
+      const RowTypePtr& rowType,
       facebook::velox::common::CompressionKind compressionKind =
           facebook::velox::common::CompressionKind_NONE) {
     facebook::velox::parquet::WriterOptions options;
@@ -93,7 +94,7 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
     options.flushPolicyFactory = flushPolicy;
     options.compression = compressionKind;
     return std::make_unique<facebook::velox::parquet::Writer>(
-        std::move(sink), options);
+        std::move(sink), options, rowType);
   }
 
   std::unique_ptr<folly::IOThreadPoolExecutor> ioExecutor_;
@@ -665,21 +666,21 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   uint64_t kSizeKB = 1024UL;
 
   auto userHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_user_s_8192.parquet"},
+      {"/home/velox/data/movielens_user_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
   auto movieHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_movie_s_8192.parquet"},
+      {"/home/velox/data/movielens_movie_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingUserHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
+      {"/home/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingMovieHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
+      {"/home/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
@@ -705,7 +706,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   auto writer = createWriter(std::move(sink), [&]() {
     return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
         kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
-  });
+  }, queryDataRowType);
   writer->write(queryDataRowVector);
   writer->flush();
   writer->close();
@@ -1383,30 +1384,30 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   });
   uint64_t kSizeKB = 1024UL;
   // std::shared_ptr<memory::MemoryPool> rootPool{
-  //     memory::defaultMemoryManager().addRootPool("root", 5000 * MB)};
+  //     memory::MemoryManager::getInstance()->addRootPool("root", 5000 * MB)};
   // queryCtx_->testingOverrideMemoryPool(rootPool);
   //   int numSplit = 2;
   auto queryDataHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/query_data.parquet"},
+      {"/home/velox/data/query_data.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
   auto userHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_user_s_8192.parquet"},
+      {"/home/velox/data/movielens_user_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
   auto movieHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_movie_s_8192.parquet"},
+      {"/home/velox/data/movielens_movie_s_8192.parquet"},
       1,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingUserHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
+      {"/home/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
   auto ratingMovieHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_rating_s_8192.parquet"},
+      {"/home/velox/data/movielens_rating_s_8192.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
@@ -1435,7 +1436,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   // FIXME refactor the code to generate query parquet file via velox parquet
   // writer, ref: SinkTests.cpp
   std::string cmdToGenData = fmt::format(
-      "python3 /home/local/ASUAD/qlin36/velox/data/gen_data.py -n {}", numSamples);
+      "python3 /home/velox/data/gen_data.py -n {}", numSamples);
   int returnCode = system(cmdToGenData.c_str());
 
   core::PlanNodeId readQueryDataPlanNodeId;
@@ -2148,17 +2149,17 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
   constexpr int64_t MB = 1024L * KB;
   constexpr int64_t GB = 1024L * MB;
   //   std::shared_ptr<memory::MemoryPool> rootPool{
-  //       memory::defaultMemoryManager().addRootPool("root", 5000 * MB)};
+  //       memory::MemoryManager::getInstance()->addRootPool("root", 5000 * MB)};
   //   queryCtx_->testingOverrideMemoryPool(rootPool);
   uint64_t kSizeKB = 1024UL;
 
   //   int numSplit = 2;
   auto userRatingHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_user_rating.parquet"},
+      {"/home/velox/data/movielens_user_rating.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
   auto movieRatingHiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens_movie_rating.parquet"},
+      {"/home/velox/data/movielens_movie_rating.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
 
@@ -2310,6 +2311,7 @@ int main(int argc, char** argv) {
   Eigen::setNbThreads(16);
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   int numSamples = FLAGS_num_sample;
   int numSplit = FLAGS_num_split; // default 2

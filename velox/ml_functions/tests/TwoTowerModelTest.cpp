@@ -46,7 +46,7 @@ class TowTowerModelTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
 
     // SetUp();
@@ -87,8 +87,7 @@ class TowTowerModelTest : public HiveConnectorTestBase {
   std::shared_ptr<core::QueryCtx> queryCtx_{
       std::make_shared<core::QueryCtx>(executor_.get())};
 
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
   VectorMaker maker{pool_.get()};
 };
 
@@ -627,7 +626,7 @@ void TowTowerModelTest::testStringEncoder() {
       {std::string(
            connector::hive::HiveConfig::kFileColumnNamesReadAsLowerCase),
        "true"}};
-  queryCtx->setConnectorConfigOverridesUnsafe(
+  queryCtx->setConnectorSessionOverridesUnsafe(
       kHiveConnectorId, std::move(configs));
   const int numSplitsPerFile = 1;
   CursorParameters params;
@@ -638,7 +637,7 @@ void TowTowerModelTest::testStringEncoder() {
   auto addSplits = [&](exec::Task* task) {
     if (!noMoreSplits) {
       auto const splits = HiveConnectorTestBase::makeHiveConnectorSplits(
-          {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
+          {"/home/velox/data/movielens.parquet"},
           numSplitsPerFile,
           dwio::common::FileFormat::PARQUET);
       for (const auto& split : splits) {
@@ -1221,7 +1220,7 @@ void TowTowerModelTest::testDataProcessing() {
       {std::string(
            connector::hive::HiveConfig::kFileColumnNamesReadAsLowerCase),
        "true"}};
-  queryCtx->setConnectorConfigOverridesUnsafe(
+  queryCtx->setConnectorSessionOverridesUnsafe(
       kHiveConnectorId, std::move(configs));
   const int numSplitsPerFile = 1;
   params.queryCtx = queryCtx;
@@ -1231,7 +1230,7 @@ void TowTowerModelTest::testDataProcessing() {
   auto addSplits = [&](exec::Task* task) {
     if (!noMoreSplits) {
       auto const splits = HiveConnectorTestBase::makeHiveConnectorSplits(
-          {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
+          {"/home/velox/data/movielens.parquet"},
           numSplitsPerFile,
           dwio::common::FileFormat::PARQUET);
       for (const auto& split : splits) {
@@ -2624,7 +2623,7 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
       {std::string(
            connector::hive::HiveConfig::kFileColumnNamesReadAsLowerCase),
        "true"}};
-  queryCtx->setConnectorConfigOverridesUnsafe(
+  queryCtx->setConnectorSessionOverridesUnsafe(
       kHiveConnectorId, std::move(configs));
   const int numSplitsPerFile = 1;
   params.queryCtx = queryCtx;
@@ -2634,7 +2633,7 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
   auto addSplits = [&](exec::Task* task) {
     if (!noMoreSplits) {
       auto const splits = HiveConnectorTestBase::makeHiveConnectorSplits(
-          {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
+          {"/home/velox/data/movielens.parquet"},
           numSplitsPerFile,
           dwio::common::FileFormat::PARQUET);
       for (const auto& split : splits) {
@@ -3366,17 +3365,17 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
   constexpr int64_t MB = 1024L * KB;
   constexpr int64_t GB = 1024L * MB;
   std::shared_ptr<memory::MemoryPool> rootPool{
-      memory::defaultMemoryManager().addRootPool("root", 500 * MB)};
+      memory::MemoryManager::getInstance()->addRootPool("root", 500 * MB)};
   queryCtx_->testingOverrideMemoryPool(rootPool);
   uint64_t kSizeKB = 1024UL;
 
   //   int numSplit = 2;
   auto hiveSplits = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
+      {"/home/velox/data/movielens.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
   auto hiveSplits1 = makeHiveConnectorSplits(
-      {"/home/local/ASUAD/qlin36/velox/data/movielens.parquet"},
+      {"/home/velox/data/movielens.parquet"},
       numSplit,
       dwio::common::FileFormat::PARQUET);
   //   int concurrency = 2;
@@ -3839,6 +3838,7 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
 int main(int argc, char** argv) {
   Eigen::setNbThreads(16);
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
   TowTowerModelTest demo;
   //   demo.testTwoTowerModelInference();
   //   demo.testDataProcessing();

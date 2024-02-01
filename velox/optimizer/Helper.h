@@ -118,7 +118,7 @@ namespace optimization {
         optimization::MyFileTest myFile;
         optimization::FileStructure myFileStructure;
         std::vector<std::shared_ptr<TempFilePath>> paths;
-        auto pool_ = memory::addDefaultLeafMemoryPool();
+        auto pool_ = memory::MemoryManager::getInstance()->addLeafPool();
         VectorMaker maker{pool_.get()};
         RowVectorPtr input;
         if (flag == 0){

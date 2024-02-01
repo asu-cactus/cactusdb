@@ -70,8 +70,7 @@ class EmbeddingTest : public HiveConnectorTestBase {
   std::shared_ptr<core::QueryCtx> queryCtx_{
       std::make_shared<core::QueryCtx>(executor_.get())};
 
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
   VectorMaker maker{pool_.get()};
 };
 
@@ -583,6 +582,7 @@ void EmbeddingTest::testSequencePooling() {
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
   EmbeddingTest demo;
   // demo.testEmbedding();
   // demo.testBatchNorm1D();
