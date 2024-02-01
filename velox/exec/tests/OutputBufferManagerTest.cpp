@@ -36,8 +36,12 @@ class OutputBufferManagerTest : public testing::Test {
     rowType_ = ROW(std::move(names), std::move(types));
   }
 
+  static void SetUpTestCase() {
+    memory::MemoryManager::testingSetInstance({});
+  }
+
   void SetUp() override {
-    pool_ = facebook::velox::memory::addDefaultLeafMemoryPool();
+    pool_ = facebook::velox::memory::memoryManager()->addLeafPool();
     bufferManager_ = OutputBufferManager::getInstance().lock();
     if (!isRegisteredVectorSerde()) {
       facebook::velox::serializer::presto::PrestoVectorSerde::
@@ -96,7 +100,7 @@ class OutputBufferManagerTest : public testing::Test {
     auto listener = bufferManager_->newListener();
     IOBufOutputStream stream(*pool_, listener.get(), data->size());
     data->flush(&stream);
-    return std::make_unique<SerializedPage>(stream.getIOBuf());
+    return std::make_unique<SerializedPage>(stream.getIOBuf(), nullptr, size);
   }
 
   void enqueue(
@@ -107,21 +111,31 @@ class OutputBufferManagerTest : public testing::Test {
     enqueue(taskId, 0, rowType, size);
   }
 
-  void enqueue(
+  // Returns the enqueued page byte size.
+  uint64_t enqueue(
       const std::string& taskId,
       int destination,
       const RowTypePtr& rowType,
       vector_size_t size,
       bool expectedBlock = false) {
     ContinueFuture future;
-    auto blocked = bufferManager_->enqueue(
-        taskId, destination, makeSerializedPage(rowType, size), &future);
+    auto page = makeSerializedPage(rowType, size);
+    const uint64_t pageSize = page->size();
+    auto blocked =
+        bufferManager_->enqueue(taskId, destination, std::move(page), &future);
     if (!expectedBlock) {
-      ASSERT_FALSE(blocked);
+      EXPECT_FALSE(blocked);
     }
     if (blocked) {
       future.wait();
     }
+    return pageSize;
+  }
+
+  OutputBuffer::Stats getStats(const std::string& taskId) {
+    const auto stats = bufferManager_->stats(taskId);
+    EXPECT_TRUE(stats.has_value());
+    return stats.value();
   }
 
   void noMoreData(const std::string& taskId) {
@@ -324,28 +338,32 @@ class OutputBufferManagerTest : public testing::Test {
       std::shared_ptr<Task> task,
       OutputBufferStatus outputBufferStatus) {
     TaskStats finishStats = task->taskStats();
+    const auto utilization = finishStats.outputBufferUtilization;
+    const auto overutilized = finishStats.outputBufferOverutilized;
     if (outputBufferStatus == OutputBufferStatus::kInitiated ||
         outputBufferStatus == OutputBufferStatus::kFinished) {
       // zero utilization on a fresh new output buffer
-      ASSERT_EQ(finishStats.outputBufferUtilization, 0);
-      ASSERT_FALSE(finishStats.outputBufferOverutilized);
+      ASSERT_EQ(utilization, 0);
+      ASSERT_FALSE(overutilized);
     }
     if (outputBufferStatus == OutputBufferStatus::kRunning) {
       // non-blocking running, 0 < utilization < 1
-      ASSERT_GT(finishStats.outputBufferUtilization, 0);
-      ASSERT_LT(finishStats.outputBufferUtilization, 1);
-      ASSERT_FALSE(finishStats.outputBufferOverutilized);
+      ASSERT_GT(utilization, 0);
+      ASSERT_LT(utilization, 1);
+      if (utilization > 0.5) {
+        ASSERT_TRUE(overutilized);
+      } else {
+        ASSERT_FALSE(overutilized);
+      }
     }
     if (outputBufferStatus == OutputBufferStatus::kBlocked) {
       // output buffer is over utilized and blocked
-      ASSERT_GT(finishStats.outputBufferUtilization, 1);
-      ASSERT_TRUE(finishStats.outputBufferOverutilized);
+      ASSERT_GT(utilization, 0.5);
+      ASSERT_TRUE(overutilized);
     }
     if (outputBufferStatus == OutputBufferStatus::kNoMoreProducer) {
-      // output buffer is over utilized but since there is no more producer
-      // outputBufferOverutilized is not true (producers are not blocked)
-      ASSERT_GT(finishStats.outputBufferUtilization, 1);
-      ASSERT_FALSE(finishStats.outputBufferOverutilized);
+      // output buffer is over utilized if no more producer is set.
+      ASSERT_TRUE(overutilized);
     }
   }
 
@@ -557,7 +575,6 @@ TEST_F(OutputBufferManagerTest, destinationBuffer) {
 
 TEST_F(OutputBufferManagerTest, basicPartitioned) {
   vector_size_t size = 100;
-
   std::string taskId = "t0";
   auto task = initializeTask(
       taskId, rowType_, PartitionedOutputNode::Kind::kPartitioned, 5, 1);
@@ -627,7 +644,7 @@ TEST_F(OutputBufferManagerTest, basicPartitioned) {
     fetchEndMarker(taskId, destination, 2);
   }
   EXPECT_TRUE(task->isRunning());
-  verifyOutputBuffer(task, OutputBufferStatus::kRunning);
+  verifyOutputBuffer(task, OutputBufferStatus::kNoMoreProducer);
 
   deleteResults(taskId, 3);
   fetchEndMarker(taskId, 4, 2);
@@ -676,7 +693,7 @@ TEST_F(OutputBufferManagerTest, basicBroadcast) {
   bufferManager_->updateOutputBuffers(taskId, 5, false);
   EXPECT_FALSE(bufferManager_->isFinished(taskId));
   bufferManager_->updateOutputBuffers(taskId, 6, false);
-  verifyOutputBuffer(task, OutputBufferStatus::kRunning);
+  verifyOutputBuffer(task, OutputBufferStatus::kNoMoreProducer);
 
   // Fetch all for the new added destinations.
   fetch(taskId, 5, 0, 1'000'000'000, 3, true);
@@ -960,6 +977,97 @@ TEST_P(AllOutputBufferManagerTest, outputBufferUtilization) {
   verifyOutputBuffer(task, OutputBufferStatus::kFinished);
 }
 
+TEST_P(AllOutputBufferManagerTest, outputBufferStats) {
+  const vector_size_t vectorSize = 100;
+  const std::string taskId = std::to_string(folly::Random::rand32());
+  initializeTask(taskId, rowType_, kind_, 1, 1);
+  {
+    const auto stats = getStats(taskId);
+    ASSERT_EQ(stats.kind, kind_);
+    ASSERT_FALSE(stats.noMoreData);
+    ASSERT_FALSE(stats.finished);
+    ASSERT_FALSE(stats.noMoreBuffers);
+    ASSERT_EQ(stats.totalPagesSent, 0);
+    ASSERT_EQ(stats.totalRowsSent, 0);
+    ASSERT_EQ(stats.bufferedPages, 0);
+    ASSERT_EQ(stats.bufferedBytes, 0);
+  }
+
+  const int numPages = 3;
+  int totalNumRows = 0;
+  int totalBytes = 0;
+  for (int pageId = 0; pageId < numPages; ++pageId) {
+    // Enqueue pages and check stats of buffered data.
+    const auto pageBytes = enqueue(taskId, 0, rowType_, vectorSize);
+    totalBytes += pageBytes;
+    totalNumRows += vectorSize;
+    // Force ArbitraryBuffer to load data, otherwise the data would
+    // not be buffered in DestinationBuffer.
+    if (kind_ == PartitionedOutputNode::Kind::kArbitrary) {
+      fetchOne(taskId, 0, pageId);
+    }
+    const auto statsEnqueue = getStats(taskId);
+    ASSERT_EQ(statsEnqueue.buffersStats[0].pagesBuffered, 1);
+    ASSERT_EQ(statsEnqueue.buffersStats[0].rowsBuffered, vectorSize);
+    if (kind_ == core::PartitionedOutputNode::Kind::kBroadcast) {
+      ASSERT_EQ(statsEnqueue.bufferedPages, pageId + 1);
+      ASSERT_EQ(statsEnqueue.bufferedBytes, totalBytes);
+    } else {
+      ASSERT_EQ(statsEnqueue.bufferedPages, 1);
+      ASSERT_EQ(statsEnqueue.bufferedBytes, pageBytes);
+    }
+    ASSERT_EQ(statsEnqueue.totalPagesSent, pageId + 1);
+    ASSERT_EQ(statsEnqueue.totalRowsSent, totalNumRows);
+
+    // Ack pages and check stats of sent data.
+    fetchOneAndAck(taskId, 0, pageId);
+    const auto statsAck = getStats(taskId);
+    ASSERT_EQ(statsAck.buffersStats[0].pagesSent, pageId + 1);
+    ASSERT_EQ(statsAck.buffersStats[0].rowsSent, totalNumRows);
+    ASSERT_EQ(statsAck.buffersStats[0].pagesBuffered, 0);
+    ASSERT_EQ(statsAck.buffersStats[0].rowsBuffered, 0);
+    if (kind_ == core::PartitionedOutputNode::Kind::kBroadcast) {
+      ASSERT_EQ(statsAck.bufferedPages, pageId + 1);
+      ASSERT_EQ(statsAck.bufferedBytes, totalBytes);
+    } else {
+      ASSERT_EQ(statsAck.bufferedPages, 0);
+      ASSERT_EQ(statsAck.bufferedBytes, 0);
+    }
+    ASSERT_EQ(statsAck.totalPagesSent, pageId + 1);
+    ASSERT_EQ(statsAck.totalRowsSent, totalNumRows);
+  }
+
+  // Set outputBuffer to NoMoreBuffers and check stats.
+  bufferManager_->updateOutputBuffers(taskId, 1, true);
+  const auto statsNoMoreBuffers = getStats(taskId);
+  ASSERT_TRUE(statsNoMoreBuffers.noMoreBuffers);
+  ASSERT_FALSE(statsNoMoreBuffers.noMoreData);
+  ASSERT_EQ(statsNoMoreBuffers.bufferedPages, 0);
+  ASSERT_EQ(statsNoMoreBuffers.bufferedBytes, 0);
+  ASSERT_EQ(statsNoMoreBuffers.totalPagesSent, numPages);
+  ASSERT_EQ(statsNoMoreBuffers.totalRowsSent, totalNumRows);
+
+  // Set outputBuffer to noMoreData and check stats.
+  noMoreData(taskId);
+  const auto statsNoMoreData = getStats(taskId);
+  ASSERT_TRUE(statsNoMoreData.noMoreData);
+
+  // DeleteResults and check stats.
+  fetchEndMarker(taskId, 0, numPages);
+  deleteResults(taskId, 0);
+  const auto statsDeleteResults = getStats(taskId);
+  ASSERT_TRUE(statsDeleteResults.buffersStats[0].finished);
+  ASSERT_TRUE(statsDeleteResults.finished);
+  ASSERT_EQ(statsNoMoreBuffers.bufferedPages, 0);
+  ASSERT_EQ(statsNoMoreBuffers.bufferedBytes, 0);
+  ASSERT_EQ(statsNoMoreBuffers.totalPagesSent, numPages);
+  ASSERT_EQ(statsNoMoreBuffers.totalRowsSent, totalNumRows);
+
+  // Remove task and check stats.
+  bufferManager_->removeTask(taskId);
+  ASSERT_FALSE(bufferManager_->stats(taskId).has_value());
+}
+
 TEST_F(OutputBufferManagerTest, outOfOrderAcks) {
   const vector_size_t size = 100;
   const std::string taskId = "t0";
@@ -1041,6 +1149,9 @@ TEST_F(OutputBufferManagerTest, getDataOnFailedTask) {
       [](std::vector<std::unique_ptr<folly::IOBuf>> pages, int64_t sequence) {
         VELOX_UNREACHABLE();
       }));
+
+  // Missing tasks should be ignored in this call.
+  ASSERT_FALSE(bufferManager_->updateNumDrivers("test.0.2", 1));
 }
 
 TEST_F(OutputBufferManagerTest, updateBrodcastBufferOnFailedTask) {

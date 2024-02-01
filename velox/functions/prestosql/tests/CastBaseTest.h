@@ -127,6 +127,66 @@ class CastBaseTest : public FunctionBaseTest {
     assertEqualVectors(wrapInDictionary(indices, expected), result);
   }
 
+  /**
+   * @tparam From Source type for cast.
+   * @tparam To Destination type for cast.
+   * @param typeString Cast type in string.
+   * @param input Input vector of type From.
+   * @param expectedResult Expected output vector of type To.
+   */
+  template <typename TFrom, typename TTo>
+  void testCast(
+      const std::string& typeString,
+      const std::vector<std::optional<TFrom>>& input,
+      const std::vector<std::optional<TTo>>& expectedResult,
+      const TypePtr& fromType = CppToType<TFrom>::create(),
+      const TypePtr& toType = CppToType<TTo>::create()) {
+    auto result = evaluate(
+        fmt::format("cast(c0 as {})", typeString),
+        makeRowVector({makeNullableFlatVector(input, fromType)}));
+    auto expected = makeNullableFlatVector<TTo>(expectedResult, toType);
+    assertEqualVectors(expected, result);
+  }
+
+  /**
+   * @tparam From Source type for cast.
+   * @tparam To Destination type for cast.
+   * @param typeString Cast type in string.
+   * @param input Input vector of type From.
+   * @param expectedResult Expected output vector of type To.
+   */
+  template <typename TFrom, typename TTo>
+  void testTryCast(
+      const std::string& typeString,
+      const std::vector<std::optional<TFrom>>& input,
+      const std::vector<std::optional<TTo>>& expectedResult,
+      const TypePtr& fromType = CppToType<TFrom>::create(),
+      const TypePtr& toType = CppToType<TTo>::create()) {
+    auto result = evaluate(
+        fmt::format("try_cast(c0 as {})", typeString),
+        makeRowVector({makeNullableFlatVector(input, fromType)}));
+    auto expected = makeNullableFlatVector<TTo>(expectedResult, toType);
+    assertEqualVectors(expected, result);
+  }
+
+  /**
+   * @tparam From Source type for cast.
+   * @param typeString Cast type in string.
+   * @param input Input vector of type From.
+   */
+  template <typename TFrom>
+  void testInvalidCast(
+      const std::string& typeString,
+      const std::vector<std::optional<TFrom>>& input,
+      const std::string& expectedErrorMessage,
+      const TypePtr& fromType = CppToType<TFrom>::create()) {
+    VELOX_ASSERT_THROW(
+        evaluate(
+            fmt::format("cast(c0 as {})", typeString),
+            makeRowVector({makeNullableFlatVector(input, fromType)})),
+        expectedErrorMessage);
+  }
+
   void testCast(
       const TypePtr& fromType,
       const TypePtr& toType,
@@ -176,7 +236,7 @@ class CastBaseTest : public FunctionBaseTest {
     testCast(fromType, toType, inputVector, expectedVector);
   }
 
-  template <typename TFrom, typename TTo>
+  template <typename TFrom>
   void testThrow(
       const TypePtr& fromType,
       const TypePtr& toType,
@@ -189,6 +249,91 @@ class CastBaseTest : public FunctionBaseTest {
             makeRowVector({makeNullableFlatVector<TFrom>(input, fromType)})),
         expectedErrorMessage);
   }
+
+  void testComplexCast(
+      const std::string& fromExpression,
+      const VectorPtr& data,
+      const VectorPtr& expected,
+      bool nullOnFailure = false) {
+    auto rowVector = makeRowVector({data});
+    auto rowType = asRowType(rowVector->type());
+    auto castExpr = makeCastExpr(
+        makeTypedExpr(fromExpression, rowType),
+        expected->type(),
+        nullOnFailure);
+    exec::ExprSet exprSet({castExpr}, &execCtx_);
+    auto copy = createCopy(data);
+    const auto size = data->size();
+    SelectivityVector rows(size);
+    std::vector<VectorPtr> result(1);
+    {
+      exec::EvalCtx evalCtx(&execCtx_, &exprSet, rowVector.get());
+      exprSet.eval(rows, evalCtx, result);
+
+      assertEqualVectors(expected, result[0]);
+
+      // Make sure the input vector does not change.
+      assertEqualVectors(data, copy);
+    }
+
+    // Test constant input.
+    {
+      // Use last element for constant.
+      const auto index = size - 1;
+      auto constantData = BaseVector::wrapInConstant(size, index, data);
+      auto constantRow = makeRowVector({constantData});
+      auto localCopy = createCopy(constantRow);
+      exec::EvalCtx evalCtx(&execCtx_, &exprSet, constantRow.get());
+      exprSet.eval(rows, evalCtx, result);
+
+      // Make sure the input vector does not change.
+      assertEqualVectors(constantRow, localCopy);
+      assertEqualVectors(data, copy);
+
+      assertEqualVectors(
+          BaseVector::wrapInConstant(size, index, expected), result[0]);
+    }
+
+    // Test dictionary input. It is not sufficient to wrap input in a dictionary
+    // as it will be peeled off before calling "cast". Apply
+    // testing_dictionary function to input to ensure that "cast" receives
+    // dictionary input.
+    {
+      auto dictionaryCastExpr = makeCastExpr(
+          makeTypedExpr(
+              fmt::format("testing_dictionary({})", fromExpression), rowType),
+          expected->type(),
+          nullOnFailure);
+      exec::ExprSet dictionaryExprSet({dictionaryCastExpr}, &execCtx_);
+      exec::EvalCtx evalCtx(&execCtx_, &dictionaryExprSet, rowVector.get());
+      dictionaryExprSet.eval(rows, evalCtx, result);
+
+      // Make sure the input vector does not change.
+      assertEqualVectors(data, copy);
+
+      auto indices = functions::test::makeIndicesInReverse(size, pool());
+      assertEqualVectors(wrapInDictionary(indices, size, expected), result[0]);
+    }
+  }
+
+  VectorPtr createCopy(const VectorPtr& input) {
+    VectorPtr result;
+    SelectivityVector rows(input->size());
+    BaseVector::ensureWritable(rows, input->type(), input->pool(), result);
+    result->copy(input.get(), rows, nullptr);
+    return result;
+  }
+
+  std::shared_ptr<core::CastTypedExpr> makeCastExpr(
+      const core::TypedExprPtr& input,
+      const TypePtr& toType,
+      bool nullOnFailure) {
+    std::vector<core::TypedExprPtr> inputs = {input};
+    return std::make_shared<core::CastTypedExpr>(toType, inputs, nullOnFailure);
+  }
+
+  const float kInf = std::numeric_limits<float>::infinity();
+  const float kNan = std::numeric_limits<float>::quiet_NaN();
 };
 
 } // namespace facebook::velox::functions::test

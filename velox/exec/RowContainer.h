@@ -953,21 +953,13 @@ class RowContainer {
       uint8_t nullMask,
       const DecodedVector& decoded,
       vector_size_t index) {
-    using T = typename KindToFlatVector<Kind>::HashRowType;
     bool rowIsNull = isNullAt(row, nullByte, nullMask);
     bool indexIsNull = decoded.isNullAt(index);
     if (rowIsNull || indexIsNull) {
       return rowIsNull == indexIsNull;
     }
-    if (Kind == TypeKind::ROW || Kind == TypeKind::ARRAY ||
-        Kind == TypeKind::MAP) {
-      return compareComplexType(row, offset, decoded, index) == 0;
-    }
-    if (Kind == TypeKind::VARCHAR || Kind == TypeKind::VARBINARY) {
-      return compareStringEqual(
-          valueAt<StringView>(row, offset), decoded, index);
-    }
-    return decoded.valueAt<T>(index) == valueAt<T>(row, offset);
+
+    return equalsNoNulls<Kind>(row, offset, decoded, index);
   }
 
   template <TypeKind Kind>
@@ -976,17 +968,17 @@ class RowContainer {
       int32_t offset,
       const DecodedVector& decoded,
       vector_size_t index) {
-    using T = typename KindToFlatVector<Kind>::HashRowType;
-
-    if (Kind == TypeKind::ROW || Kind == TypeKind::ARRAY ||
+    if constexpr (
+        Kind == TypeKind::ROW || Kind == TypeKind::ARRAY ||
         Kind == TypeKind::MAP) {
       return compareComplexType(row, offset, decoded, index) == 0;
     }
-    if (Kind == TypeKind::VARCHAR || Kind == TypeKind::VARBINARY) {
-      return compareStringEqual(
-          valueAt<StringView>(row, offset), decoded, index);
+    if constexpr (Kind == TypeKind::VARCHAR || Kind == TypeKind::VARBINARY) {
+      return compareStringAsc(
+                 valueAt<StringView>(row, offset), decoded, index) == 0;
     }
 
+    using T = typename KindToFlatVector<Kind>::HashRowType;
     return decoded.valueAt<T>(index) == valueAt<T>(row, offset);
   }
 
@@ -1114,27 +1106,6 @@ class RowContainer {
       StringView value,
       FlatVector<StringView>* FOLLY_NONNULL values,
       vector_size_t index);
-
-  static inline bool compareStringEqual(
-      StringView left,
-      const DecodedVector& decoded,
-      vector_size_t index) {
-    StringView right = decoded.valueAt<StringView>(index);
-    if (left.sizeAndPrefixAsInt64() != right.sizeAndPrefixAsInt64()) {
-      return false;
-    }
-    if (left.isInline()) {
-      return left.inlinedAsInt64() == right.inlinedAsInt64();
-    }
-    auto header = HashStringAllocator::headerOf(left.data());
-    if (LIKELY(header->size() >= left.size())) {
-      return simd::memEqual(left.data() + 4, right.data() + 4, left.size() - 4);
-    }
-    std::string storage;
-    HashStringAllocator::contiguousString(left, storage);
-    return simd::memEqual(
-        storage.data() + 4, right.data() + 4, left.size() - 4);
-  }
 
   static int32_t compareStringAsc(
       StringView left,
