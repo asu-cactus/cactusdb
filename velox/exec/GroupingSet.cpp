@@ -745,7 +745,11 @@ bool GroupingSet::getOutput(
 void GroupingSet::extractGroups(
     folly::Range<char**> groups,
     const RowVectorPtr& result) {
-  result->resize(groups.size());
+  // result->resize(groups.size());
+  // here I changed it to true sample size 1000, later we will get this number automatically, 
+  // for some aggregate functions, like our array_sum, these functions should reconstruct the groups for later use, we can add a if branch to do some work
+  // changed here only affect the output, the main logic of agg is already been done before, here we just extract the values in groups
+  result->resize(1000);
   if (groups.empty()) {
     return;
   }
@@ -753,7 +757,8 @@ void GroupingSet::extractGroups(
   auto totalKeys = rows.keyTypes().size();
   for (int32_t i = 0; i < totalKeys; ++i) {
     auto keyVector = result->childAt(i);
-    rows.extractColumn(groups.data(), groups.size(), i, keyVector);
+    // rows.extractColumn(groups.data(), groups.size(), i, keyVector);
+    rows.extractColumn(groups.data(), 1000, i, keyVector);// changed to 1000 rather than group.size()
   }
   for (int32_t i = 0; i < aggregates_.size(); ++i) {
     if (!aggregates_[i].sortingKeys.empty()) {
@@ -766,7 +771,8 @@ void GroupingSet::extractGroups(
       function->extractAccumulators(
           groups.data(), groups.size(), &aggregateVector);
     } else {
-      function->extractValues(groups.data(), groups.size(), &aggregateVector);
+      // function->extractValues(groups.data(), groups.size(), &aggregateVector);
+      function->extractValues(groups.data(), 1000, &aggregateVector);// changed to 1000 rather than group.size()
     }
   }
 

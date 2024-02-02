@@ -128,8 +128,11 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         0,
         queryCtx_,
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          if (result)
-            std::cout << result->toString() << std::endl;
+          if (result) {
+            // std::cout << "=============================\n";
+            // std::cout << result->toString() << " size: " << result->size() << std::endl;
+            // std::cout << result->toString(0, result->size()) << std::endl;
+          }
           return exec::BlockingReason::kNotBlocked;
         });
     // Get optimized idFileAddr map from cataLog
@@ -243,7 +246,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
           for (int j = 0; j < input_features_size; j++) {
 
-                  featureVector.push_back(i*input_features_size+j);
+                  // featureVector.push_back(i*input_features_size+j);
+                  featureVector.push_back(distribution(gen));
 
           }
 
@@ -269,14 +273,14 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     for (int i = 0; i < weight_layer1_size; ++i) {
 
-        weight_layer1[i] = 0.000001; 
+        weight_layer1[i] = 0.00001; 
 
     }
     float* weight_layer2 = new float[weight_layer2_size];
 
     for (int i = 0; i < weight_layer2_size; ++i) {
 
-        weight_layer2[i] = 0.000001; 
+        weight_layer2[i] = 0.00001; 
 
     }
 
@@ -289,14 +293,14 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     for (int i = 0; i < bias_layer1_size; ++i) {
 
-        bias_layer1[i] = 0.00001; 
+        bias_layer1[i] = 0; 
 
     }
     float* bias_layer2 = new float[bias_layer2_size];
 
     for (int i = 0; i < bias_layer2_size; ++i) {
 
-        bias_layer2[i] = 0.00001; 
+        bias_layer2[i] = 0; 
 
     }
 
@@ -386,6 +390,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
      );
       // Compose and return the vector function expression
      return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
+    // return "mat_mul0({})";
+    // return "relu0(mat_add0(mat_mul0({})))";
   }
   /**
    * @brief A test function to test the rewrite rule of Mul2JoinAggRewriteAction.
@@ -394,7 +400,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   */
   void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 3000;//597540
+    int input_features_size = 100000;//597540
     int num_samples = 1000;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;

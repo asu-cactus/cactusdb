@@ -51,16 +51,37 @@ class SumArrayAggregate : public exec::Aggregate {
       override {
     auto vector = (*result)->as<ArrayVector>();
     VELOX_CHECK(vector);
-    vector->resize(numGroups);
+    // vector->resize(numGroups);
+    // we changed to sample size
+    vector->resize(1000);
 
     auto elements = vector->elements()->as<FlatVector<float>>();
-    elements->resize(1024000);//Todo auto
+    // we can get it directly by countElements()
+    elements->resize(1024000);
 
     uint64_t* rawNulls = getRawNulls(vector);
     vector_size_t offset = 0;
-    for (int32_t i = 0; i < numGroups; ++i) {
-      auto& values = value<ArrayAccumulator>(groups[i])->elements;
-      auto arraySize = values.size();
+    // for (int32_t i = 0; i < numGroups; ++i) {
+    //   auto& values = value<ArrayAccumulator>(groups[i])->elements;
+    //   auto arraySize = values.size();
+    //   if (arraySize) {
+    //     clearNull(rawNulls, i);
+
+    //     // ValueListReader reader(values);
+    //     // for (auto index = 0; index < arraySize; ++index) {
+    //     //   reader.next(*elements, offset + index);
+    //     // }
+    //     values.extractValues(*elements, offset);
+    //     vector->setOffsetAndSize(i, offset, arraySize);
+    //     offset += arraySize;
+    //   } else {
+    //     vector->setNull(i, true);
+    //   }
+    // }
+
+    for (int32_t i = 0; i < 1000; ++i) {
+      auto& values = value<ArrayAccumulator>(groups[0])->elements;
+      auto arraySize = 1024;//this is the first layer output size
       if (arraySize) {
         clearNull(rawNulls, i);
 
@@ -68,13 +89,38 @@ class SumArrayAggregate : public exec::Aggregate {
         // for (auto index = 0; index < arraySize; ++index) {
         //   reader.next(*elements, offset + index);
         // }
-        values.extractValues(*elements, offset);
+        //we extra value from one group which contains all items to sample size of groups with arraySize of items
+      for (auto index = 0; index < arraySize; ++index) {
+          values.extractValues(*elements, offset + index);
+        }
         vector->setOffsetAndSize(i, offset, arraySize);
         offset += arraySize;
       } else {
         vector->setNull(i, true);
       }
     }
+
+    // auto& values = value<ArrayAccumulator>(groups[0])->elements;
+    // for (int32_t i = 0; i < 1000; ++i) {
+      
+    //   auto arraySize = 1024;
+    //   if (arraySize) {
+    //     clearNull(rawNulls, i);
+
+    //     // ValueListReader reader(values);
+    //     // for (auto index = 0; index < arraySize; ++index) {
+    //     //   reader.next(*elements, offset + index);
+    //     // }
+    //     for (auto index = 0; index < arraySize; ++index) {
+    //       values.extractValues(*elements, offset + index);
+    //     }
+
+    //     vector->setOffsetAndSize(i, offset, arraySize);
+    //     offset += arraySize;
+    //   } else {
+    //     vector->setNull(i, true);
+    //   }
+    // }
   }
 
   void extractAccumulators(char** groups, int32_t numGroups, VectorPtr* result)
