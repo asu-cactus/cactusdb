@@ -46,12 +46,15 @@ class ValueVector {
     }
   }
 
-  void extractValues (FlatVector<float>& values, vector_size_t offset) {
-    vector_size_t index = offset;
-    for (vector_size_t i = 0; i < size_; ++i) {
-      values.set(index++, storedValue[i]);
+  // void extractValues (FlatVector<float>& values, vector_size_t offset) {
+  //   vector_size_t index = offset;
+  //   for (vector_size_t i = 0; i < size_; ++i) {
+  //     values.set(index++, storedValue[i]);
+  //   }
+  // }
+    void extractValues (FlatVector<float>& values, vector_size_t index) {
+        values.set(index, storedValue[index]);
     }
-  }
 
   void free() {
     delete[] storedValue;
