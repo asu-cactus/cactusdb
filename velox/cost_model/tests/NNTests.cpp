@@ -399,6 +399,14 @@ void MLFunctionsTest::ffnn(int input_size, int layer1_size, int layer2_size) {
                   .project({fmt::format(compute, "x")}) 
 		              .planNode();
   
+    std::shared_ptr<Catalog> catalog = std::make_shared<Catalog>(Catalog("test-catalog"));
+    std::shared_ptr<OutputStat> stat = std::make_shared<OutputStat>(OutputStat(1,2));
+    Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
+    catalog->addSource(std::make_shared<Source>(src1));
+    CostModel* cm = new SimpleCostModel(catalog);
+    CostEstimator* ce = new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+    CostEstimate cost = ce->estimateCost(plan);
+    std::cout << cost.cost << std::endl;
 
     //execute_plan(plan, p0, inputRowVector, confs);
 }
@@ -423,7 +431,8 @@ void MLFunctionsTest::traverse(std::shared_ptr<const core::PlanNode>& node) {
 }
 
 void MLFunctionsTest::run() {
-
+    ffnn(784,1024,10);
+    return;
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   core::PlanNodeId nationScanId;
   core::PlanNodeId regionScanId;
