@@ -456,7 +456,6 @@ void MLFunctionsTest::run() {
              .orderBy({"r_name"}, false)
              .planNode();
 
-
     std::shared_ptr<Catalog> catalog = std::make_shared<Catalog>(Catalog("test-catalog"));
    
     std::shared_ptr<OutputStat> stat = std::make_shared<OutputStat>(OutputStat(1,2));
@@ -488,7 +487,7 @@ void MLFunctionsTest::run() {
   // Large
   //ffnn(597540,1024,14588);
   // small
-  ffnn(784,1024,10);
+  // ffnn(784,1024,10);
 
   //large
   //torch_ffnn(597540,1024,14588);

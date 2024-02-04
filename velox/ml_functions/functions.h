@@ -6,6 +6,7 @@
 #include <chrono>
 #include "velox/exec/Task.h"
 #include "velox/cost_model/CostEstimate.h"
+#include "velox/cost_model/UdfCostCoefficient.h"
 
 
 using namespace facebook::velox;
@@ -32,9 +33,9 @@ using namespace facebook::velox::memory;
 // TODO: Refactor
 class MLFunction : public exec::VectorFunction {
     public:
+
         virtual ~MLFunction() = default;
         
-        std::vector<int> dims;
         virtual float* getTensor() const = 0;
         
         virtual std::vector<int> getDims() {
@@ -46,19 +47,22 @@ class MLFunction : public exec::VectorFunction {
         }
 
         virtual CostEstimate getCost(std::vector<int> inputDims){
-
-            //model.get_cost()
             return CostEstimate(1,1,1);
         }
 
-        virtual CostEstimate setCost(){
-
+    protected:
+        std::vector<int> dims;
+        float getWeightedCost(std::string name, float cost) {
+            float coefficient = UdfCostCoefficient::getInstance().getCoefficient(name);
+            return coefficient * cost; 
         }
 
-       
+        
+
 };
 
 class MatrixMultiply: public MLFunction {
+
 public:
     MatrixMultiply(float* weights, int num_rows, int num_cols) {
         weights_ = weights; 
@@ -140,7 +144,7 @@ public:
     }
 
     CostEstimate getCost(std::vector<int> inputDims){
-        float cost = 0.95 * inputDims[0] * inputDims[1] * dims[0] * dims[1];
+        float cost = getWeightedCost(getName(), inputDims[0] * inputDims[1] * dims[0] * dims[1]);
         return CostEstimate(cost, dims[0], inputDims[1]);
     }
 
@@ -311,8 +315,8 @@ public:
     }
 
     CostEstimate getCost(std::vector<int> inputDims){
-        float cost = inputDims[0] * inputDims[1] +  dims[0] * dims[1];
-        return CostEstimate(cost, inputDims[0], inputDims[1]);
+        float cost = getWeightedCost(getName(),inputDims[0] * inputDims[1] +  dims[0] * dims[1]);
+        return CostEstimate(cost , inputDims[0], inputDims[1]);
     }
 
 private:
@@ -456,7 +460,7 @@ public:
     };
 
     CostEstimate getCost(std::vector<int> inputDims){
-        float cost = inputDims[0] * inputDims[1] ;
+        float cost = getWeightedCost(getName(), inputDims[0] * inputDims[1]);
         return CostEstimate(cost, inputDims[0], inputDims[1]);
     }
 };
@@ -518,7 +522,7 @@ public:
     };
 
     CostEstimate getCost(std::vector<int> inputDims){
-        float cost = inputDims[0] * inputDims[1] ;
+        float cost = getWeightedCost(getName(), inputDims[0] * inputDims[1]);
         return CostEstimate(cost, inputDims[0], inputDims[1]);
     }
 };
@@ -600,8 +604,12 @@ public:
         return bias;
     }
 
+    static std::string getName() {
+        return "torch_dnn";
+    };
+
     CostEstimate getCost(std::vector<int> inputDims){
-        float cost = inputDims[0] * inputDims[1];
+        float cost = getWeightedCost(getName(), inputDims[0] * inputDims[1] * dims[0] * dims[1]);
         return CostEstimate(cost, inputDims[0], inputDims[1]);
     }
 
