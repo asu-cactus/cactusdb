@@ -63,5 +63,5 @@ class SimpleCostEstimator : public CostEstimator {
             estimate.cost += srcCost;
             return estimate;
     }
-
 };
+
