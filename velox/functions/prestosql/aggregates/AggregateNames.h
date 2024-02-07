@@ -67,4 +67,5 @@ const char* const kVarSamp = "var_samp";
 const char* const kMaxSizeForStats = "max_data_size_for_stats";
 const char* const kSumDataSizeForStats = "sum_data_size_for_stats";
 const char* const kSumArray = "array_sum";
+const char* const kCatArray = "array_cat";
 } // namespace facebook::velox::aggregate
