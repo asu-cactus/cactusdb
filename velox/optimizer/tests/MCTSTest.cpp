@@ -210,52 +210,44 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       queryCtx_->testingOverrideConfigUnsafe(
           {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
            {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
-      // Create task for logical plan.
-      auto task = exec::Task::create(
-          "0",
-          myPlan.planFragment(),
-          0,
-          queryCtx_,
-          [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-            if (result)
-              // std::cout << result->toString() << std::endl;
-            return exec::BlockingReason::kNotBlocked;
-          });
-      // Get optimized idFileAddr map from cataLog
-      auto idFileAddrMap = cataLog.getIdAddressMap();
-
-      std::vector<core::PlanNodeId> ids;
-
-      // std::cout << "Hive splits:" << std::endl;
-      // Create hivesplits for each entry in idFileAddr map, add splits to task
-      for (const auto& entry : idFileAddrMap) {
-        core::PlanNodeId key = entry.first;
-
-        const std::vector<std::shared_ptr<TempFilePath>> fileAddr =
-            entry.second;
-
-        auto hiveSplits = makeHiveConnectorSplits(fileAddr);
-
-        for (auto& split : hiveSplits) {
-          task->addSplit(key, exec::Split(std::move(split)));
-        }
-
-        ids.push_back(key);
-      }
 
       // Add hivesplits to the target plan node (data source node).
       std::chrono::steady_clock::time_point begin =
           std::chrono::steady_clock::now();
 
-      // Start the task by setting the number of drivers.
-      task->start(numThreads);
-      // Wait for no more splits.
-      for (auto id : ids) {
-        task->noMoreSplits(id);
-      }
+      CursorParameters params;
+      params.maxDrivers = numThreads;
+      params.planNode = myPlan.planNode();
+      params.queryCtx = queryCtx_;
+      bool noMoreSplits = false;
+      auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
+        auto idFileAddrMap = cataLog.getIdAddressMap();
+        std::vector<core::PlanNodeId> ids;
+        if (!noMoreSplits) {
+          for (const auto& entry : idFileAddrMap) {
+            core::PlanNodeId key = entry.first;
 
-      // Wait for all drivers to finish.
-      waitForFinishedDrivers(task);
+            const std::vector<std::shared_ptr<TempFilePath>> fileAddr =
+                entry.second;
+
+            auto hiveSplits = makeHiveConnectorSplits(fileAddr);
+
+            for (auto& split : hiveSplits) {
+              task->addSplit(key, exec::Split(std::move(split)));
+            }
+
+            ids.push_back(key);
+          }
+
+          for (auto id : ids) {
+            task->noMoreSplits(id);
+          }
+        }
+        noMoreSplits = true;
+      };
+
+      auto [cursor, actualResults] = readCursor(params, addSplits);
+      waitForTaskCompletion(cursor->task().get());
 
       std::chrono::steady_clock::time_point end =
           std::chrono::steady_clock::now();
@@ -266,9 +258,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           1000000.0;
       totalElapsedTime += elapsedTime;
     }
-    std::stringstream ss;
 
-    ss << numSplits << "," << numThreads << ",";
 
     // std::cout << "Time for FFNN with Input Data (sec): "
     //           << std::endl;
@@ -326,7 +316,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::vector<float> featureVector;
 
       for (int j = 0; j < input_features_size; j++) {
-        featureVector.push_back(i * input_features_size + j);
+        featureVector.push_back(
+            (i * input_features_size + j) / input_total_size);
       }
 
       featureVectors.push_back(featureVector);
@@ -667,9 +658,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     if (rewrite) {
       // Get possible actions for this plan
       planState.getPossibleActions(planNode, cataLog);
-      // std::cout << "action size" << planState.actionsPair.size() << std::endl;
-      // Print possible actions
-      // for (const auto& entry : planState.actionsPair) {
+      // std::cout << "action size" << planState.actionsPair.size() <<
+      // std::endl; Print possible actions for (const auto& entry :
+      // planState.actionsPair) {
       //   std::cout << entry.first << ": " << entry.second << std::endl;
       // }
       // Choose one action from possible actions (Now we only pick the first
@@ -724,21 +715,49 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
     // Write the data source to a file, with the format defined by the rowVector
     writeToFile(file->path, {inputRowVector}, config);
+
+    if (input_features_size > cataLog.getBlockingThreshold()) {
+      // If input size is larger than blocking threshold, preblock and store in cataLog
+      std::vector<std::vector<float>> valuesBlock = optimization::create_input_block(input_features_size*num_samples, data.features, cataLog.getDefaultBlocksNum());
+      optimization::FileStructure values = optimization::block_to_files(valuesBlock, cataLog.getDefaultBlocksNum(), 0);
+      // Set data source blocks in cataLog
+      cataLog.setDataSourceBlocks(values.schema, values.paths);
+      // Set data source statistics in cataLog
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+    }
+    else {
+      // If input size is not larger than blocking threshold, set dataSource in cataLog
+      cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+      // Set data source statistics in cataLog
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+    }
+
     // Build two dense layers UDFs
-    std::string compute = NNBuilder()
-                              .denseLayer(
-                                  first_layer_output_size,
-                                  input_features_size,
-                                  data.weights[0],
-                                  data.bias[0],
-                                  NNBuilder::RELU)
-                              .denseLayer(
-                                  second_layer_output_size,
-                                  first_layer_output_size,
-                                  data.weights[1],
-                                  data.bias[1],
-                                  NNBuilder::SOFTMAX)
-                              .build();
+    // std::string compute = NNBuilder()
+    //                           .denseLayer(
+    //                               first_layer_output_size,
+    //                               input_features_size,
+    //                               data.weights[0],
+    //                               data.bias[0],
+    //                               NNBuilder::RELU)
+    //                           .denseLayer(
+    //                               second_layer_output_size,
+    //                               first_layer_output_size,
+    //                               data.weights[1],
+    //                               data.bias[1],
+    //                               NNBuilder::SOFTMAX)
+    //                           .build();
+
+    std::string compute = registerFunctions(
+      first_layer_output_size, 
+      second_layer_output_size, 
+      input_features_size, 
+      first_layer_output_size, 
+      data.weights[0], 
+      data.weights[1],  
+      data.bias[0], 
+      data.bias[1],
+      cataLog);
 
     // Initialize planNodeID
     core::PlanNodeId p0;
@@ -750,6 +769,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                       .capturePlanNodeId(p0)
                       .project({fmt::format(compute, "v")});
     // .planBuild();
+    // Set original plan nodeId and file address of data source
+    cataLog.setIdAddressMap(p0, {file});
+    // Set vector name and nodeId of data source
+    cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -813,6 +836,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
         for (const auto& entry : planState.actionsPair) {
+          // std::cout << "[ACTION SBACE] " << entry.first << ", " << entry.second << std::endl;
           Json::Value jsonEntry;
           jsonEntry["expression"] = entry.first;
           jsonEntry["action"] = entry.second;
