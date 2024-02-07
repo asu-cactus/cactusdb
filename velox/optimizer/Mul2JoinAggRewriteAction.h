@@ -133,14 +133,32 @@ public:
 																	{"v_col"},
 																	{"w_row"},
 																	exec::test::PlanBuilder(planNodeIdGenerator)
-																.tableScan(weightSchema)
-																.capturePlanNodeId(p2)
-																.planNode(),
-																	"", // extra filter
-																	{"v_row", "w_col", "v", "w"})
+																	.tableScan(weightSchema)
+																	.capturePlanNodeId(p2)
+																	.planNode(),
+																"", // extra filter
+																{"v_row", "w_col", "v", "w"})
 																.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
-																.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-																.project({exprStr});
+																// .localPartition({})
+																// .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
+																.partialAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
+																.localPartition({})
+																.intermediateAggregation()
+																.finalAggregation()
+																.project({exprStr})
+																;
+												// Here are several approaches to correctly aggregat the multiplied values.
+												// Note: if the values to be aggregated are already partitioned in batches.
+												// A singleAggregation is enough otherwise shuffling is needed to aggregate
+												// the values cross different threads/batches.
+												// Approach 1: run shuffling and a single aggregation: 
+												//   .localPartition({}).singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
+												// Approach 2: run via partialAggregation: 
+												//   .partialAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
+												//	 .localPartition({})
+												//	 .intermediateAggregation()
+												//	 .finalAggregation()
+												
 												// Delete old nodeId-fileAddress map
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 												// Insert new nodeId-fileAddress maps
@@ -303,12 +321,13 @@ public:
 					auto wordsEnd = std::sregex_iterator();
 					// Retrieve the possible UDF name applicable for this rule, and check if there existed block files, stored in targetAction.
 					for (auto it = wordsBegin; it != wordsEnd; ++it) {
-
+						// std::cout<<"debug111 find: " << it->str() << std::endl;
 						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
 
 							targetActions.push_back(it->str());
 						}
 					}
+					// std::cout<<"target action size: " << targetActions.size() << std::endl;
 				}
 			}
 			// We then check the filter node
