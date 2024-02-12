@@ -162,14 +162,21 @@ public:
 
 };
 
-class VeloxTreePrediction : public exec::VectorFunction {
+class VeloxTreePrediction : public MLFunction {
 
 public:
 
   VeloxTreePrediction(int numFeatures) {
   
       this->numFeatures = numFeatures;
+      dims.push_back(numFeatures);
   
+  }
+
+  float* getTensor() const override {
+
+          return new float[0]; //will this lead to memory leak?
+
   }
 
   void apply(
