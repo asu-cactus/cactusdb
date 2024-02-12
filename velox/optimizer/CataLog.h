@@ -122,6 +122,11 @@ class CataLog {
             vectorIdMap[values] = p;
         }
 
+        // Delete mapping from vector values to PlanNodeId
+        void deleteVectorIdMap(std::string values) {
+            vectorIdMap.erase(values);
+        }
+
         // Get PlanNodeId based on vector values
         core::PlanNodeId getVectorIdMap(const std::string& values) {
             auto it = vectorIdMap.find(values);

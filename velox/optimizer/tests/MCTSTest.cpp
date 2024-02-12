@@ -65,6 +65,11 @@ void sendJsonBySocket(Json::Value jsonMessage, int clientSocket) {
   send(clientSocket, jsonMessageStr.c_str(), jsonMessageStr.length(), 0);
 }
 
+void sendAcknowledgment(int clientSocket) {
+  const  char* ack_message = "ACK";
+  send(clientSocket, ack_message, strlen(ack_message), 0);
+}
+
 class IntegratedMCTSTest : public HiveConnectorTestBase {
  public:
   IntegratedMCTSTest() {
@@ -258,10 +263,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           1000000.0;
       totalElapsedTime += elapsedTime;
     }
-
-
-    // std::cout << "Time for FFNN with Input Data (sec): "
-    //           << std::endl;
 
     return totalElapsedTime / repeatRun;
   }
@@ -717,47 +718,37 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     writeToFile(file->path, {inputRowVector}, config);
 
     if (input_features_size > cataLog.getBlockingThreshold()) {
-      // If input size is larger than blocking threshold, preblock and store in cataLog
-      std::vector<std::vector<float>> valuesBlock = optimization::create_input_block(input_features_size*num_samples, data.features, cataLog.getDefaultBlocksNum());
-      optimization::FileStructure values = optimization::block_to_files(valuesBlock, cataLog.getDefaultBlocksNum(), 0);
+      // If input size is larger than blocking threshold, preblock and store in
+      // cataLog
+      std::vector<std::vector<float>> valuesBlock =
+          optimization::create_input_block(
+              input_features_size * num_samples,
+              data.features,
+              cataLog.getDefaultBlocksNum());
+      optimization::FileStructure values = optimization::block_to_files(
+          valuesBlock, cataLog.getDefaultBlocksNum(), 0);
       // Set data source blocks in cataLog
       cataLog.setDataSourceBlocks(values.schema, values.paths);
       // Set data source statistics in cataLog
       cataLog.setDataSourceStat({num_samples, input_features_size});
-    }
-    else {
-      // If input size is not larger than blocking threshold, set dataSource in cataLog
+    } else {
+      // If input size is not larger than blocking threshold, set dataSource in
+      // cataLog
       cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
       // Set data source statistics in cataLog
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
 
-    // Build two dense layers UDFs
-    // std::string compute = NNBuilder()
-    //                           .denseLayer(
-    //                               first_layer_output_size,
-    //                               input_features_size,
-    //                               data.weights[0],
-    //                               data.bias[0],
-    //                               NNBuilder::RELU)
-    //                           .denseLayer(
-    //                               second_layer_output_size,
-    //                               first_layer_output_size,
-    //                               data.weights[1],
-    //                               data.bias[1],
-    //                               NNBuilder::SOFTMAX)
-    //                           .build();
-
     std::string compute = registerFunctions(
-      first_layer_output_size, 
-      second_layer_output_size, 
-      input_features_size, 
-      first_layer_output_size, 
-      data.weights[0], 
-      data.weights[1],  
-      data.bias[0], 
-      data.bias[1],
-      cataLog);
+        first_layer_output_size,
+        second_layer_output_size,
+        input_features_size,
+        first_layer_output_size,
+        data.weights[0],
+        data.weights[1],
+        data.bias[0],
+        data.bias[1],
+        cataLog);
 
     // Initialize planNodeID
     core::PlanNodeId p0;
@@ -765,10 +756,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(asRowType(inputRowVector->type()))
-                      .capturePlanNodeId(p0)
-                      .project({fmt::format(compute, "v")});
-    // .planBuild();
+                 .tableScan(asRowType(inputRowVector->type()))
+                 .capturePlanNodeId(p0)
+                 .project({fmt::format(compute, "v")});
+
     // Set original plan nodeId and file address of data source
     cataLog.setIdAddressMap(p0, {file});
     // Set vector name and nodeId of data source
@@ -808,40 +799,52 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     startJsonMessage["queryPlan"] = planNode->toString(true, true);
     sendJsonBySocket(startJsonMessage, clientSocket);
     bool optimizationIsFinished = false;
+
     while (!optimizationIsFinished) {
       planNode = myPlan.planNode();
       // received json message from MCTS
       Json::Value receivedJsonMessage = receiveJsonFromSocket(clientSocket);
       std::string mctsAction = receivedJsonMessage["mctsAction"].asString();
+      std::cout << "===================================" << std::endl;
       std::cout << "Received message with mcts action: " << mctsAction
                 << std::endl;
-      if (mctsAction == "getQueryPlan") {
+      std::cout << "JSON Message: " << receivedJsonMessage << std::endl;
+      if (mctsAction == "resetPlan") {
+        // if it is root node, it needs to start with original plan
+        // the p0 will be increased after capturePlanNodeId is called
+        // so it is required to clean the old IdAddressMap and VectorIdMap
+        // before reset the myPlan
+        cataLog.deleteIdAddressMap(p0);
+        cataLog.deleteVectorIdMap("v");
+        myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                     .tableScan(asRowType(inputRowVector->type()))
+                     .capturePlanNodeId(p0)
+                     .project({fmt::format(compute, "v")});
+        cataLog.setIdAddressMap(p0, {file});
+        cataLog.setVectorIdMap(p0, "v");
+        planNode = myPlan.planNode();
+        // send acknowledgement for synchronization 
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getQueryPlan") {
         Json::Value jsonMessage;
         jsonMessage["communicateFlag"] = true;
         jsonMessage["mctsAction"] = "recQueryPlan";
         jsonMessage["queryPlan"] = myPlan.planNode()->toString(true, true);
-        ;
+        sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "getActionSpace") {
-        if (receivedJsonMessage["isRootNode"].asBool() == true) {
-          // if it is root node, it needs to start with original plan
-          myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                       .tableScan(asRowType(inputRowVector->type()))
-                       .capturePlanNodeId(p0)
-                       .project({fmt::format(compute, "v")})
-                       .planBuild();
-          planNode = myPlan.planNode();
-        }
         planState.getPossibleActions(planNode, cataLog);
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
         for (const auto& entry : planState.actionsPair) {
-          // std::cout << "[ACTION SBACE] " << entry.first << ", " << entry.second << std::endl;
+          // std::cout << "[ACTION SBACE] " << entry.first << ", " <<
+          // entry.second << std::endl;
           Json::Value jsonEntry;
           jsonEntry["expression"] = entry.first;
           jsonEntry["action"] = entry.second;
           jsonMessage["actionSpace"].append(jsonEntry);
         }
+        sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "takeAction") {
         std::pair<std::string, std::string> targetAction;
@@ -864,10 +867,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         }
         std::cout << "[INFO] current my query plan"
                   << myPlan.planNode()->toString(true, true) << std::endl;
+        sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
-          float executeTime = runPlan(file->path, 8, 8, myPlan, p0);
+          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 1);
           jsonMessage["reward"] = executeTime;
           std::cout << "[INFO] get Cost(offline): "
                     << " time: " << executeTime << std::endl;
@@ -891,7 +895,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           jsonMessage["reward"] = cost.cost + 1;
           std::cout << "[INFO] get Cost(online): " << cost.cost << std::endl;
         }
-
+        sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
 
       } else if (mctsAction == "finished") {
@@ -910,7 +914,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << std::endl;
     std::cout << "[INFO] Optimized query plan"
               << myPlan.planNode()->toString(true, true) << std::endl;
-    runPlan(file->path, 8, 8, myPlan, p0, repeatRun);
+    runPlanWithCataLog(8, 8, myPlan, cataLog, 1);
   }
 
  private:

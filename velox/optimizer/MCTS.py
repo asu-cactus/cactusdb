@@ -87,10 +87,6 @@ class MCTSTreeNode:
         send_message = dict()
         send_message["mctsAction"] = "getActionSpace"
         send_message["optimizationIsFinished"] = False
-        if self.parent is None:
-            send_message["isRootNode"] = True
-        else:
-            send_message["isRootNode"] = False
         send_message_by_socket(send_message, self.client_socket)
         received_message = receive_message_by_socket(self.client_socket)
         received_action_space = received_message["actionSpace"]
@@ -153,6 +149,11 @@ class MCTS:
             if os.environ['mcts_debug'] == "True":
                 print("[INFO] search iteration idx: ", iter_idx)
             node = self.root_node
+            # each new iteration needs to reset the query plan from root node
+            send_message = dict()
+            send_message["mctsAction"] = "resetPlan"
+            send_message["optimizationIsFinished"] = False
+            send_message_by_socket(send_message, self.client_socket)
             t_elapsed_time = self.timer.toc()
             if t_elapsed_time >= self.max_iteration_time:
                 # exist search if exceeds the maximum search time
@@ -216,12 +217,6 @@ class MCTS:
         new_state = node.state.copy()
         new_state[selected_expression] = selected_action
         node.action_space[(selected_expression, selected_action)] = True
-        send_message = dict()
-        send_message["mctsAction"] = "takeAction"
-        send_message["targetString"] = selected_expression
-        send_message["targetAction"] = selected_action
-        send_message["optimizationIsFinished"] = False
-        send_message_by_socket(send_message, self.client_socket)
         is_terminal = True if selected_expression == "None" else None
         if os.environ['mcts_debug'] == "True":
             print(
@@ -229,6 +224,12 @@ class MCTS:
                     (selected_expression, selected_action)
                 )
             )
+        send_message = dict()
+        send_message["mctsAction"] = "takeAction"
+        send_message["targetString"] = selected_expression
+        send_message["targetAction"] = selected_action
+        send_message["optimizationIsFinished"] = False
+        send_message_by_socket(send_message, self.client_socket)
         new_node = MCTSTreeNode(
             new_state,
             parent=node,
@@ -245,7 +246,7 @@ class MCTS:
         simulation_count = 0
         timer_simulation = Timer()
         timer_simulation.tic()
-        while not node.check_terminal():
+        while not node.is_terminal:
             if (
                 simulation_count > self.max_sim_iteration_num
                 or timer_simulation.toc() > self.max_sim_iteration_time
@@ -264,6 +265,7 @@ class MCTS:
             send_message_by_socket(send_message, self.client_socket)
             node = MCTSTreeNode(
                 new_state,
+                parent=node,
                 client_socket=self.client_socket,
                 from_action=(selected_expression, selected_action),
                 is_temp_node=True,
@@ -301,6 +303,10 @@ class MCTS:
 
 def send_message_by_socket(message, client_socket):
     client_socket.sendall(json.dumps(message).encode("utf-8"))
+    # wait for ackonowledgment
+    ack = client_socket.recv(1024)
+    if os.environ['mcts_debug'] == "True":
+        print("[DEBUG] Sent message: ", message)
 
 
 def receive_message_by_socket(client_socket, printout=False):
@@ -341,7 +347,8 @@ if __name__ == "__main__":
                 client_socket=client_socket,
                 max_iteration_num=3,
                 max_sim_iteration_num=1,
-                reward_mode="online",
+                # reward_mode="online", # FIXME online mode is not working yet
+                reward_mode="offline",
             )
             mcts.search(rootNode)
             optimization_is_finished = True
