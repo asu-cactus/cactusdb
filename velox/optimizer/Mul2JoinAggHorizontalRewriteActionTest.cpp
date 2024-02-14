@@ -119,7 +119,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::make_shared<core::QueryCtx>(executor_.get())};
     // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
-        {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},// 100000000000000000
+        {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000000000000"},// 100000000000000000
           {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
     // Create task for logical plan.
     auto task = exec::Task::create(
@@ -129,9 +129,9 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         queryCtx_,
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
           if (result) {
-            // std::cout << "=============================\n";
-            // std::cout << result->toString() << " size: " << result->size() << std::endl;
-            // std::cout << result->toString(0, result->size()) << std::endl;
+            std::cout << "=============================\n";
+            std::cout << result->toString() << " size: " << result->size() << std::endl;
+            std::cout << result->toString(0, result->size()) << std::endl;
           }
           return exec::BlockingReason::kNotBlocked;
         });
@@ -479,9 +479,9 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
                 .project({fmt::format(compute, "v")}) 
                 .planBuild();
     // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, {file});
+    // cataLog.setIdAddressMap(p0, {file});
     // Set vector name and nodeId of data source
-    cataLog.setVectorIdMap(p0, "v");
+    // cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -496,26 +496,26 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     );
 
 
-    // auto newPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-    //         .tableScan(asRowType(inputRowVector->type()))
-    //         .capturePlanNodeId(p1)
-    //         .nestedLoopJoin(
-    //           PlanBuilder(planNodeIdGenerator)
-    //           .tableScan(cataLog.getUDFSchema("mat_mul0_weights"))
-    //           .capturePlanNodeId(p2)
-    //           .planNode(),
-    //           {"v_row", "v", "w", "w_row", "w_col"}
-    //         )
-    //         .project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
-    //         // .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-    //         // // .localPartition({})
-    //         // .intermediateAggregation()
-    //         // .finalAggregation()
-    //         .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-    //         .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
-    //         .planBuild();
-    // cataLog.setIdAddressMap(p1, {file});
-    // cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights"));
+    auto newPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(asRowType(inputRowVector->type()))
+            .capturePlanNodeId(p1)
+            .nestedLoopJoin(
+              PlanBuilder(planNodeIdGenerator)
+              .tableScan(cataLog.getUDFSchema("mat_mul0_weights"))
+              .capturePlanNodeId(p2)
+              .planNode(),
+              {"v_row", "v", "w", "w_row", "w_col"}
+            )
+            .project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
+            // .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+            // // .localPartition({})
+            // .intermediateAggregation()
+            // .finalAggregation()
+            .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+            .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
+            .planBuild();
+    cataLog.setIdAddressMap(p1, {file});
+    cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights"));
 
     // Run rewriten rule
     // if (rewrite) {
@@ -536,7 +536,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     // }
 
     // Run the rewritten plan
-    runPlan(8, 8, myPlan, cataLog);
+    runPlan(8, 8, newPlan, cataLog);
   }
 
  private:
