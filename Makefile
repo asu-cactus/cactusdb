@@ -98,11 +98,11 @@ build:					#: Build the software based in BUILD_DIR and BUILD_TYPE variables
 	cmake --build $(BUILD_BASE_DIR)/$(BUILD_DIR) -j $(NUM_THREADS)
 
 debug:					#: Build with debugging symbols
-	$(MAKE) cmake BUILD_DIR=debug BUILD_TYPE=Debug EXTRA_CMAKE_FLAGS+="-DVELOX_ENABLE_PARQUET=ON -DVELOX_ENABLE_DUCKDB=ON"
+	$(MAKE) cmake BUILD_DIR=debug BUILD_TYPE=Debug EXTRA_CMAKE_FLAGS="-DVELOX_ENABLE_PARQUET=ON"
 	$(MAKE) build BUILD_DIR=debug -j ${NUM_THREADS}
 
 release:				#: Build the release version
-	$(MAKE) cmake BUILD_DIR=release BUILD_TYPE=Release EXTRA_CMAKE_FLAGS+="-DVELOX_ENABLE_PARQUET=ON -DVELOX_ENABLE_DUCKDB=ON" && \
+	$(MAKE) cmake BUILD_DIR=release BUILD_TYPE=Release EXTRA_CMAKE_FLAGS="-DVELOX_ENABLE_PARQUET=ON" && \
 	$(MAKE) build BUILD_DIR=release
 
 min_debug:				#: Minimal build with debugging symbols

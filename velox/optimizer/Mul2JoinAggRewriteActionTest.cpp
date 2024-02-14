@@ -104,14 +104,6 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
    * @param myPlan The pointer to the planBuilder which builds the logical plan.
    * @param cataLog A class storing metadata and information related to UDFs and data sources.
   */
-  /**
-   * @brief A function to run logical plan.
-   * 
-   * @param numThreads The number of Velox executor threads.
-   * @param numSplits The number of file splits.
-   * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param cataLog A class storing metadata and information related to UDFs and data sources.
-  */
   void runPlan(
       int numThreads,
       int numSplits,
@@ -129,71 +121,24 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
           {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
-
-    std::chrono::steady_clock::time_point begin =
-        std::chrono::steady_clock::now();
     // Create task for logical plan.
-    // auto task = exec::Task::create(
-    //     "0",
-    //     myPlan.planFragment(),
-    //     0,
-    //     queryCtx_,
-    //     [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-    //       if (result) {
-    //         std::cout << "=============================\n";
-    //         std::cout << result->toString() << " size: " << result->size() << std::endl;
-    //         std::cout << result->toString(0, result->size()) << std::endl;
-    //       }
-    //       return exec::BlockingReason::kNotBlocked;
-    //     });
-    // // Get optimized idFileAddr map from cataLog
-    // auto idFileAddrMap = cataLog.getIdAddressMap();
-
-    // std::vector<core::PlanNodeId> ids;
-
-    // std::cout << "Hive splits:" << std::endl;
-    // // Create hivesplits for each entry in idFileAddr map, add splits to task
-    // for (const auto& entry : idFileAddrMap) {
-
-    //   core::PlanNodeId key = entry.first;
-
-    //   const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
-
-    //   auto hiveSplits = makeHiveConnectorSplits(fileAddr);
-
-    //   for (auto& split : hiveSplits) {
-
-    //     task->addSplit(key, exec::Split(std::move(split)));
-    //   }
-
-    //   ids.push_back(key);
-    // }
-
-    // // Add hivesplits to the target plan node (data source node).
-    // std::chrono::steady_clock::time_point begin =
-    //     std::chrono::steady_clock::now();
-
-
-    // // Start the task by setting the number of drivers.
-    // task->start(numThreads);
-    // // Wait for no more splits.
-    // for (auto id: ids){
-
-    //   task->noMoreSplits(id);
-    // }
-
-    // // Wait for all drivers to finish.
-    // waitForFinishedDrivers(task);
-
-    CursorParameters params;
-    params.maxDrivers = numThreads;
-    params.planNode = myPlan.planNode();
-    params.queryCtx = queryCtx_;
-    bool noMoreSplits = false;
-    auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
+    auto task = exec::Task::create(
+        "0",
+        myPlan.planFragment(),
+        0,
+        queryCtx_,
+        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+          if (result)
+            std::cout << result->toString() << std::endl;
+          return exec::BlockingReason::kNotBlocked;
+        });
+    // Get optimized idFileAddr map from cataLog
     auto idFileAddrMap = cataLog.getIdAddressMap();
+
     std::vector<core::PlanNodeId> ids;
-      if (!noMoreSplits) {
+
+    std::cout << "Hive splits:" << std::endl;
+    // Create hivesplits for each entry in idFileAddr map, add splits to task
     for (const auto& entry : idFileAddrMap) {
 
       core::PlanNodeId key = entry.first;
@@ -205,22 +150,26 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       for (auto& split : hiveSplits) {
 
         task->addSplit(key, exec::Split(std::move(split)));
-
       }
 
       ids.push_back(key);
     }
 
+    // Add hivesplits to the target plan node (data source node).
+    std::chrono::steady_clock::time_point begin =
+        std::chrono::steady_clock::now();
+
+
+    // Start the task by setting the number of drivers.
+    task->start(numThreads);
+    // Wait for no more splits.
     for (auto id: ids){
+
       task->noMoreSplits(id);
     }
-      }
-      noMoreSplits = true;
-    };
 
-    auto [cursor, actualResults] = readCursor(params, addSplits);
-    waitForTaskCompletion(cursor->task().get());
-
+    // Wait for all drivers to finish.
+    waitForFinishedDrivers(task);
 
     std::chrono::steady_clock::time_point end =
         std::chrono::steady_clock::now();
@@ -228,12 +177,6 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     std::stringstream ss;
 
     ss << numSplits << "," << numThreads << ",";
-
-    int dataIdx = 0;
-    for (auto batchedData : actualResults) {
-      std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
-      dataIdx += 1;
-    }
 
     std::cout << "Time for FFNN with Input Data (sec): "
               << std::endl;
@@ -244,7 +187,6 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
                       .count()) /
             1000000.0
               << " secs" << std::endl;
-
   }
 
   struct DataFrame {
@@ -301,7 +243,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
           for (int j = 0; j < input_features_size; j++) {
 
-                  featureVector.push_back((i*input_features_size+j)/input_total_size);
+                  featureVector.push_back(i*input_features_size+j);
 
           }
 
@@ -553,24 +495,10 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
 };
 
-// DEFINE_int32(feature_size, 3000, "Feature size");
-// DEFINE_int32(num_sample, 1000, "Number of samples");
-// DEFINE_bool(rewrite, true, "Whether apply rewrite rule");
-
 int main(int argc, char** argv) {
-  // gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
 
   Mul2JoinAggRewriteActionTest demo;
-
-  // bool rewrite = FLAGS_rewrite;
-  // int numSamples = FLAGS_num_sample;
-  // int featureSize = FLAGS_feature_size;
-
-  // std::cout << "numsample: " << numSamples << std::endl;
-
-  // demo.testMul2JoinAggPlan(rewrite);
-
 
   bool rewrite = true;
 
