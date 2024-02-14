@@ -21,8 +21,6 @@
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/DecodedVector.h"
 #include "velox/vector/FlatVector.h"
-#include <iostream>
-
 
 namespace facebook::velox::aggregate {
 
@@ -55,13 +53,6 @@ class ValueVector {
     }
   }
 
-  void extractValues (FlatVector<float>& values, vector_size_t offset , vector_size_t length) {
-    // vector_size_t index = offset;
-    for (vector_size_t i = 0; i < length; ++i) {
-      values.set(i + offset, storedValue[i + offset]);
-    }
-  }
-
   void free() {
     delete[] storedValue;
 }
@@ -70,17 +61,6 @@ class ValueVector {
     return size_;
   }
 
-  void print(size_t endPos = -1) {
-    size_t end = size_;
-    if (endPos != -1) {
-      end = endPos;
-    }
-    std::cout << "[INFO] ValueVector: \n";
-    for (size_t i = 0; i < end; i++){
-      std::cout << storedValue[i] << ", ";
-    }
-    std::cout<<std::endl;
-  }
 
 
  private:
