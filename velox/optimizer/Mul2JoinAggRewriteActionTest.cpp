@@ -129,9 +129,9 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         queryCtx_,
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
           if (result) {
-            // std::cout << "=============================\n";
-            // std::cout << result->toString() << " size: " << result->size() << std::endl;
-            // std::cout << result->toString(0, result->size()) << std::endl;
+            std::cout << "=============================\n";
+            std::cout << result->toString() << " size: " << result->size() << std::endl;
+            std::cout << result->toString(0, result->size()) << std::endl;
           }
           return exec::BlockingReason::kNotBlocked;
         });
@@ -401,7 +401,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
     int input_features_size = 100000;//597540
-    int num_samples = 1000;
+    int num_samples = 5000;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
     // Set splits number

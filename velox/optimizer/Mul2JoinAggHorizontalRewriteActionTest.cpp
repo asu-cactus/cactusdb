@@ -119,7 +119,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::make_shared<core::QueryCtx>(executor_.get())};
     // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
-        {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
+        {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},// 100000000000000000
           {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
     // Create task for logical plan.
     auto task = exec::Task::create(
@@ -129,9 +129,9 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         queryCtx_,
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
           if (result) {
-            std::cout << "=============================\n";
-            std::cout << result->toString() << " size: " << result->size() << std::endl;
-            std::cout << result->toString(0, result->size()) << std::endl;
+            // std::cout << "=============================\n";
+            // std::cout << result->toString() << " size: " << result->size() << std::endl;
+            // std::cout << result->toString(0, result->size()) << std::endl;
           }
           return exec::BlockingReason::kNotBlocked;
         });
@@ -246,8 +246,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
           for (int j = 0; j < input_features_size; j++) {
 
-                  featureVector.push_back(i*input_features_size+j);
-                  // featureVector.push_back(distribution(gen));
+                  // featureVector.push_back(i*input_features_size+j);
+                  featureVector.push_back(distribution(gen));
 
           }
 
@@ -273,8 +273,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     for (int i = 0; i < weight_layer1_size; ++i) {
 
-        // weight_layer1[i] = 0.00001; 
-        weight_layer1[i] = i;
+        weight_layer1[i] = 0.00001; 
+        // weight_layer1[i] = i;
 
     }
     float* weight_layer2 = new float[weight_layer2_size];
@@ -390,8 +390,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         catalog
      );
       // Compose and return the vector function expression
-    //  return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
-    return "mat_mul0({})";
+     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
+    // return "mat_mul0({})";
     // return "relu0(mat_add0(mat_mul0({})))";
   }
   /**
@@ -401,16 +401,16 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   */
   void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 4;//597540
-    int num_samples = 10;
-    int first_layer_output_size = 5;
+    int input_features_size = 100000;//597540
+    int num_samples = 2000;
+    int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
     // Set splits number
     int num_splits = 4;
     // Initialize CataLog
     CataLog cataLog;
     
-    cataLog.setDefaultBlocksSize(2);
+    cataLog.setDefaultBlocksSize(128);
     cataLog.setBlockingThreshold(1);
     // Generate data source
     auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
@@ -479,9 +479,9 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
                 .project({fmt::format(compute, "v")}) 
                 .planBuild();
     // Set original plan nodeId and file address of data source
-    // cataLog.setIdAddressMap(p0, {file});
+    cataLog.setIdAddressMap(p0, {file});
     // Set vector name and nodeId of data source
-    // cataLog.setVectorIdMap(p0, "v");
+    cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -496,21 +496,27 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     );
 
 
-    auto newPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-            .tableScan(asRowType(inputRowVector->type()))
-            .capturePlanNodeId(p1)
-            .nestedLoopJoin(
-              PlanBuilder(planNodeIdGenerator)
-              .tableScan(cataLog.getUDFSchema("mat_mul0_weights"))
-              .capturePlanNodeId(p2)
-              .planNode(),
-              {"v_row", "v", "w", "w_row", "w_col"}
-            )
-            .project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
-            .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-            .planBuild();
-    cataLog.setIdAddressMap(p1, {file});
-    cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights"));
+    // auto newPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+    //         .tableScan(asRowType(inputRowVector->type()))
+    //         .capturePlanNodeId(p1)
+    //         .nestedLoopJoin(
+    //           PlanBuilder(planNodeIdGenerator)
+    //           .tableScan(cataLog.getUDFSchema("mat_mul0_weights"))
+    //           .capturePlanNodeId(p2)
+    //           .planNode(),
+    //           {"v_row", "v", "w", "w_row", "w_col"}
+    //         )
+    //         .project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
+    //         // .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+    //         // // .localPartition({})
+    //         // .intermediateAggregation()
+    //         // .finalAggregation()
+    //         .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+    //         .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
+    //         .planBuild();
+    // cataLog.setIdAddressMap(p1, {file});
+    // cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights"));
+
     // Run rewriten rule
     // if (rewrite) {
     //   // Get possible actions for this plan
@@ -530,7 +536,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     // }
 
     // Run the rewritten plan
-    runPlan(8, 8, newPlan, cataLog);
+    runPlan(8, 8, myPlan, cataLog);
   }
 
  private:

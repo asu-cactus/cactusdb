@@ -52,9 +52,25 @@ class CatArrayAggregate : public exec::Aggregate {
     auto vector = (*result)->as<ArrayVector>();
     VELOX_CHECK(vector);
     // vector->resize(numGroups);
-    auto elements = vector->elements()->as<FlatVector<float>>();
-    // we can get it directly by countElements()
-    elements->resize(countElements(groups, numGroups));
+    auto originElements = vector->elements();
+    FlatVector<double>* elementsDouble = nullptr;
+    FlatVector<float>* elementsFloat = nullptr;
+
+    if (auto doubleElements = originElements->as<FlatVector<double>>()) {
+        elementsDouble = doubleElements;
+    } else if (auto floatElements = originElements->as<FlatVector<float>>()) {
+        elementsFloat = floatElements;
+    } else {
+        
+    }
+
+    if (elementsDouble) {
+        elementsDouble->resize(countElements(groups, numGroups)); // Resize elements if it's not nullptr
+    } else if (elementsFloat) {
+        elementsFloat->resize(countElements(groups, numGroups)); // Resize elements if it's not nullptr
+    } else {
+        
+    }
 
     uint64_t* rawNulls = getRawNulls(vector);
     vector_size_t offset = 0;
@@ -68,7 +84,16 @@ class CatArrayAggregate : public exec::Aggregate {
         // for (auto index = 0; index < arraySize; ++index) {
         //   reader.next(*elements, offset + index);
         // }
-        values.concatValues(*elements, offset);
+        if (elementsDouble) {
+          values.concatValues(*elementsDouble, offset);
+        }
+        else if (elementsFloat) {
+          values.concatValues(*elementsFloat, offset);
+        }
+        else {
+          
+        }
+        // values.concatValues(*elements, offset);
         vector->setOffsetAndSize(i, offset, arraySize);
         offset += arraySize;
       } else {
@@ -122,7 +147,68 @@ class CatArrayAggregate : public exec::Aggregate {
 
   void extractAccumulators(char** groups, int32_t numGroups, VectorPtr* result)
       override {
-    extractValues(groups, numGroups, result);
+    // extractValues(groups, numGroups, result);
+    auto vector = (*result)->as<ArrayVector>();
+    VELOX_CHECK(vector);
+    // vector->resize(numGroups);
+    auto originElements = vector->elements();
+    FlatVector<double>* elementsDouble = nullptr;
+    FlatVector<float>* elementsFloat = nullptr;
+
+    if (auto doubleElements = originElements->as<FlatVector<double>>()) {
+        elementsDouble = doubleElements;
+    } else if (auto floatElements = originElements->as<FlatVector<float>>()) {
+        elementsFloat = floatElements;
+    } else {
+        
+    }
+
+    if (elementsDouble) {
+        elementsDouble->resize(countElements(groups, numGroups)); // Resize elements if it's not nullptr
+    } else if (elementsFloat) {
+        elementsFloat->resize(countElements(groups, numGroups)); // Resize elements if it's not nullptr
+    } else {
+        
+    }
+
+    uint64_t* rawNulls = getRawNulls(vector);
+    vector_size_t offset = 0;
+    for (int32_t i = 0; i < numGroups; ++i) {
+      auto& values = value<ArrayAccumulator>(groups[i])->elements;
+      auto arraySize = values.size();
+      if (arraySize) {
+        clearNull(rawNulls, i);
+
+        // ValueListReader reader(values);
+        // for (auto index = 0; index < arraySize; ++index) {
+        //   reader.next(*elements, offset + index);
+        // }
+        if (elementsDouble) {
+          if (values.isIntermediate()) {
+            values.extractInterValue(*elementsDouble, offset);
+          }
+          else {
+            values.concatValues(*elementsDouble, offset);
+          }
+        }
+        else if (elementsFloat) {
+          if (values.isIntermediate()) {
+            values.extractInterValue(*elementsFloat, offset);
+          }
+          else {
+            values.concatValues(*elementsDouble, offset);
+          }
+        }
+        else {
+          
+        }
+        // values.concatValues(*elements, offset);
+        vector->setOffsetAndSize(i, offset, arraySize);
+        offset += arraySize;
+      } else {
+        vector->setNull(i, true);
+      }
+    }
   }
 
   void addRawInput(
@@ -135,7 +221,7 @@ class CatArrayAggregate : public exec::Aggregate {
   float* Valuesfloat = Values->elements()->values()->asMutable<float>();
 
   decodedElements_.decode(*args[1], rows);
-  auto indexs = decodedElements_.base()->asFlatVector<float>();
+  auto indexs = decodedElements_.base()->asFlatVector<float>();//intermediate result changed to dict, TODO
   float* indexsFloat = indexs->values()->asMutable<float>();
   rows.applyToSelected([&](vector_size_t row) {
     auto group = groups[row];
@@ -184,9 +270,9 @@ class CatArrayAggregate : public exec::Aggregate {
     auto& elements = arrayVector->elements();
     float* Valuesfloat = arrayVector->elements()->values()->asMutable<float>();
 
-    decodedIntermediate_.decode(*args[1], rows);
-    auto indexs = decodedIntermediate_.base()->asFlatVector<float>();
-    float* indexsFloat = indexs->values()->asMutable<float>();
+    // decodedIntermediate_.decode(*args[1], rows);
+    // auto indexs = decodedIntermediate_.base()->asFlatVector<float>();
+    // float* indexsFloat = indexs->values()->asMutable<float>();
 
     rows.applyToSelected([&](vector_size_t row) {
       auto group = groups[row];
@@ -195,8 +281,8 @@ class CatArrayAggregate : public exec::Aggregate {
       auto rowOffset =  arrayVector->offsetAt(decodedRow);
       auto rowSize = arrayVector->sizeAt(decodedRow);
       auto& values = value<ArrayAccumulator>(group)->elements;
-
-      values.insertValue(Valuesfloat, rowOffset, rowSize, indexsFloat);
+      values.insertIntermediateValue(Valuesfloat, rowOffset, rowSize);
+      // values.insertValue(Valuesfloat, row, rowSize, indexsFloat);
     });
   }
 
@@ -222,7 +308,7 @@ class CatArrayAggregate : public exec::Aggregate {
     auto rowSize = Values->sizeAt(decodedRow);
  
 
-    values.insertValue(Valuesfloat, rowOffset, rowSize, indexsFloat);
+    values.insertValue(Valuesfloat, row, rowSize, indexsFloat);
     });
   }
 
@@ -244,7 +330,7 @@ class CatArrayAggregate : public exec::Aggregate {
       auto decodedRow = decodedIntermediate_.index(row);
       auto rowOffset =  arrayVector->offsetAt(decodedRow);
       auto rowSize = arrayVector->sizeAt(decodedRow);
-      values.insertValue(Valuesfloat, rowOffset, rowSize, indexsFloat);
+      values.insertValue(Valuesfloat, row, rowSize, indexsFloat);
     });
   }
 
