@@ -151,8 +151,9 @@ class CataLog {
 
     private:
         // Default values
+        // TODO: change it block size to support flexible blocking
         int defaultBlocksNum = 4;
-        int blockingThreshold = 2000;
+        int blockingThreshold = 1;
 
         // Maps for storing data
         std::map<std::string, std::vector<int>> dataSourceStatMap;

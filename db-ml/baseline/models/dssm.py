@@ -291,7 +291,33 @@ class DNN_TF(tf.keras.Model):
             fc = self.dropout(fc)
             deep_input = fc
         return deep_input
-    
+
+class SequencePoolingLayer(tf.keras.layers.Layer):
+    def __init__(self, mode='mean', **kwargs):
+        super(SequencePoolingLayer, self).__init__(**kwargs)
+        if mode not in ['mean']:
+            raise ValueError('SequencePoolingLayer mode should in [mean]')
+        self.mode = mode
+        self.eps = 1e-8
+
+    def call(self, inputs):
+        inputs, mask = inputs
+        if mask is not None:
+            mask = tf.cast(mask, tf.float32)
+            mask1 = tf.expand_dims(mask, axis=-1)
+            inputs *= mask1  # Apply mask to the inputs
+        # Sum along the time dimension
+        sum_pooling = tf.reduce_sum(inputs, axis=1, keepdims=False)
+        # Count non-masked elements along the time dimension
+        sequence_lengths = tf.reduce_sum(mask, axis=1, keepdims=True)
+        # Avoid division by zero
+        sequence_lengths = tf.where(tf.math.greater(sequence_lengths, 0), sequence_lengths, tf.ones_like(sequence_lengths))
+
+        # Mean pooling
+        mean_pooling = sum_pooling / (sequence_lengths+self.eps)
+
+        return mean_pooling
+
 class DSSM_TF(tf.keras.Model):
     def __init__(self, user_dnn_feature_columns, item_dnn_feature_columns, l2_reg_embedding=1e-5,
                  init_std=0.0001, seed=1024, task='binary'):
@@ -307,8 +333,9 @@ class DSSM_TF(tf.keras.Model):
         self.embedding_dict['age'] = tf.keras.layers.Embedding(7, 32)
         self.embedding_dict['occupation'] = tf.keras.layers.Embedding(21, 32)
         self.embedding_dict['movie_id'] = tf.keras.layers.Embedding(3706, 32)
+        self.embedding_dict['genres'] = tf.keras.layers.Embedding(1000, 32)
         
-
+        self.sequence_pooling_layer = SequencePoolingLayer()
         self.concat_layer = tf.keras.layers.Concatenate(axis=1)
         self.cosine_similarity_layer = CosineSimilarityLayer()
 
@@ -319,9 +346,12 @@ class DSSM_TF(tf.keras.Model):
         age_embed = self.embedding_dict['age'](inputs['age'])
         occupation_embed = self.embedding_dict['occupation'](inputs['occupation'])
         movie_id_embed = self.embedding_dict['movie_id'](inputs['movie_id'])
+        genres_embed = self.embedding_dict['genres'](inputs['genres'])
+        genres_mask = inputs['genres'] != 0
+        genres_embed = self.sequence_pooling_layer([genres_embed, genres_mask])
 
         user_dnn_input = self.concat_layer([user_id_embed,gender_embed,age_embed,occupation_embed, tf.expand_dims(inputs['user_mean_rating'], axis=-1)])
-        item_dnn_input = self.concat_layer([movie_id_embed, tf.expand_dims(inputs['movie_mean_rating'], axis=-1)])
+        item_dnn_input = self.concat_layer([movie_id_embed, genres_embed, tf.expand_dims(inputs['movie_mean_rating'], axis=-1)])
         # Tower 1 (User Tower)
         user_output = self.user_dnn(user_dnn_input)
 

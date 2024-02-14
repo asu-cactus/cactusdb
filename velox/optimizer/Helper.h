@@ -80,19 +80,25 @@ namespace optimization {
         return indexs;
     }
 
-    // Function to create input block based on total_size, values, and block_numbers
+
     std::vector<std::vector<float>> create_input_block(int total_size, std::vector<std::vector<float>>& values, int block_numbers){
         std::vector<std::vector<float>> valuesArray;
         std::vector<float> flattened;
         for (const auto& row : values) {
             flattened.insert(flattened.end(), row.begin(), row.end());
         }
-
+        // TODO: needs to handle the case: that can not be exactly blocked
         auto block_size = total_size / block_numbers;
+        int num_cols = total_size / values.size(); 
+        int cols_per_block = block_size / values.size();
+        // std::cout << fmt::format("Total Size: {}, block size: {}, value size: cols per block: {}", total_size, block_size, cols_per_block) << std::endl;
         for (int i = 0; i < block_numbers; i++) {
             std::vector<float> valuesArraySingleBlock;
             for (int j = 0; j < block_size; j++) {
-                valuesArraySingleBlock.push_back(flattened[i*block_size+j]);
+                // get the data's x and y in original block
+                int data_x = j / cols_per_block;
+                int data_y = i * cols_per_block + j % cols_per_block;
+                valuesArraySingleBlock.push_back(flattened[data_x*num_cols+data_y]);
             }
             valuesArray.push_back(valuesArraySingleBlock);
         }
