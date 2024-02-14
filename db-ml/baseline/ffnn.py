@@ -1,23 +1,10 @@
-# coding=utf-8
-# Copyright 2018-2023 EvaDB
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 from collections import OrderedDict
-
+import torch.nn as nn
 import pandas as pd
 import numpy as np
 import torch
 import utils
+import tensorflow as tf
 from evadb.functions.decorators.decorators import forward, setup
 from evadb.catalog.catalog_type import NdArrayType
 from evadb.functions.abstract.abstract_function import AbstractFunction
@@ -38,35 +25,24 @@ class FFNN_EVADB(AbstractFunction):
             np.ndarray: numpy array representation
         """
         return val.detach().cpu().numpy()
-    
+
     @property
     def name(self) -> str:
         return "FFNN_EVADB"
-    
+
     @setup(cacheable=True, function_type="classification", batchable=True)
     def setup(self):
-        import torch.nn as nn
+        # convert the string back to list of int
+        list_hidden_layer_sizes = np.load("evadb_ffnn_reg.npy")
+        self.model = FFNNPyTorch(list_hidden_layer_sizes)
 
-        class FFNNModel(nn.Module):
-            def __init__(self, input_size, hidden_size, output_size):
-                super(FFNNModel, self).__init__()
-                self.fc1 = nn.Linear(input_size, hidden_size)
-                self.relu = nn.ReLU()
-                self.fc2 = nn.Linear(hidden_size, output_size)
 
-            def forward(self, x):
-                x = self.fc1(x)
-                x = self.relu(x)
-                x = self.fc2(x)
-                return x
-
-        self.model = FFNNModel(597540, 1, 10)
+        # self.model = FFNNModel(597540, 1, 10)
         self.model.eval()
         self.timer_process = utils.Timer()
         self.timer_model_inference = utils.Timer()
         self.t_process = 0
         self.t_model_inference = 0
-
 
     @property
     def labels(self):
@@ -88,7 +64,7 @@ class FFNN_EVADB(AbstractFunction):
                     NdArrayType.FLOAT32,
                     NdArrayType.FLOAT32,
                 ],
-                column_shapes=[(None,),(None,),(None,)],
+                column_shapes=[(None,), (None,), (None,)],
             )
         ],
     )
@@ -104,6 +80,53 @@ class FFNN_EVADB(AbstractFunction):
         self.t_model_inference += self.timer_model_inference.toc()
         for prediction in predictions:
             label = self.as_numpy(prediction.data.argmax())
-            outcome.append({"label": str(label), "t_process": self.t_process, "t_model_inference":self.t_model_inference})
-        result_df = pd.DataFrame(outcome, columns=["label", "t_process", "t_model_inference"])
+            outcome.append(
+                {
+                    "label": str(label),
+                    "t_process": self.t_process,
+                    "t_model_inference": self.t_model_inference,
+                }
+            )
+        result_df = pd.DataFrame(
+            outcome, columns=["label", "t_process", "t_model_inference"]
+        )
         return result_df
+
+
+
+class FFNNPyTorch(nn.Module):
+    def __init__(self, list_hidden_layer_sizes):
+        super(FFNNPyTorch, self).__init__()
+        self.linears = []
+        for i in range(len(list_hidden_layer_sizes) - 1):
+            self.linears.append(
+                nn.Linear(list_hidden_layer_sizes[i], list_hidden_layer_sizes[i + 1])
+            )
+        self.linears = nn.ModuleList(self.linears)
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax()
+
+    def forward(self, x):
+        for i, l in enumerate(self.linears):
+            x = self.linears[i](x)
+            if i != (len(self.linears) - 1):
+                x = self.relu(x)
+            else:
+                x = self.softmax(x)
+        return x
+
+
+def FFNNTensorFlow(list_hidden_layer_sizes):
+    model = tf.keras.Sequential()
+
+    # Adding input layer
+    model.add(tf.keras.layers.InputLayer(input_shape=(list_hidden_layer_sizes[0],)))
+
+    # Adding hidden layers
+    for units in list_hidden_layer_sizes[1:-1]:
+        model.add(tf.keras.layers.Dense(units, activation="relu"))
+
+    # Adding output layer
+    model.add(tf.keras.layers.Dense(list_hidden_layer_sizes[-1], activation="softmax"))
+
+    return model

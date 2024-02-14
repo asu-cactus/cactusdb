@@ -46,7 +46,7 @@ def load_movielens_to_postgres():
     print("[INFO] load movielens to postgres success!")
 
 
-def load_ffnn_data_to_postgres():
+def load_ffnn_data_to_postgres(num_generated_data=50, num_features=597540):
     import evadb
 
     # Register postgres in evadb
@@ -70,10 +70,7 @@ def load_ffnn_data_to_postgres():
         }
         """
     ).df()
-    # TODO set follow params as configurable
-    num_samples = 50
-    num_features = 597540
-    x = np.random.rand(num_samples, num_features).astype(np.float32)
+    x = np.random.rand(num_generated_data, num_features).astype(np.float32)
     x_df = pd.DataFrame(x)
     x_df_new = x_df.copy()
     x_df_new["val"] = None
