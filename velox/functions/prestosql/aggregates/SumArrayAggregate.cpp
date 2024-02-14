@@ -46,6 +46,7 @@ class SumArrayAggregate : public exec::Aggregate {
       new (groups[index] + offset_) ArrayAccumulator();
     }
   }
+
   /* addRawInput is used for SingleAggregation and PartialAggregation which process 
   *  the input vector and store the values in the 
   */

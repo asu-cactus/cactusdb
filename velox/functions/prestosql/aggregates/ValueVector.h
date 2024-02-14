@@ -48,12 +48,35 @@ class ValueVector {
     }
   }
 
-  void extractValues (FlatVector<float>& values, vector_size_t offset) {
-    vector_size_t index = offset;
-    for (vector_size_t i = 0; i < size_; ++i) {
-      values.set(index++, storedValue[i]);
-    }
+  void insertValue(float* newValues, vector_size_t offset, vector_size_t size, float* newIndexs) {
+    int index = static_cast<int>(newIndexs[0]);
+    float* slicedValues = new float[size];
+    std::copy(newValues + (offset*size), newValues + (offset*size) + size, slicedValues);
+
+    insertedValue[index] = slicedValues;
+    insertedSize[index] = size;
+    if (size > block_size) { block_size = size;}
+    size_ += size;
   }
+  // void extractValues (FlatVector<float>& values, vector_size_t offset) {
+  //   vector_size_t index = offset;
+  //   for (vector_size_t i = 0; i < size_; ++i) {
+  //     values.set(index++, storedValue[i]);
+  //   }
+  // }
+    void extractValues (FlatVector<float>& values, vector_size_t index) {
+        values.set(index, storedValue[index]);
+    }
+
+    void concatValues (FlatVector<float>& values, vector_size_t offset) {
+      for (auto entry: insertedValue) {
+        int indexs = entry.first;
+        auto sizes = insertedSize[indexs];
+        for (int i = 0; i< sizes; i++){
+          values.set(offset + indexs * block_size + i, entry.second[i]);
+        }
+      }
+    }
 
   void extractValues (FlatVector<float>& values, vector_size_t offset , vector_size_t length) {
     // vector_size_t index = offset;
@@ -93,6 +116,9 @@ class ValueVector {
   // Number of values added, including nulls.
   uint32_t size_{0};
   float* storedValue = nullptr;
+  std::map<int, float*> insertedValue;
+  std::map<int, vector_size_t> insertedSize;
+  vector_size_t block_size{0};
   // Last nulls word. 'size_ % 64' is the null bit for the next element.
 
 };

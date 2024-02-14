@@ -145,6 +145,28 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(mul2joinagghorizontal_test Mul2JoinAggHorizontalRewriteActionTest.cpp)
+target_link_libraries(
+  mul2joinagghorizontal_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(conv_test ConvTest.cpp)
+target_link_libraries(
+  conv_test
+)
+
 # set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")
 if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)

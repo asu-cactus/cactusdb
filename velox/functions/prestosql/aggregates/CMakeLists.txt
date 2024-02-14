@@ -47,6 +47,7 @@ add_library(
   MaxSizeForStatsAggregate.cpp
   SumDataSizeForStatsAggregate.cpp
   SumArrayAggregate.cpp
+  CatArrayAggregate.cpp
   RegisterAggregateFunctions.cpp)
 
 target_link_libraries(
