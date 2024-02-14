@@ -64,12 +64,12 @@ class MCTSTreeNode:
             self.node_id = MCTSTreeNode.node_id
             MCTSTreeNode.node_id += 1
 
-        if os.environ['mcts_debug'] == "True":
+        if os.environ["mcts_debug"] == "True":
             print(
                 "[INFO] node states: id: {} \n \t\t terminal: {} \n  \t\t parsed action space: {}".format(
                     self.node_id, self.is_terminal, self.action_space
                 )
-        )
+            )
 
     def check_terminal(self):
         if len(self.action_space) == 0:
@@ -141,12 +141,14 @@ class MCTS:
         self.reward_mode = reward_mode
         self.timer = Timer()
 
-    def search(self, root_node: MCTSTreeNode):
-        """MCTS search algorithm"""
+    def train(self, root_node: MCTSTreeNode):
+        """MCTS training algorithm"""
         self.root_node = root_node
         self.timer.tic()
+        if os.environ["mcts_debug"] == "True":
+                print("[INFO] ==========Start MCTS Training==========")
         for iter_idx in tqdm(range(self.max_iteration_num)):
-            if os.environ['mcts_debug'] == "True":
+            if os.environ["mcts_debug"] == "True":
                 print("[INFO] search iteration idx: ", iter_idx)
             node = self.root_node
             # each new iteration needs to reset the query plan from root node
@@ -166,7 +168,7 @@ class MCTS:
 
             # check if the current node is terminal node
             while not node.is_terminal:
-                if os.environ['mcts_debug'] == "True":
+                if os.environ["mcts_debug"] == "True":
                     print("[INFO] curr node id: ", node.node_id)
                 node.check_and_update_is_fully_expanded()
                 if node.is_fully_expanded:
@@ -181,14 +183,58 @@ class MCTS:
             reward = self.simulate(node)
             self.back_propagate(node, reward)
         t_elapsed_time = self.timer.toc()
-        print("[INFO] MCTS finished, elapsed time: {} ms".format(t_elapsed_time))
+        print(
+            "[INFO] MCTS training finished, elapsed time: {} ms".format(t_elapsed_time)
+        )
 
-    def select(self, node: MCTSTreeNode) -> MCTSTreeNode:
-        """Select best node based on UCT"""
+    def search(self, root_node: MCTSTreeNode):
+        """MCTS search algorithm"""
+        self.root_node = root_node
+        self.timer.tic()
+        if os.environ["mcts_debug"] == "True":
+                print("[INFO] ==========Start MCTS Search==========")
+        node = self.root_node
+        # each new iteration needs to reset the query plan from root node
+        send_message = dict()
+        send_message["mctsAction"] = "resetPlan"
+        send_message["optimizationIsFinished"] = False
+        send_message_by_socket(send_message, self.client_socket)
+
+        # check if the current node is terminal node
+        while not node.is_terminal:
+            t_elapsed_time = self.timer.toc()
+            if t_elapsed_time >= self.max_iteration_time:
+                # exist search if exceeds the maximum search time
+                print("[INFO] maximum search time reached out")
+                break
+            if os.environ["mcts_debug"] == "True":
+                print("[INFO] curr node id: ", node.node_id)
+            node.check_and_update_is_fully_expanded()
+            node = self.select(node, use_factor=False)
+
+        # get reward via simulation after reaching the terminal state
+        reward = self.simulate(node)
+        t_elapsed_time = self.timer.toc()
+        
+        
+        print("[INFO] MCTS search finished, query execution time: {} ms".format(-reward))
+        current_query_plan = self.get_current_query_plan()
+        print("[INFO] Searched query plan: {}".format(current_query_plan))
+        
+
+    def select(self, node: MCTSTreeNode, use_factor=True) -> MCTSTreeNode:
+        """Select best node based on UCT
+
+        Args:
+            node (MCTSTreeNode): node to perform the selection
+            use_factor (bool): whether use the exploration_weight, it should be True
+                               when training
+        """
+        exploration_weight = self.exploration_weight if use_factor else 0
         selected_node = max(
             node.children,
             key=lambda child: child.reward / child.num_visit
-            + self.exploration_weight
+            + exploration_weight
             * math.sqrt(math.log(node.num_visit) / child.num_visit),
         )
         # child num_visit will be updated during back-propagation
@@ -200,7 +246,7 @@ class MCTS:
         send_message["optimizationIsFinished"] = False
         send_message_by_socket(send_message, self.client_socket)
 
-        if os.environ['mcts_debug'] == "True":
+        if os.environ["mcts_debug"] == "True":
             print(
                 "[INFO] performed SELECTION, selected action: {}".format(
                     (selected_expression, selected_action)
@@ -218,7 +264,7 @@ class MCTS:
         new_state[selected_expression] = selected_action
         node.action_space[(selected_expression, selected_action)] = True
         is_terminal = True if selected_expression == "None" else None
-        if os.environ['mcts_debug'] == "True":
+        if os.environ["mcts_debug"] == "True":
             print(
                 "[INFO] performed EXPAND, selected action: {}".format(
                     (selected_expression, selected_action)
@@ -292,20 +338,30 @@ class MCTS:
         while node is not None:
             node.num_visit += 1
             node.reward += reward
-            if os.environ['mcts_debug'] == "True":
+            if os.environ["mcts_debug"] == "True":
                 print(
                     "[INFO] current iterated node: num_visit {}, reward {}".format(
                         node.num_visit, node.reward
                     )
                 )
             node = node.parent
+    
+    def get_current_query_plan(self):
+        send_message = dict()
+        send_message["mctsAction"] = "getQueryPlan"
+        send_message["optimizationIsFinished"] = False
+        send_message_by_socket(send_message, self.client_socket)
+        received_message = receive_message_by_socket(self.client_socket)
+        current_query_plan = received_message['queryPlan']
+        
+        return current_query_plan
 
 
 def send_message_by_socket(message, client_socket):
     client_socket.sendall(json.dumps(message).encode("utf-8"))
     # wait for ackonowledgment
     ack = client_socket.recv(1024)
-    if os.environ['mcts_debug'] == "True":
+    if os.environ["mcts_debug"] == "True":
         print("[DEBUG] Sent message: ", message)
 
 
@@ -328,7 +384,7 @@ if __name__ == "__main__":
     client_socket, client_address = server_socket.accept()
 
     print(f"Connected to C++ client: {client_address}")
-    os.environ['mcts_debug'] = "True"
+    os.environ["mcts_debug"] = "True"
     optimization_is_finished = False
     while not optimization_is_finished:
         # Receive message
@@ -336,7 +392,7 @@ if __name__ == "__main__":
         # Do something
         send_message = dict()
         mctsAction = received_json_message["mctsAction"]
-        if os.environ['mcts_debug'] == "True":
+        if os.environ["mcts_debug"] == "True":
             print("[DEBUG]: ", mctsAction)
         if mctsAction == "start":
             initQueryPlan = received_json_message["queryPlan"]
@@ -345,11 +401,13 @@ if __name__ == "__main__":
             )
             mcts = MCTS(
                 client_socket=client_socket,
-                max_iteration_num=3,
+                max_iteration_num=6,
                 max_sim_iteration_num=1,
                 # reward_mode="online", # FIXME online mode is not working yet
                 reward_mode="offline",
             )
+            mcts.train(rootNode)
+            print("[DEBUG] num_visit: " , rootNode.num_visit)
             mcts.search(rootNode)
             optimization_is_finished = True
             send_message = {"optimizationIsFinished": True, "mctsAction": "finished"}
