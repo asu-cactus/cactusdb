@@ -56,6 +56,13 @@ class ValueVector {
     if (size > block_size) { block_size = size;}
     size_ += size;
   }
+
+  void insertIntermediateValue(float* newValues, vector_size_t offset, vector_size_t size) {
+    float* slicedValues = new float[size];
+    std::copy(newValues + offset, newValues + offset + size, slicedValues);
+    intermediateValue = slicedValues;
+    size_ = size;
+  }
   // void extractValues (FlatVector<float>& values, vector_size_t offset) {
   //   vector_size_t index = offset;
   //   for (vector_size_t i = 0; i < size_; ++i) {
@@ -66,6 +73,16 @@ class ValueVector {
         values.set(index, storedValue[index]);
     }
 
+    void concatValues (FlatVector<double>& values, vector_size_t offset) {
+      for (auto entry: insertedValue) {
+        int indexs = entry.first;
+        auto sizes = insertedSize[indexs];
+        for (int i = 0; i< sizes; i++){
+          values.set(offset + indexs * block_size + i, entry.second[i]);
+        }
+      }
+    }
+
     void concatValues (FlatVector<float>& values, vector_size_t offset) {
       for (auto entry: insertedValue) {
         int indexs = entry.first;
@@ -74,6 +91,24 @@ class ValueVector {
           values.set(offset + indexs * block_size + i, entry.second[i]);
         }
       }
+    }
+
+    void extractInterValue(FlatVector<double>& values, vector_size_t offset) {
+      for (int i = 0; i< size_; i++) {
+        values.set(offset + i,intermediateValue[i]);
+      }
+      
+    }
+
+    void extractInterValue(FlatVector<float>& values, vector_size_t offset) {
+      for (int i = 0; i< size_; i++) {
+        values.set(offset + i,intermediateValue[i]);
+      }
+      
+    }
+
+    bool isIntermediate() {
+      return intermediateValue != nullptr;
     }
 
   void free() {
@@ -99,6 +134,7 @@ class ValueVector {
   std::map<int, float*> insertedValue;
   std::map<int, vector_size_t> insertedSize;
   vector_size_t block_size{0};
+  float* intermediateValue;
   // Last nulls word. 'size_ % 64' is the null bit for the next element.
 
 };

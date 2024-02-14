@@ -139,6 +139,7 @@ public:
 																	"", // extra filter
 																	{"v_row", "w_col", "v", "w"})
 																.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+																.localPartition({})
 																.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
 																.project({exprStr});
 												// Delete old nodeId-fileAddress map
@@ -194,6 +195,8 @@ public:
 											std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
 										);
 										// Add UDF associate information (UDF with input values) to cataLog
+										// Should blocking source here
+										// catalog source will invoke a intern function to blocking itself, then return schema and address in here
 										cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
 
 									}
@@ -271,7 +274,7 @@ public:
 	*/
 	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog &cataLog) override {
 		try {
-			bool checkSuccess = true;
+			bool checkApplied = true;
 			if (!rootNode) {
 
 				throw std::invalid_argument("rootNode is null");
@@ -350,10 +353,10 @@ public:
 			}
 
 			for (const auto &source : sources) {
-				checkSuccess &= check(source, targetActions, cataLog);
+				checkApplied &= check(source, targetActions, cataLog);
 			}
 
-			return checkSuccess; 
+			return checkApplied; 
 
 		} catch (const std::exception &e) {
 
