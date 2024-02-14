@@ -216,6 +216,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
            {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
 
+
       // Add hivesplits to the target plan node (data source node).
       std::chrono::steady_clock::time_point begin =
           std::chrono::steady_clock::now();
@@ -814,8 +815,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         // the p0 will be increased after capturePlanNodeId is called
         // so it is required to clean the old IdAddressMap and VectorIdMap
         // before reset the myPlan
-        cataLog.deleteIdAddressMap(p0);
-        cataLog.deleteVectorIdMap("v");
+        cataLog.clearIdAddressMap();
+        cataLog.clearVectorIdMap();
         myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                      .tableScan(asRowType(inputRowVector->type()))
                      .capturePlanNodeId(p0)

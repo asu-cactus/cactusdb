@@ -111,6 +111,11 @@ class CataLog {
         void deleteIdAddressMap(core::PlanNodeId p) {
             idFileAddrMap.erase(p);
         }
+        
+        // Clear file address map entry for a given PlanNodeId
+        void clearIdAddressMap() {
+            idFileAddrMap.clear();
+        }
 
         // Get the entire file address map for PlanNodeId
         std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> getIdAddressMap() {
@@ -125,6 +130,11 @@ class CataLog {
         // Delete mapping from vector values to PlanNodeId
         void deleteVectorIdMap(std::string values) {
             vectorIdMap.erase(values);
+        }
+
+        // Clear mapping from vector values to PlanNodeId
+        void clearVectorIdMap() {
+            vectorIdMap.clear();
         }
 
         // Get PlanNodeId based on vector values
