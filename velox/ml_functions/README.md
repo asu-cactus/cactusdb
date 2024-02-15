@@ -35,7 +35,7 @@ make install
 
 ```shell
 cd velox
-./scripts/setup-ubuntu.sh
+sudo ./scripts/setup-ubuntu.sh
 export CMAKE_PREFIX_PATH=$CONDA_PREFIX
 make release
 ```
