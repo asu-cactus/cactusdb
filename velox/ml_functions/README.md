@@ -1,4 +1,4 @@
-#Installation
+# Installation
 
 ## xgboost C APIs
 
@@ -37,6 +37,7 @@ make install
 cd velox
 ./scripts/setup-ubuntu.sh
 export CMAKE_PREFIX_PATH=$CONDA_PREFIX
+make release
 ```
 
 ## libtorch 
