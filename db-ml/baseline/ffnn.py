@@ -104,7 +104,7 @@ class FFNNPyTorch(nn.Module):
             )
         self.linears = nn.ModuleList(self.linears)
         self.relu = nn.ReLU()
-        self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(1)
 
     def forward(self, x):
         for i, l in enumerate(self.linears):
