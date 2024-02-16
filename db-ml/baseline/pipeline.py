@@ -10,8 +10,10 @@ from abc import ABC, abstractmethod
 from models.preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
 from models.dssm import DSSM_Torch, DSSM_TF, get_var_feature, get_test_var_feature
 from sklearn.preprocessing import LabelEncoder
-from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tqdm.auto import tqdm
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, pandas_udf
+from pyspark.sql.types import ArrayType, FloatType
 
 
 class Pipeline(object):
@@ -43,6 +45,11 @@ class Pipeline(object):
     @abstractmethod
     def run_customized_pipeline(self):
         raise NotImplementedError("Not implemented")
+    
+    @abstractmethod
+    def clean_up(self, data):
+        pass
+
 
     def run_pipeline(self):
         self.loading_meta_impl()
@@ -57,8 +64,9 @@ class Pipeline(object):
         t_model_inference = 0
 
         data = None
-        timer_end_end.tic()
+
         for _ in tqdm(range(self.num_loop)):
+            timer_end_end.tic()
             timer_data_loading.tic()
             data = self.data_loading_impl()
             t_data_loading += timer_data_loading.toc()
@@ -71,10 +79,13 @@ class Pipeline(object):
             data = self.model_inference_impl(data)
             t_model_inference += timer_model_inference.toc()
 
-        t_end_end += timer_end_end.toc() / self.num_loop
+            t_end_end += timer_end_end.toc() 
+            self.clean_up(data)
+
         t_data_loading /= self.num_loop
         t_data_processing /= self.num_loop
         t_model_inference /= self.num_loop
+        t_end_end /= self.num_loop
 
         result_df = pd.DataFrame(
             {
@@ -459,12 +470,12 @@ class FFNNPipelineEvaDB(Pipeline):
 
             t_data_processing += result_df["t_process"].values[-1]
             t_model_inference += result_df["t_model_inference"].values[-1]
-        t_data_loading = t_end_end - t_data_processing - t_model_inference
 
         t_end_end += timer_end_end.toc() / self.num_loop
-        t_data_loading /= self.num_loop
         t_data_processing /= self.num_loop
         t_model_inference /= self.num_loop
+        t_data_loading = t_end_end - t_data_processing - t_model_inference
+        # t_data_loading /= self.num_loop
 
         result_df = pd.DataFrame(
             {
@@ -712,3 +723,86 @@ class FFNNPipelinePyTorch(Pipeline):
     def model_inference_impl(self, data):
         data = self.model(data)
         return data
+
+
+# @pandas_udf(FloatType())
+@pandas_udf(ArrayType(FloatType()))
+def predict_batch_udf(features: pd.Series) -> pd.Series:
+    features = np.ravel(features.to_numpy())
+    features = [arr for arr in features]
+    features = np.array(features).astype(np.float32)
+    features = torch.Tensor(features)
+    list_hidden_layer_sizes = np.load("evadb_ffnn_reg.npy")
+    model = ffnn.FFNNPyTorch(list_hidden_layer_sizes)
+    result = model(features)
+    # result = np.argmax(result.detach().numpy(), axis=1)
+    result = result.detach().numpy()
+    result = [result[i, :] for i in range(result.shape[0])]
+    return pd.Series(result)
+
+
+class FFNNPipelineSparkSQL(Pipeline):
+    def __init__(
+        self,
+        list_hidden_layer_sizes,
+        num_sample=500,
+        num_total_record=10000,
+        num_loop=10,
+    ):
+        super(FFNNPipelineSparkSQL, self).__init__(
+            "ffnn-sparksql", num_sample=num_sample, num_loop=num_loop
+        )
+        np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.jars.packages", "org.postgresql:postgresql:42.7.1")
+            .getOrCreate()
+        )
+        self.num_total_record = num_total_record
+        self.postgres_conn = utils.get_postgres_connection_config()
+        self.jdbc_url = utils.get_jdbc_postgres_connection_config()
+        self.connection_properties = utils.get_sparksql_postgres_connection_properties()
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self):
+        sampledIndex = np.random.randint(1, self.num_total_record, self.num_sample)
+        query_df = pd.DataFrame({"q_index": sampledIndex})
+        query_df.to_sql(
+            "ffnn_q_temp", self.postgres_conn, index=False, if_exists="replace"
+        )
+
+        # df_q = self.spark.read.jdbc(
+        #     url=self.jdbc_url, table="ffnn_q_temp", properties=self.connection_properties
+        # )
+        # df_ffnn = self.spark.read.jdbc(
+        #     url=self.jdbc_url, table="ffnn_data", properties=self.connection_properties
+        # )
+        # joined_df = df_q.join(df_ffnn, df_q['q_index'] == df_ffnn['index'], 'inner')
+
+        join_query = """
+            select * from ffnn_data,ffnn_q_temp where ffnn_data.index=ffnn_q_temp.q_index
+        """
+        joined_df = self.spark.read.jdbc(
+            url=self.jdbc_url,
+            table="({0}) AS temp".format(join_query),
+            properties=self.connection_properties,
+        )
+        # joined_df.collect()
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        result_df = data.select(predict_batch_udf(col("val")).alias("prediction"))
+        # result_df.count()
+        # result_df.cache().count()
+        # result_df.rdd.count()
+        result_df.collect()
+        # print("count:", result_df.count())
+        # print(result_df.show())
+        return result_df
+
+
