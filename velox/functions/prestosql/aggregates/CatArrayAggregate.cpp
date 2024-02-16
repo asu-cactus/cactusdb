@@ -51,26 +51,10 @@ class CatArrayAggregate : public exec::Aggregate {
       override {
     auto vector = (*result)->as<ArrayVector>();
     VELOX_CHECK(vector);
-    // vector->resize(numGroups);
+    vector->resize(numGroups);
     auto originElements = vector->elements();
-    FlatVector<double>* elementsDouble = nullptr;
-    FlatVector<float>* elementsFloat = nullptr;
-
-    if (auto doubleElements = originElements->as<FlatVector<double>>()) {
-        elementsDouble = doubleElements;
-    } else if (auto floatElements = originElements->as<FlatVector<float>>()) {
-        elementsFloat = floatElements;
-    } else {
-        
-    }
-
-    if (elementsDouble) {
-        elementsDouble->resize(countElements(groups, numGroups)); // Resize elements if it's not nullptr
-    } else if (elementsFloat) {
-        elementsFloat->resize(countElements(groups, numGroups)); // Resize elements if it's not nullptr
-    } else {
-        
-    }
+    auto elementsFloat = originElements->as<FlatVector<float>>();
+    elementsFloat->resize(countElements(groups, numGroups));
 
     uint64_t* rawNulls = getRawNulls(vector);
     vector_size_t offset = 0;
@@ -84,15 +68,7 @@ class CatArrayAggregate : public exec::Aggregate {
         // for (auto index = 0; index < arraySize; ++index) {
         //   reader.next(*elements, offset + index);
         // }
-        if (elementsDouble) {
-          values.concatValues(*elementsDouble, offset);
-        }
-        else if (elementsFloat) {
-          values.concatValues(*elementsFloat, offset);
-        }
-        else {
-          
-        }
+        values.concatValues(*elementsFloat, offset);
         // values.concatValues(*elements, offset);
         vector->setOffsetAndSize(i, offset, arraySize);
         offset += arraySize;
@@ -150,26 +126,10 @@ class CatArrayAggregate : public exec::Aggregate {
     // extractValues(groups, numGroups, result);
     auto vector = (*result)->as<ArrayVector>();
     VELOX_CHECK(vector);
-    // vector->resize(numGroups);
+    vector->resize(numGroups);
     auto originElements = vector->elements();
-    FlatVector<double>* elementsDouble = nullptr;
-    FlatVector<float>* elementsFloat = nullptr;
-
-    if (auto doubleElements = originElements->as<FlatVector<double>>()) {
-        elementsDouble = doubleElements;
-    } else if (auto floatElements = originElements->as<FlatVector<float>>()) {
-        elementsFloat = floatElements;
-    } else {
-        
-    }
-
-    if (elementsDouble) {
-        elementsDouble->resize(countElements(groups, numGroups)); // Resize elements if it's not nullptr
-    } else if (elementsFloat) {
-        elementsFloat->resize(countElements(groups, numGroups)); // Resize elements if it's not nullptr
-    } else {
-        
-    }
+    auto elementsFloat = originElements->as<FlatVector<float>>();
+    elementsFloat->resize(countElements(groups, numGroups));
 
     uint64_t* rawNulls = getRawNulls(vector);
     vector_size_t offset = 0;
@@ -183,24 +143,11 @@ class CatArrayAggregate : public exec::Aggregate {
         // for (auto index = 0; index < arraySize; ++index) {
         //   reader.next(*elements, offset + index);
         // }
-        if (elementsDouble) {
-          if (values.isIntermediate()) {
-            values.extractInterValue(*elementsDouble, offset);
-          }
-          else {
-            values.concatValues(*elementsDouble, offset);
-          }
-        }
-        else if (elementsFloat) {
-          if (values.isIntermediate()) {
-            values.extractInterValue(*elementsFloat, offset);
-          }
-          else {
-            values.concatValues(*elementsDouble, offset);
-          }
+        if (values.isIntermediate()) {
+          values.concatValues(*elementsFloat, offset);
         }
         else {
-          
+        values.extractInterValue(*elementsFloat, offset);
         }
         // values.concatValues(*elements, offset);
         vector->setOffsetAndSize(i, offset, arraySize);
@@ -358,7 +305,7 @@ bool registerCatArray(const std::string& name) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures{
       exec::AggregateFunctionSignatureBuilder()
           .returnType("array(REAL)")
-          .intermediateType("array(double)")
+          .intermediateType("array(REAL)")
           .argumentType("array(REAL)")
           .argumentType("REAL")
           .build()};
