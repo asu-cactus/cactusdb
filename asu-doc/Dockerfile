@@ -40,9 +40,10 @@ RUN apt-get install -y libjsoncpp-dev
 RUN apt-get install -y libxsimd-dev
 RUN apt-get install -y curl
 RUN apt-get install -y zip
+RUN apt-get install -y default-jre 
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
 RUN ln -s /usr/bin/python3 /usr/bin/python
-# install github option (optional)
+# install github cli (optional)
 # RUN type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
 # RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
 #     && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -88,7 +89,16 @@ RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
     && cmake ${CMAKE_FLAGS}  .. \
     && make install -j 16
 
+# set up spark
+WORKDIR /home
+RUN wget https://dlcdn.apache.org/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz
+RUN tar -xvzf spark-3.5.0-bin-hadoop3.tgz
+ENV SPARK_HOME=/home/spark-3.5.0-bin-hadoop3
+ENV PATH=$PATH:$SPARK_HOME/bin
+RUN pip install pyspark
+
 # set up velox
+WORKDIR /home
 RUN git clone https://github.com/facebookincubator/velox.git
 WORKDIR /home/velox
 
