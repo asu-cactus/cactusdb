@@ -25,7 +25,7 @@
 #include <memory>
 #include <random>
 #include <string>
-
+// #include <cstdarg>
 // Velox headers
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
@@ -119,29 +119,70 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::make_shared<core::QueryCtx>(executor_.get())};
     // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
-        {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000000000000"},// 100000000000000000
+        {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},// 100000000000000000
           {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
     // Create task for logical plan.
-    auto task = exec::Task::create(
-        "0",
-        myPlan.planFragment(),
-        0,
-        queryCtx_,
-        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          if (result) {
-            std::cout << "=============================\n";
-            std::cout << result->toString() << " size: " << result->size() << std::endl;
-            std::cout << result->toString(0, result->size()) << std::endl;
-          }
-          return exec::BlockingReason::kNotBlocked;
-        });
-    // Get optimized idFileAddr map from cataLog
+    // auto task = exec::Task::create(
+    //     "0",
+    //     myPlan.planFragment(),
+    //     0,
+    //     queryCtx_,
+    //     [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+    //       if (result) {
+    //         std::cout << "=============================\n";
+    //         std::cout << result->toString() << " size: " << result->size() << std::endl;
+    //         std::cout << result->toString(0, result->size()) << std::endl;
+    //       }
+    //       return exec::BlockingReason::kNotBlocked;
+    //     });
+    // // Get optimized idFileAddr map from cataLog
+    // auto idFileAddrMap = cataLog.getIdAddressMap();
+
+    // std::vector<core::PlanNodeId> ids;
+
+    // std::cout << "Hive splits:" << std::endl;
+    // // Create hivesplits for each entry in idFileAddr map, add splits to task
+    // for (const auto& entry : idFileAddrMap) {
+
+    //   core::PlanNodeId key = entry.first;
+
+    //   const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+
+    //   auto hiveSplits = makeHiveConnectorSplits(fileAddr);
+
+    //   for (auto& split : hiveSplits) {
+
+    //     task->addSplit(key, exec::Split(std::move(split)));
+    //   }
+
+    //   ids.push_back(key);
+    // }
+
+    // Add hivesplits to the target plan node (data source node).
+    std::chrono::steady_clock::time_point begin =
+        std::chrono::steady_clock::now();
+
+
+    // Start the task by setting the number of drivers.
+    // task->start(numThreads);
+    // // Wait for no more splits.
+    // for (auto id: ids){
+
+    //   task->noMoreSplits(id);
+    // }
+
+    // // Wait for all drivers to finish.
+    // waitForFinishedDrivers(task);
+
+    CursorParameters params;
+    params.maxDrivers = numThreads;
+    params.planNode = myPlan.planNode();
+    params.queryCtx = queryCtx_;
+    bool noMoreSplits = false;
+    auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
     auto idFileAddrMap = cataLog.getIdAddressMap();
-
     std::vector<core::PlanNodeId> ids;
-
-    std::cout << "Hive splits:" << std::endl;
-    // Create hivesplits for each entry in idFileAddr map, add splits to task
+      if (!noMoreSplits) {
     for (const auto& entry : idFileAddrMap) {
 
       core::PlanNodeId key = entry.first;
@@ -153,26 +194,23 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       for (auto& split : hiveSplits) {
 
         task->addSplit(key, exec::Split(std::move(split)));
+
       }
 
       ids.push_back(key);
     }
 
-    // Add hivesplits to the target plan node (data source node).
-    std::chrono::steady_clock::time_point begin =
-        std::chrono::steady_clock::now();
-
-
-    // Start the task by setting the number of drivers.
-    task->start(numThreads);
-    // Wait for no more splits.
     for (auto id: ids){
-
       task->noMoreSplits(id);
     }
+      }
+      noMoreSplits = true;
+    };
 
-    // Wait for all drivers to finish.
-    waitForFinishedDrivers(task);
+    auto [cursor, actualResults] = readCursor(params, addSplits);
+    waitForTaskCompletion(cursor->task().get());
+
+
 
     std::chrono::steady_clock::time_point end =
         std::chrono::steady_clock::now();
@@ -180,6 +218,12 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     std::stringstream ss;
 
     ss << numSplits << "," << numThreads << ",";
+
+    int dataIdx = 0;
+    for (auto batchedData : actualResults) {
+      std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
+      dataIdx += 1;
+    }
 
     std::cout << "Time for FFNN with Input Data (sec): "
               << std::endl;
@@ -401,8 +445,10 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   */
   void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 100000;//597540
-    int num_samples = 2000;
+    int input_features_size = 500;//597540
+    int num_samples = 500;
+    // int input_features_size = featureSize;
+    // int num_samples = sampleSize;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
     // Set splits number
@@ -410,7 +456,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     // Initialize CataLog
     CataLog cataLog;
     
-    cataLog.setDefaultBlocksSize(128);
+    cataLog.setDefaultBlocksSize(256);
     cataLog.setBlockingThreshold(1);
     // Generate data source
     auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
@@ -507,11 +553,11 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
               {"v_row", "v", "w", "w_row", "w_col"}
             )
             .project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
-            // .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-            // // .localPartition({})
-            // .intermediateAggregation()
-            // .finalAggregation()
-            .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+            .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+            .localPartition({})
+            .intermediateAggregation()
+            .finalAggregation()
+            // .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
             .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
             .planBuild();
     cataLog.setIdAddressMap(p1, {file});
@@ -549,12 +595,16 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
 
+  // int number1 = std::atoi(argv[1]);//feature size
+  // int number2 = std::atoi(argv[2]);//sample size
+
   Mul2JoinAggRewriteActionTest demo;
 
   bool rewrite = true;
 
   if (argc > 1) {
-    if (strcmp(argv[1], "N") == 0) {
+    // if (strcmp(argv[1], "N") == 0) {
+      if (strcmp(argv[3], "N") == 0) {
       rewrite = false;
     }
   }

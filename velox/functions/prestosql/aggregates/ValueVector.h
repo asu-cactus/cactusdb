@@ -58,10 +58,24 @@ class ValueVector {
   }
 
   void insertIntermediateValue(float* newValues, vector_size_t offset, vector_size_t size) {
-    float* slicedValues = new float[size];
-    std::copy(newValues + offset, newValues + offset + size, slicedValues);
-    intermediateValue = slicedValues;
-    size_ = size;
+    if (intermediateValue == nullptr){
+      intermediateValue = new float[size];
+      for (vector_size_t i = 0; i < size; ++i) {
+        intermediateValue[i] = newValues[offset + i]; // Copy the elements from newValues
+      }
+      size_ = size; 
+    }
+    else {
+      float* current_ptr = newValues + offset;
+      for (vector_size_t i = 0; i < size; ++i) {
+        intermediateValue[i] = intermediateValue[i] + current_ptr[i];
+      }
+    }
+
+    // float* slicedValues = new float[size];
+    // std::copy(newValues + offset, newValues + offset + size, slicedValues);
+    // intermediateValue = slicedValues;
+    // size_ = size;
   }
   // void extractValues (FlatVector<float>& values, vector_size_t offset) {
   //   vector_size_t index = offset;
@@ -73,37 +87,36 @@ class ValueVector {
         values.set(index, storedValue[index]);
     }
 
-    void concatValues (FlatVector<double>& values, vector_size_t offset) {
-      for (auto entry: insertedValue) {
-        int indexs = entry.first;
-        auto sizes = insertedSize[indexs];
-        for (int i = 0; i< sizes; i++){
-          values.set(offset + indexs * block_size + i, entry.second[i]);
-        }
-      }
-    }
-
     void concatValues (FlatVector<float>& values, vector_size_t offset) {
-      for (auto entry: insertedValue) {
-        int indexs = entry.first;
-        auto sizes = insertedSize[indexs];
-        for (int i = 0; i< sizes; i++){
-          values.set(offset + indexs * block_size + i, entry.second[i]);
-        }
+      for (vector_size_t i = 0; i < size_; ++i) {
+        values.set(offset + i, intermediateValue[i]);
       }
+
+      // for (auto entry: insertedValue) {
+      //   int indexs = entry.first;
+      //   auto sizes = insertedSize[indexs];
+      //   for (int i = 0; i< sizes; i++){
+      //     values.set(offset + indexs * block_size + i, entry.second[i]);
+      //   }
+      // }
     }
 
-    void extractInterValue(FlatVector<double>& values, vector_size_t offset) {
-      for (int i = 0; i< size_; i++) {
-        values.set(offset + i,intermediateValue[i]);
-      }
-      
-    }
 
     void extractInterValue(FlatVector<float>& values, vector_size_t offset) {
-      for (int i = 0; i< size_; i++) {
-        values.set(offset + i,intermediateValue[i]);
+      float* floatArray = new float[size_]();
+      for (auto entry: insertedValue) {
+        int indexs = entry.first;
+        auto sizes = insertedSize[indexs];
+        auto valuesBlock = entry.second;
+        for (int i = 0; i < sizes; i++) {
+          floatArray[indexs * block_size + i] += valuesBlock[i];
+        }
       }
+
+      for (int j = 0; j < size_; j++) {
+        values.set(offset + j, floatArray[j]);
+      }
+
       
     }
 
@@ -129,12 +142,12 @@ class ValueVector {
 
 
   // Number of values added, including nulls.
-  uint32_t size_{0};
+  int32_t size_{0};
   float* storedValue = nullptr;
   std::map<int, float*> insertedValue;
   std::map<int, vector_size_t> insertedSize;
   vector_size_t block_size{0};
-  float* intermediateValue;
+  float* intermediateValue = nullptr;
   // Last nulls word. 'size_ % 64' is the null bit for the next element.
 
 };
