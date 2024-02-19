@@ -45,11 +45,10 @@ class Pipeline(object):
     @abstractmethod
     def run_customized_pipeline(self):
         raise NotImplementedError("Not implemented")
-    
+
     @abstractmethod
     def clean_up(self, data):
         pass
-
 
     def run_pipeline(self):
         self.loading_meta_impl()
@@ -79,7 +78,7 @@ class Pipeline(object):
             data = self.model_inference_impl(data)
             t_model_inference += timer_model_inference.toc()
 
-            t_end_end += timer_end_end.toc() 
+            t_end_end += timer_end_end.toc()
             self.clean_up(data)
 
         t_data_loading /= self.num_loop
@@ -398,6 +397,7 @@ class FFNNPipelineEvaDB(Pipeline):
         num_sample=500,
         num_total_record=10000,
         num_loop=10,
+        ffnn_table_name="ffnn_data",
     ):
         super(FFNNPipelineEvaDB, self).__init__(
             "ffnn-evadb", num_sample=num_sample, num_loop=num_loop
@@ -405,6 +405,7 @@ class FFNNPipelineEvaDB(Pipeline):
         self.num_total_record = num_total_record
         self.postgres_conn = utils.get_postgres_connection_config()
         self.cursor = evadb.connect().cursor()
+        self.ffnn_table_name = ffnn_table_name
         # deregister function
         self.cursor.query("DROP FUNCTION IF EXISTS FFNN_EVADB;").df()
         # there is a bug that evadb cannot pass the argument when registering the function
@@ -463,9 +464,11 @@ class FFNNPipelineEvaDB(Pipeline):
             result_df = self.cursor.query(
                 """
             SELECT FFNN_EVADB(val)
-            FROM postgres_data.ffnn_data fd JOIN postgres_data.ffnn_q_temp fqt
+            FROM postgres_data.{} fd JOIN postgres_data.ffnn_q_temp fqt
             ON fd.index=fqt.q_index;
-            """
+            """.format(
+                    self.ffnn_table_name
+                )
             ).df()
 
             t_data_processing += result_df["t_process"].values[-1]
@@ -646,6 +649,7 @@ class FFNNPipelineTF(Pipeline):
         num_sample=500,
         num_total_record=10000,
         num_loop=10,
+        ffnn_table_name="ffnn_data",
     ):
         super(FFNNPipelineTF, self).__init__(
             "ffnn-tensorflow", num_sample=num_sample, num_loop=num_loop
@@ -653,14 +657,17 @@ class FFNNPipelineTF(Pipeline):
         self.model = ffnn.FFNNTensorFlow(list_hidden_layer_sizes)
         self.num_total_record = num_total_record
         self.postgres_conn = utils.get_postgres_connection_config()
+        self.ffnn_table_name = ffnn_table_name
 
     def loading_meta_impl(self):
         pass
 
     def data_loading_impl(self):
         sql_ffnn_query = """
-        select * from ffnn_data,ffnn_q_temp where ffnn_data.index=ffnn_q_temp.q_index;
-        """
+        select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index;
+        """.format(
+            ffnn_table_name=self.ffnn_table_name
+        )
         sampledIndex = np.random.randint(1, self.num_total_record, self.num_sample)
         query_df = pd.DataFrame({"q_index": sampledIndex})
         query_df.to_sql(
@@ -670,9 +677,7 @@ class FFNNPipelineTF(Pipeline):
         return data
 
     def data_processing_impl(self, data):
-        features = np.ravel(data["val"].to_numpy())
-        features = [arr for arr in features]
-        features = np.array(features).astype(np.float32)
+        features = np.stack(data["val"].apply(np.array)).astype(np.float32)
         data = features
         return data
 
@@ -688,6 +693,7 @@ class FFNNPipelinePyTorch(Pipeline):
         num_sample=500,
         num_total_record=10000,
         num_loop=10,
+        ffnn_table_name="ffnn_data",
     ):
         super(FFNNPipelinePyTorch, self).__init__(
             "ffnn-torch", num_sample=num_sample, num_loop=num_loop
@@ -696,14 +702,17 @@ class FFNNPipelinePyTorch(Pipeline):
         self.model.eval()
         self.num_total_record = num_total_record
         self.postgres_conn = utils.get_postgres_connection_config()
+        self.ffnn_table_name = ffnn_table_name
 
     def loading_meta_impl(self):
         pass
 
     def data_loading_impl(self):
         sql_ffnn_query = """
-        select * from ffnn_data,ffnn_q_temp where ffnn_data.index=ffnn_q_temp.q_index;
-        """
+        select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index;
+        """.format(
+            ffnn_table_name=self.ffnn_table_name
+        )
         sampledIndex = np.random.randint(1, self.num_total_record, self.num_sample)
         query_df = pd.DataFrame({"q_index": sampledIndex})
         query_df.to_sql(
@@ -713,9 +722,7 @@ class FFNNPipelinePyTorch(Pipeline):
         return data
 
     def data_processing_impl(self, data):
-        features = np.ravel(data["val"].to_numpy())
-        features = [arr for arr in features]
-        features = np.array(features).astype(np.float32)
+        features = np.stack(data["val"].apply(np.array)).astype(np.float32)
         data = features
         data = torch.from_numpy(data)
         return data
@@ -728,9 +735,7 @@ class FFNNPipelinePyTorch(Pipeline):
 # @pandas_udf(FloatType())
 @pandas_udf(ArrayType(FloatType()))
 def predict_batch_udf(features: pd.Series) -> pd.Series:
-    features = np.ravel(features.to_numpy())
-    features = [arr for arr in features]
-    features = np.array(features).astype(np.float32)
+    features = np.stack(features.apply(np.array)).astype(np.float32)
     features = torch.Tensor(features)
     list_hidden_layer_sizes = np.load("evadb_ffnn_reg.npy")
     model = ffnn.FFNNPyTorch(list_hidden_layer_sizes)
@@ -748,6 +753,7 @@ class FFNNPipelineSparkSQL(Pipeline):
         num_sample=500,
         num_total_record=10000,
         num_loop=10,
+        ffnn_table_name="ffnn_data",
     ):
         super(FFNNPipelineSparkSQL, self).__init__(
             "ffnn-sparksql", num_sample=num_sample, num_loop=num_loop
@@ -762,6 +768,7 @@ class FFNNPipelineSparkSQL(Pipeline):
         self.postgres_conn = utils.get_postgres_connection_config()
         self.jdbc_url = utils.get_jdbc_postgres_connection_config()
         self.connection_properties = utils.get_sparksql_postgres_connection_properties()
+        self.ffnn_table_name = ffnn_table_name
 
     def loading_meta_impl(self):
         pass
@@ -782,8 +789,10 @@ class FFNNPipelineSparkSQL(Pipeline):
         # joined_df = df_q.join(df_ffnn, df_q['q_index'] == df_ffnn['index'], 'inner')
 
         join_query = """
-            select * from ffnn_data,ffnn_q_temp where ffnn_data.index=ffnn_q_temp.q_index
-        """
+            select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index
+        """.format(
+            ffnn_table_name=self.ffnn_table_name
+        )
         joined_df = self.spark.read.jdbc(
             url=self.jdbc_url,
             table="({0}) AS temp".format(join_query),
@@ -804,5 +813,3 @@ class FFNNPipelineSparkSQL(Pipeline):
         # print("count:", result_df.count())
         # print(result_df.show())
         return result_df
-
-

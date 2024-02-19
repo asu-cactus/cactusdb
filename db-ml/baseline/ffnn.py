@@ -72,8 +72,7 @@ class FFNN_EVADB(AbstractFunction):
         outcome = []
         self.timer_process.tic()
         data = np.ravel(data.to_numpy())
-        list_data = [arr for arr in data]
-        list_data = np.array(list_data).astype(np.float32)
+        list_data = np.stack(data).astype(np.float32)
         self.t_process += self.timer_process.toc()
         self.timer_model_inference.tic()
         predictions = self.model(torch.tensor(list_data))
