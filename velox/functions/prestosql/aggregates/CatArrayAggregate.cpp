@@ -68,7 +68,12 @@ class CatArrayAggregate : public exec::Aggregate {
         // for (auto index = 0; index < arraySize; ++index) {
         //   reader.next(*elements, offset + index);
         // }
-        values.concatValues(*elementsFloat, offset);
+        if (values.isIntermediate()) {
+          values.concatValues(*elementsFloat, offset);
+        }
+        else {
+        values.extractInterValue(*elementsFloat, offset);
+        }
         // values.concatValues(*elements, offset);
         vector->setOffsetAndSize(i, offset, arraySize);
         offset += arraySize;

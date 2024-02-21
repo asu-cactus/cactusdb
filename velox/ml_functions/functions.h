@@ -665,6 +665,92 @@ public:
         float** bias;
 };
 
+class TorchDNN_Multi : public MLFunction {
+public:
+    TorchDNN_Multi(std::vector<float*> weights, std::vector<float*> bias, std::vector<int> dimensions) {
+        this->weights = weights;
+        this->bias = bias;
+        dims = dimensions;
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        std::vector<torch::nn::Linear> dense_layers;
+        std::vector<torch::Tensor> weights_tensors;
+        std::vector<torch::Tensor> bias_tensors;
+        std::vector<torch::nn::ReLU> relus;
+
+        // Create layers
+        for (int i = 0; i < dims.size() - 1; ++i) {
+            dense_layers.push_back(torch::nn::Linear(dims[i], dims[i+1]));
+            weights_tensors.push_back(torch::from_blob(weights[i], {dims[i], dims[i+1]}).t());
+            bias_tensors.push_back(torch::from_blob(bias[i], {dims[i+1]}));
+            relus.push_back(torch::nn::ReLU());
+        }
+
+        // Set weights and biases
+        for (int i = 0; i < dense_layers.size(); ++i) {
+            dense_layers[i]->weight.set_data(weights_tensors[i]);
+            dense_layers[i]->bias.set_data(bias_tensors[i]);
+        }
+        
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        torch::Tensor input = torch::from_blob(input_values, {rows.size(), dims[0]});
+
+        torch::Tensor output_tensor = input;
+        for (int i = 0; i < dense_layers.size(); ++i) {
+            output_tensor = dense_layers[i]->forward(output_tensor);
+            output_tensor = relus[i]->forward(output_tensor);
+        }
+
+        // Softmax output
+        output_tensor = torch::nn::functional::softmax(output_tensor, 1);
+        float* data = output_tensor.data_ptr<float>();
+
+        // Prepare results
+        std::vector<std::vector<float>> results;
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
+            results.push_back(result);
+        }
+        
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+    
+    // Getter method for weights
+    const std::vector<float*>& getWeights() const {
+        return weights;
+    }
+
+    // Getter method for bias
+    const std::vector<float*>& getBias() const {
+        return bias;
+    }
+
+private:
+    std::vector<float*> weights;
+    std::vector<float*> bias;
+};
+
 class Convolute: public MLFunction {
 public:
     Convolute(float* weights, int* dims_) {
