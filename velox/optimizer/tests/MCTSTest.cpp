@@ -138,8 +138,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           std::make_shared<core::QueryCtx>(executor_.get())};
       // Set queryCtx config.
       queryCtx_->testingOverrideConfigUnsafe(
-          {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
-           {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
+          {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"},
+           {core::QueryConfig::kMaxOutputBatchRows, "1000000"}});
       // Create task for logical plan.
       auto task = exec::Task::create(
           "0",
@@ -213,8 +213,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           std::make_shared<core::QueryCtx>(executor_.get())};
       // Set queryCtx config.
       queryCtx_->testingOverrideConfigUnsafe(
-          {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
-           {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
+          {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"},
+           {core::QueryConfig::kMaxOutputBatchRows, "1000000"}});
 
 
       // Add hivesplits to the target plan node (data source node).
