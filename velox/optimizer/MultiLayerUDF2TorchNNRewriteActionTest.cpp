@@ -25,7 +25,7 @@
 #include <memory>
 #include <random>
 #include <string>
-// #include <cstdarg>
+
 // Velox headers
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
@@ -50,18 +50,19 @@
 
 // Custom headers
 #include "RewriteAction.h"
-#include "Mul2JoinAggRewriteAction.h"
+#include "MultiLayerUDF2TorchNNRewriteAction.h"
 #include "RuleManager.h"
 #include "PlanState.h"
+#include "CataLog.h"
 #include "Register.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
-class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
+class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
  public:
- Mul2JoinAggRewriteActionTest() {
+ MultiLayerUDF2TorchNNRewriteActionTest() {
     // Register Presto scalar functions.
     functions::prestosql::registerAllScalarFunctions();
 
@@ -78,7 +79,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     connector::registerConnector(hiveConnector);
   }
 
-  ~Mul2JoinAggRewriteActionTest() {
+  ~MultiLayerUDF2TorchNNRewriteActionTest() {
     TearDown();
   }
 
@@ -99,10 +100,11 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   /**
    * @brief A function to run logical plan.
    * 
+   * @param filePath The file path for the data source file to be split.
    * @param numThreads The number of Velox executor threads.
    * @param numSplits The number of file splits.
    * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param cataLog A class storing metadata and information related to UDFs and data sources.
+   * @param p0 The planNodeID for the plan node that needs to add file splits.
   */
   void runPlan(
       int numThreads,
@@ -119,8 +121,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::make_shared<core::QueryCtx>(executor_.get())};
     // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
-        {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},// 100000000000000000  1000000
-          {core::QueryConfig::kMaxOutputBatchRows, "1000"}});
+        {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},// 100000000000000000
+          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
     // Create task for logical plan.
     // auto task = exec::Task::create(
     //     "0",
@@ -253,11 +255,12 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
  * 
  * @return DataFrame The structure used to denote the generated data.
 */
-  DataFrame data_generate(
+  DataFrame data_generate_multi(
       int features, 
       int samples, 
       int first_layer, 
-      int second_layer){
+      int second_layer,
+      int third_layer){
     // Example:
     // ( 1000 * 597540 x 597540 * 1024 + 1000*1024) first layer, data x weights + bias.
     // ( 1000 * 1024 x 1024 * 14588 + 1000*14588) second layer, data x weights + bias.
@@ -266,14 +269,17 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     int first_layer_output_size = first_layer;
     int second_layer_output_size = second_layer;
+    int third_layer_output_size = third_layer;
 
     int input_total_size = input_features_size * num_samples;
 
     int weight_layer1_size = input_features_size * first_layer_output_size;
     int weight_layer2_size = first_layer_output_size * second_layer_output_size;
+    int weight_layer3_size = second_layer_output_size * third_layer_output_size;
 
     int bias_layer1_size = num_samples * first_layer_output_size;
     int bias_layer2_size = num_samples * second_layer_output_size;
+    int bias_layer3_size = num_samples * third_layer_output_size;
     // Seed the random number generator
     std::random_device rd;  
     // Initialize the Mersenne Twister engine
@@ -290,8 +296,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
           for (int j = 0; j < input_features_size; j++) {
 
-                  // featureVector.push_back(i*input_features_size+j);
-                  featureVector.push_back(distribution(gen));
+                  featureVector.push_back(i*input_features_size+j);
 
           }
 
@@ -317,41 +322,58 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     for (int i = 0; i < weight_layer1_size; ++i) {
 
-        weight_layer1[i] = 0.00001; 
-        // weight_layer1[i] = i;
+        weight_layer1[i] = 0.000001; 
 
     }
     float* weight_layer2 = new float[weight_layer2_size];
 
     for (int i = 0; i < weight_layer2_size; ++i) {
 
-        weight_layer2[i] = 0.00001; 
+        weight_layer2[i] = 0.000001; 
+
+    }
+
+    float* weight_layer3 = new float[weight_layer3_size];
+
+    for (int i = 0; i < weight_layer3_size; ++i) {
+
+        weight_layer3[i] = 0.000001; 
 
     }
 
     std::vector<float*> weights;
     weights.push_back(weight_layer1);
     weights.push_back(weight_layer2);
+    weights.push_back(weight_layer3);
 
     //Generate bias
     float* bias_layer1 = new float[bias_layer1_size];
 
     for (int i = 0; i < bias_layer1_size; ++i) {
 
-        bias_layer1[i] = 0; 
+        bias_layer1[i] = 0.00001; 
 
     }
     float* bias_layer2 = new float[bias_layer2_size];
 
     for (int i = 0; i < bias_layer2_size; ++i) {
 
-        bias_layer2[i] = 0; 
+        bias_layer2[i] = 0.00001; 
+
+    }
+
+    float* bias_layer3 = new float[bias_layer3_size];
+
+    for (int i = 0; i < bias_layer3_size; ++i) {
+
+        bias_layer3[i] = 0.00001; 
 
     }
 
     std::vector<float*> bias;
     bias.push_back(bias_layer1);
     bias.push_back(bias_layer2);
+    bias.push_back(bias_layer3);
 
     // Create DataFrame
     DataFrame data;
@@ -362,160 +384,45 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     return data;
   }
-  
+
   /**
-   * @brief Registers a series of vector functions in the optimization namespace.
-   * 
-   * @param units1 Number of units in the first layer.
-   * @param units2 Number of units in the second layer.
-   * @param input_size1 Size of the input for the first layer.
-   * @param input_size2 Size of the input for the second layer.
-   * @param weightsFile_1 Pointer to the weights for the first layer.
-   * @param weightsFile_2 Pointer to the weights for the second layer.
-   * @param biasFile_1 Pointer to the bias for the first layer.
-   * @param biasFile_2 Pointer to the bias for the second layer.
-   * @param catalog Reference to a CataLog object to store metadata and information.
-   * 
-   * @return A string representing the composed vector function expression.
-   */
-  std::string registerFunctions(int units1, int units2, int input_size1, int input_size2, float* weightsFile_1, float* weightsFile_2, float* biasFile_1, float* biasFile_2, CataLog &catalog) {
-    // Register matrix multiplication function for the first layer
-    optimization::registerVectorFunction(
-        "mat_mul0",
-        MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1),
-        {},
-        true,
-        catalog
-    );
-    // Register matrix addition function for the first layer
-    optimization::registerVectorFunction(
-        "mat_add0",
-        MatrixAddition::signatures(),
-        std::make_unique<MatrixAddition>(biasFile_1, units1),
-        {},
-        true,
-        catalog
-    );
-    // Register ReLU activation function for the first layer
-    optimization::registerVectorFunction(
-        "relu0",
-        Relu::signatures(),
-        std::make_unique<Relu>(),
-        {},
-        true,
-        catalog
-     );
-    // Register matrix multiplication function for the second layer
-    optimization::registerVectorFunction(
-        "mat_mul1",
-        MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(weightsFile_2, input_size2, units2),
-        {},
-        true,
-        catalog
-    );
-    // Register matrix addition function for the second layer
-    optimization::registerVectorFunction(
-        "mat_add1",
-        MatrixAddition::signatures(),
-        std::make_unique<MatrixAddition>(biasFile_2, units2),
-        {},
-        true,
-        catalog
-    );
-    // Register softmax activation function for the second layer
-    optimization::registerVectorFunction(
-        "softmax0",
-        Softmax::signatures(),
-        std::make_unique<Softmax>(),
-        {},
-        true,
-        catalog
-     );
-      // Compose and return the vector function expression
-     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
-    // return "mat_mul0({})";
-    // return "relu0(mat_add0(mat_mul0({})))";
-  }
-  /**
-   * @brief A test function to test the rewrite rule of Mul2JoinAggRewriteAction.
+   * @brief A test function to test the rewrite rule of TwoLayerUDF2TorchNN.
    * 
    * @param rewrite A boolean value indicating whether to perform a rewrite.
   */
-  void testMul2JoinAggPlan(bool rewrite) {
+  void testMultiLayerUDF2TorchNNPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 100000;//597540
-    int num_samples = 2000;
-    // int input_features_size = featureSize;
-    // int num_samples = sampleSize;
-    int first_layer_output_size = 1024;
-    int second_layer_output_size = 14588;
+    int layer_number = 3;
+    int input_features_size = 800;//597540
+    int num_samples = 1000;
+    int first_layer_output_size = 1000;
+    int second_layer_output_size = 1024;
+    int third_layer_output_size = 14588;
     // Set splits number
     int num_splits = 4;
-    // Initialize CataLog
     CataLog cataLog;
-    
-    cataLog.setDefaultBlocksSize(256);
-    cataLog.setBlockingThreshold(1);
     // Generate data source
-    auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
+    auto data = data_generate_multi(input_features_size, num_samples, first_layer_output_size, second_layer_output_size, third_layer_output_size);
     // Create arrayVector for data source
     auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
     // Create rowVector for data source
-    // auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-    
-    std::vector<float> indices(num_samples);
-    for (int i = 0; i < num_samples; ++i) {
-        indices[i] = static_cast<float>(i);
-    }
-
-    auto inputRowVector = maker.rowVector(
-          {"v", "v_row"},
-          {featureArrayVector,
-           maker.flatVector(indices)});
+    auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
     // Create file path
     auto file = TempFilePath::create();
     // Create file config
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
     // Write the data source to a file, with the format defined by the rowVector
     writeToFile(file->path, {inputRowVector}, config);
-    //  Check the input size against the blocking threshold in cataLog.
-    //  If yes, preblock the input vector, store it, and add information in cataLog.
-    //  If not, set dataSource in cataLog.
-    // if (input_features_size > cataLog.getBlockingThreshold()) {
-    //   // If input size is larger than blocking threshold, preblock and store in cataLog
-    //   std::vector<std::vector<float>> valuesBlock = optimization::create_input_block(input_features_size*num_samples, data.features, cataLog.getDefaultBlocksNum());
-    //   optimization::FileStructure values = optimization::block_to_files(valuesBlock, cataLog.getDefaultBlocksNum(), 0);
-    //   // Set data source blocks in cataLog
-    //   cataLog.setDataSourceBlocks(values.schema, values.paths);
-    //   // Set data source statistics in cataLog
-    //   cataLog.setDataSourceStat({num_samples, input_features_size});
-    // }
-    // else {
-      // If input size is not larger than blocking threshold, set dataSource in cataLog
-    cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
-      // Set data source statistics in cataLog
-    cataLog.setDataSourceStat({num_samples, input_features_size});
-    // }
-    // Build two dense layers UDFs using registerFunction in optimization namespace
-    std::string compute = registerFunctions(
-      first_layer_output_size, 
-      second_layer_output_size, 
-      input_features_size, 
-      first_layer_output_size, 
-      data.weights[0], 
-      data.weights[1],  
-      data.bias[0], 
-      data.bias[1],
-      cataLog);
-
+    // Build third dense layers UDFs
+    std::string compute =  NNBuilder()
+                        .denseLayer(first_layer_output_size, input_features_size, data.weights[0], data.bias[0], NNBuilder::RELU)
+                        .denseLayer(second_layer_output_size, first_layer_output_size, data.weights[1], data.bias[1], NNBuilder::RELU)
+                        .denseLayer(third_layer_output_size, second_layer_output_size, data.weights[2], data.bias[2], NNBuilder::SOFTMAX)
+                        .build();
 
 
     // Initialize planNodeID
     core::PlanNodeId p0;
-    core::PlanNodeId p1;
-    core::PlanNodeId p2;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs
@@ -524,65 +431,34 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
                 .capturePlanNodeId(p0)
                 .project({fmt::format(compute, "v")}) 
                 .planBuild();
-    // Set original plan nodeId and file address of data source
-    // cataLog.setIdAddressMap(p0, {file});
-    // Set vector name and nodeId of data source
-    // cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan
     auto planNode = myPlan.planNode();
+    // catalog
+    cataLog.setIdAddressMap(p0, {file});
     // Create ruleManager
     RuleManager ruleManager;
     // Create planState
     PlanState planState(ruleManager);
-
-    registerVectorFunction(
-      "mat_mul_h",
-      MatrixMultiply_h::signatures(),
-      std::make_unique<MatrixMultiply_h>(input_features_size, first_layer_output_size, cataLog.getDefaultBlocksSize(), data.weights[0])
-    );
-
-
-    auto newPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-            .tableScan(asRowType(inputRowVector->type()))
-            .capturePlanNodeId(p1)
-            .nestedLoopJoin(
-              PlanBuilder(planNodeIdGenerator)
-              .tableScan(cataLog.getUDFSchema("mat_mul0_weights"))
-              .capturePlanNodeId(p2)
-              .planNode(),
-              {"v_row", "v", "w", "w_row", "w_col"}
-            )
-            .project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
-            .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-            .localPartition({"v_row"})
-            .intermediateAggregation()
-            .finalAggregation()
-            // .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-            .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
-            .planBuild();
-    cataLog.setIdAddressMap(p1, {file});
-    cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights"));
-
     // Run rewriten rule
-    // if (rewrite) {
-    //   // Get possible actions for this plan
-    //   planState.getPossibleActions(planNode, cataLog);
-    //   // Print possible actions
-    //   for (const auto& entry : planState.actionsPair) {
-    //     std::cout << entry.first << ": " << entry.second << std::endl;
-    //   }
-    //   // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
-    //   auto it = planState.actionsPair.begin();
-    //   std::pair<std::string, std::string> testAction = *it;
-    //   // Take one rewritten action
-    //   planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
-    //   // Update the planState (getPossibleAction after apply one action)
-    //   planState.update(myPlan, cataLog);
+    if (rewrite) {
+      // Get possible actions for this plan
+      planState.getPossibleActions(planNode, cataLog);
+      // Print possible actions
+      for (const auto& entry : planState.actionsPair) {
+        std::cout << entry.first << ": " << entry.second << std::endl;
+      }
+      // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
+      auto it = planState.actionsPair.begin();
+      std::pair<std::string, std::string> testAction = *it;
+      // Take one rewritten action
+      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
+      // Update the planState (getPossibleAction after apply one action)
+      planState.update(myPlan, cataLog);
 
-    // }
+    }
 
     // Run the rewritten plan
-    runPlan(8, 8, newPlan, cataLog);
+    runPlan(8, 8, myPlan, cataLog);
   }
 
  private:
@@ -595,16 +471,12 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
 
-  // int number1 = std::atoi(argv[1]);//feature size
-  // int number2 = std::atoi(argv[2]);//sample size
-
-  Mul2JoinAggRewriteActionTest demo;
+  MultiLayerUDF2TorchNNRewriteActionTest demo;
 
   bool rewrite = true;
 
   if (argc > 1) {
-    // if (strcmp(argv[1], "N") == 0) {
-      if (strcmp(argv[3], "N") == 0) {
+    if (strcmp(argv[1], "N") == 0) {
       rewrite = false;
     }
   }
@@ -615,7 +487,7 @@ int main(int argc, char** argv) {
         << std::endl
         << std::endl;
 
-    demo.testMul2JoinAggPlan(true);
+    demo.testMultiLayerUDF2TorchNNPlan(true);
 
   } else {
     std::cout
@@ -623,7 +495,7 @@ int main(int argc, char** argv) {
         << std::endl
         << std::endl;
 
-    demo.testMul2JoinAggPlan(false);
+    demo.testMultiLayerUDF2TorchNNPlan(false);
   }
 
   std::cout
