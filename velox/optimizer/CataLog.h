@@ -111,6 +111,11 @@ class CataLog {
         void deleteIdAddressMap(core::PlanNodeId p) {
             idFileAddrMap.erase(p);
         }
+        
+        // Clear file address map entry for a given PlanNodeId
+        void clearIdAddressMap() {
+            idFileAddrMap.clear();
+        }
 
         // Get the entire file address map for PlanNodeId
         std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> getIdAddressMap() {
@@ -120,6 +125,16 @@ class CataLog {
         // Set mapping from vector values to PlanNodeId
         void setVectorIdMap(core::PlanNodeId p, std::string values) {
             vectorIdMap[values] = p;
+        }
+
+        // Delete mapping from vector values to PlanNodeId
+        void deleteVectorIdMap(std::string values) {
+            vectorIdMap.erase(values);
+        }
+
+        // Clear mapping from vector values to PlanNodeId
+        void clearVectorIdMap() {
+            vectorIdMap.clear();
         }
 
         // Get PlanNodeId based on vector values
@@ -160,9 +175,10 @@ class CataLog {
 
     private:
         // Default values
+        // TODO: change it block size to support flexible blocking
         int defaultBlocksNum = 4;
         int defaultBlocksSize = 256;
-        int blockingThreshold = 2000;
+        int blockingThreshold = 1;
 
         // Maps for storing data
         std::map<std::string, std::vector<int>> dataSourceStatMap;

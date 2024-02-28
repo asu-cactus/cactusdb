@@ -88,18 +88,17 @@ std::vector<std::vector<float>> create_input_block(
   for (const auto& row : values) {
     flattened.insert(flattened.end(), row.begin(), row.end());
   }
-  std::cout << fmt::format("flatten size: {}\n", flattened.size());
   // TODO: needs to handle the case: that can not be exactly blocked
   auto block_size = total_size / block_numbers;
   int num_cols = total_size / values.size();
   int cols_per_block = block_size / values.size();
-  std::cout
-      << fmt::format(
-             "Total Size: {}, block size: {}, value size: cols per block: {}",
-             total_size,
-             block_size,
-             cols_per_block)
-      << std::endl;
+  // std::cout
+  //     << fmt::format(
+  //            "Total Size: {}, block size: {}, value size: cols per block: {}",
+  //            total_size,
+  //            block_size,
+  //            cols_per_block)
+  //     << std::endl;
   for (int i = 0; i < block_numbers; i++) {
     std::vector<float> valuesArraySingleBlock;
     for (int j = 0; j < block_size; j++) {
@@ -112,25 +111,6 @@ std::vector<std::vector<float>> create_input_block(
   }
   return valuesArray;
 }
-// std::vector<std::vector<float>> create_input_block(int total_size, const
-// std::vector<std::vector<float>>& values, int block_numbers) {
-//     std::vector<std::vector<float>> valuesArray;
-//     valuesArray.reserve(block_numbers); // Reserve space for block_numbers
-//     vectors
-
-//     int block_size = total_size / block_numbers;
-//     int cols_per_block = block_size / values.size();
-//     for (int i = 0; i < values.size(); i++) {
-//         std::vector<float> valuesArraySingleBlock;
-//         valuesArraySingleBlock.reserve(block_size); // Reserve space for
-//         block_size elements for (int j = 0; j < cols_per_block; j++) {
-//             valuesArraySingleBlock.push_back(values[i][j]);
-//         }
-//         valuesArray.push_back(std::move(valuesArraySingleBlock)); // Move
-//         valuesArraySingleBlock into valuesArray
-//     }
-//     return valuesArray;
-// }
 
 // Function to create weight block based on total_size, values, and
 // block_numbers
