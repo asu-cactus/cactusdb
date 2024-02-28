@@ -15,6 +15,18 @@ def get_postgres_connection_config():
     return "postgresql://postgresdb:postgresdb@localhost:5432/postgresdb"
 
 
+def get_jdbc_postgres_connection_config():
+    return "jdbc:postgresql://localhost:5432/postgresdb"
+
+
+def get_sparksql_postgres_connection_properties():
+    return {
+        "user": "postgresdb",
+        "password": "postgresdb",
+        "driver": "org.postgresql.Driver",
+    }
+
+
 def fetch_data_from_postgres_via_sql(command):
     # Database connection parameters
     db_params = {

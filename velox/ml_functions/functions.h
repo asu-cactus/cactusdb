@@ -153,39 +153,45 @@ public:
         
         BaseVector::ensureWritable(rows, type, context.pool(), output);
         VectorMaker maker{context.pool()};
- 
-        // auto input_elements_w = args[1]->as<ArrayVector>()->elements();
-        // float* input_values_w = input_elements_w->values()->asMutable<float>();
-        // float* input_values_w = weights_;
-        auto input_elements_v = args[0];
 
-        auto input_elements_w = args[1]->as<ArrayVector>()->elements();
-        float* input_values_w = input_elements_w->values()->asMutable<float>();
-        auto ss = input_elements_v->as<DictionaryVector<ComplexType>>();
-        // auto ss3 = args[0]->as<ArrayVector>()->elements();
-        auto ss2 = ss->valueVector();
-        auto ss3 = ss2->as<ArrayVector>()->elements();
-        float* input_values_v = ss3->values()->asMutable<float>();
+        BaseVector* left = args[0].get();
+        BaseVector* right = args[1].get();
+
+        exec::LocalDecodedVector leftHolder(context, *left, rows);
+        auto decodedLeftArray = leftHolder.get();
+        auto baseLeftArray =
+            decodedLeftArray->base()->as<ArrayVector>()->elements();
+
+        exec::LocalDecodedVector rightHolder(context, *right, rows);
+        auto decodedRightArray = rightHolder.get();
+        auto baseRightArray = rightHolder->base()->as<ArrayVector>()->elements();
+
+        float* input_values_v = baseLeftArray->values()->asMutable<float>();
+        float* input_values_w = baseRightArray->values()->asMutable<float>();
+ 
         // auto varrayVector = std::make_shared<ArrayVector<float>>();
         // const int elements_v_per_row = 1500000; //6000*250
         // const int elements_w_per_row = 125000; // 250*500
-        std::vector<std::vector<float>> result(1, std::vector<float>(dims[1]*dims[2])); //6000*500
+        
+        // std::vector<std::vector<float>> result(1, std::vector<float>(dims[1]*dims[2])); //6000*500
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, dims[2], dims[0]);//3*2
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); //2*5
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
-        for (int i = 0; i < m.rows(); ++i) {
-                for (int j = 0; j < m.cols(); ++j) {
-                    result[0][i * dims[1] + j] = m(i, j);
-            }
-        }
+
+        // for (int i = 0; i < m.rows(); ++i) {
+        //         for (int j = 0; j < m.cols(); ++j) {
+        //             result[0][i * dims[1] + j] = m(i, j);
+        //     }
+        // }
         // m = m.reshaped(1, m.size());
         // std::cout << "shape: " << m.rows() << "," <<m.cols() << std::endl;
-        // for (int i = 0; i < m.rows(); i++) {
-        //     std::vector<float> row(
-        //     m.row(i).data(),
-        //     m.row(i).data() + m.cols());
-        //     result.push_back(row);
-        // }
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < m.rows(); i++) {
+            std::vector<float> row(
+            m.row(i).data(),
+            m.row(i).data() + m.cols());
+            result.push_back(row);
+        }
         output = maker.arrayVector<float>(result, REAL());
     }
 

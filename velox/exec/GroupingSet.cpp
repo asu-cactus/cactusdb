@@ -774,6 +774,17 @@ void GroupingSet::extractGroups(
       function->extractValues(groups.data(), groups.size(), &aggregateVector);
       // function->extractValues(groups.data(), 1000, &aggregateVector);// changed to 1000 rather than group.size()
     }
+    // TODO: It is a temporary solution to unblock the aggregated value
+    // It only be triggered when the terated function is a block aggregation function, 
+    // It reset the group number to the number of samples in the block.
+    auto numRowsInResult = aggregateVector->size();
+    if (numRowsInResult > 1) {
+      result->resize(numRowsInResult);
+      for (int32_t i = 0; i < totalKeys; ++i) {
+        auto keyVector = result->childAt(i);
+        rows.extractColumn(groups.data(), numRowsInResult, i, keyVector);
+      }
+    }
   }
 
   if (sortedAggregations_) {
