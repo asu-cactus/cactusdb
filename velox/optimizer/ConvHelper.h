@@ -91,8 +91,8 @@ public:
   int get_conv2d_window_count(int kernel_size, int stride, int padding) {
     int h_slides = get_h_slides(padding, kernel_size, stride);
     int v_slides = get_v_slides(padding, kernel_size, stride);
-    std::cout << "[IMAGE] h_slides: " << h_slides << ", v_slides: " << v_slides << std::endl;
-    std::cout << "[IMAGE] kernel: " << kernel_size << ", strides: " << stride << ", padding: " << padding << std::endl;
+    // std::cout << "[IMAGE] h_slides: " << h_slides << ", v_slides: " << v_slides << std::endl;
+    // std::cout << "[IMAGE] kernel: " << kernel_size << ", strides: " << stride << ", padding: " << padding << std::endl;
 
     return h_slides * v_slides;
   }
@@ -249,7 +249,7 @@ std::vector<ImageChunk> img_to_chunks(Image& image, int block_y, int strides, in
     int windows = image.get_conv2d_window_count(kernel, strides, padding); //4*4 = 16, each chunk denotes each window
     // result.resize(windows);
 
-    std::cout << "[img_to_chunks] windows: " << windows << ", kernel: " << kernel << ", strides: " << strides << ", padding: " << padding << std::endl;
+    // std::cout << "[img_to_chunks] windows: " << windows << ", kernel: " << kernel << ", strides: " << strides << ", padding: " << padding << std::endl;
 
     int channels = image.get_num_channels();//2
     int row_start = image.getKey() * windows; // 0*16, 1*16, 2*16, for each image
@@ -265,7 +265,7 @@ std::vector<ImageChunk> img_to_chunks(Image& image, int block_y, int strides, in
                 for (int j = 0; j < kernel; j++) {
 
                     if (chunk->getSize() > 0 && chunk->getSize() % block_y == 0) {
-                        std::cout << chunk->getSize() << std::endl;
+                        // std::cout << chunk->getSize() << std::endl;
                         result.push_back(*chunk);
                         counter++;
                         chunk = std::make_shared<ImageChunk>(block_y, block_y, w, counter, row_start);
@@ -472,6 +472,7 @@ float* loadRandomBias(int size) {
     return arr;
 }
 
+
 ImageMatrix convertImage(std::vector<Image>& images, int window_items, int strides, int kWidth, int kChannels, int padding, int block_x, int block_y) {
 
     int finalRowSize = images.size() * images[0].get_conv2d_window_count(kWidth, strides, padding);
@@ -487,10 +488,10 @@ ImageMatrix convertImage(std::vector<Image>& images, int window_items, int strid
     return matrix;
 }
 
-ImageMatrix convertKernel(std::vector<Image>& kernels, int window_items, int kWidth, int kChannels, bool block_padding, int block_x, int block_y) {
+ImageMatrix convertKernel(std::vector<Image>& kernels, int window_items, int kWidth, int kChannels, bool block_padding, int block_x, int block_y, float* bias) {
     int finalRowSize = kChannels*kWidth*kWidth+1;
     int finalColSize = kernels.size();
-    float* bias = loadRandomBias(kernels.size());
+    // float* bias = loadRandomBias(kernels.size());
     std::vector<ImageChunk> chunks;
     for (auto& kernel : kernels){
       std::vector<ImageChunk> newChunks = kernel_to_chunks(kernel, window_items);
@@ -504,43 +505,99 @@ ImageMatrix convertKernel(std::vector<Image>& kernels, int window_items, int kWi
     return kernelBiasMatrix;
 }
 
-int main(int argc, char** argv) {
+std::vector<Image> loadFormData(int width, int height, int channels, int numOfImages, float* values) {
 
-    int height = 6, width = 6, channels = 2, numOfImages = 3;
-    int kHeight = 3, kWidth = 3, kChannels = 2, numOfFilters = 3;
-    std::cout << "Loading images....." << std::endl;
-    auto images = loadRandomImages(width, height, channels, numOfImages);
-    std::cout << "Loading kernel....." << std::endl;
-    auto kernels = loadRandomImages(kHeight, kWidth, kChannels, numOfFilters);
-    std::cout << "Loading bias data..." << std::endl;
-    float* bias = loadRandomBias(numOfFilters);
+    // Vector to store images
+    std::vector<Image> images;
+    int imageSize = width * height;
+    for (int imageCount = 0; imageCount < numOfImages; imageCount++) {
+        // Create a new Image object
+        Image newImage(imageCount, width, height, channels);
 
-    int num_items_in_window = kHeight*kWidth; //3*3=9
-    int strides = 1; //step size
-    int padding = 0; // 0 denote no padding; 1 denote padding in edge; Used in Image part
-    bool block_padding = false; // Used in kernel part
-    int block_x = 32; // the row size of virtual block, the block is build on several chunks, usually one channel construct one block
-    int block_y = num_items_in_window; // the col size of virtual block
+        for (int c = 0; c < channels; c++) {
+            float* imageData = new float[imageSize];
+            // Generate random data for the channel
+            for (int i = 0; i < width * height; i++) {
+                // Store the data in the image data array
+                imageData[i] = values[c * imageSize + i];
+            }
+            // Add channel to the image
+            newImage.setMatrixAtIndex(c, imageData);
+        }
 
+        // Add the constructed image to the vector
+        images.push_back(newImage);
+    }
 
-
-    ImageMatrix imageData = convertImage(images, num_items_in_window, strides, kWidth, kChannels, padding, block_x, block_y);
-    ImageMatrix kernelData = convertKernel(kernels, num_items_in_window, kWidth, kChannels, block_padding, block_x, block_y);
-
-
-    // auto kernelData = convertKernel(kernels[0]);
-
-    // Image image = images[0];
-    // auto chunks = img_to_chunks(image, window_items, strides, kWidth, padding);
-    // auto blocks = chunks_to_blocks(chunks, block_x);
-    // auto matrix = blocks_to_matrix(blocks, block_x, block_y, padding, 19, 16);// 2*3*3+1=19, kChannels*kHeight*kWidth+1=19; get_conv2d_window_count() = 16
-
-
-    // auto kernelChunks = kernel_to_chunks(kernels[0], kHeight*kWidth);
-    // auto kernelBlocks = kernelchunks_to_blocks(kernelChunks, block_x);
-    // auto kernelMatrix = kernelblocks_to_matrix(kernelBlocks, block_x, block_y, block_padding, 1, 19);
-    // auto kernelBiasMatrix = copy_bias_to_matrix(kernelMatrix, bias);
-
-    std::cout << "Finished converting" << std::endl;
-
+    return images;
 }
+
+ImageMatrix convert2Matrix(int cnn_filter_dims[], int numOfImages, float* values, float* bias) {
+  
+    std::vector<Image> kernels = loadFormData(cnn_filter_dims[0], cnn_filter_dims[1], cnn_filter_dims[2], numOfImages, values);
+    ImageMatrix kernelData = convertKernel(kernels, cnn_filter_dims[0]*cnn_filter_dims[1], cnn_filter_dims[0], cnn_filter_dims[2], false, 32, cnn_filter_dims[0]*cnn_filter_dims[1], bias);
+    return kernelData;
+}
+
+ImageMatrix convert2Matrix(int cnn_filter_dims[], int input_dims[], int numOfImages, float* values) {
+  
+    std::vector<Image> images = loadFormData(input_dims[0], input_dims[1], input_dims[2], numOfImages, values);
+    ImageMatrix imageData = convertImage(images, cnn_filter_dims[0]*cnn_filter_dims[1], 1, cnn_filter_dims[0], cnn_filter_dims[2], false, 32, cnn_filter_dims[0]*cnn_filter_dims[1]);
+    return imageData;
+}
+
+// ImageMatrix convert2Matrix(int width, int height, int channels, int numOfImages, float* values, bool isKernel, int kernelSize, float* bias) {
+//   if (isKernel) {
+//     std::vector<Image> kernels = loadFormData(width, height, channels, numOfImages, values);
+//     ImageMatrix kernelData = convertKernel(kernels, kernelSize, width, channels, false, 32, kernelSize, bias);
+//     return kernelData;
+//   }
+//   else {
+//     std::vector<Image> images = loadFormData(width, height, channels, numOfImages, values);
+//     ImageMatrix imageData = convertImage(images, kernelSize, 1, width, channels, false, 32, kernelSize);
+//     return imageData;
+//   }
+
+// }
+
+
+// int main(int argc, char** argv) {
+
+//     int height = 6, width = 6, channels = 2, numOfImages = 3;
+//     int kHeight = 3, kWidth = 3, kChannels = 2, numOfFilters = 3;
+//     std::cout << "Loading images....." << std::endl;
+//     auto images = loadRandomImages(width, height, channels, numOfImages);
+//     std::cout << "Loading kernel....." << std::endl;
+//     auto kernels = loadRandomImages(kHeight, kWidth, kChannels, numOfFilters);
+//     std::cout << "Loading bias data..." << std::endl;
+//     float* bias = loadRandomBias(numOfFilters);
+
+//     int num_items_in_window = kHeight*kWidth; //3*3=9
+//     int strides = 1; //step size
+//     int padding = 0; // 0 denote no padding; 1 denote padding in edge; Used in Image part
+//     bool block_padding = false; // Used in kernel part
+//     int block_x = 32; // the row size of virtual block, the block is build on several chunks, usually one channel construct one block
+//     int block_y = num_items_in_window; // the col size of virtual block
+
+
+
+//     ImageMatrix imageData = convertImage(images, num_items_in_window, strides, kWidth, kChannels, padding, block_x, block_y);
+//     ImageMatrix kernelData = convertKernel(kernels, num_items_in_window, kWidth, kChannels, block_padding, block_x, block_y);
+
+
+//     // auto kernelData = convertKernel(kernels[0]);
+
+//     // Image image = images[0];
+//     // auto chunks = img_to_chunks(image, window_items, strides, kWidth, padding);
+//     // auto blocks = chunks_to_blocks(chunks, block_x);
+//     // auto matrix = blocks_to_matrix(blocks, block_x, block_y, padding, 19, 16);// 2*3*3+1=19, kChannels*kHeight*kWidth+1=19; get_conv2d_window_count() = 16
+
+
+//     // auto kernelChunks = kernel_to_chunks(kernels[0], kHeight*kWidth);
+//     // auto kernelBlocks = kernelchunks_to_blocks(kernelChunks, block_x);
+//     // auto kernelMatrix = kernelblocks_to_matrix(kernelBlocks, block_x, block_y, block_padding, 1, 19);
+//     // auto kernelBiasMatrix = copy_bias_to_matrix(kernelMatrix, bias);
+
+//     std::cout << "Finished converting" << std::endl;
+
+// }
