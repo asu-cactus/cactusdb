@@ -46,7 +46,7 @@ def load_movielens_to_postgres():
     print("[INFO] load movielens to postgres success!")
 
 
-def load_ffnn_data_to_postgres():
+def load_ffnn_data_to_postgres(num_generated_data=50, num_features=597540, table_name = "ffnn_data"):
     import evadb
 
     # Register postgres in evadb
@@ -55,25 +55,22 @@ def load_ffnn_data_to_postgres():
     cursor = evadb.connect().cursor()
     cursor.query(
         """
-        USE postgres_data {
-            DROP TABLE IF EXISTS ffnn_data
-        }
-        """
+        USE postgres_data {{
+            DROP TABLE IF EXISTS {}
+        }}
+        """.format(table_name)
     ).df()
     cursor.query(
         """
-        USE postgres_data {
-        CREATE TABLE IF NOT EXISTS ffnn_data (
+        USE postgres_data {{
+        CREATE TABLE IF NOT EXISTS {} (
         index INTEGER,
         val REAL[]
         )
-        }
-        """
+        }}
+        """.format(table_name)
     ).df()
-    # TODO set follow params as configurable
-    num_samples = 50
-    num_features = 597540
-    x = np.random.rand(num_samples, num_features).astype(np.float32)
+    x = np.random.rand(num_generated_data, num_features).astype(np.float32)
     x_df = pd.DataFrame(x)
     x_df_new = x_df.copy()
     x_df_new["val"] = None
@@ -89,11 +86,11 @@ def load_ffnn_data_to_postgres():
     cursor.query(
         """
         USE postgres_data {{
-        COPY ffnn_data(index,val)
+        COPY {}(index,val)
         FROM '{}'
         DELIMITER ',' CSV HEADER
         }}
-        """.format(data_file_abs_path)
+        """.format(table_name, data_file_abs_path)
     ).df()
     print("[INFO] load FFNN data to postgres success!")
 
