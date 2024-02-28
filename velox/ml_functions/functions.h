@@ -785,7 +785,7 @@ public:
         std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
      
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        // for each input sample
+        
         for (int s = 0; s < rows.size(); s++) {
             // for each channel
             for(int c = 0; c < dims[3]; c++) {
@@ -803,6 +803,29 @@ public:
                 }   
             }
         }
+
+        // #pragma omp parallel for
+        // for (int s = 0; s < rows.size(); s++) {
+        //     for (int f = 0; f < dims[0]; f++) {
+        //         // Pre-calculate filter offset
+        //         int filter_offset = f * output_height * output_width;
+        //         for (int c = 0; c < dims[3]; c++) {
+        //             // Map input and filter data
+        //             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> input(input_values + s * input_size + c * input_channel_size, input_height, input_width);
+        //             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> kernel(weights_ + f * filter_size + c * filter_channel_size, dims[1], dims[2]);
+
+        //             // Convolution operation
+        //             for (int i = 0; i < output_height; ++i) {
+        //                 int output_row_offset = i * output_width;
+        //                 for (int j = 0; j < output_width; ++j) {
+        //                     // Compute dot product using Eigen operations
+        //                     results[s][filter_offset + output_row_offset + j] += (input.block(i, j, dims[1], dims[2]).cwiseProduct(kernel)).sum();
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+
        
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         std::cout << "Time for conv2d (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
@@ -909,6 +932,110 @@ private:
     
 };
 
+class TorchCNN: public MLFunction {
+public:
+    TorchCNN(float* weights, float* bias, int* dims_) {
+        weights_ = weights;
+        bias_ = bias; 
+        for(int i=0; i < 7; i++)
+            dims.push_back(dims_[i]);
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();     
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+        
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+       
+        int input_height =  dims[4];
+        int input_width = dims[5];
+
+        int output_height = input_height - dims[1] + 1;
+        int output_width = input_width - dims[2] + 1;
+
+        
+        std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
+       
+        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}).bias(false));
+        // torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}));
+        // torch::Tensor conv_weights = torch::tensor(weights_).view({dims[3], dims[0], dims[1], dims[2]});
+
+        // conv_layer->weight = torch::nn::parameter::Parameter (conv_weights);
+        torch::Tensor input_data = torch::from_blob(input_values, {rows.size(), dims[3], input_height, input_width});
+
+       
+        torch::Tensor output_data = conv_layer(input_data);
+
+        // Convert bias values to a tensor
+        torch::Tensor bias_tensor = torch::from_blob(bias_, {dims[0]}); 
+        if (conv_layer->bias.defined()) {
+            output_data += bias_tensor;
+        }
+
+        // output_data = torch::relu(output_data);
+
+        // output_data = torch::max_pool2d(output_data, {dims[6], dims[6]});
+        
+        float* data = output_data.data_ptr<float>();
+        
+        int row_size = output_height * output_width * dims[0];
+       
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result;
+            for (int j = 0; j < row_size; ++j) {
+                result.push_back(data[i*row_size + j]);
+            }
+            results.push_back(result);
+        }
+
+        // for (auto entry: results) {
+        //     for (int i =0; i < 1000; i++){
+        //         std::cout << entry[i] << std::endl;
+        //     }
+        // }
+
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        //std::cout << "Time for conv2d (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    // Getter method for weights
+    float* getWeights() const {
+        return weights_;
+    }
+
+    // Getter method for bias
+    float* getBias() const {
+        return bias_;
+    }
+    static std::string getName() {
+        return "torchcnn";
+    };
+
+
+private:
+    float* weights_;
+    float* bias_;
+};
 
 
 
@@ -1008,6 +1135,13 @@ public:
                 }
             }
         }
+
+        // for (const auto& inner_vector : results) {
+        //     // Iterate over each element in the inner vector
+        //     for (const auto& element : inner_vector) {
+        //         std::cout << element << std::endl;
+        //     }
+        // }
 
         // for(int i=0; i < 64; i++){
 
