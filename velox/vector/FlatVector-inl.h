@@ -91,7 +91,7 @@ std::unique_ptr<SimpleVector<uint64_t>> FlatVector<T>::hashAll() const {
   }
 
   // overwrite the null hash values
-  if (BaseVector::getNullCount().value_or(1) > 0) {
+  if (BaseVector::rawNulls_ != nullptr) {
     for (size_t i = 0; i < BaseVector::length_; ++i) {
       if (bits::isBitNull(BaseVector::rawNulls_, i)) {
         hashData[i] = BaseVector::kNullHash;
@@ -448,14 +448,16 @@ void FlatVector<T>::ensureWritable(const SelectivityVector& rows) {
       newValues = AlignedBuffer::allocate<T>(newSize, BaseVector::pool_);
     }
 
-    SelectivityVector rowsToCopy(BaseVector::length_);
-    rowsToCopy.deselect(rows);
-
     if constexpr (std::is_same_v<T, bool>) {
       auto rawNewValues = newValues->asMutable<uint64_t>();
-      std::memcpy(rawNewValues, rawValues_, values_->size());
+      std::memcpy(
+          rawNewValues,
+          rawValues_,
+          std::min(values_->size(), newValues->size()));
     } else {
       auto rawNewValues = newValues->asMutable<T>();
+      SelectivityVector rowsToCopy(BaseVector::length_);
+      rowsToCopy.deselect(rows);
       rowsToCopy.applyToSelected(
           [&](vector_size_t row) { rawNewValues[row] = rawValues_[row]; });
     }

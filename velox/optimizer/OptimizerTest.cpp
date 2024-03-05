@@ -83,7 +83,7 @@ void test_optimizer_demo(int argc, char** argv);
 std::shared_ptr<PlanBuilderExec> rewriten_udf(PlanBuilder& udf_plan_builder, DataFrame data, int features, int first_layer, int second_layer, std::string test_action);
 PlanBuilderExec rewriten_tradition(PlanBuilderExec plan_s1_builder);
 
-auto pool_ = memory::addDefaultLeafMemoryPool();
+auto pool_ = memory::MemoryManager::getInstance()->addLeafPool();
 std::shared_ptr<folly::Executor> executor_{
       std::make_shared<folly::CPUThreadPoolExecutor>(
           std::thread::hardware_concurrency())};
@@ -93,7 +93,7 @@ std::shared_ptr<core::QueryCtx> queryCtx_{
 //       int64_t memoryCapacity) {
     
 //     std::unordered_map<std::string, std::shared_ptr<Config>> configs;
-//     std::shared_ptr<MemoryPool> pool = memory::defaultMemoryManager().addRootPool(
+//     std::shared_ptr<MemoryPool> pool = memory::MemoryManager::getInstance()->addRootPool(
 //         "", memoryCapacity, MemoryReclaimer::create());
 //    std::unordered_map<std::string, std::string> myMapWithValues = {{core::QueryConfig::kSpillEnabled, "true"}, 
 //                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
@@ -405,7 +405,7 @@ PlanBuilderExec build_plan_udf_torch(DataFrame data, int features, int first_lay
 }
 
 void exec_plan_udf(PlanBuilderExec planBuilderExec, int memoryLimit, std::vector<std::vector<float>> features, int splitsNum, int threadsNum){
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", memoryLimit * MB)};
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", memoryLimit * MB)};
   auto planFragment = planBuilderExec.planBuilder->planFragment();
   queryCtx_->testingOverrideMemoryPool(rootPool);
   queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});//may be this is the key factor (latency)
@@ -582,7 +582,7 @@ OptOutput optiming_plan(PlanBuilder& planBuilder, DataFrame data, int num_sample
 
 void exec_plan_relational(PlanBuilderExec planBuilderOpt, int memoryLimit, std::vector<std::shared_ptr<TempFilePath>> inputPaths, 
 std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root_relational", memoryLimit * MB)}; // 280 pass for 4 threads, 40 for 1 thread
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root_relational", memoryLimit * MB)}; // 280 pass for 4 threads, 40 for 1 thread
   queryCtx_->testingOverrideMemoryPool(rootPool);
   queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}});
   auto planFragmentOpt = planBuilderOpt.planBuilder->planFragment();
@@ -677,7 +677,7 @@ void test_optimizer_demo(int argc, char** argv){
   auto hiveConnector =
       connector::getConnectorFactory(
           connector::hive::HiveConnectorFactory::kHiveConnectorName)
-          ->newConnector(kHiveConnectorId, nullptr);
+          ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
   connector::registerConnector(hiveConnector);
 
   filesystems::registerLocalFileSystem();
@@ -971,7 +971,7 @@ void test_optimizer_mcts(int argc, char** argv){
   auto hiveConnector =
       connector::getConnectorFactory(
           connector::hive::HiveConnectorFactory::kHiveConnectorName)
-          ->newConnector(kHiveConnectorId, nullptr);
+          ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
   connector::registerConnector(hiveConnector);
 
   filesystems::registerLocalFileSystem();
@@ -1031,7 +1031,7 @@ void rewrite_test_split2multi(int argc, char** argv){
   auto hiveConnector =
       connector::getConnectorFactory(
           connector::hive::HiveConnectorFactory::kHiveConnectorName)
-          ->newConnector(kHiveConnectorId, nullptr);
+          ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
   connector::registerConnector(hiveConnector);
 
   filesystems::registerLocalFileSystem();
@@ -1179,7 +1179,7 @@ void rewrite_test_merge2single(int argc, char** argv){
   auto hiveConnector =
       connector::getConnectorFactory(
           connector::hive::HiveConnectorFactory::kHiveConnectorName)
-          ->newConnector(kHiveConnectorId, nullptr);
+          ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
   connector::registerConnector(hiveConnector);
 
   filesystems::registerLocalFileSystem();
@@ -1294,7 +1294,7 @@ void rewrite_test_mul2joinagg(int argc, char** argv, int blocks){
   auto hiveConnector =
       connector::getConnectorFactory(
           connector::hive::HiveConnectorFactory::kHiveConnectorName)
-          ->newConnector(kHiveConnectorId, nullptr);
+          ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
   connector::registerConnector(hiveConnector);
 
   filesystems::registerLocalFileSystem();
@@ -1428,7 +1428,7 @@ void rewrite_test_joinagg2mul(int argc, char** argv){
   auto hiveConnector =
       connector::getConnectorFactory(
           connector::hive::HiveConnectorFactory::kHiveConnectorName)
-          ->newConnector(kHiveConnectorId, nullptr);
+          ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
   connector::registerConnector(hiveConnector);
 
   filesystems::registerLocalFileSystem();
@@ -1552,6 +1552,7 @@ void rewrite_test_joinagg2mul(int argc, char** argv){
 }
 
 int main(int argc, char** argv) {
+    memory::MemoryManager::initialize({});
     // test_optimizer_demo(argc, argv);
     // test_optimizer_mcts(argc, argv);
     rewrite_test_split2multi(argc, argv);
