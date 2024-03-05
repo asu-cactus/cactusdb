@@ -74,7 +74,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
   }
 
@@ -547,8 +547,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   }
 
  private:
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
 
   VectorMaker maker{pool_.get()};
 };
@@ -560,6 +559,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 int main(int argc, char** argv) {
   // gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   Mul2JoinAggRewriteActionTest demo;
 

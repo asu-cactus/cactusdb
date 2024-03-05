@@ -458,6 +458,11 @@ class Operator : public BaseRuntimeStatWriter {
 
   virtual std::string toString() const;
 
+  /// Used in debug ednpoints.
+  virtual std::string toJsonString() const {
+    return toString();
+  }
+
   velox::memory::MemoryPool* pool() const {
     return operatorCtx_->pool();
   }
@@ -621,6 +626,7 @@ class Operator : public BaseRuntimeStatWriter {
     uint64_t reclaim(
         memory::MemoryPool* pool,
         uint64_t targetBytes,
+        uint64_t maxWaitMs,
         memory::MemoryReclaimer::Stats& stats) override;
 
     void abort(memory::MemoryPool* pool, const std::exception_ptr& /* error */)

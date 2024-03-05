@@ -255,7 +255,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   std::shared_ptr<core::QueryCtx> newQueryCtx(int64_t memoryCapacity) {
     
     std::unordered_map<std::string, std::shared_ptr<Config>> configs;
-    std::shared_ptr<MemoryPool> pool = memory::defaultMemoryManager().addRootPool(
+    std::shared_ptr<MemoryPool> pool = memory::MemoryManager::getInstance()->addRootPool(
         "", memoryCapacity, memory::MemoryReclaimer::create());
     std::unordered_map<std::string, std::string> queryConfig = {{core::QueryConfig::kSpillEnabled, "true"}, 
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
@@ -287,7 +287,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   std::shared_ptr<folly::Executor> executor_{std::make_shared<folly::CPUThreadPoolExecutor>(std::thread::hardware_concurrency())};
   std::shared_ptr<core::QueryCtx> queryCtx_{std::make_shared<core::QueryCtx>(executor_.get())};
   
-  std::shared_ptr<memory::MemoryPool> pool_ =  memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_ =  memory::MemoryManager::getInstance()->addLeafPool();
   //std::shared_ptr<memory::MemoryPool> childPool = rootPool_->addAggregateChild("HiveConnectorTestBase.Writer");
   VectorMaker maker{pool_.get()};
 
@@ -414,6 +414,7 @@ void MLFunctionsTest::run() {
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
   MLFunctionsTest demo;
   demo.run();
 }

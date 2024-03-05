@@ -123,6 +123,7 @@ RowVectorPtr Exchange::getOutput() {
   {
     auto lockedStats = stats_.wlock();
     lockedStats->rawInputBytes += rawInputBytes;
+    lockedStats->rawInputPositions += result_->size();
     lockedStats->addInputVector(result_->estimateFlatSize(), result_->size());
   }
 
@@ -147,7 +148,7 @@ void Exchange::recordExchangeClientStats() {
 
   auto lockedStats = stats_.wlock();
   const auto exchangeClientStats = exchangeClient_->stats();
-  for (const auto& [name, value] : exchangeClient_->stats()) {
+  for (const auto& [name, value] : exchangeClientStats) {
     lockedStats->runtimeStats.erase(name);
     lockedStats->runtimeStats.insert({name, value});
   }

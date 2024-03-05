@@ -57,10 +57,10 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr, ioExecutor_.get());
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>(), ioExecutor_.get());
     connector::registerConnector(hiveConnector);
 
-    rootPool_ = memory::defaultMemoryManager().addRootPool("TwoTowerTest");
+    rootPool_ = memory::MemoryManager::getInstance()->addRootPool("TwoTowerTest");
     pool_ = rootPool_->addLeafChild("TwoTowerTest");
 
     // SetUp();
@@ -86,6 +86,7 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
       std::function<
           std::unique_ptr<facebook::velox::parquet::DefaultFlushPolicy>()>
           flushPolicy,
+      const RowTypePtr& rowType,
       facebook::velox::common::CompressionKind compressionKind =
           facebook::velox::common::CompressionKind_NONE) {
     facebook::velox::parquet::WriterOptions options;
@@ -93,7 +94,7 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
     options.flushPolicyFactory = flushPolicy;
     options.compression = compressionKind;
     return std::make_unique<facebook::velox::parquet::Writer>(
-        std::move(sink), options);
+        std::move(sink), options, rowType);
   }
 
   std::unique_ptr<folly::IOThreadPoolExecutor> ioExecutor_;
@@ -709,7 +710,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   auto writer = createWriter(std::move(sink), [&]() {
     return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
         kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
-  });
+  }, queryDataRowType);
   writer->write(queryDataRowVector);
   writer->flush();
   writer->close();
@@ -1493,7 +1494,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   auto writer = createWriter(std::move(sink), [&]() {
     return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
         kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
-  });
+  }, queryDataRowType);
   writer->write(queryDataRowVector);
   writer->flush();
   writer->close();
@@ -2378,6 +2379,7 @@ int main(int argc, char** argv) {
   Eigen::setNbThreads(16);
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   int numSamples = FLAGS_num_sample;
   int numSplit = FLAGS_num_split; // default 2
