@@ -919,8 +919,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   }
 
  private:
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
 
   VectorMaker maker{pool_.get()};
 };
@@ -934,6 +933,7 @@ DEFINE_int32(num_sample, 1000, "Number of samples");
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
   std::string mode = FLAGS_mode;
   bool rewrite = FLAGS_rewrite;
   int repeatRun = FLAGS_num_repeat;
