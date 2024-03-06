@@ -89,6 +89,14 @@ RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
     && cmake ${CMAKE_FLAGS}  .. \
     && make install -j 16
 
+# set up xgboost c api
+WORKDIR /home
+RUN git clone --recursive https://github.com/dmlc/xgboost \
+    && cd xgboost \
+    && mkdir build \
+    && cd build \
+    && make install
+
 # set up spark
 WORKDIR /home
 RUN wget https://dlcdn.apache.org/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz
