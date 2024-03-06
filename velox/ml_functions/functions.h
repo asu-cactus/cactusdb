@@ -213,6 +213,83 @@ private:
     float* weights_;
     
 };
+
+class MatrixMultiply_Block: public MLFunction {
+public:
+    MatrixMultiply_Block(int num_rows, int num_cols, int num_samples, float* weights, int blocks) {
+        dims.push_back(num_rows);
+        dims.push_back(num_cols);
+        dims.push_back(num_samples);
+        dims.push_back(blocks);
+        weights_ = weights;
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+        
+        auto elementType = ArrayType(std::make_shared<ArrayType>(ArrayType(REAL())));
+        BaseVector::ensureWritable(rows, std::make_shared<ArrayType>(elementType), context.pool(), output);
+        // BaseVector::ensureWritable(rows, type, context.pool(), output);
+        VectorMaker maker{context.pool()};
+
+        BaseVector* left = args[0].get();
+        BaseVector* right = args[1].get();
+
+        exec::LocalDecodedVector leftHolder(context, *left, rows);
+        auto decodedLeftArray = leftHolder.get();
+        auto baseLeftArray =
+            decodedLeftArray->base()->as<ArrayVector>()->elements();
+
+        exec::LocalDecodedVector rightHolder(context, *right, rows);
+        auto decodedRightArray = rightHolder.get();
+        auto baseRightArray = rightHolder->base()->as<ArrayVector>()->elements();
+
+        float* input_values_v = baseLeftArray->values()->asMutable<float>();
+        float* input_values_w = baseRightArray->values()->asMutable<float>();
+ 
+        // std::vector<std::vector<float>> result(1, std::vector<float>(dims[1]*dims[2])); //6000*500
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, dims[2], dims[0]);//3*2
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); //2*5
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
+
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < m.rows(); i++) {
+            std::vector<float> row(
+            m.row(i).data(),
+            m.row(i).data() + m.cols());
+            result.push_back(row);
+        }
+        auto baseVector = maker.arrayVector<float>(result, REAL());
+        auto arrayOfArrays = maker.arrayVector({0}, baseVector);
+        output = arrayOfArrays;
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(array(REAL))")
+                     .argumentType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    static std::string getName() {
+        return "mat_mul_block";
+    };
+
+
+private:
+    float* weights_;
+    
+};
+
 // there is no need to pass any parameter here since dimensions can be figured out from the input 
 // can the optimiser figure out the dimensions from the context?
 class MatrixAddition: public MLFunction {

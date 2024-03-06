@@ -107,29 +107,40 @@ class ArrayofArrayUnnestTest : public VectorTestBase {
 
 void ArrayofArrayUnnestTest::run() {
   // Let’s create two vectors of 64-bit integers and one vector of strings.
-  auto a = makeFlatVector<int64_t>({0, 1, 2});
+  auto a = makeFlatVector<float>({0, 1, 2});
 //   auto b = makeFlatVector<int64_t>({0, 1, 2});
-  auto baseVector = makeArrayVector<int64_t>(
-      {{1, 1}, {2, 2}, {3, 3}, {4, 4}, {5, 5}, {6, 6}});
+  // auto baseVector = makeArrayVector<float>(
+  //     {{1, 1, 1}, {2, 2, 2}, {3, 3, 3}, {4, 4, 4}, {5, 5, 5}, {6, 6, 6}});
+  auto baseVector = makeArrayVector<float>(
+      {{1, 1, 1}, {2, 2, 2}, {3, 3, 3}, {4, 4, 4}, {5, 5, 5}, {6, 6, 6}});
 
   // Create an array of array vector using above base vector
-  auto arrayOfArrays = makeArrayVector({0, 2, 4}, baseVector);
+  auto arrayOfArrays = makeArrayVector({0}, baseVector);
 
-  auto data = makeRowVector({"a", "b"}, {a, arrayOfArrays});
+  // auto data = makeRowVector({"a", "b"}, {a, arrayOfArrays});
+  auto data = makeRowVector({"b"}, {arrayOfArrays});
 
   auto plan = PlanBuilder()
                   .values({data})
-                  .unnest({"a"}, {"b"}, "")
                   .planNode();
 
   auto result = AssertQueryBuilder(plan).copyResults(pool());
 
+  std::cout << std::endl
+            << "Results: 1 \n" << result->toString() << std::endl;
+  std::cout << result->toString(0, result->size()) << std::endl;
 
+  auto plan2 = PlanBuilder()
+                  .values({data})
+                  .unnest({}, {"b"})
+                  .planNode();
+
+  auto result2 = AssertQueryBuilder(plan2).copyResults(pool());
 
 
   std::cout << std::endl
-            << "> vectors a, b, dow: " << result->toString() << std::endl;
-  std::cout << result->toString(0, result->size()) << std::endl;
+            << "Results: 2\n" << result2->toString() << std::endl;
+  std::cout << result2->toString(0, result2->size()) << std::endl;
 
 }
 
