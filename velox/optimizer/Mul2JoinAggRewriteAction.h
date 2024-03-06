@@ -110,6 +110,11 @@ public:
 														MatrixMultiply_b::signatures(),
 														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
 													);
+													registerVectorFunction(
+														"mat_mul_block",
+														MatrixMultiply_Block::signatures(),
+														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, weights, blocks)
+													);
 													// Add UDF associate information (UDF with input values) to cataLog
 													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
 
@@ -124,7 +129,7 @@ public:
 												weightSchema = cataLog.getUDFSchema(target+"_weights");
 												// Regular expression match
 												std::regex pattern(target + R"(\([^)]+\))");
-												exprStr = std::regex_replace(exprStr, pattern, "R1");
+												exprStr = std::regex_replace(exprStr, pattern, "r1");
 												// Build new plan
 												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
 																.tableScan(valueSchema)
@@ -138,13 +143,16 @@ public:
 																	.planNode(),
 																"", // extra filter
 																{"v_row", "w_col", "v", "w"})
-																.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+																.project({"v_row", "w_col", "mat_mul_block(v, w) AS mp"})
 																// .localPartition({})
 																// .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
 																.partialAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
 																.localPartition({})
 																.intermediateAggregation()
 																.finalAggregation()
+																// .project({"r1"})
+																.unnest({}, {"r1"}) // after unnest velox will automatically add + "_e" to its original name. PlanBuilder.cpp/unnest
+																.project({"r1_e AS r1"})
 																.project({exprStr})
 																;
 												// Here are several approaches to correctly aggregat the multiplied values.
