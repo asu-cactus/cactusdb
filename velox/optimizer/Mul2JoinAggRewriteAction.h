@@ -153,6 +153,7 @@ public:
 																// .project({"r1"})
 																.unnest({}, {"r1"}) // after unnest velox will automatically add + "_e" to its original name. PlanBuilder.cpp/unnest
 																.project({"r1_e AS r1"})
+																.localPartitionRoundRobinRow()
 																.project({exprStr})
 																;
 												// Here are several approaches to correctly aggregat the multiplied values.
