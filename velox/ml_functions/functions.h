@@ -74,6 +74,9 @@ public:
         float* input_values = input_elements->values()->asMutable<float>();
         int input_size = input_elements->size();
 
+        // std::cout << "input_size:" << "," << input_size << std::endl;
+        // std::cout << "input_values:" << "," << input_values[0] << "," << input_values[1] << std::endl;
+        
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
         
@@ -966,18 +969,30 @@ public:
         int output_height = input_height - dims[1] + 1;
         int output_width = input_width - dims[2] + 1;
 
-        
+        int input_size = input_elements->size();
+        // std::cout << "input_size:" << "," << input_size << std::endl;
+        // std::cout << "input_values:" << "," << input_values[0] << "," << input_values[1] << "," << input_values[2080] << std::endl;
+        // std::cout << "row size" << "," << rows.size() << std::endl;
+
         std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
        
-        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}).bias(false));
+        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[0], dims[3], {dims[1], dims[2]}).bias(false));
         // torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}));
-        // torch::Tensor conv_weights = torch::tensor(weights_).view({dims[3], dims[0], dims[1], dims[2]});
+        torch::Tensor conv_weights = torch::from_blob(weights_, {dims[3], dims[0], dims[1], dims[2]}).to(torch::kFloat);
 
-        // conv_layer->weight = torch::nn::parameter::Parameter (conv_weights);
-        torch::Tensor input_data = torch::from_blob(input_values, {rows.size(), dims[3], input_height, input_width});
+        auto parameters = conv_layer->named_parameters();
+
+        // Find and set the weight parameter
+        for (auto& named_param : parameters) {
+            if (named_param.key() == "weight") {
+                named_param.value().data() = conv_weights;
+                break;
+            }
+        }
+        torch::Tensor input_data = torch::from_blob(input_values, {rows.size(), dims[3], input_height, input_width}).to(torch::kFloat);
 
        
-        torch::Tensor output_data = conv_layer(input_data);
+        torch::Tensor output_data = conv_layer->forward(input_data);
 
         // Convert bias values to a tensor
         torch::Tensor bias_tensor = torch::from_blob(bias_, {dims[0]}); 

@@ -172,6 +172,10 @@ class CataLog {
             return defaultBlocksSize;
         }
 
+        int getDefaultSplits (){
+            return defaultSplits;
+        }
+
 
     private:
         // Default values
@@ -179,7 +183,7 @@ class CataLog {
         int defaultBlocksNum = 4;
         int defaultBlocksSize = 256;
         int blockingThreshold = 1;
-
+        int defaultSplits = 392;
         // Maps for storing data
         std::map<std::string, std::vector<int>> dataSourceStatMap;
         std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> idFileAddrMap;
