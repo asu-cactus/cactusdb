@@ -112,6 +112,9 @@ class Conv2dActionTest : public HiveConnectorTestBase {
       CataLog &cataLog) {
 
     // Initializes executor.
+    constexpr int64_t KB = 1024L;
+    constexpr int64_t MB = 1024L * KB;
+    constexpr int64_t GB = 1024L * MB;
     std::shared_ptr<folly::Executor> executor_{
         std::make_shared<folly::CPUThreadPoolExecutor>(
             std::thread::hardware_concurrency())};
@@ -119,6 +122,12 @@ class Conv2dActionTest : public HiveConnectorTestBase {
     std::shared_ptr<core::QueryCtx> queryCtx_{
         std::make_shared<core::QueryCtx>(executor_.get())};
     // Set queryCtx config.
+    // std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 50 * MB)};
+
+    // queryCtx_->testingOverrideMemoryPool(rootPool);
+    // queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
+    // queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}});
+
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000000000000"},// 100000000000000000  1000000
           {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
@@ -140,9 +149,9 @@ class Conv2dActionTest : public HiveConnectorTestBase {
       core::PlanNodeId key = entry.first;
 
       const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
-
+      std::cout << "path size:"<< fileAddr.size() << std::endl;
       auto hiveSplits = makeHiveConnectorSplits(fileAddr);
-
+      std::cout << "hive size:"<< hiveSplits.size() << std::endl;
       for (auto& split : hiveSplits) {
 
         task->addSplit(key, exec::Split(std::move(split)));
@@ -172,10 +181,103 @@ class Conv2dActionTest : public HiveConnectorTestBase {
     ss << numSplits << "," << numThreads << ",";
 
     int dataIdx = 0;
-    for (auto batchedData : actualResults) {
-      std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
-      dataIdx += 1;
+    // for (auto batchedData : actualResults) {
+    //   std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
+    //   dataIdx += 1;
+    // }
+
+    std::cout << "Time for FFNN with Input Data (sec): "
+              << std::endl;
+
+    std::cout << ss.str()
+              << (std::chrono::duration_cast<std::chrono::microseconds>(
+                      end - begin)
+                      .count()) /
+            1000000.0
+              << " secs" << std::endl;
+  }
+
+  void runPlan_splits(
+      int numThreads,
+      int numSplits,
+      PlanBuilder& myPlan,
+      CataLog &cataLog) {
+
+    // Initializes executor.
+    constexpr int64_t KB = 1024L;
+    constexpr int64_t MB = 1024L * KB;
+    constexpr int64_t GB = 1024L * MB;
+    std::shared_ptr<folly::Executor> executor_{
+        std::make_shared<folly::CPUThreadPoolExecutor>(
+            std::thread::hardware_concurrency())};
+    // Initializes queryCtx.
+    std::shared_ptr<core::QueryCtx> queryCtx_{
+        std::make_shared<core::QueryCtx>(executor_.get())};
+    // Set queryCtx config.
+    std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 50 * MB)};
+
+    queryCtx_->testingOverrideMemoryPool(rootPool);
+    // queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
+    queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}});
+
+    queryCtx_->testingOverrideConfigUnsafe(
+        {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000000000000"},// 100000000000000000  1000000
+          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
+
+    std::chrono::steady_clock::time_point begin =
+        std::chrono::steady_clock::now();
+
+    CursorParameters params;
+    params.maxDrivers = numThreads;
+    params.planNode = myPlan.planNode();
+    params.queryCtx = queryCtx_;
+    bool noMoreSplits = false;
+    auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
+    auto idFileAddrMap = cataLog.getIdAddressMap();
+    std::vector<core::PlanNodeId> ids;
+      if (!noMoreSplits) {
+    for (const auto& entry : idFileAddrMap) {
+
+      core::PlanNodeId key = entry.first;
+
+      const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+
+      // auto hiveSplits = makeHiveConnectorSplits(fileAddr[0], numSplits, dwio::common::FileFormat::DWRF);
+      auto hiveSplits =  makeHiveConnectorSplits(fileAddr[0]->path, cataLog.getDefaultSplits(), dwio::common::FileFormat::DWRF);
+      std::cout << "hive size:"<< hiveSplits.size() << std::endl;
+      for (auto& split : hiveSplits) {
+        std::cout << split->toString() << std::endl;
+        task->addSplit(key, exec::Split(std::move(split)));
+
+      }
+
+      ids.push_back(key);
     }
+
+    for (auto id: ids){
+      task->noMoreSplits(id);
+    }
+      }
+      noMoreSplits = true;
+    };
+
+    auto [cursor, actualResults] = readCursor(params, addSplits);
+    waitForTaskCompletion(cursor->task().get());
+
+
+
+    std::chrono::steady_clock::time_point end =
+        std::chrono::steady_clock::now();
+
+    std::stringstream ss;
+
+    ss << numSplits << "," << numThreads << ",";
+
+    int dataIdx = 0;
+    // for (auto batchedData : actualResults) {
+    //   std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
+    //   dataIdx += 1;
+    // }
 
     std::cout << "Time for FFNN with Input Data (sec): "
               << std::endl;
@@ -552,9 +654,12 @@ class Conv2dActionTest : public HiveConnectorTestBase {
 
     }
 
-    else {
+    else if(flag == 3) {
+    auto blocks = convert2Blocks(input_dims[0], input_dims[1], input_dims[2], num_samples, cnn_filter_dims[0], cnn_filter_dims[2], 1, 0, 32);
     ImageMatrix kernel = convert2Matrix(cnn_filter_dims, cnn_filters, data.weights[0], data.bias[0]);
-    ImageMatrix images = convert2Matrix(cnn_filter_dims, input_dims, num_samples, data.featuresFloat);
+    // ImageMatrix images = convert2Matrix(cnn_filter_dims, input_dims, num_samples, data.featuresFloat);
+    // auto values = convert2Matrix(input_dims[0], input_dims[1], input_dims[2], num_samples, cnn_filter_dims[0], cnn_filter_dims[2], 1, 0, 1);
+
 
     // saveToFile("kernel.txt", kernel);
     // saveToFile("image.txt", images);
@@ -562,29 +667,126 @@ class Conv2dActionTest : public HiveConnectorTestBase {
     int kernel_col = kernel.getColSize();
     int kernel_row = kernel.getRowSize();
 
-    int image_col = images.getColSize();
-    int image_row = images.getRowSize();
+    // int image_col = images.getColSize();
+    // int image_row = images.getRowSize();
 
 
 
+    // std::vector<std::vector<float>> featureVectors;
 
-    std::vector<std::vector<float>> featureVectors;
+    // for (int i = 0; i < image_row; i++) {
 
-    for (int i = 0; i < image_row; i++) {
+    //       std::vector<float> featureVector;
 
-          std::vector<float> featureVector;
+    //       for (int j = 0; j < image_col; j++) {
 
-          for (int j = 0; j < image_col; j++) {
+    //               featureVector.push_back(images.data[i*image_col + j]);
+    //       }
 
-                  featureVector.push_back(images.data[i*image_col + j]);
-          }
+    //       featureVectors.push_back(featureVector);
 
-          featureVectors.push_back(featureVector);
+    //   }
 
-      }
-      auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
-
+    //   auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+    // auto featureArrayVector = maker.arrayVector<float>(values, REAL());
+    RowTypePtr schema;
+    std::vector<std::shared_ptr<TempFilePath>> paths;
+    for (auto& block : blocks) {
+      std::vector<std::vector<float>> result;
+      result.push_back(block);
+      auto featureArrayVector = maker.arrayVector<float>(result, REAL());
       auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      schema = asRowType(inputRowVector->type());
+      auto file = TempFilePath::create();
+      auto config = std::make_shared<facebook::velox::dwrf::Config>();
+      writeToFile(file->path, {inputRowVector}, config);
+      paths.push_back(file);
+    }
+    // auto featureArrayVector = maker.arrayVector<float>(blocks, REAL());
+    // auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+    
+    // Create file path
+    auto file = TempFilePath::create();
+    // Create file config
+    uint64_t kSizeKB = 1024UL;
+    uint32_t rows = num_samples / 8;
+    auto config = std::make_shared<facebook::velox::dwrf::Config>();
+    // config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 1000 * kSizeKB);
+    // config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
+    // Write the data source to a file, with the format defined by the rowVector
+    // writeToFile(file->path, {inputRowVector}, config);
+
+    // cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+      // Set data source statistics in cataLog
+    cataLog.setDataSourceStat({num_samples, input_size, input_dims[0], input_dims[1], input_dims[2]});
+
+    std::string compute = registerFunctions(dims, kernel.data, kernel_row, kernel_col, dims[6], cataLog);
+
+        // Initialize planNodeID
+    core::PlanNodeId p0;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    // Create a plan for FFNN using two dense layers UDFs
+    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(schema)
+                .capturePlanNodeId(p0)
+                .project({fmt::format(compute, "v")}) 
+                .planBuild();
+    // Set original plan nodeId and file address of data source
+    // cataLog.setIdAddressMap(p0, {file});
+    cataLog.setIdAddressMap(p0, paths);
+    // Set vector name and nodeId of data source
+    // cataLog.setVectorIdMap(p0, "v");
+    // Get the logical plan
+    auto planNode = myPlan.planNode();
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
+
+    // runPlan_splits(8, 392, myPlan, cataLog);
+    runPlan(8, 8, myPlan, cataLog);
+
+    // std::cout << image_col << "," << image_row << std::endl;
+    }
+
+    else  {
+    // auto blocks = convert2Blocks(input_dims[0], input_dims[1], input_dims[2], num_samples, cnn_filter_dims[0], cnn_filter_dims[2], 1, 0, 32);
+    ImageMatrix kernel = convert2Matrix(cnn_filter_dims, cnn_filters, data.weights[0], data.bias[0]);
+    // ImageMatrix images = convert2Matrix(cnn_filter_dims, input_dims, num_samples, data.featuresFloat);
+    auto values = convert2Matrix(input_dims[0], input_dims[1], input_dims[2], num_samples, cnn_filter_dims[0], cnn_filter_dims[2], 1, 0, 12544);
+
+
+    // saveToFile("kernel.txt", kernel);
+    // saveToFile("image.txt", images);
+
+    int kernel_col = kernel.getColSize();
+    int kernel_row = kernel.getRowSize();
+
+    // int image_col = images.getColSize();
+    // int image_row = images.getRowSize();
+
+
+
+    // std::vector<std::vector<float>> featureVectors;
+
+    // for (int i = 0; i < image_row; i++) {
+
+    //       std::vector<float> featureVector;
+
+    //       for (int j = 0; j < image_col; j++) {
+
+    //               featureVector.push_back(images.data[i*image_col + j]);
+    //       }
+
+    //       featureVectors.push_back(featureVector);
+
+    //   }
+
+    //   auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+    auto featureArrayVector = maker.arrayVector<float>(values, REAL());
+    // auto featureArrayVector = maker.arrayVector<float>(blocks, REAL());
+    auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
     
     // Create file path
     auto file = TempFilePath::create();
@@ -622,7 +824,7 @@ class Conv2dActionTest : public HiveConnectorTestBase {
 
     runPlan(8, 8, myPlan, cataLog);
 
-
+    // std::cout << image_col << "," << image_row << std::endl;
     }
   }
 
