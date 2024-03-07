@@ -726,7 +726,7 @@ core::PlanNodePtr& filter_O(const std::string& filter, core::PlanNodePtr source)
 
 
 
-auto pool_ = memory::addDefaultLeafMemoryPool();
+auto pool_ = memory::MemoryManager::getInstance()->addLeafPool();
 std::shared_ptr<folly::Executor> executor_{
       std::make_shared<folly::CPUThreadPoolExecutor>(
           std::thread::hardware_concurrency())};
@@ -737,7 +737,7 @@ std::shared_ptr<core::QueryCtx> queryCtx_{
       int64_t memoryCapacity) {
     
     std::unordered_map<std::string, std::shared_ptr<Config>> configs;
-    std::shared_ptr<MemoryPool> pool = memory::defaultMemoryManager().addRootPool(
+    std::shared_ptr<MemoryPool> pool = memory::MemoryManager::getInstance()->addRootPool(
         "", memoryCapacity, MemoryReclaimer::create());
    std::unordered_map<std::string, std::string> myMapWithValues = {{core::QueryConfig::kSpillEnabled, "true"}, 
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
@@ -1595,7 +1595,7 @@ void test_mnist_oom_error(int argc, char** argv){
    aggregate::prestosql::registerAllAggregateFunctions();
 
    parse::registerTypeResolver();
-   std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 38 * MB)};
+   std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", 38 * MB)};
   //  auto childPool = rootPool->addLeafChild("leaf");
    VectorMaker maker{pool_.get()};
   // VectorMaker maker{childPool.get()};
@@ -1645,7 +1645,7 @@ void test_mnist_oom_error(int argc, char** argv){
   //     {{core::QueryConfig::kPreferredOutputBatchRows, "400"}, {core::QueryConfig::kPreferredOutputBatchBytes, "2000000"},  {core::QueryConfig::kMaxOutputBatchRows, "300"}});
   // Create task
   
-  // std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 39 * MB)};
+  // std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", 39 * MB)};
   // auto childPool = rootPool->addLeafChild("leaf");
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
@@ -1748,7 +1748,7 @@ void test_oom_success(int argc, char** argv){
   
 
 
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 102 * MB)}; // 280 pass for 4 threads, 40 for 1 thread
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", 102 * MB)}; // 280 pass for 4 threads, 40 for 1 thread
   auto childPool = rootPool->addLeafChild("leaf");
   queryCtx_->testingOverrideMemoryPool(rootPool);
   
@@ -2285,7 +2285,7 @@ PlanBuilder& build_plan_udf(DataFrame data, int features, int first_layer, int s
 }
 
 void exec_plan_udf(PlanBuilder& planBuilder, int memoryLimit, std::vector<std::vector<float>> features, int splitsNum, int threadsNum){
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", memoryLimit * MB)};
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", memoryLimit * MB)};
   auto planFragment = planBuilder.planFragment();
   queryCtx_->testingOverrideMemoryPool(rootPool);
   queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
@@ -2428,7 +2428,7 @@ OptOutput optiming_plan(PlanBuilder& planBuilder, DataFrame data, int num_sample
 
 void exec_plan_relational(PlanBuilder& planBuilderOpt, int memoryLimit, std::vector<std::shared_ptr<TempFilePath>> inputPaths, 
 std::vector<std::shared_ptr<TempFilePath>> weightPaths, int threadsNum){
-  std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", memoryLimit * MB)}; // 280 pass for 4 threads, 40 for 1 thread
+  std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", memoryLimit * MB)}; // 280 pass for 4 threads, 40 for 1 thread
   queryCtx_->testingOverrideMemoryPool(rootPool);
   auto planFragmentOpt = planBuilderOpt.planFragment();
   MyFileTest myFile;

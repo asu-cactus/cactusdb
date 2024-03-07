@@ -16,16 +16,17 @@
 
 #include "velox/connectors/hive/HiveDataSink.h"
 
+#include "velox/common/base/Counters.h"
 #include "velox/common/base/Fs.h"
+#include "velox/common/base/StatsReporter.h"
 #include "velox/common/testutil/TestValue.h"
 #include "velox/connectors/hive/HiveConfig.h"
 #include "velox/connectors/hive/HivePartitionFunction.h"
+#include "velox/connectors/hive/TableHandle.h"
 #include "velox/core/ITypedExpr.h"
 #include "velox/dwio/common/SortingWriter.h"
-#include "velox/exec/SortBuffer.h"
-
-#include "velox/connectors/hive/TableHandle.h"
 #include "velox/exec/OperatorUtils.h"
+#include "velox/exec/SortBuffer.h"
 
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -36,6 +37,46 @@ using facebook::velox::common::testutil::TestValue;
 namespace facebook::velox::connector::hive {
 
 namespace {
+
+// Returns the type of non-partition keys.
+RowTypePtr getNonPartitionTypes(
+    const std::vector<column_index_t>& dataCols,
+    const RowTypePtr& inputType) {
+  std::vector<std::string> childNames;
+  std::vector<TypePtr> childTypes;
+  const auto& dataSize = dataCols.size();
+  childNames.reserve(dataSize);
+  childTypes.reserve(dataSize);
+  for (uint32_t i = 0; i < inputType->size(); i++) {
+    if (std::find(dataCols.cbegin(), dataCols.cend(), i) != dataCols.cend()) {
+      childNames.push_back(inputType->nameOf(i));
+      childTypes.push_back(inputType->childAt(i));
+    }
+  }
+
+  return ROW(std::move(childNames), std::move(childTypes));
+}
+
+// Filters out partition columns if there is any.
+RowVectorPtr makeDataInput(
+    const std::vector<column_index_t>& dataCols,
+    const RowVectorPtr& input) {
+  std::vector<VectorPtr> childVectors;
+  childVectors.reserve(dataCols.size());
+  for (uint32_t i = 0; i < input->childrenSize(); i++) {
+    if (std::find(dataCols.cbegin(), dataCols.cend(), i) != dataCols.cend()) {
+      childVectors.push_back(input->childAt(i));
+    }
+  }
+
+  return std::make_shared<RowVector>(
+      input->pool(),
+      getNonPartitionTypes(dataCols, asRowType(input->type())),
+      input->nulls(),
+      input->size(),
+      std::move(childVectors),
+      input->getNullCount());
+}
 
 // Returns a subset of column indices corresponding to partition keys.
 std::vector<column_index_t> getPartitionChannels(
@@ -50,6 +91,23 @@ std::vector<column_index_t> getPartitionChannels(
   }
 
   return channels;
+}
+
+// Returns the column indices of non-partition keys.
+std::vector<column_index_t> getNonPartitionChannels(
+    const std::vector<column_index_t>& partitionChannels,
+    const column_index_t childrenSize) {
+  std::vector<column_index_t> dataChannels;
+  dataChannels.reserve(childrenSize - partitionChannels.size());
+
+  for (column_index_t i = 0; i < childrenSize; i++) {
+    if (std::find(partitionChannels.cbegin(), partitionChannels.cend(), i) ==
+        partitionChannels.cend()) {
+      dataChannels.push_back(i);
+    }
+  }
+
+  return dataChannels;
 }
 
 std::string makePartitionDirectory(
@@ -129,6 +187,7 @@ std::shared_ptr<memory::MemoryPool> createSortPool(
 #define WRITER_NON_RECLAIMABLE_SECTION_GUARD(index)     \
   exec::NonReclaimableSectionGuard nonReclaimableGuard( \
       writerInfo_[(index)]->nonReclaimableSectionHolder.get())
+
 } // namespace
 
 const HiveWriterId& HiveWriterId::unpartitionedId() {
@@ -290,22 +349,27 @@ HiveDataSink::HiveDataSink(
     std::shared_ptr<const HiveInsertTableHandle> insertTableHandle,
     const ConnectorQueryCtx* connectorQueryCtx,
     CommitStrategy commitStrategy,
-    const std::shared_ptr<const Config>& connectorProperties)
+    const std::shared_ptr<const HiveConfig>& hiveConfig)
     : inputType_(std::move(inputType)),
       insertTableHandle_(std::move(insertTableHandle)),
       connectorQueryCtx_(connectorQueryCtx),
       commitStrategy_(commitStrategy),
-      connectorProperties_(connectorProperties),
-      maxOpenWriters_(
-          HiveConfig::maxPartitionsPerWriters(connectorQueryCtx_->config())),
+      hiveConfig_(hiveConfig),
+      maxOpenWriters_(hiveConfig_->maxPartitionsPerWriters(
+          connectorQueryCtx->sessionProperties())),
       partitionChannels_(getPartitionChannels(insertTableHandle_)),
       partitionIdGenerator_(
-          !partitionChannels_.empty() ? std::make_unique<PartitionIdGenerator>(
-                                            inputType_,
-                                            partitionChannels_,
-                                            maxOpenWriters_,
-                                            connectorQueryCtx_->memoryPool())
-                                      : nullptr),
+          !partitionChannels_.empty()
+              ? std::make_unique<PartitionIdGenerator>(
+                    inputType_,
+                    partitionChannels_,
+                    maxOpenWriters_,
+                    connectorQueryCtx_->memoryPool(),
+                    hiveConfig_->isPartitionPathAsLowerCase(
+                        connectorQueryCtx->sessionProperties()))
+              : nullptr),
+      dataChannels_(
+          getNonPartitionChannels(partitionChannels_, inputType_->size())),
       bucketCount_(
           insertTableHandle_->bucketProperty() == nullptr
               ? 0
@@ -338,13 +402,17 @@ HiveDataSink::HiveDataSink(
     sortColumnIndices_.reserve(sortedProperty.size());
     sortCompareFlags_.reserve(sortedProperty.size());
     for (int i = 0; i < sortedProperty.size(); ++i) {
-      sortColumnIndices_.push_back(
-          inputType_->getChildIdx(sortedProperty.at(i)->sortColumn()));
-      sortCompareFlags_.push_back(
-          {sortedProperty.at(i)->sortOrder().isNullsFirst(),
-           sortedProperty.at(i)->sortOrder().isAscending(),
-           false,
-           CompareFlags::NullHandlingMode::kNullAsValue});
+      auto columnIndex =
+          getNonPartitionTypes(dataChannels_, inputType_)
+              ->getChildIdxIfExists(sortedProperty.at(i)->sortColumn());
+      if (columnIndex.has_value()) {
+        sortColumnIndices_.push_back(columnIndex.value());
+        sortCompareFlags_.push_back(
+            {sortedProperty.at(i)->sortOrder().isNullsFirst(),
+             sortedProperty.at(i)->sortOrder().isAscending(),
+             false,
+             CompareFlags::NullHandlingMode::kNullAsValue});
+      }
     }
   }
 }
@@ -399,8 +467,11 @@ void HiveDataSink::appendData(RowVectorPtr input) {
 
 void HiveDataSink::write(size_t index, const VectorPtr& input) {
   WRITER_NON_RECLAIMABLE_SECTION_GUARD(index);
-  writers_[index]->write(input);
-  writerInfo_[index]->numWrittenRows += input->size();
+  auto dataInput =
+      makeDataInput(dataChannels_, std::dynamic_pointer_cast<RowVector>(input));
+
+  writers_[index]->write(dataInput);
+  writerInfo_[index]->numWrittenRows += dataInput->size();
 }
 
 std::string HiveDataSink::stateString(State state) {
@@ -594,7 +665,10 @@ uint32_t HiveDataSink::appendWriter(const HiveWriterId& id) {
   setMemoryReclaimers(writerInfo_.back().get());
 
   dwio::common::WriterOptions options;
-  options.schema = inputType_;
+  const auto* connectorSessionProperties =
+      connectorQueryCtx_->sessionProperties();
+  options.schema = getNonPartitionTypes(dataChannels_, inputType_);
+
   options.memoryPool = writerInfo_.back()->writerPool.get();
   options.compressionKind = insertTableHandle_->compressionKind();
   if (canReclaim()) {
@@ -602,11 +676,10 @@ uint32_t HiveDataSink::appendWriter(const HiveWriterId& id) {
   }
   options.nonReclaimableSection =
       writerInfo_.back()->nonReclaimableSectionHolder.get();
-  options.maxStripeSize = std::optional(HiveConfig::getOrcWriterMaxStripeSize(
-      connectorQueryCtx_->config(), connectorProperties_.get()));
-  options.maxDictionaryMemory =
-      std::optional(HiveConfig::getOrcWriterMaxDictionaryMemory(
-          connectorQueryCtx_->config(), connectorProperties_.get()));
+  options.maxStripeSize = std::optional(
+      hiveConfig_->orcWriterMaxStripeSize(connectorSessionProperties));
+  options.maxDictionaryMemory = std::optional(
+      hiveConfig_->orcWriterMaxDictionaryMemory(connectorSessionProperties));
   ioStats_.emplace_back(std::make_shared<io::IoStatistics>());
 
   // Prevents the memory allocation during the writer creation.
@@ -615,7 +688,8 @@ uint32_t HiveDataSink::appendWriter(const HiveWriterId& id) {
       dwio::common::FileSink::create(
           writePath,
           {.bufferWrite = false,
-           .connectorProperties = connectorProperties_,
+           .connectorProperties = hiveConfig_->config(),
+           .fileCreateConfig = hiveConfig_->writeFileCreateConfig(),
            .pool = writerInfo_.back()->sinkPool.get(),
            .metricLogger = dwio::common::MetricsLog::voidLog(),
            .stats = ioStats_.back().get()}),
@@ -640,7 +714,7 @@ HiveDataSink::maybeCreateBucketSortWriter(
   auto* sortPool = writerInfo_.back()->sortPool.get();
   VELOX_CHECK_NOT_NULL(sortPool);
   auto sortBuffer = std::make_unique<exec::SortBuffer>(
-      inputType_,
+      getNonPartitionTypes(dataChannels_, inputType_),
       sortColumnIndices_,
       sortCompareFlags_,
       sortPool,
@@ -649,8 +723,10 @@ HiveDataSink::maybeCreateBucketSortWriter(
   return std::make_unique<dwio::common::SortingWriter>(
       std::move(writer),
       std::move(sortBuffer),
-      HiveConfig::sortWriterMaxOutputRows(connectorQueryCtx_->config()),
-      HiveConfig::sortWriterMaxOutputBytes(connectorQueryCtx_->config()),
+      hiveConfig_->sortWriterMaxOutputRows(
+          connectorQueryCtx_->sessionProperties()),
+      hiveConfig_->sortWriterMaxOutputBytes(
+          connectorQueryCtx_->sessionProperties()),
       writerInfo_.back()->spillStats.get());
 }
 
@@ -729,14 +805,20 @@ std::pair<std::string, std::string> HiveDataSink::getWriterFileNames(
   const std::string writeFileName = isCommitRequired()
       ? fmt::format(".tmp.velox.{}_{}", targetFileName, makeUuid())
       : targetFileName;
+  if (insertTableHandle_->tableStorageFormat() ==
+      dwio::common::FileFormat::PARQUET) {
+    return {
+        fmt::format("{}{}", targetFileName, ".parquet"),
+        fmt::format("{}{}", writeFileName, ".parquet")};
+  }
   return {targetFileName, writeFileName};
 }
 
 HiveWriterParameters::UpdateMode HiveDataSink::getUpdateMode() const {
   if (insertTableHandle_->isInsertTable()) {
     if (insertTableHandle_->isPartitioned()) {
-      const auto insertBehavior = HiveConfig::insertExistingPartitionsBehavior(
-          connectorQueryCtx_->config());
+      const auto insertBehavior = hiveConfig_->insertExistingPartitionsBehavior(
+          connectorQueryCtx_->sessionProperties());
       switch (insertBehavior) {
         case HiveConfig::InsertExistingPartitionsBehavior::kOverwrite:
           return HiveWriterParameters::UpdateMode::kOverwrite;
@@ -752,7 +834,7 @@ HiveWriterParameters::UpdateMode HiveDataSink::getUpdateMode() const {
       if (insertTableHandle_->isBucketed()) {
         VELOX_USER_FAIL("Cannot insert into bucketed unpartitioned Hive table");
       }
-      if (HiveConfig::immutablePartitions(connectorProperties_.get())) {
+      if (hiveConfig_->immutablePartitions()) {
         VELOX_USER_FAIL("Unpartitioned Hive tables are immutable.");
       }
       return HiveWriterParameters::UpdateMode::kAppend;
@@ -868,6 +950,7 @@ bool HiveDataSink::WriterReclaimer::reclaimableBytes(
 uint64_t HiveDataSink::WriterReclaimer::reclaim(
     memory::MemoryPool* pool,
     uint64_t targetBytes,
+    uint64_t maxWaitMs,
     memory::MemoryReclaimer::Stats& stats) {
   VELOX_CHECK_EQ(pool->name(), writerInfo_->writerPool->name());
   if (!dataSink_->canReclaim()) {
@@ -875,6 +958,7 @@ uint64_t HiveDataSink::WriterReclaimer::reclaim(
   }
 
   if (*writerInfo_->nonReclaimableSectionHolder.get()) {
+    RECORD_METRIC_VALUE(kMetricMemoryNonReclaimableCount);
     LOG(WARNING) << "Can't reclaim from hive writer pool " << pool->name()
                  << " which is under non-reclaimable section, "
                  << " used memory: " << succinctBytes(pool->currentBytes())
@@ -887,7 +971,7 @@ uint64_t HiveDataSink::WriterReclaimer::reclaim(
   const uint64_t memoryUsageBeforeReclaim = pool->currentBytes();
   const std::string memoryUsageTreeBeforeReclaim = pool->treeMemoryUsage();
   const auto reclaimedBytes =
-      exec::MemoryReclaimer::reclaim(pool, targetBytes, stats);
+      exec::MemoryReclaimer::reclaim(pool, targetBytes, maxWaitMs, stats);
   const uint64_t memoryUsageAfterReclaim = pool->currentBytes();
   if (memoryUsageAfterReclaim > memoryUsageBeforeReclaim) {
     VELOX_FAIL(
