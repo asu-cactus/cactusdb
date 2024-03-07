@@ -331,6 +331,8 @@ class MCTS:
         received_message = receive_message_by_socket(self.client_socket)
         # TODO: Current reward is the latency, should be changed once integrated with cost model
         reward = -received_message["reward"]
+        if os.environ["mcts_debug"] == "True":
+            print("[INFO] reward value: ", reward)
         return reward
 
     def back_propagate(self, node: MCTSTreeNode, reward: float):

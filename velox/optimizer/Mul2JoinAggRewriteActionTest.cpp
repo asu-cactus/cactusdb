@@ -230,10 +230,15 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     ss << numSplits << "," << numThreads << ",";
 
     int dataIdx = 0;
+    int totalDataNum = 0;
     for (auto batchedData : actualResults) {
-      std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
+      int batchSize = batchedData->size();
+      std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
       dataIdx += 1;
+      totalDataNum += batchSize;
     }
+
+    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum);
 
     std::cout << "Time for FFNN with Input Data (sec): "
               << std::endl;

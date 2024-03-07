@@ -95,7 +95,8 @@ RUN git clone --recursive https://github.com/dmlc/xgboost \
     && cd xgboost \
     && mkdir build \
     && cd build \
-    && make install
+    && cmake ..
+    && make install .
 
 # set up spark
 WORKDIR /home
