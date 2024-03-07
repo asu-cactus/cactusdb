@@ -61,6 +61,14 @@ class HiveDataSinkTest : public exec::test::HiveConnectorTestBase {
         std::thread::hardware_concurrency());
   }
 
+  void TearDown() override {
+    connectorQueryCtx_.reset();
+    connectorPool_.reset();
+    opPool_.reset();
+    root_.reset();
+    HiveConnectorTestBase::TearDown();
+  }
+
   std::vector<RowVectorPtr> createVectors(int vectorSize, int numVectors) {
     VectorFuzzer::Options options;
     options.vectorSize = vectorSize;
@@ -77,6 +85,7 @@ class HiveDataSinkTest : public exec::test::HiveConnectorTestBase {
       uint64_t writerFlushThreshold) {
     return std::make_unique<SpillConfig>(
         [&]() -> const std::string& { return spillPath; },
+        [&](uint64_t) {},
         "",
         0,
         0,
@@ -84,6 +93,7 @@ class HiveDataSinkTest : public exec::test::HiveConnectorTestBase {
         spillExecutor_.get(),
         10,
         20,
+        0,
         0,
         0,
         0,
@@ -98,7 +108,7 @@ class HiveDataSinkTest : public exec::test::HiveConnectorTestBase {
     opPool_.reset();
     root_.reset();
 
-    root_ = memory::defaultMemoryManager().addRootPool(
+    root_ = memory::memoryManager()->addRootPool(
         "HiveDataSinkTest", 1L << 30, exec::MemoryReclaimer::create());
     opPool_ = root_->addLeafChild("operator");
     connectorPool_ =
@@ -107,7 +117,7 @@ class HiveDataSinkTest : public exec::test::HiveConnectorTestBase {
     connectorQueryCtx_ = std::make_unique<connector::ConnectorQueryCtx>(
         opPool_.get(),
         connectorPool_.get(),
-        connectorConfig_.get(),
+        connectorSessionProperties_.get(),
         nullptr,
         nullptr,
         nullptr,
@@ -177,26 +187,23 @@ class HiveDataSinkTest : public exec::test::HiveConnectorTestBase {
         fmt::format("SELECT * FROM tmp"));
   }
 
-  void setConnectorConfig(
-      std::unordered_map<std::string, std::string> connectorConfig) {
-    connectorConfig_ =
-        std::make_shared<core::MemConfig>(std::move(connectorConfig));
-  }
-
   void setConnectorQueryContext(
       std::unique_ptr<ConnectorQueryCtx> connectorQueryCtx) {
     connectorQueryCtx_ = std::move(connectorQueryCtx);
   }
 
   const std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+      memory::memoryManager()->addLeafPool();
 
   std::shared_ptr<memory::MemoryPool> root_;
   std::shared_ptr<memory::MemoryPool> opPool_;
   std::shared_ptr<memory::MemoryPool> connectorPool_;
   RowTypePtr rowType_;
+  std::shared_ptr<core::MemConfig> connectorSessionProperties_ =
+      std::make_shared<core::MemConfig>();
   std::unique_ptr<ConnectorQueryCtx> connectorQueryCtx_;
-  std::shared_ptr<Config> connectorConfig_{std::make_unique<core::MemConfig>()};
+  std::shared_ptr<HiveConfig> connectorConfig_ =
+      std::make_shared<HiveConfig>(std::make_shared<core::MemConfig>());
   std::unique_ptr<folly::IOThreadPoolExecutor> spillExecutor_;
 };
 
@@ -630,7 +637,7 @@ TEST_F(HiveDataSinkTest, memoryReclaim) {
       auto connectorQueryCtx = std::make_unique<connector::ConnectorQueryCtx>(
           opPool_.get(),
           connectorPool_.get(),
-          connectorConfig_.get(),
+          connectorSessionProperties_.get(),
           spillConfig.get(),
           nullptr,
           nullptr,
@@ -643,7 +650,7 @@ TEST_F(HiveDataSinkTest, memoryReclaim) {
       auto connectorQueryCtx = std::make_unique<connector::ConnectorQueryCtx>(
           opPool_.get(),
           connectorPool_.get(),
-          connectorConfig_.get(),
+          connectorSessionProperties_.get(),
           nullptr,
           nullptr,
           nullptr,
@@ -667,19 +674,18 @@ TEST_F(HiveDataSinkTest, memoryReclaim) {
       dataSink->appendData(vectors[i]);
     }
     memory::MemoryReclaimer::Stats stats;
-    uint64_t reclaimableBytes;
+    uint64_t reclaimableBytes{0};
     if (testData.expectedWriterReclaimed) {
-      ASSERT_TRUE(root_->reclaimableBytes(reclaimableBytes));
+      reclaimableBytes = root_->reclaimableBytes().value();
       ASSERT_GT(reclaimableBytes, 0);
-      ASSERT_GT(root_->reclaim(256L << 20, stats), 0);
+      ASSERT_GT(root_->reclaim(256L << 20, 0, stats), 0);
       ASSERT_GT(stats.reclaimExecTimeUs, 0);
       ASSERT_GT(stats.reclaimedBytes, 0);
       // We expect dwrf writer set numNonReclaimableAttempts counter.
       ASSERT_LE(stats.numNonReclaimableAttempts, 1);
     } else {
-      ASSERT_FALSE(root_->reclaimableBytes(reclaimableBytes));
-      ASSERT_EQ(reclaimableBytes, 0);
-      ASSERT_EQ(root_->reclaim(256L << 20, stats), 0);
+      ASSERT_FALSE(root_->reclaimableBytes().has_value());
+      ASSERT_EQ(root_->reclaim(256L << 20, 0, stats), 0);
       ASSERT_EQ(stats.reclaimExecTimeUs, 0);
       ASSERT_EQ(stats.reclaimedBytes, 0);
       if (testData.expectedWriterReclaimEnabled) {
@@ -742,12 +748,11 @@ TEST_F(HiveDataSinkTest, memoryReclaimAfterClose) {
     connectorConfig.emplace(
         "file_writer_flush_threshold_bytes", folly::to<std::string>(0));
     // Avoid internal the stripe flush while data write.
-    connectorConfig.emplace("orc_optimized_writer_max_stripe_size", "1GB");
-    connectorConfig.emplace(
-        "orc_optimized_writer_max_dictionary_memory", "1GB");
+    connectorConfig.emplace("hive.orc.writer.stripe-max-size", "1GB");
+    connectorConfig.emplace("hive.orc.writer.dictionary-max-memory", "1GB");
 
-    setConnectorConfig(connectorConfig);
-
+    connectorConfig_ = std::make_shared<HiveConfig>(
+        std::make_shared<core::MemConfig>(std::move(connectorConfig)));
     const auto outputDirectory = TempDirectoryPath::create();
     std::shared_ptr<HiveBucketProperty> bucketProperty;
     std::vector<std::string> partitionBy;
@@ -770,7 +775,7 @@ TEST_F(HiveDataSinkTest, memoryReclaimAfterClose) {
       auto connectorQueryCtx = std::make_unique<connector::ConnectorQueryCtx>(
           opPool_.get(),
           connectorPool_.get(),
-          connectorConfig_.get(),
+          connectorSessionProperties_.get(),
           spillConfig.get(),
           nullptr,
           nullptr,
@@ -783,7 +788,7 @@ TEST_F(HiveDataSinkTest, memoryReclaimAfterClose) {
       auto connectorQueryCtx = std::make_unique<connector::ConnectorQueryCtx>(
           opPool_.get(),
           connectorPool_.get(),
-          connectorConfig_.get(),
+          connectorSessionProperties_.get(),
           nullptr,
           nullptr,
           nullptr,
@@ -816,9 +821,9 @@ TEST_F(HiveDataSinkTest, memoryReclaimAfterClose) {
     }
 
     memory::MemoryReclaimer::Stats stats;
-    uint64_t reclaimableBytes;
+    uint64_t reclaimableBytes{0};
     if (testData.expectedWriterReclaimEnabled) {
-      ASSERT_TRUE(root_->reclaimableBytes(reclaimableBytes));
+      reclaimableBytes = root_->reclaimableBytes().value();
       if (testData.close) {
         // NOTE: file writer might not release all the memory on close
         // immediately.
@@ -827,10 +832,9 @@ TEST_F(HiveDataSinkTest, memoryReclaimAfterClose) {
         ASSERT_EQ(reclaimableBytes, 0);
       }
     } else {
-      ASSERT_FALSE(root_->reclaimableBytes(reclaimableBytes));
-      ASSERT_EQ(reclaimableBytes, 0);
+      ASSERT_FALSE(root_->reclaimableBytes().has_value());
     }
-    ASSERT_EQ(root_->reclaim(1L << 30, stats), 0);
+    ASSERT_EQ(root_->reclaim(1L << 30, 0, stats), 0);
     ASSERT_EQ(stats.reclaimExecTimeUs, 0);
     ASSERT_EQ(stats.reclaimedBytes, 0);
     if (testData.expectedWriterReclaimEnabled) {
@@ -867,7 +871,7 @@ DEBUG_ONLY_TEST_F(HiveDataSinkTest, sortWriterFailureTest) {
   auto connectorQueryCtx = std::make_unique<connector::ConnectorQueryCtx>(
       opPool_.get(),
       connectorPool_.get(),
-      connectorConfig_.get(),
+      connectorSessionProperties_.get(),
       spillConfig.get(),
       nullptr,
       nullptr,

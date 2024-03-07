@@ -785,8 +785,7 @@ public:
 
 private:
 
-    std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+    std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
 
     VectorMaker maker{pool_.get()}; 
 
@@ -794,6 +793,7 @@ private:
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   TraversalTest demo;
 

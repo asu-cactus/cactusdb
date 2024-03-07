@@ -22,6 +22,7 @@
 #include "velox/common/base/Exceptions.h"
 #include "velox/core/CoreTypeSystem.h"
 #include "velox/expression/PeeledEncoding.h"
+#include "velox/expression/PrestoCastHooks.h"
 #include "velox/expression/ScopedVarSetter.h"
 #include "velox/external/date/tz.h"
 #include "velox/functions/lib/RowsTranslationUtil.h"
@@ -103,13 +104,10 @@ VectorPtr CastExpr::castToDate(
   switch (fromType->kind()) {
     case TypeKind::VARCHAR: {
       auto* inputVector = input.as<SimpleVector<StringView>>();
-      const auto& queryConfig = context.execCtx()->queryCtx()->queryConfig();
-      auto isIso8601 = queryConfig.isIso8601();
       applyToSelectedNoThrowLocal(context, rows, castResult, [&](int row) {
         try {
-          auto inputString = inputVector->valueAt(row);
           resultFlatVector->set(
-              row, util::castFromDateString(inputString, isIso8601));
+              row, hooks_->castStringToDate(inputVector->valueAt(row)));
         } catch (const VeloxUserError& ue) {
           VELOX_USER_FAIL(
               makeErrorMessage(input, row, DATE()) + " " + ue.message());
@@ -552,7 +550,6 @@ void CastExpr::applyPeeled(
     } else {
       applyCustomCast();
     }
-
   } else if (fromType->isDate()) {
     result = castFromDate(rows, input, context, toType);
   } else if (toType->isDate()) {
@@ -648,28 +645,29 @@ void CastExpr::apply(
     applyPeeled(
         *nonNullRows, *decoded->base(), context, fromType, toType, localResult);
   } else {
-    ScopedContextSaver saver;
-    LocalSelectivityVector newRowsHolder(*context.execCtx());
+    withContextSaver([&](ContextSaver& saver) {
+      LocalSelectivityVector newRowsHolder(*context.execCtx());
 
-    LocalDecodedVector localDecoded(context);
-    std::vector<VectorPtr> peeledVectors;
-    auto peeledEncoding = PeeledEncoding::peel(
-        {input}, *nonNullRows, localDecoded, true, peeledVectors);
-    VELOX_CHECK_EQ(peeledVectors.size(), 1);
-    if (peeledVectors[0]->isLazy()) {
-      peeledVectors[0] =
-          peeledVectors[0]->as<LazyVector>()->loadedVectorShared();
-    }
-    auto newRows =
-        peeledEncoding->translateToInnerRows(*nonNullRows, newRowsHolder);
-    // Save context and set the peel.
-    context.saveAndReset(saver, *nonNullRows);
-    context.setPeeledEncoding(peeledEncoding);
-    applyPeeled(
-        *newRows, *peeledVectors[0], context, fromType, toType, localResult);
+      LocalDecodedVector localDecoded(context);
+      std::vector<VectorPtr> peeledVectors;
+      auto peeledEncoding = PeeledEncoding::peel(
+          {input}, *nonNullRows, localDecoded, true, peeledVectors);
+      VELOX_CHECK_EQ(peeledVectors.size(), 1);
+      if (peeledVectors[0]->isLazy()) {
+        peeledVectors[0] =
+            peeledVectors[0]->as<LazyVector>()->loadedVectorShared();
+      }
+      auto newRows =
+          peeledEncoding->translateToInnerRows(*nonNullRows, newRowsHolder);
+      // Save context and set the peel.
+      context.saveAndReset(saver, *nonNullRows);
+      context.setPeeledEncoding(peeledEncoding);
+      applyPeeled(
+          *newRows, *peeledVectors[0], context, fromType, toType, localResult);
 
-    localResult = context.getPeeledEncoding()->wrap(
-        toType, context.pool(), localResult, *nonNullRows);
+      localResult = context.getPeeledEncoding()->wrap(
+          toType, context.pool(), localResult, *nonNullRows);
+    });
   }
   context.moveOrCopyResult(localResult, *nonNullRows, result);
   context.releaseVector(localResult);
@@ -750,14 +748,18 @@ ExprPtr CastCallToSpecialForm::constructSpecialForm(
     const TypePtr& type,
     std::vector<ExprPtr>&& compiledChildren,
     bool trackCpuUsage,
-    const core::QueryConfig& /*config*/) {
+    const core::QueryConfig& config) {
   VELOX_CHECK_EQ(
       compiledChildren.size(),
       1,
-      "CAST statements expect exactly 1 argument, received {}",
+      "CAST statements expect exactly 1 argument, received {}.",
       compiledChildren.size());
   return std::make_shared<CastExpr>(
-      type, std::move(compiledChildren[0]), trackCpuUsage, false);
+      type,
+      std::move(compiledChildren[0]),
+      trackCpuUsage,
+      false,
+      std::make_shared<PrestoCastHooks>(config));
 }
 
 TypePtr TryCastCallToSpecialForm::resolveType(
@@ -769,13 +771,17 @@ ExprPtr TryCastCallToSpecialForm::constructSpecialForm(
     const TypePtr& type,
     std::vector<ExprPtr>&& compiledChildren,
     bool trackCpuUsage,
-    const core::QueryConfig& /*config*/) {
+    const core::QueryConfig& config) {
   VELOX_CHECK_EQ(
       compiledChildren.size(),
       1,
-      "TRY CAST statements expect exactly 1 argument, received {}",
+      "TRY CAST statements expect exactly 1 argument, received {}.",
       compiledChildren.size());
   return std::make_shared<CastExpr>(
-      type, std::move(compiledChildren[0]), trackCpuUsage, true);
+      type,
+      std::move(compiledChildren[0]),
+      trackCpuUsage,
+      true,
+      std::make_shared<PrestoCastHooks>(config));
 }
 } // namespace facebook::velox::exec

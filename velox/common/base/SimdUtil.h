@@ -410,9 +410,9 @@ inline void storeLeading(
 
 /// Stores elements of 'input' selected by 'indices' into 'output'. output[i] =
 /// input[indices[i]].
-// Indices and output may be the same. May overread indices but will not
-// dereference indices that are not in range. Writes exactly indices.size()
-// elements of 'output'.
+/// Indices and output may be the same. May over-read indices but will not
+/// dereference indices that are not in range. Writes exactly indices.size()
+/// elements of 'output'.
 template <typename TData, typename TIndex, typename A = xsimd::default_arch>
 inline void transpose(
     const TData* input,
@@ -493,9 +493,9 @@ template <typename T, typename U, typename A = xsimd::default_arch>
 xsimd::batch<T, A> reinterpretBatch(xsimd::batch<U, A>, const A& = {});
 
 // Compares memory at 'x' and 'y' and returns true if 'size' leading bytes are
-// equal.
+// equal. May address up to SIMD width -1 past end of either 'x' or 'y'.
 template <typename A = xsimd::default_arch>
-inline bool memEqual(const void* x, const void* y, int32_t size);
+inline bool memEqualUnsafe(const void* x, const void* y, int32_t size);
 
 } // namespace facebook::velox::simd
 
