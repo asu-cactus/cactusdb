@@ -110,86 +110,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   /**
    * @brief A function to run logical plan.
    *
-   * @param filePath The file path for the data source file to be split.
-   * @param numThreads The number of Velox executor threads.
-   * @param numSplits The number of file splits.
-   * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param p0 The planNodeID for the plan node that needs to add file splits.
-   */
-  // TODO: needs to integrated with runPlanWithCataLog
-  float runPlan(
-      std::string filePath,
-      int numThreads,
-      int numSplits,
-      PlanBuilder& myPlan,
-      core::PlanNodeId p0,
-      int repeatRun = 1) {
-    float totalElapsedTime = 0;
-    for (int i = 0; i < repeatRun; i++) {
-      // Create hivesplits for file.
-      auto hiveSplits = makeHiveConnectorSplits(
-          filePath, numSplits, dwio::common::FileFormat::DWRF);
-      // Initializes executor.
-      std::shared_ptr<folly::Executor> executor_{
-          std::make_shared<folly::CPUThreadPoolExecutor>(
-              std::thread::hardware_concurrency())};
-      // Initializes queryCtx.
-      std::shared_ptr<core::QueryCtx> queryCtx_{
-          std::make_shared<core::QueryCtx>(executor_.get())};
-      // Set queryCtx config.
-      queryCtx_->testingOverrideConfigUnsafe(
-          {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"},
-           {core::QueryConfig::kMaxOutputBatchRows, "1000000"}});
-      // Create task for logical plan.
-      auto task = exec::Task::create(
-          "0",
-          myPlan.planFragment(),
-          0,
-          queryCtx_,
-          [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-            if (result)
-              // std::cout << result->toString() << std::endl;
-              return exec::BlockingReason::kNotBlocked;
-          });
-
-      // std::cout << "Hive splits:" << std::endl;
-      // Add hivesplits to the target plan node (data source node).
-      for (auto& split : hiveSplits) {
-        // std::cout << split->toString() << std::endl;
-        task->addSplit(p0, exec::Split(std::move(split)));
-      }
-      std::chrono::steady_clock::time_point begin =
-          std::chrono::steady_clock::now();
-
-      // Start the task by setting the number of drivers.
-      task->start(numThreads);
-      // Add all splits.
-      task->noMoreSplits(p0);
-      // Wait for all drivers to finish.
-      waitForFinishedDrivers(task);
-
-      std::chrono::steady_clock::time_point end =
-          std::chrono::steady_clock::now();
-      auto elapsedTime =
-          (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
-               .count()) /
-          1000000.0;
-      totalElapsedTime += elapsedTime;
-    }
-    std::stringstream ss;
-
-    ss << numSplits << "," << numThreads << ",";
-
-    // std::cout << "Time for FFNN with Input Data (sec): " << std::endl;
-
-    // std::cout << ss.str() << totalElapsedTime/repeatRun << " secs" <<
-    // std::endl;
-    return totalElapsedTime / repeatRun;
-  }
-
-  /**
-   * @brief A function to run logical plan.
-   *
    * @param numThreads The number of Velox executor threads.
    * @param numSplits The number of file splits.
    * @param myPlan The pointer to the planBuilder which builds the logical plan.
@@ -219,8 +139,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       queryCtx_->testingOverrideConfigUnsafe(
           {
             // {core::QueryConfig::kPreferredOutputBatchBytes, "10000"},
-           {core::QueryConfig::kMaxOutputBatchRows, "100"},
-           {core::QueryConfig::kPreferredOutputBatchRows, "100"}});
+           {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
+           {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
 
 
       // Add hivesplits to the target plan node (data source node).
@@ -568,6 +488,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto planNode = myPlan.planNode();
     // Create ruleManager
     RuleManager ruleManager;
+    ruleManager.rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
     // Create planState
     PlanState planState(ruleManager);
     // Run rewriten rule

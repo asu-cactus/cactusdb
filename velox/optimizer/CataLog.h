@@ -163,11 +163,21 @@ class CataLog {
             return defaultBlocksNum;
         }
 
+        void setDefaultBlocksSize(int newBlocksSize) {
+            defaultBlocksSize = newBlocksSize;
+        }
+
+        // Get default number of blocks
+        int getDefaultBlocksSize () {
+            return defaultBlocksSize;
+        }
+
 
     private:
         // Default values
         // TODO: change it block size to support flexible blocking
         int defaultBlocksNum = 4;
+        int defaultBlocksSize = 256;
         int blockingThreshold = 1;
 
         // Maps for storing data
