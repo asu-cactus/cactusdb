@@ -110,11 +110,6 @@ public:
 														MatrixMultiply_b::signatures(),
 														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
 													);
-													registerVectorFunction(
-														"mat_mul_block",
-														MatrixMultiply_Block::signatures(),
-														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, weights, blocks)
-													);
 													// Add UDF associate information (UDF with input values) to cataLog
 													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
 
@@ -129,7 +124,7 @@ public:
 												weightSchema = cataLog.getUDFSchema(target+"_weights");
 												// Regular expression match
 												std::regex pattern(target + R"(\([^)]+\))");
-												exprStr = std::regex_replace(exprStr, pattern, "r1");
+												exprStr = std::regex_replace(exprStr, pattern, "R1");
 												// Build new plan
 												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
 																.tableScan(valueSchema)
@@ -138,37 +133,14 @@ public:
 																	{"v_col"},
 																	{"w_row"},
 																	exec::test::PlanBuilder(planNodeIdGenerator)
-																	.tableScan(weightSchema)
-																	.capturePlanNodeId(p2)
-																	.planNode(),
-																"", // extra filter
-																{"v_row", "w_col", "v", "w"})
-																.project({"v_row", "w_col", "mat_mul_block(v, w) AS mp"})
-																// .localPartition({})
-																// .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-																.partialAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-																.localPartition({})
-																.intermediateAggregation()
-																.finalAggregation()
-																// .project({"r1"})
-																.unnest({}, {"r1"}) // after unnest velox will automatically add + "_e" to its original name. PlanBuilder.cpp/unnest
-																.project({"r1_e AS r1"})
-																// TODO: performance degradation observed, temporary disable the repartition
-																// .localPartitionRoundRobinRow() 
-																.project({exprStr})
-																;
-												// Here are several approaches to correctly aggregat the multiplied values.
-												// Note: if the values to be aggregated are already partitioned in batches.
-												// A singleAggregation is enough otherwise shuffling is needed to aggregate
-												// the values cross different threads/batches.
-												// Approach 1: run shuffling and a single aggregation: 
-												//   .localPartition({}).singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-												// Approach 2: run via partialAggregation: 
-												//   .partialAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-												//	 .localPartition({})
-												//	 .intermediateAggregation()
-												//	 .finalAggregation()
-												
+																.tableScan(weightSchema)
+																.capturePlanNodeId(p2)
+																.planNode(),
+																	"", // extra filter
+																	{"v_row", "w_col", "v", "w"})
+																.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+																.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
+																.project({exprStr});
 												// Delete old nodeId-fileAddress map
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 												// Insert new nodeId-fileAddress maps
@@ -333,13 +305,12 @@ public:
 					auto wordsEnd = std::sregex_iterator();
 					// Retrieve the possible UDF name applicable for this rule, and check if there existed block files, stored in targetAction.
 					for (auto it = wordsBegin; it != wordsEnd; ++it) {
-						// std::cout<<"debug111 find: " << it->str() << std::endl;
+
 						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
 
 							targetActions.push_back(it->str());
 						}
 					}
-					// std::cout<<"target action size: " << targetActions.size() << std::endl;
 				}
 			}
 			// We then check the filter node

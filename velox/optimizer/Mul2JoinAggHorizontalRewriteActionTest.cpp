@@ -25,7 +25,7 @@
 #include <memory>
 #include <random>
 #include <string>
-
+// #include <cstdarg>
 // Velox headers
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
@@ -74,7 +74,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
+            ->newConnector(kHiveConnectorId, nullptr);
     connector::registerConnector(hiveConnector);
   }
 
@@ -104,14 +104,6 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
    * @param myPlan The pointer to the planBuilder which builds the logical plan.
    * @param cataLog A class storing metadata and information related to UDFs and data sources.
   */
-  /**
-   * @brief A function to run logical plan.
-   * 
-   * @param numThreads The number of Velox executor threads.
-   * @param numSplits The number of file splits.
-   * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param cataLog A class storing metadata and information related to UDFs and data sources.
-  */
   void runPlan(
       int numThreads,
       int numSplits,
@@ -127,11 +119,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::make_shared<core::QueryCtx>(executor_.get())};
     // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
-        {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
-          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
-
-    std::chrono::steady_clock::time_point begin =
-        std::chrono::steady_clock::now();
+        {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},// 100000000000000000  1000000
+          {core::QueryConfig::kMaxOutputBatchRows, "1000"}});
     // Create task for logical plan.
     // auto task = exec::Task::create(
     //     "0",
@@ -169,12 +158,12 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     //   ids.push_back(key);
     // }
 
-    // // Add hivesplits to the target plan node (data source node).
-    // std::chrono::steady_clock::time_point begin =
-    //     std::chrono::steady_clock::now();
+    // Add hivesplits to the target plan node (data source node).
+    std::chrono::steady_clock::time_point begin =
+        std::chrono::steady_clock::now();
 
 
-    // // Start the task by setting the number of drivers.
+    // Start the task by setting the number of drivers.
     // task->start(numThreads);
     // // Wait for no more splits.
     // for (auto id: ids){
@@ -222,6 +211,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     waitForTaskCompletion(cursor->task().get());
 
 
+
     std::chrono::steady_clock::time_point end =
         std::chrono::steady_clock::now();
 
@@ -230,15 +220,10 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     ss << numSplits << "," << numThreads << ",";
 
     int dataIdx = 0;
-    int totalDataNum = 0;
     for (auto batchedData : actualResults) {
-      int batchSize = batchedData->size();
-      std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
+      std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
       dataIdx += 1;
-      totalDataNum += batchSize;
     }
-
-    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum);
 
     std::cout << "Time for FFNN with Input Data (sec): "
               << std::endl;
@@ -249,7 +234,6 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
                       .count()) /
             1000000.0
               << " secs" << std::endl;
-
   }
 
   struct DataFrame {
@@ -334,6 +318,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     for (int i = 0; i < weight_layer1_size; ++i) {
 
         weight_layer1[i] = 0.00001; 
+        // weight_layer1[i] = i;
 
     }
     float* weight_layer2 = new float[weight_layer2_size];
@@ -461,19 +446,34 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
     int input_features_size = 100000;//597540
-    int num_samples = 5000;
+    int num_samples = 2000;
+    // int input_features_size = featureSize;
+    // int num_samples = sampleSize;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
     // Set splits number
     int num_splits = 4;
     // Initialize CataLog
     CataLog cataLog;
+    
+    cataLog.setDefaultBlocksSize(256);
+    cataLog.setBlockingThreshold(1);
     // Generate data source
     auto data = data_generate(input_features_size, num_samples, first_layer_output_size, second_layer_output_size);
     // Create arrayVector for data source
     auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
     // Create rowVector for data source
-    auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+    // auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+    
+    std::vector<float> indices(num_samples);
+    for (int i = 0; i < num_samples; ++i) {
+        indices[i] = static_cast<float>(i);
+    }
+
+    auto inputRowVector = maker.rowVector(
+          {"v", "v_row"},
+          {featureArrayVector,
+           maker.flatVector(indices)});
     // Create file path
     auto file = TempFilePath::create();
     // Create file config
@@ -483,21 +483,21 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     //  Check the input size against the blocking threshold in cataLog.
     //  If yes, preblock the input vector, store it, and add information in cataLog.
     //  If not, set dataSource in cataLog.
-    if (input_features_size > cataLog.getBlockingThreshold()) {
-      // If input size is larger than blocking threshold, preblock and store in cataLog
-      std::vector<std::vector<float>> valuesBlock = optimization::create_input_block(input_features_size*num_samples, data.features, cataLog.getDefaultBlocksNum());
-      optimization::FileStructure values = optimization::block_to_files(valuesBlock, cataLog.getDefaultBlocksNum(), 0);
-      // Set data source blocks in cataLog
-      cataLog.setDataSourceBlocks(values.schema, values.paths);
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
-    }
-    else {
+    // if (input_features_size > cataLog.getBlockingThreshold()) {
+    //   // If input size is larger than blocking threshold, preblock and store in cataLog
+    //   std::vector<std::vector<float>> valuesBlock = optimization::create_input_block(input_features_size*num_samples, data.features, cataLog.getDefaultBlocksNum());
+    //   optimization::FileStructure values = optimization::block_to_files(valuesBlock, cataLog.getDefaultBlocksNum(), 0);
+    //   // Set data source blocks in cataLog
+    //   cataLog.setDataSourceBlocks(values.schema, values.paths);
+    //   // Set data source statistics in cataLog
+    //   cataLog.setDataSourceStat({num_samples, input_features_size});
+    // }
+    // else {
       // If input size is not larger than blocking threshold, set dataSource in cataLog
-      cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+    cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
       // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
-    }
+    cataLog.setDataSourceStat({num_samples, input_features_size});
+    // }
     // Build two dense layers UDFs using registerFunction in optimization namespace
     std::string compute = registerFunctions(
       first_layer_output_size, 
@@ -514,6 +514,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     // Initialize planNodeID
     core::PlanNodeId p0;
+    core::PlanNodeId p1;
+    core::PlanNodeId p2;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs
@@ -523,67 +525,85 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
                 .project({fmt::format(compute, "v")}) 
                 .planBuild();
     // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, {file});
+    // cataLog.setIdAddressMap(p0, {file});
     // Set vector name and nodeId of data source
-    cataLog.setVectorIdMap(p0, "v");
+    // cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
     RuleManager ruleManager;
     // Create planState
     PlanState planState(ruleManager);
-    // Run rewriten rule
-    if (rewrite) {
-      // Get possible actions for this plan
-      planState.getPossibleActions(planNode, cataLog);
-      // Print possible actions
-      for (const auto& entry : planState.actionsPair) {
-        std::cout << entry.first << ": " << entry.second << std::endl;
-      }
-      // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
-      auto it = planState.actionsPair.begin();
-      std::pair<std::string, std::string> testAction = *it;
-      // Take one rewritten action
-      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
-      // Update the planState (getPossibleAction after apply one action)
-      planState.update(myPlan, cataLog);
 
-    }
+    registerVectorFunction(
+      "mat_mul_h",
+      MatrixMultiply_h::signatures(),
+      std::make_unique<MatrixMultiply_h>(input_features_size, first_layer_output_size, cataLog.getDefaultBlocksSize(), data.weights[0])
+    );
+
+
+    auto newPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(asRowType(inputRowVector->type()))
+            .capturePlanNodeId(p1)
+            .nestedLoopJoin(
+              PlanBuilder(planNodeIdGenerator)
+              .tableScan(cataLog.getUDFSchema("mat_mul0_weights"))
+              .capturePlanNodeId(p2)
+              .planNode(),
+              {"v_row", "v", "w", "w_row", "w_col"}
+            )
+            .project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
+            .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+            .localPartition({"v_row"})
+            .intermediateAggregation()
+            .finalAggregation()
+            // .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+            .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
+            .planBuild();
+    cataLog.setIdAddressMap(p1, {file});
+    cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights"));
+
+    // Run rewriten rule
+    // if (rewrite) {
+    //   // Get possible actions for this plan
+    //   planState.getPossibleActions(planNode, cataLog);
+    //   // Print possible actions
+    //   for (const auto& entry : planState.actionsPair) {
+    //     std::cout << entry.first << ": " << entry.second << std::endl;
+    //   }
+    //   // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
+    //   auto it = planState.actionsPair.begin();
+    //   std::pair<std::string, std::string> testAction = *it;
+    //   // Take one rewritten action
+    //   planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
+    //   // Update the planState (getPossibleAction after apply one action)
+    //   planState.update(myPlan, cataLog);
+
+    // }
 
     // Run the rewritten plan
-    runPlan(8, 8, myPlan, cataLog);
+    runPlan(8, 8, newPlan, cataLog);
   }
 
  private:
-  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
+  std::shared_ptr<MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
 
   VectorMaker maker{pool_.get()};
 };
 
-// DEFINE_int32(feature_size, 3000, "Feature size");
-// DEFINE_int32(num_sample, 1000, "Number of samples");
-// DEFINE_bool(rewrite, true, "Whether apply rewrite rule");
-
 int main(int argc, char** argv) {
-  // gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
-  memory::MemoryManager::initialize({});
+
+  // int number1 = std::atoi(argv[1]);//feature size
+  // int number2 = std::atoi(argv[2]);//sample size
 
   Mul2JoinAggRewriteActionTest demo;
-
-  // bool rewrite = FLAGS_rewrite;
-  // int numSamples = FLAGS_num_sample;
-  // int featureSize = FLAGS_feature_size;
-
-  // std::cout << "numsample: " << numSamples << std::endl;
-
-  // demo.testMul2JoinAggPlan(rewrite);
-
 
   bool rewrite = true;
 
   if (argc > 1) {
-    if (strcmp(argv[1], "N") == 0) {
+    // if (strcmp(argv[1], "N") == 0) {
+      if (strcmp(argv[3], "N") == 0) {
       rewrite = false;
     }
   }

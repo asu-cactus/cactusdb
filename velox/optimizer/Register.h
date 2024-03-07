@@ -46,19 +46,19 @@ void updateCataLog(const std::string& name, std::shared_ptr<VectorFunction> shar
             float* weights = MulUDF->getTensor();
             // Get blocking threshold and default blocks number from cataLog
             int blockingThreshold = cataLog.getBlockingThreshold();
-            int blocksNum = cataLog.getDefaultBlocksNum();
+            int blocksSize = cataLog.getDefaultBlocksSize();
             // Check if blocking is required based on dimensions
             if (dims[0] > blockingThreshold) {
                 // Create weight blocks and convert to files
-                auto weightBlocks = create_weight_block(dims[0]*dims[1], weights, blocksNum);
-                auto weights = block_to_files(weightBlocks, blocksNum, 1);
+                auto weightBlocks = create_blocks(dims[0], dims[1], weights, blocksSize);
+                auto weights = save_blocks_to_files(weightBlocks);
                 // Add the updated information to cataLog
                 cataLog.add(name, weights.schema, weights.paths, 1);
             }
         }
     }
     else {
-        std::cout << "Warning: " << name << ": No update for catalog." << std::endl;
+        std::cout << "INFO: " << name << ": No update for catalog." << std::endl;
     }
 }
 // We encapsulate the original registerFunction, adding a step to update the catalog when registering functions.

@@ -177,11 +177,14 @@ public:
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, dims[2], dims[0]);//3*2
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); //2*5
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
+
         // for (int i = 0; i < m.rows(); ++i) {
         //         for (int j = 0; j < m.cols(); ++j) {
         //             result[0][i * dims[1] + j] = m(i, j);
         //     }
         // }
+        // m = m.reshaped(1, m.size());
+        // std::cout << "shape: " << m.rows() << "," <<m.cols() << std::endl;
         std::vector<std::vector<float>> result;
         for (int i = 0; i < m.rows(); i++) {
             std::vector<float> row(
@@ -282,6 +285,96 @@ public:
 
     static std::string getName() {
         return "mat_mul_block";
+    };
+
+
+private:
+    float* weights_;
+    
+};
+
+class MatrixMultiply_h: public MLFunction {
+public:
+    MatrixMultiply_h(int num_rows, int num_cols, int block_size, float* weights) {
+        dims.push_back(num_rows);
+        dims.push_back(num_cols);
+        dims.push_back(block_size);
+        weights_ = weights;
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+        
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+        VectorMaker maker{context.pool()};
+ 
+        // auto input_elements_w = args[1]->as<ArrayVector>()->elements();
+        // float* input_values_w = input_elements_w->values()->asMutable<float>();
+        // float* input_values_w = weights_;
+        auto v1 = args[0]->as<DictionaryVector<ComplexType>>();
+        // auto ss3 = args[0]->as<ArrayVector>()->elements();
+        auto v2 = v1->valueVector();
+        auto v3 = v2->as<LazyVector>();
+        auto v4 = v3->loadedVector();
+        auto input_elements_v = v4->as<ArrayVector>()->elements();
+        float* input_values_v = input_elements_v->values()->asMutable<float>();
+
+        auto w1 = args[1]->as<DictionaryVector<ComplexType>>();
+        auto w2 = w1->valueVector();
+        auto w3 = w2->as<LazyVector>();
+        auto w4 = w3->loadedVector();
+        auto input_elements_w = w4->as<ArrayVector>()->elements();
+        float* input_values_w = input_elements_w->values()->asMutable<float>();
+        // auto varrayVector = std::make_shared<ArrayVector<float>>();
+        // const int elements_v_per_row = 1500000; //6000*250
+        // const int elements_w_per_row = 125000; // 250*500
+        int current_block_size = (input_elements_w->size()< (dims[0] * dims[2])) ? input_elements_w->size()/dims[0] : dims[2];
+        std::vector<std::vector<float>> result; //6000*500
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, input_elements_v->size()/dims[0], dims[0]);//3*2
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], current_block_size); //2*5
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
+        
+        for (int i = 0; i < m.rows(); i++) {
+            std::vector<float> row(
+            m.row(i).data(),
+            m.row(i).data() + m.cols());
+            result.push_back(row);
+        }
+
+        // for (int i = 0; i < m.rows(); ++i) {
+        //         for (int j = 0; j < m.cols(); ++j) {
+        //             result[0][i * dims[1] + j] = m(i, j);
+        //     }
+        // }
+        // m = m.reshaped(1, m.size());
+        // std::cout << "shape: " << m.rows() << "," <<m.cols() << std::endl;
+        // for (int i = 0; i < m.rows(); i++) {
+        //     std::vector<float> row(
+        //     m.row(i).data(),
+        //     m.row(i).data() + m.cols());
+        //     result.push_back(row);
+        // }
+        output = maker.arrayVector<float>(result, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    static std::string getName() {
+        return "mat_mul_h";
     };
 
 
@@ -654,6 +747,92 @@ public:
         float** bias;
 };
 
+class TorchDNN_Multi : public MLFunction {
+public:
+    TorchDNN_Multi(std::vector<float*> weights, std::vector<float*> bias, std::vector<int> dimensions) {
+        this->weights = weights;
+        this->bias = bias;
+        dims = dimensions;
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        std::vector<torch::nn::Linear> dense_layers;
+        std::vector<torch::Tensor> weights_tensors;
+        std::vector<torch::Tensor> bias_tensors;
+        std::vector<torch::nn::ReLU> relus;
+
+        // Create layers
+        for (int i = 0; i < dims.size() - 1; ++i) {
+            dense_layers.push_back(torch::nn::Linear(dims[i], dims[i+1]));
+            weights_tensors.push_back(torch::from_blob(weights[i], {dims[i], dims[i+1]}).t());
+            bias_tensors.push_back(torch::from_blob(bias[i], {dims[i+1]}));
+            relus.push_back(torch::nn::ReLU());
+        }
+
+        // Set weights and biases
+        for (int i = 0; i < dense_layers.size(); ++i) {
+            dense_layers[i]->weight.set_data(weights_tensors[i]);
+            dense_layers[i]->bias.set_data(bias_tensors[i]);
+        }
+        
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        torch::Tensor input = torch::from_blob(input_values, {rows.size(), dims[0]});
+
+        torch::Tensor output_tensor = input;
+        for (int i = 0; i < dense_layers.size(); ++i) {
+            output_tensor = dense_layers[i]->forward(output_tensor);
+            output_tensor = relus[i]->forward(output_tensor);
+        }
+
+        // Softmax output
+        output_tensor = torch::nn::functional::softmax(output_tensor, 1);
+        float* data = output_tensor.data_ptr<float>();
+
+        // Prepare results
+        std::vector<std::vector<float>> results;
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
+            results.push_back(result);
+        }
+        
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+    
+    // Getter method for weights
+    const std::vector<float*>& getWeights() const {
+        return weights;
+    }
+
+    // Getter method for bias
+    const std::vector<float*>& getBias() const {
+        return bias;
+    }
+
+private:
+    std::vector<float*> weights;
+    std::vector<float*> bias;
+};
+
 class Convolute: public MLFunction {
 public:
     Convolute(float* weights, int* dims_) {
@@ -688,7 +867,7 @@ public:
         std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
      
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        // for each input sample
+        
         for (int s = 0; s < rows.size(); s++) {
             // for each channel
             for(int c = 0; c < dims[3]; c++) {
@@ -706,6 +885,29 @@ public:
                 }   
             }
         }
+
+        // #pragma omp parallel for
+        // for (int s = 0; s < rows.size(); s++) {
+        //     for (int f = 0; f < dims[0]; f++) {
+        //         // Pre-calculate filter offset
+        //         int filter_offset = f * output_height * output_width;
+        //         for (int c = 0; c < dims[3]; c++) {
+        //             // Map input and filter data
+        //             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> input(input_values + s * input_size + c * input_channel_size, input_height, input_width);
+        //             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> kernel(weights_ + f * filter_size + c * filter_channel_size, dims[1], dims[2]);
+
+        //             // Convolution operation
+        //             for (int i = 0; i < output_height; ++i) {
+        //                 int output_row_offset = i * output_width;
+        //                 for (int j = 0; j < output_width; ++j) {
+        //                     // Compute dot product using Eigen operations
+        //                     results[s][filter_offset + output_row_offset + j] += (input.block(i, j, dims[1], dims[2]).cwiseProduct(kernel)).sum();
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+
        
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         std::cout << "Time for conv2d (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
@@ -812,6 +1014,110 @@ private:
     
 };
 
+class TorchCNN: public MLFunction {
+public:
+    TorchCNN(float* weights, float* bias, int* dims_) {
+        weights_ = weights;
+        bias_ = bias; 
+        for(int i=0; i < 7; i++)
+            dims.push_back(dims_[i]);
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();     
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+        
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+       
+        int input_height =  dims[4];
+        int input_width = dims[5];
+
+        int output_height = input_height - dims[1] + 1;
+        int output_width = input_width - dims[2] + 1;
+
+        
+        std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
+       
+        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}).bias(false));
+        // torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}));
+        // torch::Tensor conv_weights = torch::tensor(weights_).view({dims[3], dims[0], dims[1], dims[2]});
+
+        // conv_layer->weight = torch::nn::parameter::Parameter (conv_weights);
+        torch::Tensor input_data = torch::from_blob(input_values, {rows.size(), dims[3], input_height, input_width});
+
+       
+        torch::Tensor output_data = conv_layer(input_data);
+
+        // Convert bias values to a tensor
+        torch::Tensor bias_tensor = torch::from_blob(bias_, {dims[0]}); 
+        if (conv_layer->bias.defined()) {
+            output_data += bias_tensor;
+        }
+
+        // output_data = torch::relu(output_data);
+
+        // output_data = torch::max_pool2d(output_data, {dims[6], dims[6]});
+        
+        float* data = output_data.data_ptr<float>();
+        
+        int row_size = output_height * output_width * dims[0];
+       
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result;
+            for (int j = 0; j < row_size; ++j) {
+                result.push_back(data[i*row_size + j]);
+            }
+            results.push_back(result);
+        }
+
+        // for (auto entry: results) {
+        //     for (int i =0; i < 1000; i++){
+        //         std::cout << entry[i] << std::endl;
+        //     }
+        // }
+
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        //std::cout << "Time for conv2d (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    // Getter method for weights
+    float* getWeights() const {
+        return weights_;
+    }
+
+    // Getter method for bias
+    float* getBias() const {
+        return bias_;
+    }
+    static std::string getName() {
+        return "torchcnn";
+    };
+
+
+private:
+    float* weights_;
+    float* bias_;
+};
 
 
 
@@ -911,6 +1217,13 @@ public:
                 }
             }
         }
+
+        // for (const auto& inner_vector : results) {
+        //     // Iterate over each element in the inner vector
+        //     for (const auto& element : inner_vector) {
+        //         std::cout << element << std::endl;
+        //     }
+        // }
 
         // for(int i=0; i < 64; i++){
 
