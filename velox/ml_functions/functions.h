@@ -311,27 +311,25 @@ public:
         
         BaseVector::ensureWritable(rows, type, context.pool(), output);
         VectorMaker maker{context.pool()};
- 
-        // auto input_elements_w = args[1]->as<ArrayVector>()->elements();
-        // float* input_values_w = input_elements_w->values()->asMutable<float>();
-        // float* input_values_w = weights_;
-        auto v1 = args[0]->as<DictionaryVector<ComplexType>>();
-        // auto ss3 = args[0]->as<ArrayVector>()->elements();
-        auto v2 = v1->valueVector();
-        auto v3 = v2->as<LazyVector>();
-        auto v4 = v3->loadedVector();
-        auto input_elements_v = v4->as<ArrayVector>()->elements();
-        float* input_values_v = input_elements_v->values()->asMutable<float>();
+        std::cout << fmt::format("[INFO] DEBUG1 : rows size: {}", rows.size()) << std::endl;
 
-        auto w1 = args[1]->as<DictionaryVector<ComplexType>>();
-        auto w2 = w1->valueVector();
-        auto w3 = w2->as<LazyVector>();
-        auto w4 = w3->loadedVector();
-        auto input_elements_w = w4->as<ArrayVector>()->elements();
-        float* input_values_w = input_elements_w->values()->asMutable<float>();
-        // auto varrayVector = std::make_shared<ArrayVector<float>>();
-        // const int elements_v_per_row = 1500000; //6000*250
-        // const int elements_w_per_row = 125000; // 250*500
+        BaseVector* left = args[0].get();
+        BaseVector* right = args[1].get();
+
+        exec::LocalDecodedVector leftHolder(context, *left, rows);
+        auto decodedLeftArray = leftHolder.get();
+        auto baseLeftArray =
+            decodedLeftArray->base()->as<ArrayVector>()->elements();
+
+        exec::LocalDecodedVector rightHolder(context, *right, rows);
+        auto decodedRightArray = rightHolder.get();
+        auto baseRightArray = rightHolder->base()->as<ArrayVector>()->elements();
+
+        float* input_values_v = baseLeftArray->values()->asMutable<float>();
+        float* input_values_w = baseRightArray->values()->asMutable<float>();
+
+        auto input_elements_v = baseLeftArray;
+        auto input_elements_w = baseRightArray;
         int current_block_size = (input_elements_w->size()< (dims[0] * dims[2])) ? input_elements_w->size()/dims[0] : dims[2];
         std::vector<std::vector<float>> result; //6000*500
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, input_elements_v->size()/dims[0], dims[0]);//3*2
@@ -345,19 +343,6 @@ public:
             result.push_back(row);
         }
 
-        // for (int i = 0; i < m.rows(); ++i) {
-        //         for (int j = 0; j < m.cols(); ++j) {
-        //             result[0][i * dims[1] + j] = m(i, j);
-        //     }
-        // }
-        // m = m.reshaped(1, m.size());
-        // std::cout << "shape: " << m.rows() << "," <<m.cols() << std::endl;
-        // for (int i = 0; i < m.rows(); i++) {
-        //     std::vector<float> row(
-        //     m.row(i).data(),
-        //     m.row(i).data() + m.cols());
-        //     result.push_back(row);
-        // }
         output = maker.arrayVector<float>(result, REAL());
     }
 
