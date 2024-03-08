@@ -356,14 +356,14 @@ class TwoLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
       }
       // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
-      std::pair<std::string, std::string> testAction = *it;
+      std::pair<std::string, std::string> testAction("softmax5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0(ROW[\"v\"]))))))", "MultiLayerUDF2TorchNNRewriteAction");
       // Take one rewritten action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
       // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan, cataLog);
 
     }
-
+    std::cout << "Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
     // Run the rewritten plan
     runPlan(file->path, 8, 8, myPlan, p0);
   }

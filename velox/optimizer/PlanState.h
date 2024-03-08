@@ -56,8 +56,7 @@ public:
             if (rule.check(rootNode, actions, cataLog)) {
                 // Create a map to store actions and target UDF names, key is UDF name, value is rule name
                 for (const auto& action : actions) {
-
-                    actionsPair[action] = rulePair.first;
+                    actionsPair[action].push_back(rulePair.first);
                 }
                 // clear target UDF name, prepare for next rule
                 actions.clear();
@@ -137,7 +136,7 @@ public:
         getPossibleActions(curNode, cataLog);
     }
 
-    std::map<std::string, std::string> actionsPair;
+    std::map<std::string, std::vector<std::string>> actionsPair;
     std::vector<std::string> actions;
     RuleManager ruleManager;
     std::string preAction;
