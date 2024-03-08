@@ -44,8 +44,9 @@ make release
 
 [Reference URL](https://pytorch.org/cppdocs/installing.html)
 
-# important update: the compile flag _GLIBCXX_USE_CXX11_ABI changed in the latest libtorch and will occur link error when compile the velox.
-# the libtorch version 2.0.1 should be installed here.
+### important update for now: 
+the compile flag _GLIBCXX_USE_CXX11_ABI changed in the latest libtorch and will occur link error when compile the velox.
+The libtorch version 2.0.1 should be installed here.
 ```shell
 cd ~
 wget https://download.pytorch.org/libtorch/nightly/cpu/libtorch-shared-with-deps-latest.zip
