@@ -75,7 +75,7 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
   }
 
@@ -470,6 +470,7 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   MultiLayerUDF2TorchNNRewriteActionTest demo;
 
