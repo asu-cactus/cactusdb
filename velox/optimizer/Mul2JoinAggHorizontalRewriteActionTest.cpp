@@ -74,7 +74,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
   }
 
@@ -378,7 +378,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
    * 
    * @return A string representing the composed vector function expression.
    */
-  std::string registerFunctions(int units1, int units2, int input_size1, int input_size2, float* weightsFile_1, float* weightsFile_2, float* biasFile_1, float* biasFile_2, CataLog &catalog) {
+  std::string registerFunctions(int units1, int units2, int input_size1, int input_size2, float* weightsFile_1, float* weightsFile_2, float* biasFile_1, float* biasFile_2, CataLog &catalog, bool isVerticalPartition = false) {
     // Register matrix multiplication function for the first layer
     optimization::registerVectorFunction(
         "mat_mul0",
@@ -386,7 +386,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1),
         {},
         true,
-        catalog
+        catalog,
+        isVerticalPartition
     );
     // Register matrix addition function for the first layer
     optimization::registerVectorFunction(
@@ -413,7 +414,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::make_unique<MatrixMultiply>(weightsFile_2, input_size2, units2),
         {},
         true,
-        catalog
+        catalog,
+        isVerticalPartition
     );
     // Register matrix addition function for the second layer
     optimization::registerVectorFunction(
@@ -499,6 +501,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     cataLog.setDataSourceStat({num_samples, input_features_size});
     // }
     // Build two dense layers UDFs using registerFunction in optimization namespace
+    bool isVerticalPartition = false;
     std::string compute = registerFunctions(
       first_layer_output_size, 
       second_layer_output_size, 
@@ -508,7 +511,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       data.weights[1],  
       data.bias[0], 
       data.bias[1],
-      cataLog);
+      cataLog,
+      isVerticalPartition);
 
 
 
@@ -593,6 +597,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   // int number1 = std::atoi(argv[1]);//feature size
   // int number2 = std::atoi(argv[2]);//sample size
