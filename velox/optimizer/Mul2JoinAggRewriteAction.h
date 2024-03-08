@@ -301,7 +301,7 @@ public:
 	*/
 	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog &cataLog) override {
 		try {
-			bool checkApplied = true;
+			bool checkSuccess = true;
 			if (!rootNode) {
 
 				throw std::invalid_argument("rootNode is null");
@@ -381,10 +381,10 @@ public:
 			}
 
 			for (const auto &source : sources) {
-				checkApplied &= check(source, targetActions, cataLog);
+				checkSuccess &= check(source, targetActions, cataLog);
 			}
 
-			return checkApplied; 
+			return checkSuccess; 
 
 		} catch (const std::exception &e) {
 
