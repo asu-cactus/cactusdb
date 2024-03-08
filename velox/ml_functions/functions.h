@@ -311,7 +311,6 @@ public:
         
         BaseVector::ensureWritable(rows, type, context.pool(), output);
         VectorMaker maker{context.pool()};
-        std::cout << fmt::format("[INFO] DEBUG1 : rows size: {}", rows.size()) << std::endl;
 
         BaseVector* left = args[0].get();
         BaseVector* right = args[1].get();
