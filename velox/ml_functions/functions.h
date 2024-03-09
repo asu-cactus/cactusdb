@@ -592,9 +592,9 @@ public:
     };
 };
 
-class TorchDNN: public MLFunction {
+class TorchDNN2Level: public MLFunction {
 public:
-    TorchDNN(float** weights, float** bias, std::vector<int> dimensions) {
+    TorchDNN2Level(float** weights, float** bias, std::vector<int> dimensions) {
         this->weights = weights;
         this->bias = bias;
         dims = dimensions;
@@ -674,9 +674,9 @@ public:
         float** bias;
 };
 
-class TorchDNN_Multi : public MLFunction {
+class TorchDNN : public MLFunction {
 public:
-    TorchDNN_Multi(std::vector<float*> weights, std::vector<float*> bias, std::vector<int> dimensions) {
+    TorchDNN(std::vector<float*> weights, std::vector<float*> bias, std::vector<int> dimensions) {
         this->weights = weights;
         this->bias = bias;
         dims = dimensions;

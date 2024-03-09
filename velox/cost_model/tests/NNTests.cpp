@@ -343,8 +343,8 @@ void MLFunctionsTest::torch_ffnn(int input_size, int layer1_size, int layer2_siz
   // step1: Register
   exec::registerVectorFunction(
     "torchDNN",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
+    TorchDNN2Level::signatures(),
+    std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
   );
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
