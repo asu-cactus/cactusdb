@@ -332,8 +332,8 @@ class TorchNN2TwoLayerUDFRewriteActionTest : public HiveConnectorTestBase {
     // Register torchdnn UDF
     exec::registerVectorFunction(
       "torchDNN0",
-      TorchDNN::signatures(),
-      std::make_unique<TorchDNN>(weights, bias, dimensions)
+      TorchDNN2Level::signatures(),
+      std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
     );
     // Initialize planNodeID
     core::PlanNodeId p0;

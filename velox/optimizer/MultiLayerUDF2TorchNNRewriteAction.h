@@ -182,8 +182,8 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                       // Register torchdnn_multi
                       registerVectorFunction(
                           "torchDNN",
-                          TorchDNN_Multi::signatures(),
-                          std::make_unique<TorchDNN_Multi>(
+                          TorchDNN::signatures(),
+                          std::make_unique<TorchDNN>(
                               weights, bias, dims));
                       // TODO:catalog process
 
@@ -302,8 +302,8 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
               // Register torchdnn_multi
               registerVectorFunction(
                   "torchDNN",
-                  TorchDNN_Multi::signatures(),
-                  std::make_unique<TorchDNN_Multi>(weights, bias, dims));
+                  TorchDNN::signatures(),
+                  std::make_unique<TorchDNN>(weights, bias, dims));
               // TODO:catalog process
 
               if (curNode->sources().size() > 0) {
