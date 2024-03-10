@@ -457,8 +457,8 @@ void MLFunctionsTest::test_torch_dense_layer(){
   // step1: Register
   exec::registerVectorFunction(
     "torchDNN",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
+    TorchDNN2Level::signatures(),
+    std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
   );
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   core::PlanNodeId p0;
@@ -1214,8 +1214,8 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   // step1: Register
   exec::registerVectorFunction(
     "torchDNN",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
+    TorchDNN2Level::signatures(),
+    std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
   );
 
                    
@@ -1551,7 +1551,7 @@ void MLFunctionsTest::test_deep_bench_conv1() {
 
     exec::registerVectorFunction(
     "torchConvolute",
-    TorchDNN::signatures(),
+    TorchDNN2Level::signatures(),
     std::make_unique<TorchConvolute>(weights->values()->asMutable<float>(), dims)
     );
 
@@ -1666,7 +1666,7 @@ void MLFunctionsTest::test_land_cover_conv3() {
 
     exec::registerVectorFunction(
     "torchConvolute",
-    TorchDNN::signatures(),
+    TorchDNN2Level::signatures(),
     std::make_unique<TorchConvolute>(weights->values()->asMutable<float>(), dims)
     );
 

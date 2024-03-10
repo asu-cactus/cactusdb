@@ -387,8 +387,8 @@ PlanBuilderExec build_plan_udf_torch(DataFrame data, int features, int first_lay
   // std::cout << "line 354" << std::endl;
   exec::registerVectorFunction(
     "torchDNN",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
+    TorchDNN2Level::signatures(),
+    std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
   );
 
 
@@ -788,8 +788,8 @@ public:
 
         exec::registerVectorFunction(
           "torchDNN",
-          TorchDNN::signatures(),
-          std::make_unique<TorchDNN>(weights, bias, dimensions)
+          TorchDNN2Level::signatures(),
+          std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
         );
 
         auto oldplan = originPlanBuilder->planNode()->sources()[0];
@@ -1061,8 +1061,8 @@ void rewrite_test_split2multi(int argc, char** argv){
 
   exec::registerVectorFunction(
     "torchDNN0",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
+    TorchDNN2Level::signatures(),
+    std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
   );
 
     // optimization::registerVectorFunction(

@@ -74,6 +74,9 @@ public:
         float* input_values = input_elements->values()->asMutable<float>();
         int input_size = input_elements->size();
 
+        // std::cout << "input_size:" << "," << input_size << std::endl;
+        // std::cout << "input_values:" << "," << input_values[0] << "," << input_values[1] << std::endl;
+        
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
         
@@ -649,9 +652,9 @@ public:
     };
 };
 
-class TorchDNN: public MLFunction {
+class TorchDNN2Level: public MLFunction {
 public:
-    TorchDNN(float** weights, float** bias, std::vector<int> dimensions) {
+    TorchDNN2Level(float** weights, float** bias, std::vector<int> dimensions) {
         this->weights = weights;
         this->bias = bias;
         dims = dimensions;
@@ -729,6 +732,92 @@ public:
     private:
         float** weights;
         float** bias;
+};
+
+class TorchDNN : public MLFunction {
+public:
+    TorchDNN(std::vector<float*> weights, std::vector<float*> bias, std::vector<int> dimensions) {
+        this->weights = weights;
+        this->bias = bias;
+        dims = dimensions;
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        std::vector<torch::nn::Linear> dense_layers;
+        std::vector<torch::Tensor> weights_tensors;
+        std::vector<torch::Tensor> bias_tensors;
+        std::vector<torch::nn::ReLU> relus;
+
+        // Create layers
+        for (int i = 0; i < dims.size() - 1; ++i) {
+            dense_layers.push_back(torch::nn::Linear(dims[i], dims[i+1]));
+            weights_tensors.push_back(torch::from_blob(weights[i], {dims[i], dims[i+1]}).t());
+            bias_tensors.push_back(torch::from_blob(bias[i], {dims[i+1]}));
+            relus.push_back(torch::nn::ReLU());
+        }
+
+        // Set weights and biases
+        for (int i = 0; i < dense_layers.size(); ++i) {
+            dense_layers[i]->weight.set_data(weights_tensors[i]);
+            dense_layers[i]->bias.set_data(bias_tensors[i]);
+        }
+        
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        torch::Tensor input = torch::from_blob(input_values, {rows.size(), dims[0]});
+
+        torch::Tensor output_tensor = input;
+        for (int i = 0; i < dense_layers.size(); ++i) {
+            output_tensor = dense_layers[i]->forward(output_tensor);
+            output_tensor = relus[i]->forward(output_tensor);
+        }
+
+        // Softmax output
+        output_tensor = torch::nn::functional::softmax(output_tensor, 1);
+        float* data = output_tensor.data_ptr<float>();
+
+        // Prepare results
+        std::vector<std::vector<float>> results;
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
+            results.push_back(result);
+        }
+        
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+    
+    // Getter method for weights
+    const std::vector<float*>& getWeights() const {
+        return weights;
+    }
+
+    // Getter method for bias
+    const std::vector<float*>& getBias() const {
+        return bias;
+    }
+
+private:
+    std::vector<float*> weights;
+    std::vector<float*> bias;
 };
 
 class TorchDNN_Multi : public MLFunction {
@@ -1026,18 +1115,30 @@ public:
         int output_height = input_height - dims[1] + 1;
         int output_width = input_width - dims[2] + 1;
 
-        
+        int input_size = input_elements->size();
+        // std::cout << "input_size:" << "," << input_size << std::endl;
+        // std::cout << "input_values:" << "," << input_values[0] << "," << input_values[1] << "," << input_values[2080] << std::endl;
+        // std::cout << "row size" << "," << rows.size() << std::endl;
+
         std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
        
-        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}).bias(false));
+        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[0], dims[3], {dims[1], dims[2]}).bias(false));
         // torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}));
-        // torch::Tensor conv_weights = torch::tensor(weights_).view({dims[3], dims[0], dims[1], dims[2]});
+        torch::Tensor conv_weights = torch::from_blob(weights_, {dims[3], dims[0], dims[1], dims[2]}).to(torch::kFloat);
 
-        // conv_layer->weight = torch::nn::parameter::Parameter (conv_weights);
-        torch::Tensor input_data = torch::from_blob(input_values, {rows.size(), dims[3], input_height, input_width});
+        auto parameters = conv_layer->named_parameters();
+
+        // Find and set the weight parameter
+        for (auto& named_param : parameters) {
+            if (named_param.key() == "weight") {
+                named_param.value().data() = conv_weights;
+                break;
+            }
+        }
+        torch::Tensor input_data = torch::from_blob(input_values, {rows.size(), dims[3], input_height, input_width}).to(torch::kFloat);
 
        
-        torch::Tensor output_data = conv_layer(input_data);
+        torch::Tensor output_data = conv_layer->forward(input_data);
 
         // Convert bias values to a tensor
         torch::Tensor bias_tensor = torch::from_blob(bias_, {dims[0]}); 

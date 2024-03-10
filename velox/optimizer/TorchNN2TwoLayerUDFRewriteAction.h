@@ -97,7 +97,7 @@ public:
 
 											if (UDF) {
 								
-												std::shared_ptr<TorchDNN> TorchUDF = std::dynamic_pointer_cast<TorchDNN>(UDF);
+												std::shared_ptr<TorchDNN2Level> TorchUDF = std::dynamic_pointer_cast<TorchDNN2Level>(UDF);
 
 												if (TorchUDF) {
 													// Get the dimensions, weights and bias from this torchdnn UDF
@@ -173,7 +173,7 @@ public:
 
 				            if (UDF) {
 				   
-				                std::shared_ptr<TorchDNN> TorchUDF = std::dynamic_pointer_cast<TorchDNN>(UDF);
+				                std::shared_ptr<TorchDNN2Level> TorchUDF = std::dynamic_pointer_cast<TorchDNN2Level>(UDF);
 
 					            if (TorchUDF) {
 					 
