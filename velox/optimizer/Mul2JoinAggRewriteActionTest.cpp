@@ -238,7 +238,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       totalDataNum += batchSize;
     }
 
-    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum);
+    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}\n", dataIdx, totalDataNum);
 
     std::cout << "Time for FFNN with Input Data (sec): "
               << std::endl;
