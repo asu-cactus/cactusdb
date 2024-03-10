@@ -170,9 +170,9 @@ class MLFunctionsTest : public HiveConnectorTestBase {
 
 void MLFunctionsTest::test_mat_mul() { 
 //Eigen::setNbThreads(48); 
-  int output_size = 5000;
-  int input_size = 1000;
-  int num_samples = 500000;
+  int output_size = 500;
+  int input_size = 100;
+  int num_samples = 500;
   int size = output_size*input_size;
   
   auto weights = maker.flatVector<float>(size);
@@ -202,8 +202,10 @@ void MLFunctionsTest::test_mat_mul() {
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                   .values({inputRowVector})
-                  .filter("col % 2 + col % 101 > 97")
+                  // using CPU for mat_mul
                   .project({"mat_mul(x)"})
+                  // using GPU for mat_mul
+                  // .project({"mat_mul(x, true)"})
 		              .planNode();
 
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
