@@ -68,40 +68,37 @@ public:
         exec::EvalCtx& context,
         VectorPtr& output) const override {
         
-        BaseVector::ensureWritable(rows, type, context.pool(), output);
+        bool use_gpu = false;
+        if (args.size() == 2) {
+            // an optional parameter can be passed to enable the GPU for mat_mul
+            use_gpu = args[1]->as<ConstantVector<bool>>()->valueAt(0);
+        }
         
-        auto input_elements = args[0]->as<ArrayVector>()->elements();
-        float* input_values = input_elements->values()->asMutable<float>();
-        int input_size = input_elements->size();
-
-        // std::cout << "input_size:" << "," << input_size << std::endl;
-        // std::cout << "input_values:" << "," << input_values[0] << "," << input_values[1] << std::endl;
-        
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
-        
-        
-        // std::cout << "Matrix shapes Matmul" << std::endl;
-        // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() << std::endl;
-        // std::cout << "Matrix shape: " << m2.rows() << " x " << m2.cols() << std::endl;
-
-        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
-        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        // std::cout << "Time for Matrix multiply (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
-
-        // std::vector<std::vector<float>> result(m.rows(), std::vector<float>(m.cols()));
-        // for (int i = 0; i < m.rows(); ++i) {
-        //     for (int j = 0; j < m.cols(); ++j) {
-        //         result[i][j] = m(i, j);
-        //     }
-        // }
+        // results are expected to be stored as std::vector<std::vector<float>>
         std::vector<std::vector<float>> result;
-        for (int i = 0; i < m.rows(); i++) {
-            std::vector<float> row(
-            m.row(i).data(),
-            m.row(i).data() + m.cols());
-            result.push_back(row);
+        if (use_gpu) {
+            // TODO: implementation of matrix multiplication in GPU
+            throw std::runtime_error("GPU implementation of Matrix Multiple is not implemented.");
+        } else {
+            BaseVector::ensureWritable(rows, type, context.pool(), output);
+            
+            auto input_elements = args[0]->as<ArrayVector>()->elements();
+            float* input_values = input_elements->values()->asMutable<float>();
+            int input_size = input_elements->size();
+
+            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
+            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
+            
+            // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+            Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
+
+            
+            for (int i = 0; i < m.rows(); i++) {
+                std::vector<float> row(
+                m.row(i).data(),
+                m.row(i).data() + m.cols());
+                result.push_back(row);
+            }
         }
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
@@ -111,6 +108,12 @@ public:
         return {exec::FunctionSignatureBuilder()
                      .returnType("array(REAL)")
                      .argumentType("array(REAL)")
+                     .build(),
+                // supports with additional flag: use_gpu
+                exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .argumentType("BOOLEAN")
                      .build()};
     }
 
