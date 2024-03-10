@@ -53,12 +53,19 @@ void updateCataLog(const std::string& name, std::shared_ptr<VectorFunction> shar
                 std::vector<std::vector<float>> weightBlocks;
                 optimization::FileStructure weightsFileStructure;
                 // Create weight blocks and convert to files
+                std::string nameSuffix = "";
                 if (isVerticalPartition) {
+                    // in vertical partition approach: inputs are partitioned vertically
+                    // while weights are partitioned horizontally
                     weightBlocks = create_weight_block(dims[0]*dims[1], weights, blocksNum);
                     weightsFileStructure = block_to_files(weightBlocks, blocksNum, 1);
+                    nameSuffix = "_horizontal";
                 } else {
+                    // in horizontal partition approach: inputs are partitioned horizontally 
+                    // by using Velox's batches, while weights are partitioned vertically
                     weightBlocks = create_blocks(dims[0], dims[1], weights, blocksSize);
                     weightsFileStructure = save_blocks_to_files(weightBlocks);
+                    nameSuffix = "_vertical";
                 }
                 // Add the updated information to cataLog
                 cataLog.add(name, weightsFileStructure.schema, weightsFileStructure.paths, 1);

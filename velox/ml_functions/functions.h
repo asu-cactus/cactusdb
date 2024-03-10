@@ -136,12 +136,12 @@ private:
 
 class MatrixMultiply_b: public MLFunction {
 public:
-    MatrixMultiply_b(int num_rows, int num_cols, int num_samples, float* weights, int blocks) {
+    MatrixMultiply_b(int num_rows, int num_cols, int num_samples, int blocks) {
         dims.push_back(num_rows);
         dims.push_back(num_cols);
         dims.push_back(num_samples);
         dims.push_back(blocks);
-        weights_ = weights;
+        // weights_ = weights;
     }
 
     void apply(
@@ -219,12 +219,12 @@ private:
 
 class MatrixMultiply_Block: public MLFunction {
 public:
-    MatrixMultiply_Block(int num_rows, int num_cols, int num_samples, float* weights, int blocks) {
+    MatrixMultiply_Block(int num_rows, int num_cols, int num_samples, int blocks) {
         dims.push_back(num_rows);
         dims.push_back(num_cols);
         dims.push_back(num_samples);
         dims.push_back(blocks);
-        weights_ = weights;
+        // weights_ = weights;
     }
 
     void apply(
@@ -295,11 +295,11 @@ private:
 
 class MatrixMultiply_h: public MLFunction {
 public:
-    MatrixMultiply_h(int num_rows, int num_cols, int block_size, float* weights) {
+    MatrixMultiply_h(int num_rows, int num_cols, int block_size) {
         dims.push_back(num_rows);
         dims.push_back(num_cols);
         dims.push_back(block_size);
-        weights_ = weights;
+        // weights_ = weights;
     }
 
     void apply(
