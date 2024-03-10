@@ -387,8 +387,8 @@ PlanBuilderExec build_plan_udf_torch(DataFrame data, int features, int first_lay
   // std::cout << "line 354" << std::endl;
   exec::registerVectorFunction(
     "torchDNN",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
+    TorchDNN2Level::signatures(),
+    std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
   );
 
 
@@ -514,7 +514,7 @@ PlanBuilderExec build_plan_op(float* weight, int row, int col, int samples, RowT
   exec::registerVectorFunction(
     "mat_mul_b",
     MatrixMultiply_b::signatures(),
-    std::make_unique<MatrixMultiply_b>(row, col, samples, weight, 4)
+    std::make_unique<MatrixMultiply_b>(row, col, samples, 4)
   );
   
   std::string searchString = targetString[0];
@@ -788,8 +788,8 @@ public:
 
         exec::registerVectorFunction(
           "torchDNN",
-          TorchDNN::signatures(),
-          std::make_unique<TorchDNN>(weights, bias, dimensions)
+          TorchDNN2Level::signatures(),
+          std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
         );
 
         auto oldplan = originPlanBuilder->planNode()->sources()[0];
@@ -807,7 +807,7 @@ public:
         exec::registerVectorFunction(
         "mat_mul_b",
         MatrixMultiply_b::signatures(),
-        std::make_unique<MatrixMultiply_b>(dims0[0]/blocks, dims0[1], data.features.size(), data.weights[0], 4)
+        std::make_unique<MatrixMultiply_b>(dims0[0]/blocks, dims0[1], data.features.size(), 4)
       );
 
       std::string searchString = "mat_mul0(ROW[\"v\"])";
@@ -1061,8 +1061,8 @@ void rewrite_test_split2multi(int argc, char** argv){
 
   exec::registerVectorFunction(
     "torchDNN0",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
+    TorchDNN2Level::signatures(),
+    std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
   );
 
     // optimization::registerVectorFunction(

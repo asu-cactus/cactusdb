@@ -46,42 +46,9 @@ class SumArrayAggregate : public exec::Aggregate {
       new (groups[index] + offset_) ArrayAccumulator();
     }
   }
-
-  void extractValues(char** groups, int32_t numGroups, VectorPtr* result)
-      override {
-    auto vector = (*result)->as<ArrayVector>();
-    VELOX_CHECK(vector);
-    vector->resize(numGroups);
-
-    auto elements = vector->elements()->as<FlatVector<float>>();
-    elements->resize(1024000);//Todo auto
-
-    uint64_t* rawNulls = getRawNulls(vector);
-    vector_size_t offset = 0;
-    for (int32_t i = 0; i < numGroups; ++i) {
-      auto& values = value<ArrayAccumulator>(groups[i])->elements;
-      auto arraySize = values.size();
-      if (arraySize) {
-        clearNull(rawNulls, i);
-
-        // ValueListReader reader(values);
-        // for (auto index = 0; index < arraySize; ++index) {
-        //   reader.next(*elements, offset + index);
-        // }
-        values.extractValues(*elements, offset);
-        vector->setOffsetAndSize(i, offset, arraySize);
-        offset += arraySize;
-      } else {
-        vector->setNull(i, true);
-      }
-    }
-  }
-
-  void extractAccumulators(char** groups, int32_t numGroups, VectorPtr* result)
-      override {
-    extractValues(groups, numGroups, result);
-  }
-
+  /* addRawInput is used for SingleAggregation and PartialAggregation which process 
+  *  the input vector and store the values in the 
+  */
   void addRawInput(
     char** groups,
     const SelectivityVector& rows,
@@ -89,64 +56,84 @@ class SumArrayAggregate : public exec::Aggregate {
     bool /*mayPushdown*/) override {
   decodedElements_.decode(*args[0], rows);
   auto Values = decodedElements_.base()->as<ArrayVector>();
-  float* Valuesfloat = Values->elements()->values()->asMutable<float>();
+  auto rowVector = decodedElements_.base()->as<ArrayVector>();
+  // std::cout << fmt::format("[INFO ADDRAWINPUT]: num_rows:{}, value size: {}\n", rows.size(), rowVector->size());
+  auto arrayVectorOuter = rowVector->elements()->as<ArrayVector>();
+  auto arrayVectorInner = arrayVectorOuter->elements();
+  // std::cout << fmt::format("[INFO ADDRAWINPUT]: outer arr size:{}, inner arr size: {} \n", arrayVectorOuter->size(), arrayVectorInner->size());
+  float* floatValues = arrayVectorInner->values()->asMutable<float>();
+  numSamples_ = arrayVectorOuter->size();
+  numCols_ = arrayVectorInner->size() / numSamples_;
+  // std::cout << fmt::format("[INFO addRawInput] numSample: {}, numCols: {}, rows size: {}\n", numSamples_, numCols_, rows.size());
   rows.applyToSelected([&](vector_size_t row) {
     auto group = groups[row];
     auto tracker = trackRowSize(group);
     auto decodedRow = decodedElements_.index(row);
     auto rowOffset =  Values->offsetAt(decodedRow);
     auto rowSize = Values->sizeAt(decodedRow);
+    // Change row size to the whole block size
+    rowSize = numSamples_*numCols_;
  
     auto& oldValues = value<ArrayAccumulator>(group)->elements;
-    oldValues.addValue(Valuesfloat, rowOffset, rowSize);
-    // auto newValues = decodedElements_.base()->as<ArrayVector>();
-    // if (oldValues.size() == 0) {
-    //   oldValues.appendValue(decodedElements_, row, allocator_);//index is row old.addvalue(newvalue[index,offsetsize])
-    // } else {
-    //   auto size = oldValues.size();
-    //   const auto newValues = decodedElements_.base()->as<ArrayVector>();
-
-    //   float* input_values_new = newValues->elements()->values()->asMutable<float>();
-    //   // auto resultVector = BaseVector::create(args[0].type(), 0, allocator_);
-    //   // auto resultVector = args[0]->as<ArrayVector>()->elements();
-    //   // auto resultVector = BaseVector::create(newValues->type(), 0, allocator_);
-
-
-    //   // for (auto index = 0; index < size; ++index) {
-    //   //   valueListReader.next(*resultVector, index);
-    //   // }
-    //   // auto ss = resultVector->values()->asMutable<float>();
-    //   // for (vector_size_t i = 0; i < size; ++i) {
-    //   //   // auto newv = newValues->as<float>()[i];
-    //   //   // resultVector->values()->asMutable<float>()[i] += newv;
-    //   // }
-
-    // }
+    oldValues.addValue(floatValues, rowOffset, rowSize);
   });
 }
-
-
-  void addIntermediateResults(
+  // This function is invoked by intermediateAggregation and finalAggregation
+  // which takes the inputs from the partialAggregation and add the results into
+  // the accumulator
+void addIntermediateResults(
       char** groups,
       const SelectivityVector& rows,
       const std::vector<VectorPtr>& args,
-      bool /*mayPushdown*/) override {
-    decodedIntermediate_.decode(*args[0], rows);
-
-    auto arrayVector = decodedIntermediate_.base()->as<ArrayVector>();
-    auto& elements = arrayVector->elements();
-    float* Valuesfloat = arrayVector->elements()->values()->asMutable<float>();
-    rows.applyToSelected([&](vector_size_t row) {
-      auto group = groups[row];
-      auto decodedRow = decodedIntermediate_.index(row);
-      auto tracker = trackRowSize(group);
-      auto rowOffset =  arrayVector->offsetAt(decodedRow);
-      auto rowSize = arrayVector->sizeAt(decodedRow);
-      auto& values = value<ArrayAccumulator>(group)->elements;
-
-      values.addValue(Valuesfloat, rowOffset, rowSize);
-    });
+      bool mayPushdown) override {
+    addRawInput(groups, rows, args, mayPushdown);
+    // std::cout << fmt::format("[INFO addIntermediateResults] numSample: {}, numCols: {}, rows size: {}\n", numSamples_, numCols_, rows.size());
   }
+
+  // This function is invoked by singleAggregation or finalAggregation to
+  // produce the final results from the accumulator, where addRawInput and
+  // addIntermediateResults store the aggregated values.
+  void extractValues(char** groups, int32_t numGroups, VectorPtr* result)
+      override {
+
+    auto vector = (*result)->as<ArrayVector>();
+    VELOX_CHECK(vector);
+    // Unblocking: set the number of groups equals the sample size
+    // std::cout << fmt::format("[INFO extractValues] numGroups: {}, numSamples: {}, numCols: {}\n", numGroups, numSamples_, numCols_);
+    auto arrayVectorOuter = vector->as<ArrayVector>();
+    auto arrayVectorInner = arrayVectorOuter->elements()->as<ArrayVector>();
+    auto elements = arrayVectorInner->elements()->as<FlatVector<float>>();
+    vector->resize(numGroups);
+    arrayVectorOuter->resize(numGroups);
+    arrayVectorInner->resize(numSamples_);
+    elements->resize(numSamples_ * numCols_);
+
+    uint64_t* rawNulls = getRawNulls(vector);
+    // Only one group eventually and the aggregated results are stored in group 0
+    auto& aggregatedValues = value<ArrayAccumulator>(groups[0])->elements;
+    auto offsetOuter = 0;
+    auto offsetInner = 0;
+    // each tuple's features are stored in the inner array
+    // each tuple itself is stored in the outer array
+    // there is only one row, hence only need to set offset and size for outer array onece
+    arrayVectorOuter->setOffsetAndSize(0, offsetOuter, numSamples_);
+    for (int32_t i = 0; i< numSamples_; i++) {
+      arrayVectorInner->setOffsetAndSize(i, offsetInner, numCols_);
+      aggregatedValues.extractValues(*elements, i*numCols_, numCols_);
+      offsetInner += numCols_;
+    }
+
+  }
+
+  // This function is invoked for partialAggregation and intermediateAggregation
+  // to produce the partial aggregated results that will be used for the next
+  // aggregation.
+  void extractAccumulators(char** groups, int32_t numGroups, VectorPtr* result)
+      override {
+    // std::cout << fmt::format("[INFO extractAccumulators] : numSamples: {}, numCols: {} numGroups: {}\n", numSamples_, numCols_, numGroups);
+    extractValues(groups, numGroups, result);
+  }
+
 
   void addSingleGroupRawInput(
       char* group,
@@ -158,13 +145,14 @@ class SumArrayAggregate : public exec::Aggregate {
     decodedElements_.decode(*args[0], rows);
     auto tracker = trackRowSize(group);
     auto Values = decodedElements_.base()->as<ArrayVector>();
+    // std::cout << fmt::format("addSingleGroupRawInput:  Values \n {} \n {}\n", Values->toString(), Values->toString(0, Values->size()));
     float* Valuesfloat = Values->elements()->values()->asMutable<float>();
     rows.applyToSelected([&](vector_size_t row) {
     auto decodedRow = decodedElements_.index(row);
     auto rowOffset =  Values->offsetAt(decodedRow);
     auto rowSize = Values->sizeAt(decodedRow);
  
-
+    rowSize = numSamples_*numCols_;
     values.addValue(Valuesfloat, rowOffset, rowSize);
     });
   }
@@ -176,13 +164,14 @@ class SumArrayAggregate : public exec::Aggregate {
       bool /* mayPushdown */) override {
     decodedIntermediate_.decode(*args[0], rows);
     auto arrayVector = decodedIntermediate_.base()->as<ArrayVector>();
-
+    // std::cout << fmt::format("addSingleGroupIntermediateResults:  Values \n {} \n {}\n", arrayVector->toString(), arrayVector->toString(0, arrayVector->size()));
     auto& values = value<ArrayAccumulator>(group)->elements;
     float* Valuesfloat = arrayVector->elements()->values()->asMutable<float>();
     rows.applyToSelected([&](vector_size_t row) {
       auto decodedRow = decodedIntermediate_.index(row);
       auto rowOffset =  arrayVector->offsetAt(decodedRow);
       auto rowSize = arrayVector->sizeAt(decodedRow);
+      rowSize = numSamples_*numCols_;
       values.addValue(Valuesfloat, rowOffset, rowSize);
     });
   }
@@ -205,20 +194,17 @@ class SumArrayAggregate : public exec::Aggregate {
   // Reusable instance of DecodedVector for decoding input vectors.
   DecodedVector decodedElements_;
   DecodedVector decodedIntermediate_;
+  size_t numSamples_;
+  size_t numCols_;
 };
 
 bool registerSumArray(const std::string& name) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures{
       exec::AggregateFunctionSignatureBuilder()
-          .returnType("array(REAL)")
-          .intermediateType("array(double)")
-          .argumentType("array(REAL)")
+          .argumentType("array(array(REAL))")
+          .intermediateType("array(array(REAL))")
+          .returnType("array(array(REAL))")
           .build()};
-          // .typeVariable("E")
-          // .returnType("array(E)")
-          // .intermediateType("array(E)")
-          // .argumentType("E")
-          // .build()};
 
   exec::registerAggregateFunction(
       name,

@@ -1,3 +1,9 @@
+# Set up developement environment through Docker
+
+It is recommended to automatically configure your development environment through docker. 
+
+Please go to check [Docker-README](./asu-doc/README.md) under asu-doc to set-up your docker environment.
+
 # Installation
 ## xgboost C APIs
 [Reference URL](https://github.com/asu-cactus/velox/edit/main/velox/ml_functions/README.md)

@@ -170,9 +170,9 @@ class MLFunctionsTest : public HiveConnectorTestBase {
 
 void MLFunctionsTest::test_mat_mul() { 
 //Eigen::setNbThreads(48); 
-  int output_size = 5000;
-  int input_size = 1000;
-  int num_samples = 500000;
+  int output_size = 500;
+  int input_size = 100;
+  int num_samples = 500;
   int size = output_size*input_size;
   
   auto weights = maker.flatVector<float>(size);
@@ -202,8 +202,10 @@ void MLFunctionsTest::test_mat_mul() {
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                   .values({inputRowVector})
-                  .filter("col % 2 + col % 101 > 97")
+                  // using CPU for mat_mul
                   .project({"mat_mul(x)"})
+                  // using GPU for mat_mul
+                  // .project({"mat_mul(x, true)"})
 		              .planNode();
 
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
@@ -457,8 +459,8 @@ void MLFunctionsTest::test_torch_dense_layer(){
   // step1: Register
   exec::registerVectorFunction(
     "torchDNN",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
+    TorchDNN2Level::signatures(),
+    std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
   );
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   core::PlanNodeId p0;
@@ -1214,8 +1216,8 @@ void MLFunctionsTest::test_torch_dense_layer_multithreading(){
   // step1: Register
   exec::registerVectorFunction(
     "torchDNN",
-    TorchDNN::signatures(),
-    std::make_unique<TorchDNN>(weights, bias, dimensions)
+    TorchDNN2Level::signatures(),
+    std::make_unique<TorchDNN2Level>(weights, bias, dimensions)
   );
 
                    
@@ -1551,7 +1553,7 @@ void MLFunctionsTest::test_deep_bench_conv1() {
 
     exec::registerVectorFunction(
     "torchConvolute",
-    TorchDNN::signatures(),
+    TorchDNN2Level::signatures(),
     std::make_unique<TorchConvolute>(weights->values()->asMutable<float>(), dims)
     );
 
@@ -1666,7 +1668,7 @@ void MLFunctionsTest::test_land_cover_conv3() {
 
     exec::registerVectorFunction(
     "torchConvolute",
-    TorchDNN::signatures(),
+    TorchDNN2Level::signatures(),
     std::make_unique<TorchConvolute>(weights->values()->asMutable<float>(), dims)
     );
 

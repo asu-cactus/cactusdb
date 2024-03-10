@@ -20,9 +20,10 @@
 class CataLog {
     public:
         // Add or update UDF associate information (schema, file address) based on the flag (weights or values)
-        void add(const std::string& name, RowTypePtr schema, std::vector<std::shared_ptr<TempFilePath>> filePath, int flag) {
+        void add(const std::string& name, RowTypePtr schema, std::vector<std::shared_ptr<TempFilePath>> filePath, int flag, std::string nameSuffix = "") {
+            // TODO: better naming convention for the flag variable
             if (flag == 1) {
-                std::string key = name + "_weights";
+                std::string key = name + "_weights" + nameSuffix;
 
                 auto fileAddrIt = UDFFileAddrMap.find(key);
                 auto schemaIt = UDFSchemaMap.find(key);
@@ -38,7 +39,7 @@ class CataLog {
                 }
             }
             else if (flag == 0) {
-                std::string key = name + "_values";
+                std::string key = name + "_values" + nameSuffix;
 
                 auto fileAddrIt = UDFFileAddrMap.find(key);
                 auto schemaIt = UDFSchemaMap.find(key);
@@ -111,6 +112,11 @@ class CataLog {
         void deleteIdAddressMap(core::PlanNodeId p) {
             idFileAddrMap.erase(p);
         }
+        
+        // Clear file address map entry for a given PlanNodeId
+        void clearIdAddressMap() {
+            idFileAddrMap.clear();
+        }
 
         // Get the entire file address map for PlanNodeId
         std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> getIdAddressMap() {
@@ -120,6 +126,16 @@ class CataLog {
         // Set mapping from vector values to PlanNodeId
         void setVectorIdMap(core::PlanNodeId p, std::string values) {
             vectorIdMap[values] = p;
+        }
+
+        // Delete mapping from vector values to PlanNodeId
+        void deleteVectorIdMap(std::string values) {
+            vectorIdMap.erase(values);
+        }
+
+        // Clear mapping from vector values to PlanNodeId
+        void clearVectorIdMap() {
+            vectorIdMap.clear();
         }
 
         // Get PlanNodeId based on vector values
@@ -148,12 +164,26 @@ class CataLog {
             return defaultBlocksNum;
         }
 
+        void setDefaultBlocksSize(int newBlocksSize) {
+            defaultBlocksSize = newBlocksSize;
+        }
+
+        // Get default number of blocks
+        int getDefaultBlocksSize () {
+            return defaultBlocksSize;
+        }
+
+        int getDefaultSplits (){
+            return defaultSplits;
+        }
+
 
     private:
         // Default values
         int defaultBlocksNum = 4;
-        int blockingThreshold = 2000;
-
+        int defaultBlocksSize = 256;
+        int blockingThreshold = 1;
+        int defaultSplits = 392;
         // Maps for storing data
         std::map<std::string, std::vector<int>> dataSourceStatMap;
         std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> idFileAddrMap;

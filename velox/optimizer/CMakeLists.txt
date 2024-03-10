@@ -92,6 +92,23 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(multilayer2torch_test MultiLayerUDF2TorchNNRewriteActionTest.cpp)
+target_link_libraries(
+  multilayer2torch_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
 
 add_executable(decisionforest2rel_test DecisionForestUDF2RelationRewriteActionTest.cpp)
 target_link_libraries(
@@ -113,6 +130,40 @@ target_link_libraries(
 add_executable(mul2joinagg_test Mul2JoinAggRewriteActionTest.cpp)
 target_link_libraries(
   mul2joinagg_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(mul2joinagghorizontal_test Mul2JoinAggHorizontalRewriteActionTest.cpp)
+target_link_libraries(
+  mul2joinagghorizontal_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(conv_test Conv2dActionTest.cpp)
+target_link_libraries(
+  conv_test
   velox_aggregates
   velox_type
   velox_vector
