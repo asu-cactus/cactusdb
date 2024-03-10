@@ -34,11 +34,11 @@ using namespace facebook::velox::core;
 
 namespace optimization {
 
-class Mul2JoinAggRewriteAction : public RewriteAction {
+class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
 
 public:
 
-    Mul2JoinAggRewriteAction (){}
+    Mul2JoinAggHorizontalRewriteAction (){}
 
 	/**
 	 * @brief A function to apply a rule for rewriting the logical plan.
@@ -103,15 +103,18 @@ public:
 													// Get information (defaultBlocksnumber, number of samples) from cataLog
 													int blocks = cataLog.getDefaultBlocksNum();
 													int samples = cataLog.getDataSourceStat("values")[0];
+													int blockSize = cataLog.getDefaultBlocksSize();
 
 													// Register matrix blocks multiply function
 													registerVectorFunction(
-														"mat_mul_b",
-														MatrixMultiply_b::signatures(),
-														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
+														"mat_mul_h",
+														MatrixMultiply_h::signatures(),
+														// std::make_unique<MatrixMultiply_h>(dims[0]/blocks, dims[1], samples, weights, blocks)
+														std::make_unique<MatrixMultiply_h>(dims[0], dims[1], cataLog.getDefaultBlocksSize())
 													);
+
 													// Add UDF associate information (UDF with input values) to cataLog
-													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
+													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0, "_vertical");
 
 												}
 											}
@@ -138,14 +141,18 @@ public:
 																.planNode(),
 																	"", // extra filter
 																	{"v_row", "w_col", "v", "w"})
-																.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
-																.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-																.project({exprStr});
+																// .project({"v_row", "w_col", "mat_mul_h(v, w) AS mp"})
+																// .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+																// .localPartition({"v_row"})
+																// .intermediateAggregation()
+																// .finalAggregation()
+																// .project({exprStr})
+																;
 												// Delete old nodeId-fileAddress map
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 												// Insert new nodeId-fileAddress maps
-												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
-												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
+												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values_vertical"));
+												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_horizontal"));
 
 												transformationApplied = true;
 											}
@@ -186,12 +193,14 @@ public:
 										// Get information (defaultBlocksnumber, number of samples) from cataLog
 										int blocks = cataLog.getDefaultBlocksNum();
 										int samples = cataLog.getDataSourceStat("values")[0];
+										int blockSize = cataLog.getDefaultBlocksSize();
 
 										// Register matrix blocks multiply function
 										registerVectorFunction(
-											"mat_mul_b",
-											MatrixMultiply_b::signatures(),
-											std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
+											"mat_mul_h",
+											MatrixMultiply_h::signatures(),
+											// std::make_unique<MatrixMultiply_h>(dims[0]/blocks, dims[1], samples, weights, blocks)
+											std::make_unique<MatrixMultiply_h>(dims[0], dims[1], cataLog.getDefaultBlocksSize())
 										);
 										// Add UDF associate information (UDF with input values) to cataLog
 										// Should blocking source here
@@ -223,9 +232,13 @@ public:
 													.planNode(),
 														"", // extra filter
 														{"v_row", "w_col", "v", "w"})
-													.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
-													.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-													.project({exprStr});
+													.project({"v_row", "w_col", "mat_mul_h(v, w) AS mp"})
+													.partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+													.localPartition({"v_row"})
+													.intermediateAggregation()
+													.finalAggregation()
+													.project({exprStr})
+													;
 									// Delete old nodeId-fileAddress map
 									cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 									// Insert new nodeId-fileAddress maps
@@ -258,7 +271,7 @@ public:
 
     std::string name() override {
     
-        return "Mul2JoinAggRewriteAction";
+        return "Mul2JoinAggHorizontalRewriteAction";
     
     }
 
@@ -299,7 +312,6 @@ public:
 					std::string expr = expression->toString();
 					// Regular expression match
 					std::regex pattern(R"(mat_mul\d+)");
-
 					auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
 
 					auto wordsEnd = std::sregex_iterator();
@@ -307,7 +319,6 @@ public:
 					for (auto it = wordsBegin; it != wordsEnd; ++it) {
 
 						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
-
 							targetActions.push_back(it->str());
 						}
 					}

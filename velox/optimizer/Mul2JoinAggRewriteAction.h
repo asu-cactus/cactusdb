@@ -108,12 +108,12 @@ public:
 													registerVectorFunction(
 														"mat_mul_b",
 														MatrixMultiply_b::signatures(),
-														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
+														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, blocks)
 													);
 													registerVectorFunction(
 														"mat_mul_block",
 														MatrixMultiply_Block::signatures(),
-														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, weights, blocks)
+														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks)
 													);
 													// Add UDF associate information (UDF with input values) to cataLog
 													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
@@ -216,11 +216,17 @@ public:
 										int samples = cataLog.getDataSourceStat("values")[0];
 
 										// Register matrix blocks multiply function
+										// registerVectorFunction(
+										// 	"mat_mul_b",
+										// 	MatrixMultiply_b::signatures(),
+										// 	std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, blocks)
+										// );
+
 										registerVectorFunction(
-											"mat_mul_b",
-											MatrixMultiply_b::signatures(),
-											std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
-										);
+														"mat_mul_block",
+														MatrixMultiply_Block::signatures(),
+														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks)
+													);
 										// Add UDF associate information (UDF with input values) to cataLog
 										// Should blocking source here
 										// catalog source will invoke a intern function to blocking itself, then return schema and address in here

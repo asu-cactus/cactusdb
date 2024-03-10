@@ -514,7 +514,7 @@ PlanBuilderExec build_plan_op(float* weight, int row, int col, int samples, RowT
   exec::registerVectorFunction(
     "mat_mul_b",
     MatrixMultiply_b::signatures(),
-    std::make_unique<MatrixMultiply_b>(row, col, samples, weight, 4)
+    std::make_unique<MatrixMultiply_b>(row, col, samples, 4)
   );
   
   std::string searchString = targetString[0];
@@ -807,7 +807,7 @@ public:
         exec::registerVectorFunction(
         "mat_mul_b",
         MatrixMultiply_b::signatures(),
-        std::make_unique<MatrixMultiply_b>(dims0[0]/blocks, dims0[1], data.features.size(), data.weights[0], 4)
+        std::make_unique<MatrixMultiply_b>(dims0[0]/blocks, dims0[1], data.features.size(), 4)
       );
 
       std::string searchString = "mat_mul0(ROW[\"v\"])";

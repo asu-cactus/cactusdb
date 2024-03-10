@@ -20,9 +20,10 @@
 class CataLog {
     public:
         // Add or update UDF associate information (schema, file address) based on the flag (weights or values)
-        void add(const std::string& name, RowTypePtr schema, std::vector<std::shared_ptr<TempFilePath>> filePath, int flag) {
+        void add(const std::string& name, RowTypePtr schema, std::vector<std::shared_ptr<TempFilePath>> filePath, int flag, std::string nameSuffix = "") {
+            // TODO: better naming convention for the flag variable
             if (flag == 1) {
-                std::string key = name + "_weights";
+                std::string key = name + "_weights" + nameSuffix;
 
                 auto fileAddrIt = UDFFileAddrMap.find(key);
                 auto schemaIt = UDFSchemaMap.find(key);
@@ -38,7 +39,7 @@ class CataLog {
                 }
             }
             else if (flag == 0) {
-                std::string key = name + "_values";
+                std::string key = name + "_values" + nameSuffix;
 
                 auto fileAddrIt = UDFFileAddrMap.find(key);
                 auto schemaIt = UDFSchemaMap.find(key);

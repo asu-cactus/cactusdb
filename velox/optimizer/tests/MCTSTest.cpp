@@ -197,7 +197,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         for (auto batchedData : finalResult) {
           batchedData = std::move(batchedData);
           int batchSize = batchedData->size();
-          std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
+          std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << batchedData->toString(0, batchedData->size()) << std::endl;
           dataIdx += 1;
           totalDataNum += batchSize;
         }
@@ -427,6 +427,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int num_splits = 4;
     // Initialize CataLog
     CataLog cataLog;
+    cataLog.setDefaultBlocksSize(256);
+    cataLog.setBlockingThreshold(1);
     // Generate data source
     auto data = data_generate(
         input_features_size,
@@ -470,6 +472,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Build two dense layers UDFs using registerFunction in optimization
     // namespace
     bool isVerticalPartition = true;
+    if (benchmarkMode == "mul2joinAggHorizontal") {
+      isVerticalPartition = false;
+    }
     std::string compute = registerFunctions(
         first_layer_output_size,
         second_layer_output_size,
@@ -513,6 +518,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       planState.getPossibleActions(planNode, cataLog);
       // std::cout << "action size" << planState.actionsPair.size() <<
       // std::endl; Print possible actions for (const auto& entry :
+      std::cout << "[INFO] All possible actions:" << std::endl;
       for (auto entry: planState.actionsPair) {
         std::cout << entry.first << ": " << entry.second << std::endl;
       }
@@ -524,6 +530,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
       } else if (benchmarkMode == "udf2torchNN") {
         testAction = std::make_pair("softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0(ROW[\"v\"]))))))", "MultiLayerUDF2TorchNNRewriteAction");
+      } else if (benchmarkMode == "mul2joinAggHorizontal") {
+        testAction = std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
       } else {
          throw std::runtime_error(fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
       }
@@ -702,9 +710,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         for (const auto& entry : planState.actionsPair) {
           // std::cout << "[ACTION SBACE] " << entry.first << ", " <<
           // entry.second << std::endl;
+          // TODO: need to change corresponding in python side
           Json::Value jsonEntry;
           jsonEntry["expression"] = entry.first;
-          jsonEntry["action"] = entry.second;
+          jsonEntry["action"] = Json::arrayValue;
+          for (auto action : entry.second) {
+            jsonEntry["action"].append(Json::Value(action));
+          }
           jsonMessage["actionSpace"].append(jsonEntry);
         }
         sendAcknowledgment(clientSocket);
@@ -804,7 +816,7 @@ int main(int argc, char** argv) {
   int numSample = FLAGS_num_sample;
   int numDriver = FLAGS_num_driver;
   IntegratedMCTSTest demo;
-  // available single benchmark mode: mul2joinAgg, udf2torchNN
+  // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
     demo.testIntegratedMCTS(featureSize, numSample, repeatRun);
   } else {

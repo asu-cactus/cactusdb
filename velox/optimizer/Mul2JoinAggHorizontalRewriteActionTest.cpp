@@ -219,11 +219,17 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     ss << numSplits << "," << numThreads << ",";
 
+
     int dataIdx = 0;
+    int totalDataNum = 0;
     for (auto batchedData : actualResults) {
-      std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
+      batchedData = std::move(batchedData);
+      int batchSize = batchedData->size();
+      std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
       dataIdx += 1;
+      totalDataNum += batchSize;
     }
+    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
 
     std::cout << "Time for FFNN with Input Data (sec): "
               << std::endl;
@@ -447,8 +453,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   */
   void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 100000;//597540
-    int num_samples = 2000;
+    int input_features_size = 100;//597540
+    int num_samples = 10;
     // int input_features_size = featureSize;
     // int num_samples = sampleSize;
     int first_layer_output_size = 1024;
@@ -542,7 +548,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     registerVectorFunction(
       "mat_mul_h",
       MatrixMultiply_h::signatures(),
-      std::make_unique<MatrixMultiply_h>(input_features_size, first_layer_output_size, cataLog.getDefaultBlocksSize(), data.weights[0])
+      std::make_unique<MatrixMultiply_h>(input_features_size, first_layer_output_size, cataLog.getDefaultBlocksSize())
     );
 
 
@@ -561,11 +567,11 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
             .localPartition({"v_row"})
             .intermediateAggregation()
             .finalAggregation()
-            // .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+            // // .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
             .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
-            .planBuild();
+            ;
     cataLog.setIdAddressMap(p1, {file});
-    cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights"));
+    cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights_vertical"));
 
     // Run rewriten rule
     // if (rewrite) {
@@ -584,7 +590,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     //   planState.update(myPlan, cataLog);
 
     // }
-
+    std::cout << "[INFO] Query Plan: \n" << newPlan.planNode()->toString(true,true) << std::endl;
     // Run the rewritten plan
     runPlan(8, 8, newPlan, cataLog);
   }
