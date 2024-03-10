@@ -551,13 +551,12 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       std::make_unique<MatrixMultiply_h>(input_features_size, first_layer_output_size, cataLog.getDefaultBlocksSize())
     );
 
-
     auto newPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
             .tableScan(asRowType(inputRowVector->type()))
             .capturePlanNodeId(p1)
             .nestedLoopJoin(
               PlanBuilder(planNodeIdGenerator)
-              .tableScan(cataLog.getUDFSchema("mat_mul0_weights"))
+              .tableScan(cataLog.getUDFSchema("mat_mul0_weights_vertical"))
               .capturePlanNodeId(p2)
               .planNode(),
               {"v_row", "v", "w", "w_row", "w_col"}
@@ -568,10 +567,11 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
             .intermediateAggregation()
             .finalAggregation()
             // // .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-            .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
+            // .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
             ;
     cataLog.setIdAddressMap(p1, {file});
     cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights_vertical"));
+
 
     // Run rewriten rule
     // if (rewrite) {

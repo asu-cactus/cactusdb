@@ -109,12 +109,12 @@ public:
 													registerVectorFunction(
 														"mat_mul_h",
 														MatrixMultiply_h::signatures(),
-														// std::make_unique<MatrixMultiply_h>(dims[0]/blocks, dims[1], samples, weights, blocks)
 														std::make_unique<MatrixMultiply_h>(dims[0], dims[1], cataLog.getDefaultBlocksSize())
 													);
 
 													// Add UDF associate information (UDF with input values) to cataLog
-													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0, "_vertical");
+													// std::string nameSuffix = "_vertical";
+													// cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0, "_vertical");
 
 												}
 											}
@@ -124,7 +124,7 @@ public:
 												core::PlanNodeId p2;
 												// Get schema of values and weights from cataLog
 												valueSchema = cataLog.getUDFSchema(target+"_values");
-												weightSchema = cataLog.getUDFSchema(target+"_weights");
+												weightSchema = cataLog.getUDFSchema(target+"_weights_vertical");
 												// Regular expression match
 												std::regex pattern(target + R"(\([^)]+\))");
 												exprStr = std::regex_replace(exprStr, pattern, "R1");
@@ -151,8 +151,8 @@ public:
 												// Delete old nodeId-fileAddress map
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 												// Insert new nodeId-fileAddress maps
-												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values_vertical"));
-												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_horizontal"));
+												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
+												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_vertical"));
 
 												transformationApplied = true;
 											}
@@ -205,7 +205,7 @@ public:
 										// Add UDF associate information (UDF with input values) to cataLog
 										// Should blocking source here
 										// catalog source will invoke a intern function to blocking itself, then return schema and address in here
-										cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
+										// cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
 
 									}
 								}
@@ -215,7 +215,7 @@ public:
 									core::PlanNodeId p2;
 									// Get schema of values and weights from cataLog
 									valueSchema = cataLog.getUDFSchema(target+"_values");
-									weightSchema = cataLog.getUDFSchema(target+"_weights");
+									weightSchema = cataLog.getUDFSchema(target+"_weights_vertical");
 									// Regular expression match
 									std::regex pattern(target + R"(\([^)]+\))");
 									exprStr = std::regex_replace(exprStr, pattern, "R1");
@@ -243,7 +243,7 @@ public:
 									cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 									// Insert new nodeId-fileAddress maps
 									cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
-									cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
+									cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_vertical"));
 
 									transformationApplied = true;
 								}
