@@ -79,7 +79,6 @@ public:
 							for (auto expression : projections) {
 								// Get the string of expression
 								exprStr = expression->toString();
-
 								if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)){
 
 									std::string callName = call->name();
@@ -106,18 +105,13 @@ public:
 
 													// Register matrix blocks multiply function
 													registerVectorFunction(
-														"mat_mul_b",
-														MatrixMultiply_b::signatures(),
-														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, blocks)
-													);
-													registerVectorFunction(
 														"mat_mul_block",
 														MatrixMultiply_Block::signatures(),
 														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks)
 													);
 													// Add UDF associate information (UDF with input values) to cataLog
-													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
-
+													std::string nameSuffix = "_vertical";
+													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0, nameSuffix);
 												}
 											}
 											if (curNode->sources().size() > 0) {
@@ -125,8 +119,8 @@ public:
 												core::PlanNodeId p1;
 												core::PlanNodeId p2;
 												// Get schema of values and weights from cataLog
-												valueSchema = cataLog.getUDFSchema(target+"_values");
-												weightSchema = cataLog.getUDFSchema(target+"_weights");
+												valueSchema = cataLog.getUDFSchema(target+"_values_vertical");
+												weightSchema = cataLog.getUDFSchema(target+"_weights_horizontal");
 												// Regular expression match
 												std::regex pattern(target + R"(\([^)]+\))");
 												exprStr = std::regex_replace(exprStr, pattern, "r1");
@@ -172,8 +166,8 @@ public:
 												// Delete old nodeId-fileAddress map
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 												// Insert new nodeId-fileAddress maps
-												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
-												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
+												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values_vertical"));
+												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_horizontal"));
 
 												transformationApplied = true;
 											}
@@ -216,11 +210,6 @@ public:
 										int samples = cataLog.getDataSourceStat("values")[0];
 
 										// Register matrix blocks multiply function
-										// registerVectorFunction(
-										// 	"mat_mul_b",
-										// 	MatrixMultiply_b::signatures(),
-										// 	std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, blocks)
-										// );
 
 										registerVectorFunction(
 														"mat_mul_block",
@@ -230,7 +219,8 @@ public:
 										// Add UDF associate information (UDF with input values) to cataLog
 										// Should blocking source here
 										// catalog source will invoke a intern function to blocking itself, then return schema and address in here
-										cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
+										std::string nameSuffix = "_vertical";
+										cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0, nameSuffix);
 
 									}
 								}
@@ -263,8 +253,8 @@ public:
 									// Delete old nodeId-fileAddress map
 									cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 									// Insert new nodeId-fileAddress maps
-									cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
-									cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
+									cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values_vertical"));
+									cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_horizontal"));
 
 									transformationApplied = true;
 								}
