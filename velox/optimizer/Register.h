@@ -29,7 +29,7 @@ namespace optimization {
  * @param sharedFunc Shared pointer to the registered vector function.
  * @param cataLog Reference to a CataLog object to store metadata and information.
  */
-void updateCataLog(const std::string& name, std::shared_ptr<VectorFunction> sharedFunc, CataLog& cataLog) {
+void updateCataLog(const std::string& name, std::shared_ptr<VectorFunction> sharedFunc, CataLog& cataLog, bool isVerticalPartition = false) {
     // TODO:Finish all branches, here we only complete mat_mul
     // Check if the registered vector function is a TorchDNN, here
     if (name.find("torchDNN") != std::string::npos) {
@@ -46,19 +46,34 @@ void updateCataLog(const std::string& name, std::shared_ptr<VectorFunction> shar
             float* weights = MulUDF->getTensor();
             // Get blocking threshold and default blocks number from cataLog
             int blockingThreshold = cataLog.getBlockingThreshold();
+            int blocksSize = cataLog.getDefaultBlocksSize();
             int blocksNum = cataLog.getDefaultBlocksNum();
             // Check if blocking is required based on dimensions
             if (dims[0] > blockingThreshold) {
+                std::vector<std::vector<float>> weightBlocks;
+                optimization::FileStructure weightsFileStructure;
                 // Create weight blocks and convert to files
-                auto weightBlocks = create_weight_block(dims[0]*dims[1], weights, blocksNum);
-                auto weights = block_to_files(weightBlocks, blocksNum, 1);
+                std::string nameSuffix = "";
+                if (isVerticalPartition) {
+                    // in vertical partition approach: inputs are partitioned vertically
+                    // while weights are partitioned horizontally
+                    weightBlocks = create_weight_block(dims[0]*dims[1], weights, blocksNum);
+                    weightsFileStructure = block_to_files(weightBlocks, blocksNum, 1);
+                    nameSuffix = "_horizontal";
+                } else {
+                    // in horizontal partition approach: inputs are partitioned horizontally 
+                    // by using Velox's batches, while weights are partitioned vertically
+                    weightBlocks = create_blocks(dims[0], dims[1], weights, blocksSize);
+                    weightsFileStructure = save_blocks_to_files(weightBlocks);
+                    nameSuffix = "_vertical";
+                }
                 // Add the updated information to cataLog
-                cataLog.add(name, weights.schema, weights.paths, 1);
+                cataLog.add(name, weightsFileStructure.schema, weightsFileStructure.paths, 1);
             }
         }
     }
     else {
-        std::cout << "Warning: " << name << ": No update for catalog." << std::endl;
+        std::cout << "INFO: " << name << ": No update for catalog." << std::endl;
     }
 }
 // We encapsulate the original registerFunction, adding a step to update the catalog when registering functions.
@@ -68,11 +83,12 @@ bool registerVectorFunction(
     std::unique_ptr<VectorFunction> func,
     VectorFunctionMetadata metadata,
     bool overwrite,
-    CataLog& cataLog) {
+    CataLog& cataLog,
+    bool isVerticalPartition = false) {
         
     std::shared_ptr<VectorFunction> sharedFunc = std::move(func);
     // Only added this update step 
-    updateCataLog(name, sharedFunc, cataLog);
+    updateCataLog(name, sharedFunc, cataLog, isVerticalPartition);
     auto factory = [sharedFunc](
                         const auto& /*name*/,
                         const auto& /*vectorArg*/,

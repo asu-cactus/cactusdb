@@ -141,8 +141,8 @@ public:
 																				// Register new torchdnn UDF function
 																				registerVectorFunction(
 																				"torchDNN",
-																				TorchDNN::signatures(),
-																				std::make_unique<TorchDNN>(weights, bias, dims)
+																				TorchDNN2Level::signatures(),
+																				std::make_unique<TorchDNN2Level>(weights, bias, dims)
 																				);
 
 																			}
@@ -251,8 +251,8 @@ public:
 
 																registerVectorFunction(
 																"torchDNN",
-																TorchDNN::signatures(),
-																std::make_unique<TorchDNN>(weights, bias, dims)
+																TorchDNN2Level::signatures(),
+																std::make_unique<TorchDNN2Level>(weights, bias, dims)
 																);
 
 															}

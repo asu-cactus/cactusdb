@@ -34,11 +34,11 @@ using namespace facebook::velox::core;
 
 namespace optimization {
 
-class Mul2JoinAggRewriteAction : public RewriteAction {
+class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
 
 public:
 
-    Mul2JoinAggRewriteAction (){}
+    Mul2JoinAggHorizontalRewriteAction (){}
 
 	/**
 	 * @brief A function to apply a rule for rewriting the logical plan.
@@ -103,20 +103,18 @@ public:
 													// Get information (defaultBlocksnumber, number of samples) from cataLog
 													int blocks = cataLog.getDefaultBlocksNum();
 													int samples = cataLog.getDataSourceStat("values")[0];
+													int blockSize = cataLog.getDefaultBlocksSize();
 
 													// Register matrix blocks multiply function
 													registerVectorFunction(
-														"mat_mul_b",
-														MatrixMultiply_b::signatures(),
-														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, blocks)
+														"mat_mul_h",
+														MatrixMultiply_h::signatures(),
+														// std::make_unique<MatrixMultiply_h>(dims[0]/blocks, dims[1], samples, weights, blocks)
+														std::make_unique<MatrixMultiply_h>(dims[0], dims[1], cataLog.getDefaultBlocksSize())
 													);
-													registerVectorFunction(
-														"mat_mul_block",
-														MatrixMultiply_Block::signatures(),
-														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks)
-													);
+
 													// Add UDF associate information (UDF with input values) to cataLog
-													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
+													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0, "_vertical");
 
 												}
 											}
@@ -129,7 +127,7 @@ public:
 												weightSchema = cataLog.getUDFSchema(target+"_weights");
 												// Regular expression match
 												std::regex pattern(target + R"(\([^)]+\))");
-												exprStr = std::regex_replace(exprStr, pattern, "r1");
+												exprStr = std::regex_replace(exprStr, pattern, "R1");
 												// Build new plan
 												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
 																.tableScan(valueSchema)
@@ -138,42 +136,23 @@ public:
 																	{"v_col"},
 																	{"w_row"},
 																	exec::test::PlanBuilder(planNodeIdGenerator)
-																	.tableScan(weightSchema)
-																	.capturePlanNodeId(p2)
-																	.planNode(),
-																"", // extra filter
-																{"v_row", "w_col", "v", "w"})
-																.project({"v_row", "w_col", "mat_mul_block(v, w) AS mp"})
-																// .localPartition({})
-																// .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-																.partialAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-																.localPartition({})
-																.intermediateAggregation()
-																.finalAggregation()
-																// .project({"r1"})
-																.unnest({}, {"r1"}) // after unnest velox will automatically add + "_e" to its original name. PlanBuilder.cpp/unnest
-																.project({"r1_e AS r1"})
-																// TODO: performance degradation observed, temporary disable the repartition
-																// .localPartitionRoundRobinRow() 
-																.project({exprStr})
+																.tableScan(weightSchema)
+																.capturePlanNodeId(p2)
+																.planNode(),
+																	"", // extra filter
+																	{"v_row", "w_col", "v", "w"})
+																// .project({"v_row", "w_col", "mat_mul_h(v, w) AS mp"})
+																// .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+																// .localPartition({"v_row"})
+																// .intermediateAggregation()
+																// .finalAggregation()
+																// .project({exprStr})
 																;
-												// Here are several approaches to correctly aggregat the multiplied values.
-												// Note: if the values to be aggregated are already partitioned in batches.
-												// A singleAggregation is enough otherwise shuffling is needed to aggregate
-												// the values cross different threads/batches.
-												// Approach 1: run shuffling and a single aggregation: 
-												//   .localPartition({}).singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-												// Approach 2: run via partialAggregation: 
-												//   .partialAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-												//	 .localPartition({})
-												//	 .intermediateAggregation()
-												//	 .finalAggregation()
-												
 												// Delete old nodeId-fileAddress map
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 												// Insert new nodeId-fileAddress maps
-												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
-												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
+												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values_vertical"));
+												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_horizontal"));
 
 												transformationApplied = true;
 											}
@@ -214,19 +193,15 @@ public:
 										// Get information (defaultBlocksnumber, number of samples) from cataLog
 										int blocks = cataLog.getDefaultBlocksNum();
 										int samples = cataLog.getDataSourceStat("values")[0];
+										int blockSize = cataLog.getDefaultBlocksSize();
 
 										// Register matrix blocks multiply function
-										// registerVectorFunction(
-										// 	"mat_mul_b",
-										// 	MatrixMultiply_b::signatures(),
-										// 	std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, blocks)
-										// );
-
 										registerVectorFunction(
-														"mat_mul_block",
-														MatrixMultiply_Block::signatures(),
-														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks)
-													);
+											"mat_mul_h",
+											MatrixMultiply_h::signatures(),
+											// std::make_unique<MatrixMultiply_h>(dims[0]/blocks, dims[1], samples, weights, blocks)
+											std::make_unique<MatrixMultiply_h>(dims[0], dims[1], cataLog.getDefaultBlocksSize())
+										);
 										// Add UDF associate information (UDF with input values) to cataLog
 										// Should blocking source here
 										// catalog source will invoke a intern function to blocking itself, then return schema and address in here
@@ -257,9 +232,13 @@ public:
 													.planNode(),
 														"", // extra filter
 														{"v_row", "w_col", "v", "w"})
-													.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
-													.singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
-													.project({exprStr});
+													.project({"v_row", "w_col", "mat_mul_h(v, w) AS mp"})
+													.partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
+													.localPartition({"v_row"})
+													.intermediateAggregation()
+													.finalAggregation()
+													.project({exprStr})
+													;
 									// Delete old nodeId-fileAddress map
 									cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 									// Insert new nodeId-fileAddress maps
@@ -292,7 +271,7 @@ public:
 
     std::string name() override {
     
-        return "Mul2JoinAggRewriteAction";
+        return "Mul2JoinAggHorizontalRewriteAction";
     
     }
 
@@ -307,7 +286,7 @@ public:
 	*/
 	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog &cataLog) override {
 		try {
-			bool checkSuccess = true;
+			bool checkApplied = true;
 			if (!rootNode) {
 
 				throw std::invalid_argument("rootNode is null");
@@ -333,7 +312,6 @@ public:
 					std::string expr = expression->toString();
 					// Regular expression match
 					std::regex pattern(R"(mat_mul\d+)");
-
 					auto wordsBegin = std::sregex_iterator(expr.begin(), expr.end(), pattern);
 
 					auto wordsEnd = std::sregex_iterator();
@@ -341,7 +319,6 @@ public:
 					for (auto it = wordsBegin; it != wordsEnd; ++it) {
 
 						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
-
 							targetActions.push_back(it->str());
 						}
 					}
@@ -386,10 +363,10 @@ public:
 			}
 
 			for (const auto &source : sources) {
-				checkSuccess &= check(source, targetActions, cataLog);
+				checkApplied &= check(source, targetActions, cataLog);
 			}
 
-			return checkSuccess; 
+			return checkApplied; 
 
 		} catch (const std::exception &e) {
 
