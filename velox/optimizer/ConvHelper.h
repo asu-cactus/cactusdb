@@ -207,11 +207,12 @@ public:
 };
 
 std::vector<Image> loadRandomImages(int width, int height, int channels, int numOfImages) {
-    std::random_device rd;
-    std::mt19937 e2(rd());
-    std::uniform_real_distribution<> distp(0.0001, 0.5);
-    std::uniform_real_distribution<> distn(0.0001, 0.5);
-    auto gen = std::bind(std::uniform_int_distribution<>(0, 1), std::default_random_engine());
+    // Seed the random number generator
+    std::random_device rd;  
+    // Initialize the Mersenne Twister engine
+    std::mt19937 gen(rd());
+    // Define the range
+    std::uniform_real_distribution<float> distribution(0, 1);
 
     // Vector to store images
     std::vector<Image> images;
@@ -225,7 +226,7 @@ std::vector<Image> loadRandomImages(int width, int height, int channels, int num
             // Generate random data for the channel
             for (int i = 0; i < width * height; i++) {
                 // Generate random data based on gen()
-                float data = (bool)gen() ? distn(e2) : distp(e2);
+                float data = distribution(gen);
                 // Store the data in the image data array
                 imageData[i] = data;
             }
@@ -538,10 +539,71 @@ ImageMatrix convert2Matrix(int cnn_filter_dims[], int numOfImages, float* values
 }
 
 ImageMatrix convert2Matrix(int cnn_filter_dims[], int input_dims[], int numOfImages, float* values) {
-  
-    std::vector<Image> images = loadFormData(input_dims[0], input_dims[1], input_dims[2], numOfImages, values);
+
+    std::vector<Image> images = loadRandomImages(input_dims[0], input_dims[1], input_dims[2], numOfImages);
+    // std::vector<Image> images = loadFormData(input_dims[0], input_dims[1], input_dims[2], numOfImages, values);
     ImageMatrix imageData = convertImage(images, cnn_filter_dims[0]*cnn_filter_dims[1], 1, cnn_filter_dims[0], cnn_filter_dims[2], false, 32, cnn_filter_dims[0]*cnn_filter_dims[1]);
     return imageData;
+}
+
+std::vector<std::vector<float>> chunks2Blocks(std::vector<ImageChunk>& chunks, int block_x_width, int block_y_width) {
+    std::vector<std::vector<float>> blocks;
+    int blocks_row_size = (chunks.size() + block_x_width -1) / block_x_width;//392
+    // int single_chunk_size = chunks[0].getSize();
+    // int total_chunk_size = (block_y_width - 1) * single_chunk_size + 1;
+    int total_chunk_size = chunks[0].getSize();
+    blocks.resize(blocks_row_size);
+    for (auto& block : blocks) {
+        block.resize(block_x_width * total_chunk_size);
+    }
+    // for (int i = 0; i < blocks_row_size; ++i) {
+    //     blocks[i] = new float[block_x_width * total_chunk_size];
+    // }
+
+    for (auto& chunk : chunks) {
+        // Calculate block index for the chunk
+        int block_index = (chunk.block_row + chunk.block_row_start) / block_x_width;
+
+
+        // Calculate starting position in the block
+        int start_row = ((chunk.block_row + chunk.block_row_start) % block_x_width) * total_chunk_size;
+        // int start_col = chunk.y_index * single_chunk_size;
+
+        // Copy values to the block
+        std::copy(chunk.chunk.begin(), chunk.chunk.end(), blocks[block_index].begin() + start_row);
+        // std::copy(chunk.chunk.begin(), chunk.chunk.end(), 
+        //           blocks[block_index] + start_row);
+    }
+    return blocks;
+
+}
+
+std::vector<std::vector<float>> convert2Blocks(int width, int height, int channels, int numOfImages, int kWidth, int kChannels, int strides, int padding, int block_x_width) {
+  auto images = loadRandomImages(width, height, channels, numOfImages);
+  int finalRowSize = images.size() * images[0].get_conv2d_window_count(kWidth, strides, padding);
+  int finalColSize = kChannels*kWidth*kWidth+1;
+  std::vector<ImageChunk> chunks;
+  for (auto& image : images){
+    std::vector<ImageChunk> newChunks = img_to_chunks(image, finalColSize, strides, kWidth, padding);
+    chunks.insert(chunks.end(), newChunks.begin(), newChunks.end());
+  }
+
+  auto blocks = chunks2Blocks(chunks, block_x_width, finalColSize);
+  return blocks;
+}
+
+std::vector<std::vector<float>> convert2Matrix(int width, int height, int channels, int numOfImages, int kWidth, int kChannels, int strides, int padding, int block_x_width) {
+  auto images = loadRandomImages(width, height, channels, numOfImages);
+  int finalRowSize = images.size() * images[0].get_conv2d_window_count(kWidth, strides, padding);
+  int finalColSize = kChannels*kWidth*kWidth+1;
+  std::vector<ImageChunk> chunks;
+  for (auto& image : images){
+    std::vector<ImageChunk> newChunks = img_to_chunks(image, finalColSize, strides, kWidth, padding);
+    chunks.insert(chunks.end(), newChunks.begin(), newChunks.end());
+  }
+
+  auto blocks = chunks2Blocks(chunks, block_x_width, finalColSize);
+  return blocks;
 }
 
 // ImageMatrix convert2Matrix(int width, int height, int channels, int numOfImages, float* values, bool isKernel, int kernelSize, float* bias) {
