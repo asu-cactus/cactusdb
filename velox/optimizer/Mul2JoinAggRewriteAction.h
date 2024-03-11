@@ -330,7 +330,7 @@ public:
 					// Retrieve the possible UDF name applicable for this rule, and check if there existed block files, stored in targetAction.
 					for (auto it = wordsBegin; it != wordsEnd; ++it) {
 
-						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
+						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights_horizontal")) {
 
 							targetActions.push_back(it->str());
 						}
@@ -359,7 +359,7 @@ public:
 				// Retrieve the possible UDF name applicable for this rule, and check if there existed block files, stored in targetAction.
 				for (auto it = wordsBegin; it != wordsEnd; ++it) {
 
-					if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
+					if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights_horizontal")) {
 
 						targetActions.push_back(it->str());
 					}
