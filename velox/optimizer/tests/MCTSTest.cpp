@@ -121,7 +121,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int numSplits,
       PlanBuilder& myPlan,
       CataLog& cataLog,
-      int repeatRun = 1) {
+      int repeatRun = 1,
+      int verbose = 1) {
     float totalElapsedTime = 0;
     std::vector<RowVectorPtr> finalResult;
     int dataIdx;
@@ -197,7 +198,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         for (auto batchedData : finalResult) {
           batchedData = std::move(batchedData);
           int batchSize = batchedData->size();
-          std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << batchedData->toString(0, batchedData->size()) << std::endl;
+          std::cout << "[DEBUG] verbose: " << verbose << std::endl;
+          if (verbose == 1) {
+            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
+          } else if (verbose == 2) {
+            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << batchedData->toString(0, batchedData->size()) << std::endl;
+          }
           dataIdx += 1;
           totalDataNum += batchSize;
         }
@@ -469,6 +475,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // Set data source statistics in cataLog
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
+    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
     // Build two dense layers UDFs using registerFunction in optimization
     // namespace
     bool isVerticalPartition = true;

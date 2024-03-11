@@ -135,16 +135,18 @@ public:
 												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
 														.tableScan(valueSchema)
 														.capturePlanNodeId(p1)
+														// automatically generate row number for input values
+														.rowNumber({})
 														.nestedLoopJoin(
 															PlanBuilder(planNodeIdGenerator)
 															.tableScan(weightSchema)
 															.capturePlanNodeId(p2)
 															.planNode(),
-															{"v_row", "v", "w", "w_row", "w_col"}
+															{"row_number", "v", "w", "w_row", "w_col"}
 															)
-														.project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
-														.partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-														.localPartition({"v_row"})
+														.project({"mat_mul_h(v, w) AS t", "row_number", "w_col"})
+														.partialAggregation({"row_number"}, {"array_cat(t, w_col) AS R1"})
+														.localPartition({"row_number"})
 														.intermediateAggregation()
 														.finalAggregation()
 														.project({exprStr});
@@ -224,16 +226,17 @@ public:
 									planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
 														.tableScan(valueSchema)
 														.capturePlanNodeId(p1)
+														.rowNumber({})
 														.nestedLoopJoin(
 															PlanBuilder(planNodeIdGenerator)
 															.tableScan(weightSchema)
 															.capturePlanNodeId(p2)
 															.planNode(),
-															{"v_row", "v", "w", "w_row", "w_col"}
+															{"row_number", "v", "w", "w_row", "w_col"}
 															)
-														.project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
-														.partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-														.localPartition({"v_row"})
+														.project({"mat_mul_h(v, w) AS t", "row_number", "w_col"})
+														.partialAggregation({"row_number"}, {"array_cat(t, w_col) AS R1"})
+														.localPartition({"row_number"})
 														.intermediateAggregation()
 														.finalAggregation()
 														.project({exprStr});
