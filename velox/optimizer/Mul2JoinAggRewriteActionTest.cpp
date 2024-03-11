@@ -238,7 +238,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       totalDataNum += batchSize;
     }
 
-    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum);
+    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}\n", dataIdx, totalDataNum);
 
     std::cout << "Time for FFNN with Input Data (sec): "
               << std::endl;
@@ -546,8 +546,9 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::cout << entry.first << ": " << entry.second << std::endl;
       }
       // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
-      auto it = planState.actionsPair.begin();
+      // auto it = planState.actionsPair.begin();
       std::pair<std::string, std::string> testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
+      std::cout << "[INFO] Taken action: " << testAction << std::endl;
       // Take one rewritten action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
       // Update the planState (getPossibleAction after apply one action)

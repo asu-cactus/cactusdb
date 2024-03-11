@@ -95,12 +95,12 @@ RUN git clone --recursive https://github.com/dmlc/xgboost \
     && cd xgboost \
     && mkdir build \
     && cd build \
-    && cmake ..
+    && cmake .. \
     && make install .
 
 # set up spark
 WORKDIR /home
-RUN wget https://dlcdn.apache.org/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz
+RUN wget https://archive.apache.org/dist/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz
 RUN tar -xvzf spark-3.5.0-bin-hadoop3.tgz
 ENV SPARK_HOME=/home/spark-3.5.0-bin-hadoop3
 ENV PATH=$PATH:$SPARK_HOME/bin
