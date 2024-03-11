@@ -72,14 +72,26 @@ class CataLog {
             return findFileAddrInMap(dataSourceBlocksFileAddrMap, key);
         }
 
+        void setUDFSchema(std::string key, RowTypePtr schema) {
+            UDFSchemaMap[key] = schema;
+        }
+
         // Get UDF schema based on key
         RowTypePtr getUDFSchema(std::string key) {
-            return findSchemaInMap(UDFSchemaMap, key);
+            RowTypePtr result = findSchemaInMap(UDFSchemaMap, key);
+            if (result == 0) {
+                throw std::runtime_error(fmt::format("Key: {} was not found in UDFSchemaMap.", key));
+            }         
+            return result;
         }
 
         // Get UDF file address based on key
         std::vector<std::shared_ptr<TempFilePath>> getUDFFileAddr(std::string key) {
-            return findFileAddrInMap(UDFFileAddrMap, key);
+            std::vector<std::shared_ptr<TempFilePath>> result =  findFileAddrInMap(UDFFileAddrMap, key);
+            if (result.size() == 0) {
+                throw std::runtime_error(fmt::format("Key: {} was not found in UDFFileAddrMap.", key));
+            }
+            return result;
         }
 
         // Check if UDF file address exists for the given key
@@ -100,13 +112,21 @@ class CataLog {
 
         // Get data source statistics based on key
         std::vector<int> getDataSourceStat(std::string key) {
-            return findStatInMap(dataSourceStatMap, key);
+            std::vector<int> result = findStatInMap(dataSourceStatMap, key);
+            if (result.size() == 0) {
+                throw std::runtime_error(fmt::format("Key: {} was not found in dataSourceStatMap.", key));
+            }
+            return result;
         }
 
         // Set file address map for a given PlanNodeId
         void setIdAddressMap(core::PlanNodeId p, std::vector<std::shared_ptr<TempFilePath>> filePath) {
             idFileAddrMap[p] = filePath;
         }
+
+       std::vector<std::shared_ptr<TempFilePath>> getFileAddress(core::PlanNodeId p) {
+        return idFileAddrMap[p];
+       }
 
         // Delete file address map entry for a given PlanNodeId
         void deleteIdAddressMap(core::PlanNodeId p) {
@@ -198,7 +218,7 @@ class CataLog {
          // Helper function to find schema in a map based on key
         RowTypePtr findSchemaInMap(const std::map<std::string, RowTypePtr>& schemaMap, const std::string& key) {
             auto schemaIt = schemaMap.find(key);
-            return (schemaIt != schemaMap.end()) ? schemaIt->second : RowTypePtr();  // Return null shared pointer
+            return (schemaIt != schemaMap.end()) ? schemaIt->second : nullptr;  // Return null shared pointer
         }
 
         // Helper function to find file address in a map based on key
