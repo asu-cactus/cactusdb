@@ -68,7 +68,7 @@ void updateCataLog(const std::string& name, std::shared_ptr<VectorFunction> shar
                     nameSuffix = "_vertical";
                 }
                 // Add the updated information to cataLog
-                cataLog.add(name, weightsFileStructure.schema, weightsFileStructure.paths, 1);
+                cataLog.add(name, weightsFileStructure.schema, weightsFileStructure.paths, 1, nameSuffix);
             }
         }
     }

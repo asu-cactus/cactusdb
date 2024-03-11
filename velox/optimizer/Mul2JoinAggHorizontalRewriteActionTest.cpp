@@ -121,58 +121,11 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},// 100000000000000000  1000000
           {core::QueryConfig::kMaxOutputBatchRows, "1000"}});
-    // Create task for logical plan.
-    // auto task = exec::Task::create(
-    //     "0",
-    //     myPlan.planFragment(),
-    //     0,
-    //     queryCtx_,
-    //     [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-    //       if (result) {
-    //         std::cout << "=============================\n";
-    //         std::cout << result->toString() << " size: " << result->size() << std::endl;
-    //         std::cout << result->toString(0, result->size()) << std::endl;
-    //       }
-    //       return exec::BlockingReason::kNotBlocked;
-    //     });
-    // // Get optimized idFileAddr map from cataLog
-    // auto idFileAddrMap = cataLog.getIdAddressMap();
-
-    // std::vector<core::PlanNodeId> ids;
-
-    // std::cout << "Hive splits:" << std::endl;
-    // // Create hivesplits for each entry in idFileAddr map, add splits to task
-    // for (const auto& entry : idFileAddrMap) {
-
-    //   core::PlanNodeId key = entry.first;
-
-    //   const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
-
-    //   auto hiveSplits = makeHiveConnectorSplits(fileAddr);
-
-    //   for (auto& split : hiveSplits) {
-
-    //     task->addSplit(key, exec::Split(std::move(split)));
-    //   }
-
-    //   ids.push_back(key);
-    // }
 
     // Add hivesplits to the target plan node (data source node).
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
 
-
-    // Start the task by setting the number of drivers.
-    // task->start(numThreads);
-    // // Wait for no more splits.
-    // for (auto id: ids){
-
-    //   task->noMoreSplits(id);
-    // }
-
-    // // Wait for all drivers to finish.
-    // waitForFinishedDrivers(task);
 
     CursorParameters params;
     params.maxDrivers = numThreads;
@@ -488,23 +441,11 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
     // Write the data source to a file, with the format defined by the rowVector
     writeToFile(file->path, {inputRowVector}, config);
-    //  Check the input size against the blocking threshold in cataLog.
-    //  If yes, preblock the input vector, store it, and add information in cataLog.
-    //  If not, set dataSource in cataLog.
-    // if (input_features_size > cataLog.getBlockingThreshold()) {
-    //   // If input size is larger than blocking threshold, preblock and store in cataLog
-    //   std::vector<std::vector<float>> valuesBlock = optimization::create_input_block(input_features_size*num_samples, data.features, cataLog.getDefaultBlocksNum());
-    //   optimization::FileStructure values = optimization::block_to_files(valuesBlock, cataLog.getDefaultBlocksNum(), 0);
-    //   // Set data source blocks in cataLog
-    //   cataLog.setDataSourceBlocks(values.schema, values.paths);
-    //   // Set data source statistics in cataLog
-    //   cataLog.setDataSourceStat({num_samples, input_features_size});
-    // }
-    // else {
-      // If input size is not larger than blocking threshold, set dataSource in cataLog
+    // In horizontal partition approach, it relies on Velox's batches to partition the data
     cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
       // Set data source statistics in cataLog
     cataLog.setDataSourceStat({num_samples, input_features_size});
+    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
     // }
     // Build two dense layers UDFs using registerFunction in optimization namespace
     bool isVerticalPartition = false;
@@ -532,12 +473,11 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                 .tableScan(asRowType(inputRowVector->type()))
                 .capturePlanNodeId(p0)
-                .project({fmt::format(compute, "v")}) 
-                .planBuild();
+                .project({fmt::format(compute, "v")});
     // Set original plan nodeId and file address of data source
-    // cataLog.setIdAddressMap(p0, {file});
+    cataLog.setIdAddressMap(p0, {file});
     // Set vector name and nodeId of data source
-    // cataLog.setVectorIdMap(p0, "v");
+    cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -545,54 +485,26 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     // Create planState
     PlanState planState(ruleManager);
 
-    registerVectorFunction(
-      "mat_mul_h",
-      MatrixMultiply_h::signatures(),
-      std::make_unique<MatrixMultiply_h>(input_features_size, first_layer_output_size, cataLog.getDefaultBlocksSize())
-    );
+    if (rewrite) {
+      // Get possible actions for this plan
+      planState.getPossibleActions(planNode, cataLog);
+      // Print possible actions
+      for (const auto& entry : planState.actionsPair) {
+        std::cout << entry.first << ": " << entry.second << std::endl;
+      }
+      // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
+      auto it = planState.actionsPair.begin();
+      std::pair<std::string, std::string> testAction = std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
+      std::cout << "[INFO] Taken action: " << testAction << std::endl;
+      // Take one rewritten action
+      planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
+      // Update the planState (getPossibleAction after apply one action)
+      planState.update(myPlan, cataLog);
+    } 
 
-
-    auto newPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-            .tableScan(asRowType(inputRowVector->type()))
-            .capturePlanNodeId(p1)
-            .nestedLoopJoin(
-              PlanBuilder(planNodeIdGenerator)
-              .tableScan(cataLog.getUDFSchema("mat_mul0_weights"))
-              .capturePlanNodeId(p2)
-              .planNode(),
-              {"v_row", "v", "w", "w_row", "w_col"}
-            )
-            .project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
-            .partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-            .localPartition({"v_row"})
-            .intermediateAggregation()
-            .finalAggregation()
-            // // .singleAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-            .project({"softmax0(mat_add1(mat_mul1(relu0(mat_add0(R1)))))"})
-            ;
-    cataLog.setIdAddressMap(p1, {file});
-    cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr("mat_mul0_weights_vertical"));
-
-    // Run rewriten rule
-    // if (rewrite) {
-    //   // Get possible actions for this plan
-    //   planState.getPossibleActions(planNode, cataLog);
-    //   // Print possible actions
-    //   for (const auto& entry : planState.actionsPair) {
-    //     std::cout << entry.first << ": " << entry.second << std::endl;
-    //   }
-    //   // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
-    //   auto it = planState.actionsPair.begin();
-    //   std::pair<std::string, std::string> testAction = *it;
-    //   // Take one rewritten action
-    //   planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
-    //   // Update the planState (getPossibleAction after apply one action)
-    //   planState.update(myPlan, cataLog);
-
-    // }
-    std::cout << "[INFO] Query Plan: \n" << newPlan.planNode()->toString(true,true) << std::endl;
+    std::cout << "[INFO] Query Plan: \n" << myPlan.planNode()->toString(true,true) << std::endl;
     // Run the rewritten plan
-    runPlan(8, 8, newPlan, cataLog);
+    runPlan(8, 8, myPlan, cataLog);
   }
 
  private:
@@ -613,8 +525,7 @@ int main(int argc, char** argv) {
   bool rewrite = true;
 
   if (argc > 1) {
-    // if (strcmp(argv[1], "N") == 0) {
-      if (strcmp(argv[3], "N") == 0) {
+      if (strcmp(argv[1], "N") == 0) {
       rewrite = false;
     }
   }
@@ -639,9 +550,9 @@ int main(int argc, char** argv) {
   std::cout
       << "--" << std::endl
       << "[Usage] " << std::endl
-      << "./_build/release/velox/optimizer/torch2twolayer_test Y  //run FFNN model with rewriting rule 2"
+      << "./_build/release/velox/optimizer/mul2joinagghorizontal_test Y  //run FFNN model with rewriting"
       << std::endl
-      << "./_build/release/velox/optimizer/torch2twolayer_test N  //run FFNN model with rewriting rule 2"
+      << "./_build/release/velox/optimizer/mul2joinagghorizontal_test N  //run FFNN model without rewriting"
       << std::endl
       << "By default: Y is used" << std::endl;
 }
