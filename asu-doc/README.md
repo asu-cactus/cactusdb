@@ -54,24 +54,6 @@ cd evadb
 pip install ./[ray]
 ```
 
-DuckDB (It is automatically configured by using Docker development environment)
-```
-wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
-    && tar -xf v0.8.1.tar.gz \
-    && cd duckdb-0.8.1 \
-    && mkdir build && cd build \
-    && CMAKE_FLAGS=(
-        "-DBUILD_UNITTESTS=OFF"
-        "-DENABLE_SANITIZER=OFF"
-        "-DENABLE_UBSAN=OFF"
-        "-DBUILD_SHELL=OFF"
-        "-DEXPORT_DLL_SYMBOLS=OFF"
-    ) \
-    && cmake ${CMAKE_FLAGS[*]}  .. \
-    && make install -j 16
-```
-
-
 ### Develop with Visual Studio Code
 
 It is recommended to code with Visual Studio Code. You can use the following script to start a VS Code Tunnel for remote development. If you want to keep the tunnel alive in the background, you can first launch a `tmux` session and then execute the following command.

@@ -187,18 +187,6 @@ class TwoTowerModelPipelinePyTorch(Pipeline):
             )
             for feat in item_dense_features
         ]
-
-        item_varlen_feature_columns = [
-            VarLenSparseFeat(
-                SparseFeat("genres", vocabulary_size=1000, embedding_dim=embedding_dim),
-                maxlen=genres_maxlen,
-                combiner="mean",
-                length_name=None,
-            )
-        ]
-
-        item_feature_columns += item_varlen_feature_columns
-
         model = DSSM_Torch(
             user_feature_columns, item_feature_columns, task="binary", device=device
         )
@@ -257,7 +245,7 @@ class TwoTowerModelPipelinePyTorch(Pipeline):
 class TwoTowerModelPipelineTF(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
         super(TwoTowerModelPipelineTF, self).__init__(
-            "two-tower-model-tensorflow", num_sample=num_sample, num_loop=num_loop
+            "two-tower-model-tensorflow", num_loop, num_sample
         )
         # self.model = None  # TODO
         # self.model.eval()
@@ -317,17 +305,6 @@ class TwoTowerModelPipelineTF(Pipeline):
             )
             for feat in item_dense_features
         ]
-
-        item_varlen_feature_columns = [
-            VarLenSparseFeat(
-                SparseFeat("genres", vocabulary_size=1000, embedding_dim=embedding_dim),
-                maxlen=genres_maxlen,
-                combiner="mean",
-                length_name=None,
-            )
-        ]
-
-        item_feature_columns += item_varlen_feature_columns
         # FIXME
         model = DSSM_TF(["user_id"], ["movie_id"])
         # model.compile(
@@ -494,10 +471,10 @@ class FFNNPipelineEvaDB(Pipeline):
         return result_df
 
 
-class TwoTowerModelPipelineEvaDB(Pipeline):
+class TowTowerModelPipelineEvaDB(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
-        super(TwoTowerModelPipelineEvaDB, self).__init__(
-            "two-tower-evadb", num_sample=num_sample, num_loop=num_loop
+        super(TowTowerModelPipelineEvaDB, self).__init__(
+            "two-tower-evadb", num_loop, num_sample
         )
         self.cursor = evadb.connect().cursor()
         # create changed_rating_view
@@ -514,7 +491,7 @@ class TwoTowerModelPipelineEvaDB(Pipeline):
             };
         """
         ).df()
-        # create user_rating_view
+        # create user_rating_view 
         self.cursor.query(
             """
             USE postgres_data {
@@ -609,16 +586,6 @@ class TwoTowerModelPipelineEvaDB(Pipeline):
                     self.num_sample
                 )
             ).df()
-            # result_df = self.cursor.query(
-            #     """
-            # select user_id, gender, age, occupation, user_mean_rating, movie_id, genres, movie_mean_rating
-            # from postgres_data.movielens_q_temp mqt JOIN postgres_data.evadb_v_user_rating tur
-            # ON mqt.q_user_id=tur.user_id JOIN postgres_data.evadb_v_movie_rating tmr
-            # ON mqt.q_movie_id=tmr.movie_id;
-            # """.format(
-            #         self.num_sample
-            #     )
-            # ).df()
 
             t_data_processing += result_df["t_process"].values[-1]
             t_model_inference += result_df["t_model_inference"].values[-1]

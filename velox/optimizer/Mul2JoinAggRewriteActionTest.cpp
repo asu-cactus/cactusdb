@@ -74,7 +74,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
   }
 
@@ -128,7 +128,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     // Set queryCtx config.
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
-          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
+          {core::QueryConfig::kMaxOutputBatchRows, "1000"}});
 
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
@@ -230,10 +230,15 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     ss << numSplits << "," << numThreads << ",";
 
     int dataIdx = 0;
+    int totalDataNum = 0;
     for (auto batchedData : actualResults) {
-      std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
+      int batchSize = batchedData->size();
+      std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
       dataIdx += 1;
+      totalDataNum += batchSize;
     }
+
+    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}\n", dataIdx, totalDataNum);
 
     std::cout << "Time for FFNN with Input Data (sec): "
               << std::endl;
@@ -302,6 +307,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
           for (int j = 0; j < input_features_size; j++) {
 
                   // featureVector.push_back(i*input_features_size+j);
+                  // featureVector.push_back((i*input_features_size+j)/input_total_size);
                   featureVector.push_back(distribution(gen));
 
           }
@@ -388,7 +394,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
    * 
    * @return A string representing the composed vector function expression.
    */
-  std::string registerFunctions(int units1, int units2, int input_size1, int input_size2, float* weightsFile_1, float* weightsFile_2, float* biasFile_1, float* biasFile_2, CataLog &catalog) {
+  std::string registerFunctions(int units1, int units2, int input_size1, int input_size2, float* weightsFile_1, float* weightsFile_2, float* biasFile_1, float* biasFile_2, CataLog &catalog, bool isVerticalPartition = false) {
     // Register matrix multiplication function for the first layer
     optimization::registerVectorFunction(
         "mat_mul0",
@@ -396,7 +402,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1),
         {},
         true,
-        catalog
+        catalog,
+        isVerticalPartition
     );
     // Register matrix addition function for the first layer
     optimization::registerVectorFunction(
@@ -423,7 +430,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::make_unique<MatrixMultiply>(weightsFile_2, input_size2, units2),
         {},
         true,
-        catalog
+        catalog,
+        isVerticalPartition
     );
     // Register matrix addition function for the second layer
     optimization::registerVectorFunction(
@@ -455,7 +463,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   */
   void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 100000;//597540
+    int input_features_size = 1000;//597540
     int num_samples = 5000;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
@@ -494,6 +502,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
     // Build two dense layers UDFs using registerFunction in optimization namespace
+    bool isVerticalPartition = true;
     std::string compute = registerFunctions(
       first_layer_output_size, 
       second_layer_output_size, 
@@ -503,7 +512,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       data.weights[1],  
       data.bias[0], 
       data.bias[1],
-      cataLog);
+      cataLog,
+      isVerticalPartition);
 
 
 
@@ -536,22 +546,22 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
         std::cout << entry.first << ": " << entry.second << std::endl;
       }
       // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
-      auto it = planState.actionsPair.begin();
-      std::pair<std::string, std::string> testAction = *it;
+      // auto it = planState.actionsPair.begin();
+      std::pair<std::string, std::string> testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
+      std::cout << "[INFO] Taken action: " << testAction << std::endl;
       // Take one rewritten action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
       // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan, cataLog);
 
     }
-
+    std::cout << "Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
     // Run the rewritten plan
     runPlan(8, 8, myPlan, cataLog);
   }
 
  private:
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
 
   VectorMaker maker{pool_.get()};
 };
@@ -563,6 +573,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 int main(int argc, char** argv) {
   // gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   Mul2JoinAggRewriteActionTest demo;
 

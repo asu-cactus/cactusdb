@@ -483,4 +483,4 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
   std::vector<float*> bias;
 };
 
-} // namespace optimization
+} 

@@ -21,8 +21,6 @@
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/DecodedVector.h"
 #include "velox/vector/FlatVector.h"
-#include <iostream>
-
 
 namespace facebook::velox::aggregate {
 
@@ -141,17 +139,6 @@ class ValueVector {
     return size_;
   }
 
-  void print(size_t endPos = -1) {
-    size_t end = size_;
-    if (endPos != -1) {
-      end = endPos;
-    }
-    std::cout << "[INFO] ValueVector: \n";
-    for (size_t i = 0; i < end; i++){
-      std::cout << storedValue[i] << ", ";
-    }
-    std::cout<<std::endl;
-  }
 
 
  private:

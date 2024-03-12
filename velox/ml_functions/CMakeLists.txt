@@ -13,13 +13,14 @@
 # limitations under the License.
 
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
-# set(CMAKE_PREFIX_PATH "$HOME/libtorch")
-# find_package(Torch REQUIRED)
-set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
+#set(CMAKE_PREFIX_PATH "$HOME/libtorch; $CONDA_PREFIX")
+set(CMAKE_PREFIX_PATH "$HOME/libtorch")
+set(CMAKE_PREFIX_PATH "$CONDA_PREFIX")
+
 find_package(Torch REQUIRED)
+find_package(xgboost REQUIRED)
 
 add_executable(ml_functions_test tests/MLFunctionsTest.cpp)
-
 target_link_libraries(
   ml_functions_test
   velox_aggregates
@@ -123,10 +124,44 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(xgboost_test tests/XGBoostTest.cpp)
+target_link_libraries(
+  xgboost_test
+  xgboost::xgboost
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
 
 add_executable(ml_sql_test tests/MLSQLTest.cpp)
 target_link_libraries(
   ml_sql_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(array_array_unnest_test tests/ArrayofArrayUnnestTest.cpp)
+target_link_libraries(
+  array_array_unnest_test
   velox_aggregates
   velox_type
   velox_vector

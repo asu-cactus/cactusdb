@@ -258,7 +258,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   std::shared_ptr<core::QueryCtx> newQueryCtx(int64_t memoryCapacity) {
     
     std::unordered_map<std::string, std::shared_ptr<Config>> configs;
-    std::shared_ptr<MemoryPool> pool = memory::defaultMemoryManager().addRootPool(
+    std::shared_ptr<MemoryPool> pool = memory::MemoryManager::getInstance()->addRootPool(
         "", memoryCapacity, memory::MemoryReclaimer::create());
     std::unordered_map<std::string, std::string> queryConfig = {{core::QueryConfig::kSpillEnabled, "true"}, 
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
@@ -290,7 +290,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   std::shared_ptr<folly::Executor> executor_{std::make_shared<folly::CPUThreadPoolExecutor>(std::thread::hardware_concurrency())};
   std::shared_ptr<core::QueryCtx> queryCtx_{std::make_shared<core::QueryCtx>(executor_.get())};
   
-  std::shared_ptr<memory::MemoryPool> pool_ =  memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
   //std::shared_ptr<memory::MemoryPool> childPool = rootPool_->addAggregateChild("HiveConnectorTestBase.Writer");
   VectorMaker maker{pool_.get()};
 
@@ -399,6 +399,14 @@ void MLFunctionsTest::ffnn(int input_size, int layer1_size, int layer2_size) {
                   .project({fmt::format(compute, "x")}) 
 		              .planNode();
   
+    std::shared_ptr<Catalog> catalog = std::make_shared<Catalog>(Catalog("test-catalog"));
+    std::shared_ptr<OutputStat> stat = std::make_shared<OutputStat>(OutputStat(1,2));
+    Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
+    catalog->addSource(std::make_shared<Source>(src1));
+    CostModel* cm = new SimpleCostModel(catalog);
+    CostEstimator* ce = new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+    CostEstimate cost = ce->estimateCost(plan);
+    std::cout << cost.cost << std::endl;
 
     //execute_plan(plan, p0, inputRowVector, confs);
 }
@@ -423,7 +431,8 @@ void MLFunctionsTest::traverse(std::shared_ptr<const core::PlanNode>& node) {
 }
 
 void MLFunctionsTest::run() {
-
+    ffnn(784,1024,10);
+    return;
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   core::PlanNodeId nationScanId;
   core::PlanNodeId regionScanId;
@@ -446,7 +455,6 @@ void MLFunctionsTest::run() {
              .singleAggregation({"r_name"}, {"count(1) as nation_cnt"})
              .orderBy({"r_name"}, false)
              .planNode();
-
 
     std::shared_ptr<Catalog> catalog = std::make_shared<Catalog>(Catalog("test-catalog"));
    
@@ -479,7 +487,7 @@ void MLFunctionsTest::run() {
   // Large
   //ffnn(597540,1024,14588);
   // small
-  ffnn(784,1024,10);
+  // ffnn(784,1024,10);
 
   //large
   //torch_ffnn(597540,1024,14588);
@@ -489,6 +497,7 @@ void MLFunctionsTest::run() {
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
   MLFunctionsTest demo;
   demo.run();
 }

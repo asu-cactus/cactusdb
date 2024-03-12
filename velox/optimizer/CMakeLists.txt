@@ -56,24 +56,6 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
-add_executable(optimizer_test OptimizerTest.cpp)
-target_link_libraries(
-  optimizer_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  jsoncpp_lib
-  ${TORCH_LIBRARIES}
-)
-
 
 
 add_executable(torch2twolayer_test TorchNN2TwoLayerUDFRewriteActionTest.cpp)
@@ -197,6 +179,3 @@ target_link_libraries(
 )
 
 # set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")
-if(${VELOX_BUILD_TESTING})
-  add_subdirectory(tests)
-endif()

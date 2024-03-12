@@ -75,7 +75,7 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
   }
 
@@ -100,11 +100,10 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
   /**
    * @brief A function to run logical plan.
    * 
-   * @param filePath The file path for the data source file to be split.
    * @param numThreads The number of Velox executor threads.
    * @param numSplits The number of file splits.
    * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param p0 The planNodeID for the plan node that needs to add file splits.
+   * @param cataLog A class storing metadata and information related to UDFs and data sources.
   */
   void runPlan(
       int numThreads,
@@ -123,58 +122,10 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},// 100000000000000000
           {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
-    // Create task for logical plan.
-    // auto task = exec::Task::create(
-    //     "0",
-    //     myPlan.planFragment(),
-    //     0,
-    //     queryCtx_,
-    //     [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-    //       if (result) {
-    //         std::cout << "=============================\n";
-    //         std::cout << result->toString() << " size: " << result->size() << std::endl;
-    //         std::cout << result->toString(0, result->size()) << std::endl;
-    //       }
-    //       return exec::BlockingReason::kNotBlocked;
-    //     });
-    // // Get optimized idFileAddr map from cataLog
-    // auto idFileAddrMap = cataLog.getIdAddressMap();
 
-    // std::vector<core::PlanNodeId> ids;
-
-    // std::cout << "Hive splits:" << std::endl;
-    // // Create hivesplits for each entry in idFileAddr map, add splits to task
-    // for (const auto& entry : idFileAddrMap) {
-
-    //   core::PlanNodeId key = entry.first;
-
-    //   const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
-
-    //   auto hiveSplits = makeHiveConnectorSplits(fileAddr);
-
-    //   for (auto& split : hiveSplits) {
-
-    //     task->addSplit(key, exec::Split(std::move(split)));
-    //   }
-
-    //   ids.push_back(key);
-    // }
-
-    // Add hivesplits to the target plan node (data source node).
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
 
-
-    // Start the task by setting the number of drivers.
-    // task->start(numThreads);
-    // // Wait for no more splits.
-    // for (auto id: ids){
-
-    //   task->noMoreSplits(id);
-    // }
-
-    // // Wait for all drivers to finish.
-    // waitForFinishedDrivers(task);
 
     CursorParameters params;
     params.maxDrivers = numThreads;
@@ -223,7 +174,7 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
 
     int dataIdx = 0;
     for (auto batchedData : actualResults) {
-      std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString(0, batchedData->size()) << std::endl;
+      std::cout << fmt::format("[INFO] Batched Data: {} \n", dataIdx) << batchedData->toString() << std::endl;
       dataIdx += 1;
     }
 
@@ -252,6 +203,7 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
  * @param samples The number of samples (row count) in the data source.
  * @param first_layer The output size of the first layer in the network.
  * @param second_layer The output size of the second layer in the network.
+ * @param third_layer The output size of the third layer in the network.
  * 
  * @return DataFrame The structure used to denote the generated data.
 */
@@ -449,27 +401,28 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
       }
       // Choose one action from possible actions (Now we only pick the first one, later it would be choosen by MCTS)
       auto it = planState.actionsPair.begin();
-      std::pair<std::string, std::string> testAction = *it;
+      std::pair<std::string, std::string> testAction = std::make_pair("softmax8(mat_add7(mat_mul6(relu5(mat_add4(mat_mul3(relu2(mat_add1(mat_mul0(ROW[\"v\"])))))))))", "MultiLayerUDF2TorchNNRewriteAction");
       // Take one rewritten action
       planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
       // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan, cataLog);
 
     }
-
+    std::cout << "Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
     // Run the rewritten plan
     runPlan(8, 8, myPlan, cataLog);
   }
 
  private:
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
+
 
   VectorMaker maker{pool_.get()};
 };
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   MultiLayerUDF2TorchNNRewriteActionTest demo;
 

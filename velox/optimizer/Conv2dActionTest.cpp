@@ -75,7 +75,7 @@ class Conv2dActionTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
   }
 
@@ -214,7 +214,7 @@ class Conv2dActionTest : public HiveConnectorTestBase {
     std::shared_ptr<core::QueryCtx> queryCtx_{
         std::make_shared<core::QueryCtx>(executor_.get())};
     // Set queryCtx config.
-    std::shared_ptr<memory::MemoryPool> rootPool{memory::defaultMemoryManager().addRootPool("root", 50 * MB)};
+    std::shared_ptr<memory::MemoryPool> rootPool{memory::MemoryManager::getInstance()->addRootPool("root", 50 * MB)};
 
     queryCtx_->testingOverrideMemoryPool(rootPool);
     // queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "false"}});
@@ -832,14 +832,14 @@ class Conv2dActionTest : public HiveConnectorTestBase {
 
 
  private:
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
 
   VectorMaker maker{pool_.get()};
 };
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   int number1 = std::atoi(argv[1]);//actions
   int number2 = std::atoi(argv[2]);//sample size

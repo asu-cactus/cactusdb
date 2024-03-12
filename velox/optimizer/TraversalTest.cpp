@@ -466,7 +466,7 @@ public:
 
          std::shared_ptr<const ProjectNode> myProjectNode = std::dynamic_pointer_cast<const ProjectNode> (curNode);
 
-	 const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
+	    const std::vector<TypedExprPtr> & projections = myProjectNode->projections();
 
          handleExpressions(projections);
 
@@ -568,32 +568,32 @@ public:
     }
 
     enum PlanNodeType {
-        Values,
-	ArrowStream,
-	Filter,
-	Project,
-        TableScan,
-        Aggregation,
-	TableWrite,
-        TableWriteMerge,
-	Exchange,
-        MergeExchange,
-        LocalMerge,
-        LocalPartition,
-	PartitionedOutput,
-	HashJoin,
-	MergeJoin,
-        NestedLoopJoin,
-        OrderBy,
-	TopN,
-	Limit,
-	Unnest,
-	EnforceSingleRow,
-	AssignUniqueId,
-	Window,
-	RowNumber,
-	MarkDistinct,
-	TopNRowNumber
+            Values,
+        ArrowStream,
+        Filter,
+        Project,
+            TableScan,
+            Aggregation,
+        TableWrite,
+            TableWriteMerge,
+        Exchange,
+            MergeExchange,
+            LocalMerge,
+            LocalPartition,
+        PartitionedOutput,
+        HashJoin,
+        MergeJoin,
+            NestedLoopJoin,
+            OrderBy,
+        TopN,
+        Limit,
+        Unnest,
+        EnforceSingleRow,
+        AssignUniqueId,
+        Window,
+        RowNumber,
+        MarkDistinct,
+        TopNRowNumber
     };
 
     PlanNodeType hashPlanNode(std::string_view name) {
@@ -785,8 +785,7 @@ public:
 
 private:
 
-    std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+    std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
 
     VectorMaker maker{pool_.get()}; 
 
@@ -794,6 +793,7 @@ private:
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
 
   TraversalTest demo;
 

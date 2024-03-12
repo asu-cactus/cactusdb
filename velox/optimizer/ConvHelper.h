@@ -36,7 +36,7 @@ public:
   int index;
 
   Image() {}
-  Image(int index, int x, int y, int z) : index(index), Matrix3D(x, y, z) {}
+  Image(int index, int x, int y, int z) : Matrix3D(x, y, z), index(index)  {}
 
   int &getKey() { return index; }
 
@@ -114,8 +114,7 @@ public:
   ImageChunk() {}
 
   ImageChunk(int size, int y_size, int block_row, int y_index, int block_row_start)
-      : chunk_size(size), y_size(y_size), block_row(block_row),
-        y_index(y_index), block_row_start(block_row_start) {
+      : block_row(block_row), y_index(y_index), chunk_size(size), y_size(y_size),  block_row_start(block_row_start) {
     chunk.reserve(size);
   }
 
@@ -146,13 +145,12 @@ public:
 
   // Constructor with arguments:
   ImageBlock(ImageChunk &chunk, int block_x_size)
-      : block_y_size(chunk.y_size), block_y_index(chunk.y_index),
-        block_x_size(block_x_size),
-        block_x_index((int)(chunk.getChunkActualRowIndex() / block_x_size)) {
+      : block_x_index((int)(chunk.getChunkActualRowIndex() / block_x_size)), block_x_size(block_x_size), 
+      block_y_size(chunk.y_size), block_y_index(chunk.y_index) {
     feature_count = chunk.getSize();
     chunks[chunk.getChunkActualRowIndex()] = chunk.getChunk();
     key = block_x_index * 10000 + block_y_index;
-  }
+}
 
   std::map<int, std::vector<float>> &getBlock() { return chunks; }
 

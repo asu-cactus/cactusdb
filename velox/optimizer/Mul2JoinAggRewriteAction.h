@@ -79,7 +79,6 @@ public:
 							for (auto expression : projections) {
 								// Get the string of expression
 								exprStr = expression->toString();
-
 								if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(expression)){
 
 									std::string callName = call->name();
@@ -106,13 +105,13 @@ public:
 
 													// Register matrix blocks multiply function
 													registerVectorFunction(
-														"mat_mul_b",
-														MatrixMultiply_b::signatures(),
-														std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
+														"mat_mul_block",
+														MatrixMultiply_Block::signatures(),
+														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks)
 													);
 													// Add UDF associate information (UDF with input values) to cataLog
-													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
-
+													std::string nameSuffix = "_vertical";
+													cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0, nameSuffix);
 												}
 											}
 											if (curNode->sources().size() > 0) {
@@ -120,11 +119,11 @@ public:
 												core::PlanNodeId p1;
 												core::PlanNodeId p2;
 												// Get schema of values and weights from cataLog
-												valueSchema = cataLog.getUDFSchema(target+"_values");
-												weightSchema = cataLog.getUDFSchema(target+"_weights");
+												valueSchema = cataLog.getUDFSchema(target+"_values_vertical");
+												weightSchema = cataLog.getUDFSchema(target+"_weights_horizontal");
 												// Regular expression match
 												std::regex pattern(target + R"(\([^)]+\))");
-												exprStr = std::regex_replace(exprStr, pattern, "R1");
+												exprStr = std::regex_replace(exprStr, pattern, "r1");
 												// Build new plan
 												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
 																.tableScan(valueSchema)
@@ -138,13 +137,18 @@ public:
 																	.planNode(),
 																"", // extra filter
 																{"v_row", "w_col", "v", "w"})
-																.project({"v_row", "w_col", "mat_mul_b(v, w) AS mp"})
+																.project({"v_row", "w_col", "mat_mul_block(v, w) AS mp"})
 																// .localPartition({})
 																// .singleAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
 																.partialAggregation({"w_col","v_row"}, {"array_sum(mp) AS R1"})
 																.localPartition({})
 																.intermediateAggregation()
 																.finalAggregation()
+																// .project({"r1"})
+																.unnest({}, {"r1"}) // after unnest velox will automatically add + "_e" to its original name. PlanBuilder.cpp/unnest
+																.project({"r1_e AS r1"})
+																// TODO: performance degradation observed, temporary disable the repartition
+																// .localPartitionRoundRobinRow() 
 																.project({exprStr})
 																;
 												// Here are several approaches to correctly aggregat the multiplied values.
@@ -162,8 +166,8 @@ public:
 												// Delete old nodeId-fileAddress map
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 												// Insert new nodeId-fileAddress maps
-												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
-												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
+												cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values_vertical"));
+												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_horizontal"));
 
 												transformationApplied = true;
 											}
@@ -206,15 +210,17 @@ public:
 										int samples = cataLog.getDataSourceStat("values")[0];
 
 										// Register matrix blocks multiply function
+
 										registerVectorFunction(
-											"mat_mul_b",
-											MatrixMultiply_b::signatures(),
-											std::make_unique<MatrixMultiply_b>(dims[0]/blocks, dims[1], samples, weights, blocks)
-										);
+														"mat_mul_block",
+														MatrixMultiply_Block::signatures(),
+														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks)
+													);
 										// Add UDF associate information (UDF with input values) to cataLog
 										// Should blocking source here
 										// catalog source will invoke a intern function to blocking itself, then return schema and address in here
-										cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0);
+										std::string nameSuffix = "_vertical";
+										cataLog.add(target, cataLog.getDataSourceBlocksSchema("values"), cataLog.getDataSourceBlocksFileAddr("values"), 0, nameSuffix);
 
 									}
 								}
@@ -247,8 +253,8 @@ public:
 									// Delete old nodeId-fileAddress map
 									cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
 									// Insert new nodeId-fileAddress maps
-									cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values"));
-									cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights"));
+									cataLog.setIdAddressMap(p1, cataLog.getUDFFileAddr(target+"_values_vertical"));
+									cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_horizontal"));
 
 									transformationApplied = true;
 								}
@@ -291,7 +297,7 @@ public:
 	*/
 	bool check(std::shared_ptr<const core::PlanNode> rootNode, std::vector<std::string> &targetActions, CataLog &cataLog) override {
 		try {
-			bool checkApplied = true;
+			bool checkSuccess = true;
 			if (!rootNode) {
 
 				throw std::invalid_argument("rootNode is null");
@@ -323,13 +329,12 @@ public:
 					auto wordsEnd = std::sregex_iterator();
 					// Retrieve the possible UDF name applicable for this rule, and check if there existed block files, stored in targetAction.
 					for (auto it = wordsBegin; it != wordsEnd; ++it) {
-						// std::cout<<"debug111 find: " << it->str() << std::endl;
-						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
+
+						if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights_horizontal")) {
 
 							targetActions.push_back(it->str());
 						}
 					}
-					// std::cout<<"target action size: " << targetActions.size() << std::endl;
 				}
 			}
 			// We then check the filter node
@@ -354,7 +359,7 @@ public:
 				// Retrieve the possible UDF name applicable for this rule, and check if there existed block files, stored in targetAction.
 				for (auto it = wordsBegin; it != wordsEnd; ++it) {
 
-					if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights")) {
+					if (cataLog.checkExistsUDFFileAddr(it->str()+"_weights_horizontal")) {
 
 						targetActions.push_back(it->str());
 					}
@@ -371,10 +376,10 @@ public:
 			}
 
 			for (const auto &source : sources) {
-				checkApplied &= check(source, targetActions, cataLog);
+				checkSuccess &= check(source, targetActions, cataLog);
 			}
 
-			return checkApplied; 
+			return checkSuccess; 
 
 		} catch (const std::exception &e) {
 

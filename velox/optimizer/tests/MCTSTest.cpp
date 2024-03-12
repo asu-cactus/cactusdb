@@ -85,7 +85,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, nullptr);
+            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
   }
 
@@ -110,86 +110,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   /**
    * @brief A function to run logical plan.
    *
-   * @param filePath The file path for the data source file to be split.
-   * @param numThreads The number of Velox executor threads.
-   * @param numSplits The number of file splits.
-   * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param p0 The planNodeID for the plan node that needs to add file splits.
-   */
-  // TODO: needs to integrated with runPlanWithCataLog
-  float runPlan(
-      std::string filePath,
-      int numThreads,
-      int numSplits,
-      PlanBuilder& myPlan,
-      core::PlanNodeId p0,
-      int repeatRun = 1) {
-    float totalElapsedTime = 0;
-    for (int i = 0; i < repeatRun; i++) {
-      // Create hivesplits for file.
-      auto hiveSplits = makeHiveConnectorSplits(
-          filePath, numSplits, dwio::common::FileFormat::DWRF);
-      // Initializes executor.
-      std::shared_ptr<folly::Executor> executor_{
-          std::make_shared<folly::CPUThreadPoolExecutor>(
-              std::thread::hardware_concurrency())};
-      // Initializes queryCtx.
-      std::shared_ptr<core::QueryCtx> queryCtx_{
-          std::make_shared<core::QueryCtx>(executor_.get())};
-      // Set queryCtx config.
-      queryCtx_->testingOverrideConfigUnsafe(
-          {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"},
-           {core::QueryConfig::kMaxOutputBatchRows, "1000000"}});
-      // Create task for logical plan.
-      auto task = exec::Task::create(
-          "0",
-          myPlan.planFragment(),
-          0,
-          queryCtx_,
-          [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-            if (result)
-              // std::cout << result->toString() << std::endl;
-              return exec::BlockingReason::kNotBlocked;
-          });
-
-      // std::cout << "Hive splits:" << std::endl;
-      // Add hivesplits to the target plan node (data source node).
-      for (auto& split : hiveSplits) {
-        // std::cout << split->toString() << std::endl;
-        task->addSplit(p0, exec::Split(std::move(split)));
-      }
-      std::chrono::steady_clock::time_point begin =
-          std::chrono::steady_clock::now();
-
-      // Start the task by setting the number of drivers.
-      task->start(numThreads);
-      // Add all splits.
-      task->noMoreSplits(p0);
-      // Wait for all drivers to finish.
-      waitForFinishedDrivers(task);
-
-      std::chrono::steady_clock::time_point end =
-          std::chrono::steady_clock::now();
-      auto elapsedTime =
-          (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
-               .count()) /
-          1000000.0;
-      totalElapsedTime += elapsedTime;
-    }
-    std::stringstream ss;
-
-    ss << numSplits << "," << numThreads << ",";
-
-    // std::cout << "Time for FFNN with Input Data (sec): " << std::endl;
-
-    // std::cout << ss.str() << totalElapsedTime/repeatRun << " secs" <<
-    // std::endl;
-    return totalElapsedTime / repeatRun;
-  }
-
-  /**
-   * @brief A function to run logical plan.
-   *
    * @param numThreads The number of Velox executor threads.
    * @param numSplits The number of file splits.
    * @param myPlan The pointer to the planBuilder which builds the logical plan.
@@ -203,6 +123,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       CataLog& cataLog,
       int repeatRun = 1) {
     float totalElapsedTime = 0;
+    std::vector<RowVectorPtr> finalResult;
+    int dataIdx;
+    int totalDataNum;
+
     for (int i = 0; i < repeatRun; i++) {
       // Initializes executor.
       std::shared_ptr<folly::Executor> executor_{
@@ -213,8 +137,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           std::make_shared<core::QueryCtx>(executor_.get())};
       // Set queryCtx config.
       queryCtx_->testingOverrideConfigUnsafe(
-          {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"},
-           {core::QueryConfig::kMaxOutputBatchRows, "1000000"}});
+          {
+            // {core::QueryConfig::kPreferredOutputBatchBytes, "10000"},
+           {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
+           {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
 
 
       // Add hivesplits to the target plan node (data source node).
@@ -263,7 +189,26 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                .count()) /
           1000000.0;
       totalElapsedTime += elapsedTime;
+      
+      if (i == repeatRun - 1) {
+        finalResult = actualResults;
+        dataIdx = 0;
+        totalDataNum = 0;
+        for (auto batchedData : finalResult) {
+          batchedData = std::move(batchedData);
+          int batchSize = batchedData->size();
+          std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << batchedData->toString(0, batchedData->size()) << std::endl;
+          dataIdx += 1;
+          totalDataNum += batchSize;
+        }
+        finalResult = std::move(finalResult);
+      }
     }
+
+    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
+    // std::cout << "DEBUG, REACHED here";
+    // finalResult = std::move(finalResult);
+
 
     return totalElapsedTime / repeatRun;
   }
@@ -403,7 +348,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       float* weightsFile_2,
       float* biasFile_1,
       float* biasFile_2,
-      CataLog& catalog) {
+      CataLog& catalog,
+      bool isVerticalPartition) {
     // Register matrix multiplication function for the first layer
     optimization::registerVectorFunction(
         "mat_mul0",
@@ -411,7 +357,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1),
         {},
         true,
-        catalog);
+        catalog,
+        isVerticalPartition);
     // Register matrix addition function for the first layer
     optimization::registerVectorFunction(
         "mat_add0",
@@ -435,7 +382,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         std::make_unique<MatrixMultiply>(weightsFile_2, input_size2, units2),
         {},
         true,
-        catalog);
+        catalog,
+        isVerticalPartition);
     // Register matrix addition function for the second layer
     optimization::registerVectorFunction(
         "mat_add1",
@@ -456,108 +404,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
   }
 
-  /**
-   * @brief A test function to test the rewrite rule of TwoLayerUDF2TorchNN.
-   *
-   * @param rewrite A boolean value indicating whether to perform a rewrite.
-   */
-  void testTwoLayerUDF2TorchNNPlan(
-      bool rewrite,
-      int repeatRun,
-      int featureSize,
-      int numSamples) {
-    // Set data source config.
-    // int input_features_size = 800; // 597540
-    int input_features_size = featureSize; // 597540
-    // int num_samples = 1000;
-    int num_samples = numSamples;
-    int first_layer_output_size = 1024;
-    int second_layer_output_size = 14588;
-    CataLog cataLog;
-    // Set splits number
-    int num_splits = 4;
-    // Generate data source
-    auto data = data_generate(
-        input_features_size,
-        num_samples,
-        first_layer_output_size,
-        second_layer_output_size);
-    // Create arrayVector for data source
-    auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
-    // Create rowVector for data source
-    auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-    // Create file path
-    auto file = TempFilePath::create();
-    // Create file config
-    auto config = std::make_shared<facebook::velox::dwrf::Config>();
-    // Write the data source to a file, with the format defined by the rowVector
-    writeToFile(file->path, {inputRowVector}, config);
-    // Build two dense layers UDFs
-    std::string compute = NNBuilder()
-                              .denseLayer(
-                                  first_layer_output_size,
-                                  input_features_size,
-                                  data.weights[0],
-                                  data.bias[0],
-                                  NNBuilder::RELU)
-                              .denseLayer(
-                                  second_layer_output_size,
-                                  first_layer_output_size,
-                                  data.weights[1],
-                                  data.bias[1],
-                                  NNBuilder::SOFTMAX)
-                              .build();
-
-    // Initialize planNodeID
-    core::PlanNodeId p0;
-    // Initialize planNodeIdGenerator
-    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    // Create a plan for FFNN using two dense layers UDFs
-    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(asRowType(inputRowVector->type()))
-                      .capturePlanNodeId(p0)
-                      .project({fmt::format(compute, "v")})
-                      .planBuild();
-    // Get the logical plan
-    auto planNode = myPlan.planNode();
-    // Create ruleManager
-    RuleManager ruleManager;
-    // Create planState
-    PlanState planState(ruleManager);
-    // Run rewriten rule
-    if (rewrite) {
-      // Get possible actions for this plan
-      planState.getPossibleActions(planNode, cataLog);
-      // Print possible actions
-      // for (const auto& entry : planState.actionsPair) {
-      //   std::cout << "[INFO] print action pair\n";
-      //   std::cout << entry.first << ": " << entry.second << std::endl;
-      // }
-      // Choose one action from possible actions (Now we only pick the first
-      // one, later it would be choosen by MCTS)
-      auto it = planState.actionsPair.begin();
-      std::pair<std::string, std::string> testAction = *it;
-      // Take one rewritten action
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
-      // Update the planState (getPossibleAction after apply one action)
-      planState.update(myPlan, cataLog);
-    }
-
-    // Run the rewritten plan
-    // std::cout << "Plan: " << myPlan.planNode()->toString(true, true) <<
-    // std::endl;
-    float averageExectuionTime =
-        runPlan(file->path, 8, 8, myPlan, p0, repeatRun);
-    std::cout << averageExectuionTime;
-  }
 
   /**
    * @brief A test function to test the rewrite rule of
@@ -565,11 +411,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
    *
    * @param rewrite A boolean value indicating whether to perform a rewrite.
    */
-  void testMul2JoinAggPlan(
+  void testSingleRewrite(
       bool rewrite,
       int repeatRun,
       int featureSize,
-      int numSamples) {
+      int numSamples,
+      int numDriver,
+      std::string benchmarkMode) {
     // Set data source config.
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
@@ -579,6 +427,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int num_splits = 4;
     // Initialize CataLog
     CataLog cataLog;
+    cataLog.setDefaultBlocksSize(256);
+    cataLog.setBlockingThreshold(1);
     // Generate data source
     auto data = data_generate(
         input_features_size,
@@ -621,6 +471,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
     // Build two dense layers UDFs using registerFunction in optimization
     // namespace
+    bool isVerticalPartition = true;
+    if (benchmarkMode == "mul2joinAggHorizontal") {
+      isVerticalPartition = false;
+    }
     std::string compute = registerFunctions(
         first_layer_output_size,
         second_layer_output_size,
@@ -630,7 +484,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         data.weights[1],
         data.bias[0],
         data.bias[1],
-        cataLog);
+        cataLog,
+        isVerticalPartition);
 
     // Initialize planNodeID
     core::PlanNodeId p0;
@@ -650,6 +505,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto planNode = myPlan.planNode();
     // Create ruleManager
     RuleManager ruleManager;
+    ruleManager.rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
     // std::cout<<"rule size" << ruleManager.rules.size() << std::endl;
     // auto it = ruleManager.rules.find("TwoLayerUDF2TorchNNRewriteAction");
     // ruleManager.rules.erase(it);
@@ -662,13 +518,25 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       planState.getPossibleActions(planNode, cataLog);
       // std::cout << "action size" << planState.actionsPair.size() <<
       // std::endl; Print possible actions for (const auto& entry :
-      // planState.actionsPair) {
-      //   std::cout << entry.first << ": " << entry.second << std::endl;
-      // }
+      std::cout << "[INFO] All possible actions:" << std::endl;
+      for (auto entry: planState.actionsPair) {
+        std::cout << entry.first << ": " << entry.second << std::endl;
+      }
       // Choose one action from possible actions (Now we only pick the first
       // one, later it would be choosen by MCTS)
-      auto it = planState.actionsPair.begin();
-      std::pair<std::string, std::string> testAction = *it;
+      // auto it = planState.actionsPair.begin();
+      std::pair<std::string, std::string> testAction;
+      if (benchmarkMode == "mul2joinAgg") {
+        testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
+      } else if (benchmarkMode == "udf2torchNN") {
+        testAction = std::make_pair("softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0(ROW[\"v\"]))))))", "MultiLayerUDF2TorchNNRewriteAction");
+      } else if (benchmarkMode == "mul2joinAggHorizontal") {
+        testAction = std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
+      } else {
+         throw std::runtime_error(fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
+      }
+      // std::pair<std::string, std::string> testAction("mat_mul0", "Mul2JoinAggRewriteAction");
+      std::cout << "Taken action: " << testAction << std::endl;
       // Take one rewritten action
       planState.takeAction(
           planNode,
@@ -684,9 +552,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
 
     // Run the rewritten plan
-    // std::cout << myPlan.planNode()->toString(true, true) << std::endl;
+    std::cout << myPlan.planNode()->toString(true, true) << std::endl;
     float averageExectuionTime =
-        runPlanWithCataLog(8, 8, myPlan, cataLog, repeatRun);
+        runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun);
     std::cout << averageExectuionTime;
   }
 
@@ -740,6 +608,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
 
+    bool isVerticalPartition = true;
     std::string compute = registerFunctions(
         first_layer_output_size,
         second_layer_output_size,
@@ -749,7 +618,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         data.weights[1],
         data.bias[0],
         data.bias[1],
-        cataLog);
+        cataLog,
+        isVerticalPartition);
 
     // Initialize planNodeID
     core::PlanNodeId p0;
@@ -840,9 +710,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         for (const auto& entry : planState.actionsPair) {
           // std::cout << "[ACTION SBACE] " << entry.first << ", " <<
           // entry.second << std::endl;
+          // TODO: need to change corresponding in python side
           Json::Value jsonEntry;
           jsonEntry["expression"] = entry.first;
-          jsonEntry["action"] = entry.second;
+          jsonEntry["action"] = Json::arrayValue;
+          for (auto action : entry.second) {
+            jsonEntry["action"].append(Json::Value(action));
+          }
           jsonMessage["actionSpace"].append(jsonEntry);
         }
         sendAcknowledgment(clientSocket);
@@ -919,8 +793,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   }
 
  private:
-  std::shared_ptr<memory::MemoryPool> pool_ =
-      memory::addDefaultLeafMemoryPool();
+  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
 
   VectorMaker maker{pool_.get()};
 };
@@ -930,22 +803,25 @@ DEFINE_bool(rewrite, true, "Whether  rewrite");
 DEFINE_int32(num_repeat, 5, "Number of repeat run");
 DEFINE_int32(feature_size, 1000, "FFNN Feature size");
 DEFINE_int32(num_sample, 1000, "Number of samples");
+DEFINE_int32(num_driver, 8, "Number of drivers");
 
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
+  memory::MemoryManager::initialize({});
   std::string mode = FLAGS_mode;
   bool rewrite = FLAGS_rewrite;
   int repeatRun = FLAGS_num_repeat;
   int featureSize = FLAGS_feature_size;
   int numSample = FLAGS_num_sample;
+  int numDriver = FLAGS_num_driver;
   IntegratedMCTSTest demo;
+  // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
     demo.testIntegratedMCTS(featureSize, numSample, repeatRun);
-  } else if (mode == "benchmark_udf2torchdnn") {
-    demo.testTwoLayerUDF2TorchNNPlan(
-        rewrite, repeatRun, featureSize, numSample);
-  } else if (mode == "benchmark_mul2joinagg") {
-    demo.testMul2JoinAggPlan(rewrite, repeatRun, featureSize, numSample);
+  } else {
+    // Benchmark a single rewrite action
+    demo.testSingleRewrite(
+        rewrite, repeatRun, featureSize, numSample, numDriver, mode);
   }
 }

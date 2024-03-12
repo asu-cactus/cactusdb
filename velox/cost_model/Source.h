@@ -28,6 +28,5 @@ class Source {
     private:
         std::string name;
         Type type;
-        std::shared_ptr<Stat> stats;
-       
+        std::shared_ptr<Stat> stats;     
 };

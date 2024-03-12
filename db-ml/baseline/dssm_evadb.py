@@ -104,18 +104,6 @@ class DSSM_EVADB(AbstractFunction):
             )
             for feat in item_dense_features
         ]
-
-        item_varlen_feature_columns = [
-            VarLenSparseFeat(
-                SparseFeat("genres", vocabulary_size=1000, embedding_dim=embedding_dim),
-                maxlen=genres_maxlen,
-                combiner="mean",
-                length_name=None,
-            )
-        ]
-
-        item_feature_columns += item_varlen_feature_columns
-        
         model = DSSM_Torch(
             user_feature_columns, item_feature_columns, task="binary", device=device
         )

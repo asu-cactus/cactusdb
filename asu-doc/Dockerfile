@@ -68,7 +68,7 @@ RUN service postgresql start \
 COPY pg_hba.conf /etc/postgresql/$PG_MAJOR/main/pg_hba.conf
 RUN echo "service postgresql start" >> /etc/bash.bashrc
 
-# setup libtorch
+
 WORKDIR /home
 RUN wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.0.1%2Bcpu.zip
 RUN unzip libtorch-cxx11-abi-shared-with-deps-2.0.1+cpu.zip
@@ -89,9 +89,18 @@ RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
     && cmake ${CMAKE_FLAGS}  .. \
     && make install -j 16
 
+# set up xgboost c api
+WORKDIR /home
+RUN git clone --recursive https://github.com/dmlc/xgboost \
+    && cd xgboost \
+    && mkdir build \
+    && cd build \
+    && cmake .. \
+    && make install .
+
 # set up spark
 WORKDIR /home
-RUN wget https://dlcdn.apache.org/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz
+RUN wget https://archive.apache.org/dist/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz
 RUN tar -xvzf spark-3.5.0-bin-hadoop3.tgz
 ENV SPARK_HOME=/home/spark-3.5.0-bin-hadoop3
 ENV PATH=$PATH:$SPARK_HOME/bin

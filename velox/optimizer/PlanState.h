@@ -56,13 +56,31 @@ public:
             if (rule.check(rootNode, actions, cataLog)) {
                 // Create a map to store actions and target UDF names, key is UDF name, value is rule name
                 for (const auto& action : actions) {
-
-                    actionsPair[action] = rulePair.first;
+                    actionsPair[action].push_back(rulePair.first);
                 }
                 // clear target UDF name, prepare for next rule
                 actions.clear();
             }
         }
+    }
+
+    /**
+     * @brief Check whether a rule is valid in actionPairs when apply the rule
+     * 
+     * @param targetRule A rule will be applied
+     * @param targetString The target string expression where the rule applies
+    */
+
+    bool checkIsValidRule(std::string targetRule, std::string targetString) {
+        // action pair is structures as: targetStr: [applicable rule1, applicable rule2, ...]
+        auto it = actionsPair.find(targetString);
+        if (it != actionsPair.end()) {
+            const std::vector<std::string>& applicableRules = it->second;
+            if (std::find(applicableRules.begin(), applicableRules.end(), targetRule) != applicableRules.end()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -103,6 +121,12 @@ public:
        for (auto groupedAction: groupedActions) {
            std::string targetRule = groupedAction.first;
            std::vector<std::string> targetStrings = groupedAction.second;
+           
+           for (std::string targetString : targetStrings) {
+            if (!checkIsValidRule(targetRule, targetString)) {
+                throw std::runtime_error(fmt::format("[ERROR]: {} is not a valid rule on: {}\n", targetRule, targetString));
+            }
+           }
            // Get the pointer for this rule
            auto rule = ruleManager.pickRule(targetRule);
             
@@ -114,7 +138,7 @@ public:
                // TODO: forbidden preAction in next step. (Avoid cycle)
            } else {
                // Handle the case when the rule is not found
-               std::cerr << fmt::format("Error: Rule {} not found for targetString: {}", targetRule, targetStrings) << std::endl;
+               std::cerr << fmt::format("[Error]: Rule {} not found for targetString: {}", targetRule, targetStrings) << std::endl;
            }
         }        
 
@@ -137,7 +161,7 @@ public:
         getPossibleActions(curNode, cataLog);
     }
 
-    std::map<std::string, std::string> actionsPair;
+    std::map<std::string, std::vector<std::string>> actionsPair;
     std::vector<std::string> actions;
     RuleManager ruleManager;
     std::string preAction;
