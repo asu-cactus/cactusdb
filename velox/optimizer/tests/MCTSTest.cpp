@@ -198,11 +198,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         for (auto batchedData : finalResult) {
           batchedData = std::move(batchedData);
           int batchSize = batchedData->size();
-          std::cout << "[DEBUG] verbose: " << verbose << std::endl;
           if (verbose == 1) {
             std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
           } else if (verbose == 2) {
-            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << batchedData->toString(0, batchedData->size()) << std::endl;
+            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << "\n" << batchedData->toString(0, batchedData->size()) << std::endl;
           }
           dataIdx += 1;
           totalDataNum += batchSize;
@@ -271,6 +270,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       for (int j = 0; j < input_features_size; j++) {
         featureVector.push_back(
             (i * input_features_size + j) / input_total_size);
+            // featureVector.push_back(j);
       }
 
       featureVectors.push_back(featureVector);
@@ -407,6 +407,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         true,
         catalog);
     // Compose and return the vector function expression
+    // return "mat_mul0({})";
     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
   }
 
@@ -423,14 +424,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int featureSize,
       int numSamples,
       int numDriver,
-      std::string benchmarkMode) {
+      std::string benchmarkMode,
+      int verbose) {
     // Set data source config.
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
     // Set splits number
-    int num_splits = 4;
     // Initialize CataLog
     CataLog cataLog;
     cataLog.setDefaultBlocksSize(256);
@@ -561,7 +562,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Run the rewritten plan
     std::cout << myPlan.planNode()->toString(true, true) << std::endl;
     float averageExectuionTime =
-        runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun);
+        runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
     std::cout << averageExectuionTime;
   }
 
@@ -571,11 +572,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int input_features_size = featureSize; // 597540
     // int num_samples = 1000;
     int num_samples = numSamples;
-    int first_layer_output_size = 1024;
+    int first_layer_output_size = 256;
     int second_layer_output_size = 14588;
     CataLog cataLog;
     // Set splits number
-    int num_splits = 4;
     // Generate data source
     auto data = data_generate(
         input_features_size,
@@ -811,6 +811,7 @@ DEFINE_int32(num_repeat, 5, "Number of repeat run");
 DEFINE_int32(feature_size, 1000, "FFNN Feature size");
 DEFINE_int32(num_sample, 1000, "Number of samples");
 DEFINE_int32(num_driver, 8, "Number of drivers");
+DEFINE_int32(verbose, 1, "Verbose");
 
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -822,6 +823,7 @@ int main(int argc, char** argv) {
   int featureSize = FLAGS_feature_size;
   int numSample = FLAGS_num_sample;
   int numDriver = FLAGS_num_driver;
+  int verbose = FLAGS_verbose;
   IntegratedMCTSTest demo;
   // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
@@ -829,6 +831,6 @@ int main(int argc, char** argv) {
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
-        rewrite, repeatRun, featureSize, numSample, numDriver, mode);
+        rewrite, repeatRun, featureSize, numSample, numDriver, mode, verbose);
   }
 }
