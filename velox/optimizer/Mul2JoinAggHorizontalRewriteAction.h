@@ -129,7 +129,7 @@ public:
 												weightSchema = cataLog.getUDFSchema(target+"_weights_vertical");
 												// Regular expression match
 												std::regex pattern(target + R"(\([^)]+\))");
-												exprStr = std::regex_replace(exprStr, pattern, "R1");
+												exprStr = std::regex_replace(exprStr, pattern, "v");
 												// Build new plan
 
 												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
@@ -145,7 +145,7 @@ public:
 															{"row_number", "v", "w", "w_row", "w_col"}
 															)
 														.project({"mat_mul_h(v, w) AS t", "row_number", "w_col"})
-														.partialAggregation({"row_number"}, {"array_cat(t, w_col) AS R1"})
+														.partialAggregation({"row_number"}, {"array_cat(t, w_col) AS v"})
 														.localPartition({"row_number"})
 														.intermediateAggregation()
 														.finalAggregation()

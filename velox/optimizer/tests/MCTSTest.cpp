@@ -524,15 +524,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     if (rewrite) {
       // Get possible actions for this plan
       planState.getPossibleActions(planNode, cataLog);
-      // std::cout << "action size" << planState.actionsPair.size() <<
-      // std::endl; Print possible actions for (const auto& entry :
-      std::cout << "[INFO] All possible actions:" << std::endl;
-      for (auto entry: planState.actionsPair) {
-        std::cout << entry.first << ": " << entry.second << std::endl;
-      }
-      // Choose one action from possible actions (Now we only pick the first
-      // one, later it would be choosen by MCTS)
-      // auto it = planState.actionsPair.begin();
       std::pair<std::string, std::string> testAction;
       if (benchmarkMode == "mul2joinAgg") {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
@@ -543,8 +534,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       } else {
          throw std::runtime_error(fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
       }
-      // std::pair<std::string, std::string> testAction("mat_mul0", "Mul2JoinAggRewriteAction");
-      std::cout << "Taken action: " << testAction << std::endl;
+
+      if (verbose != 0) {
+        std::cout << "[INFO] All possible actions:" << std::endl;
+        for (auto entry: planState.actionsPair) {
+          std::cout << entry.first << ": " << entry.second << std::endl;
+        }
+        std::cout << "Taken action: " << testAction << std::endl;
+      }
       // Take one rewritten action
       planState.takeAction(
           planNode,
@@ -560,7 +557,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
 
     // Run the rewritten plan
-    std::cout << myPlan.planNode()->toString(true, true) << std::endl;
+    if (verbose != 0) {
+      std::cout << "Executed Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
+    }
     float averageExectuionTime =
         runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
     std::cout << averageExectuionTime;
@@ -572,9 +571,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int input_features_size = featureSize; // 597540
     // int num_samples = 1000;
     int num_samples = numSamples;
-    int first_layer_output_size = 256;
-    int second_layer_output_size = 14588;
+    int first_layer_output_size = 1000;
+    int second_layer_output_size = 100;
     CataLog cataLog;
+    cataLog.setDefaultBlocksSize(256);
+    cataLog.setBlockingThreshold(1);
     // Set splits number
     // Generate data source
     auto data = data_generate(
@@ -615,7 +616,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
 
-    bool isVerticalPartition = true;
+    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+
+    bool isVerticalPartition = false;
     std::string compute = registerFunctions(
         first_layer_output_size,
         second_layer_output_size,
@@ -700,7 +703,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                      .project({fmt::format(compute, "v")});
         cataLog.setIdAddressMap(p0, {file});
         cataLog.setVectorIdMap(p0, "v");
+        cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
         planNode = myPlan.planNode();
+        planState.getPossibleActions(planNode, cataLog);
         // send acknowledgement for synchronization 
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getQueryPlan") {
@@ -715,9 +720,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
         for (const auto& entry : planState.actionsPair) {
-          // std::cout << "[ACTION SBACE] " << entry.first << ", " <<
+          // std::cout << "[ACTION SBACE] " << entry.first << s't'd
           // entry.second << std::endl;
-          // TODO: need to change corresponding in python side
           Json::Value jsonEntry;
           jsonEntry["expression"] = entry.first;
           jsonEntry["action"] = Json::arrayValue;
