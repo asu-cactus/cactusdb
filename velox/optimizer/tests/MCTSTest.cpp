@@ -571,8 +571,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int input_features_size = featureSize; // 597540
     // int num_samples = 1000;
     int num_samples = numSamples;
-    int first_layer_output_size = 1000;
-    int second_layer_output_size = 100;
+    int first_layer_output_size = 1024;
+    int second_layer_output_size = 14588;
     CataLog cataLog;
     cataLog.setDefaultBlocksSize(256);
     cataLog.setBlockingThreshold(1);
@@ -757,7 +757,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
-          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 1);
+          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
           jsonMessage["reward"] = executeTime;
           std::cout << "[INFO] get Cost(offline): "
                     << " time: " << executeTime << std::endl;
@@ -800,7 +800,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << std::endl;
     std::cout << "[INFO] Optimized query plan"
               << myPlan.planNode()->toString(true, true) << std::endl;
-    runPlanWithCataLog(8, 8, myPlan, cataLog, 1);
+    runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
   }
 
  private:

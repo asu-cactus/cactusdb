@@ -123,7 +123,7 @@ class MCTS:
         max_iteration_num: int = 2000,
         max_iteration_time: int = 1 * 60 * 1000,  # 1 mins
         max_sim_iteration_num: int = 100,
-        max_sim_iteration_time: int = 30 * 1000,  # 30 seconds
+        max_sim_iteration_time: int = 100 * 30 * 1000,  # 30 seconds
         exploration_weight: float = math.sqrt(2),
         rollout_policy: str = "random",
         reward_mode: str = "offline",
@@ -173,8 +173,8 @@ class MCTS:
             if t_elapsed_time >= self.max_iteration_time:
                 # exist search if exceeds the maximum search time
                 print(
-                    "[INFO] maximum search time reached out, current search iteration idx: {}".format(
-                        iter_idx
+                    "[INFO] maximum search time reached out, current search iteration idx: {}, current time: {}, max allowed time: {}".format(
+                        iter_idx, t_elapsed_time, self.max_iteration_time
                     )
                 )
                 break
@@ -422,6 +422,7 @@ if __name__ == "__main__":
                 max_sim_iteration_num=3,
                 # reward_mode="online", # FIXME online mode is not working yet
                 reward_mode="offline",
+                max_iteration_time = 1000 * 3600
             )
             mcts.train(rootNode)
             print("[DEBUG] num_visit: " , rootNode.num_visit)
