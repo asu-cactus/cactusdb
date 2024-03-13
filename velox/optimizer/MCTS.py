@@ -52,6 +52,9 @@ class MCTSTreeNode:
         self.reward = 0
         self.parent = parent
         self.client_socket = client_socket
+        self.printout = False
+        if os.environ["mcts_debug"] == "True":
+            self.printout = True
         self.action_space = self.get_action_space()
         self.is_terminal = (
             is_terminal if is_terminal is not None else self.check_terminal()
@@ -88,11 +91,17 @@ class MCTSTreeNode:
         send_message["mctsAction"] = "getActionSpace"
         send_message["optimizationIsFinished"] = False
         send_message_by_socket(send_message, self.client_socket)
-        received_message = receive_message_by_socket(self.client_socket)
+        received_message = receive_message_by_socket(self.client_socket, self.printout)
         received_action_space = received_message["actionSpace"]
         action_space = dict()
         for action_pair in received_action_space:
-            action_space[(action_pair["expression"], action_pair["action"])] = False
+            target_expression = action_pair["expression"]
+            # FIXME: temporary does not support rewrite on mat_mul1
+            if 'mat_mul1' == target_expression:
+                continue
+            list_actions = action_pair["action"]
+            for action in list_actions:
+                action_space[(target_expression, action)] = False
         # add no-action state for the root node
         if self.parent is None:
             action_space[("None", "None")] = False
@@ -140,6 +149,10 @@ class MCTS:
         self.iteration_count = 0
         self.reward_mode = reward_mode
         self.timer = Timer()
+        if os.environ["mcts_debug"] == "True":
+            self.printout = True
+        else:
+            self.printout = False
 
     def train(self, root_node: MCTSTreeNode):
         """MCTS training algorithm"""
@@ -262,7 +275,9 @@ class MCTS:
         selected_expression, selected_action = random.choice(unexplorered_action)
         new_state = node.state.copy()
         new_state[selected_expression] = selected_action
-        node.action_space[(selected_expression, selected_action)] = True
+        matched_keys = [key for key in node.action_space.keys() if key[0] == selected_expression]
+        for target_expression, action in matched_keys:
+            node.action_space[(target_expression, action)] = True
         is_terminal = True if selected_expression == "None" else None
         if os.environ["mcts_debug"] == "True":
             print(
@@ -328,7 +343,7 @@ class MCTS:
         send_message["mctsAction"] = "getCost"
         send_message["costMode"] = self.reward_mode
         send_message_by_socket(send_message, self.client_socket)
-        received_message = receive_message_by_socket(self.client_socket)
+        received_message = receive_message_by_socket(self.client_socket, self.printout)
         # TODO: Current reward is the latency, should be changed once integrated with cost model
         reward = -received_message["reward"]
         if os.environ["mcts_debug"] == "True":
@@ -353,7 +368,7 @@ class MCTS:
         send_message["mctsAction"] = "getQueryPlan"
         send_message["optimizationIsFinished"] = False
         send_message_by_socket(send_message, self.client_socket)
-        received_message = receive_message_by_socket(self.client_socket)
+        received_message = receive_message_by_socket(self.client_socket, self.printout)
         current_query_plan = received_message['queryPlan']
         
         return current_query_plan
@@ -404,7 +419,7 @@ if __name__ == "__main__":
             mcts = MCTS(
                 client_socket=client_socket,
                 max_iteration_num=6,
-                max_sim_iteration_num=1,
+                max_sim_iteration_num=3,
                 # reward_mode="online", # FIXME online mode is not working yet
                 reward_mode="offline",
             )
