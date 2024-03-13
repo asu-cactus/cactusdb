@@ -75,9 +75,9 @@ class SequencePooling : public exec::VectorFunction {
 
         Eigen::VectorXf mergedValues;
         if (mode_ == "MIN") {
-          mergedValues = varaidicEmbedding.rowwise().minCoeff();
+          mergedValues = varaidicEmbedding.colwise().minCoeff();
         } else if (mode_ == "MAX") {
-          mergedValues = varaidicEmbedding.rowwise().maxCoeff();
+          mergedValues = varaidicEmbedding.colwise().maxCoeff();
         } else if (mode_ == "MEAN") {
           mergedValues = varaidicEmbedding.colwise().mean();
         }
