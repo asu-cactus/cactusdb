@@ -79,7 +79,7 @@ class SequencePooling : public exec::VectorFunction {
         } else if (mode_ == "MAX") {
           mergedValues = varaidicEmbedding.rowwise().maxCoeff();
         } else if (mode_ == "MEAN") {
-          mergedValues = varaidicEmbedding.rowwise().mean();
+          mergedValues = varaidicEmbedding.colwise().mean();
         }
 
         std::memcpy(
