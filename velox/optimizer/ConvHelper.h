@@ -236,6 +236,7 @@ std::vector<Image> loadRandomImages(int width, int height, int channels, int num
 
         // Add the constructed image to the vector
         images.push_back(newImage);
+
     }
 
     return images;
@@ -580,13 +581,17 @@ std::vector<std::vector<float>> chunks2Blocks(std::vector<ImageChunk>& chunks, i
 
 std::vector<std::vector<float>> convert2Blocks(int width, int height, int channels, int numOfImages, int kWidth, int kChannels, int strides, int padding, int block_x_width) {
   auto images = loadRandomImages(width, height, channels, numOfImages);
+
   int finalRowSize = images.size() * images[0].get_conv2d_window_count(kWidth, strides, padding);
+
   int finalColSize = kChannels*kWidth*kWidth+1;
+
   std::vector<ImageChunk> chunks;
   for (auto& image : images){
     std::vector<ImageChunk> newChunks = img_to_chunks(image, finalColSize, strides, kWidth, padding);
     chunks.insert(chunks.end(), newChunks.begin(), newChunks.end());
   }
+
 
   auto blocks = chunks2Blocks(chunks, block_x_width, finalColSize);
   return blocks;
