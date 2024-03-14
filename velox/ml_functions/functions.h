@@ -7,6 +7,7 @@
 #include "velox/exec/Task.h"
 #include "velox/cost_model/CostEstimate.h"
 #include "velox/cost_model/UdfCostCoefficient.h"
+#include "velox/ml_functions/gpufunctions.h"
 
 
 using namespace facebook::velox;
@@ -90,17 +91,30 @@ public:
             use_gpu = args[1]->as<ConstantVector<bool>>()->valueAt(0);
         }
         
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+        
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        int input_size = input_elements->size();
         // results are expected to be stored as std::vector<std::vector<float>>
         std::vector<std::vector<float>> result;
+	    int rows_A = input_size / dims[0];
+	    int cols_A = dims[0];
+	    int rows_B = dims[0];
+	    int cols_B = dims[1];
         if (use_gpu) {
-            // TODO: implementation of matrix multiplication in GPU
-            throw std::runtime_error("GPU implementation of Matrix Multiple is not implemented.");
+	        float *host_C = (float*) malloc(rows_A * cols_B * sizeof(float)); 
+	        multiplyMatrices(rows_A, cols_B, cols_A,
+                             input_values, rows_A, weights_, cols_A, host_C, rows_A);
+            float *C = host_C;
+            for (int i = 0; i < rows_A; i++) {
+                std::vector<float> row{C, C + cols_B};
+                result.push_back(row);
+                C = C + cols_B;
+            }
+            free(host_C);
+
         } else {
-            BaseVector::ensureWritable(rows, type, context.pool(), output);
-            
-            auto input_elements = args[0]->as<ArrayVector>()->elements();
-            float* input_values = input_elements->values()->asMutable<float>();
-            int input_size = input_elements->size();
 
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
@@ -116,6 +130,7 @@ public:
                 result.push_back(row);
             }
         }
+
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
     }

@@ -43,6 +43,8 @@
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 #include "velox/common/memory/MemoryArbitrator.h"
 #include "velox/vector/fuzzer/VectorFuzzer.h"
+#include "velox/ml_functions/gpufunctions.h"
+#include <cmath>
 
 
 
@@ -79,7 +81,8 @@ class MLFunctionsTest : public HiveConnectorTestBase {
 
   /// Run the demo.
   void run();
-  void test_mat_mul();
+  void test_mat_mul(int, int, int);
+  //void test_mat_mul();
   void test_mat_add();
   void test_relu();
   void test_softmax();
@@ -168,17 +171,17 @@ class MLFunctionsTest : public HiveConnectorTestBase {
 
 };
 
-void MLFunctionsTest::test_mat_mul() { 
+void MLFunctionsTest::test_mat_mul(int output_size, int input_size, int num_samples) { 
 //Eigen::setNbThreads(48); 
-  int output_size = 500;
-  int input_size = 100;
-  int num_samples = 500;
+  //int output_size = 2000;
+  //int input_size = 4000;
+  //int num_samples = 3000;
   int size = output_size*input_size;
   
   auto weights = maker.flatVector<float>(size);
   auto col = maker.flatVector<int>(num_samples);
   for(int i=0; i < size; i++){
-	  weights->set(i, i*10);
+	  weights->set(i, i/1000.0);
   } 
   
   std::vector<std::vector<float>> featureVectors;
@@ -186,7 +189,7 @@ void MLFunctionsTest::test_mat_mul() {
     col->set(i, i* 7 - i*(i%3));
     std::vector<float> featureVector;
     for(int j=0; j < input_size; j++){
-      featureVector.push_back(i*j);
+      featureVector.push_back(i*j/5000.0);
     }
     featureVectors.push_back(featureVector);
   }
@@ -203,9 +206,9 @@ void MLFunctionsTest::test_mat_mul() {
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                   .values({inputRowVector})
                   // using CPU for mat_mul
-                  .project({"mat_mul(x)"})
+                  //.project({"mat_mul(x)"})
                   // using GPU for mat_mul
-                  // .project({"mat_mul(x, true)"})
+                    .project({"mat_mul(x, true)"})
 		              .planNode();
 
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
@@ -1725,7 +1728,12 @@ void MLFunctionsTest::test_land_cover_conv3() {
 }
 
 void MLFunctionsTest::run() {
-   test_mat_mul();
+    int output = 100;
+    int input = 500;
+    for (int i = 10; i < 1000001; i *= 10){
+        test_mat_mul(output, input, i);
+
+    }
   //  test_mat_add();
   //  test_relu();
   //  test_softmax()
