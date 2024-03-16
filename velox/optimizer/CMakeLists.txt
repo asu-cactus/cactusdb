@@ -195,7 +195,108 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
-# set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")
-if(${VELOX_BUILD_TESTING})
-  add_subdirectory(tests)
+add_executable(my_program_eigen BasicMulTest.cpp)
+
+# Add executable without OpenBLAS and with OpenMP
+add_executable(my_program_eigen_openmp BasicMulTest.cpp)
+
+# Add executable with OpenBLAS and without OpenMP
+add_executable(my_program_openblas BasicMulTest.cpp)
+
+# Add executable with OpenBLAS and with OpenMP
+add_executable(my_program_openblas_openmp BasicMulTest.cpp)
+
+# Find OpenBLAS
+
+
+# Find OpenBLAS
+
+# Enable Eigen to use OpenBLAS
+
+# if(TARGET my_program_openblas)
+#     add_definitions(-DEIGEN_USE_BLAS)
+# endif()
+
+# if(TARGET my_program_openblas_openmp)
+#     add_definitions(-DEIGEN_USE_BLAS)
+# endif()
+
+add_definitions(-DEIGEN_USE_BLAS)
+
+# Link against OpenBLAS for targets that require it
+target_link_libraries(
+  my_program_eigen
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES})
+
+
+
+target_link_libraries(
+  my_program_openblas
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+  openblas)
+
+
+# Enable OpenMP for executables that require it
+find_package(OpenMP)
+if(OPENMP_FOUND)
+    if(TARGET my_program_eigen_openmp)
+        target_compile_options(my_program_eigen_openmp PRIVATE ${OpenMP_CXX_FLAGS})
+        target_link_libraries(my_program_eigen_openmp 
+        PRIVATE ${OpenMP_CXX_FLAGS}
+        velox_aggregates
+        velox_type
+        velox_vector
+        velox_vector_test_lib
+        velox_exec
+        velox_exec_test_lib
+        velox_tpch_connector
+        velox_memory
+        velox_common_base
+        velox_vector_fuzzer
+        velox_dwio_parquet_reader
+        ${TORCH_LIBRARIES})
+    endif()
+
+    if(TARGET my_program_openblas_openmp)
+        target_compile_options(my_program_openblas_openmp PRIVATE ${OpenMP_CXX_FLAGS})
+        target_link_libraries(my_program_openblas_openmp 
+        PRIVATE ${OpenMP_CXX_FLAGS}
+        velox_aggregates
+        velox_type
+        velox_vector
+        velox_vector_test_lib
+        velox_exec
+        velox_exec_test_lib
+        velox_tpch_connector
+        velox_memory
+        velox_common_base
+        velox_vector_fuzzer
+        velox_dwio_parquet_reader
+        ${TORCH_LIBRARIES}
+        openblas)
+    endif()
 endif()
+
+

@@ -161,6 +161,126 @@ private:
     
 };
 
+class MatrixMultiply_bench: public MLFunction {
+
+public:
+    MatrixMultiply_bench(float* weights, int num_rows, int num_cols, int threads) {
+        weights_ = weights; 
+        dims.push_back(num_rows);
+        dims.push_back(num_cols);
+        dims.push_back(threads);
+    }
+
+    MatrixMultiply_bench(std::string weightsFile, int num_rows, int num_cols, int threads) {
+        weightsFile_ = weightsFile; 
+        dims.push_back(num_rows);
+        dims.push_back(num_cols);
+        dims.push_back(threads);
+    }
+
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+        
+        bool use_gpu = false;
+        if (args.size() == 2) {
+            // an optional parameter can be passed to enable the GPU for mat_mul
+            use_gpu = args[1]->as<ConstantVector<bool>>()->valueAt(0);
+        }
+        
+        // results are expected to be stored as std::vector<std::vector<float>>
+        std::vector<std::vector<float>> result;
+        if (use_gpu) {
+            // TODO: implementation of matrix multiplication in GPU
+            throw std::runtime_error("GPU implementation of Matrix Multiple is not implemented.");
+        } else {
+            BaseVector::ensureWritable(rows, type, context.pool(), output);
+            
+            auto input_elements = args[0]->as<ArrayVector>()->elements();
+            float* input_values = input_elements->values()->asMutable<float>();
+            int input_size = input_elements->size();
+
+            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
+            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
+            Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m;
+            #ifdef _OPENMP
+                std::cout << "Using OpenMP" << std::endl;
+                omp_set_num_threads(dims[2]); // Set to the number of cores you want to utilize
+
+                // Perform matrix multiplication using OpenMP
+                #pragma omp parallel
+                {
+                    m  =  m1 * m2;
+                }
+            #else
+                // Perform matrix multiplication without OpenMP
+                #ifdef EIGEN_USE_BLAS
+                    std::cout << "Using Eigen with OpenBLAS" << std::endl;
+                    m  =  m1 * m2;
+                #else
+                    std::cout << "Using Eigen without OpenBLAS" << std::endl;
+                    m  =  m1 * m2;
+                #endif
+
+            #endif
+
+            
+            for (int i = 0; i < m.rows(); i++) {
+                std::vector<float> row(
+                m.row(i).data(),
+                m.row(i).data() + m.cols());
+                result.push_back(row);
+            }
+        }
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(result, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build(),
+                // supports with additional flag: use_gpu
+                exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .argumentType("BOOLEAN")
+                     .build()};
+    }
+
+    float* getTensor() const override {
+        return weights_;
+    }
+
+    static std::string getName() {
+        return "mat_mul";
+    };
+
+    std::string getWeightsFile() {
+        return weightsFile_;
+    }
+
+    void setWeights(float* weights){
+        weights_ = weights;
+    }
+
+    CostEstimate getCost(std::vector<int> inputDims){
+        float cost = getWeightedCost(getName(), inputDims[0] * inputDims[1] * dims[0] * dims[1]);
+        return CostEstimate(cost, dims[0], inputDims[1]);
+    }
+
+
+private:
+    float* weights_;
+    std::string weightsFile_;
+    
+};
+
 class MatrixMultiply_b: public MLFunction {
 public:
     MatrixMultiply_b(int num_rows, int num_cols, int num_samples, int blocks) {
