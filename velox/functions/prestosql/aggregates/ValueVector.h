@@ -21,6 +21,7 @@
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/DecodedVector.h"
 #include "velox/vector/FlatVector.h"
+#include <iostream>
 
 namespace facebook::velox::aggregate {
 
@@ -46,10 +47,10 @@ class ValueVector {
     }
   }
 
-  void insertValue(float* newValues, vector_size_t offset, vector_size_t size, float* newIndexs) {
-    int index = static_cast<int>(newIndexs[0]);
+  void insertValue(float* newValues, vector_size_t offset, vector_size_t size, float newIndexs) {
+    int index = static_cast<int>(newIndexs);
     float* slicedValues = new float[size];
-    std::copy(newValues + (offset*size), newValues + (offset*size) + size, slicedValues);
+    std::copy(newValues + offset, newValues + offset + size, slicedValues);
 
     insertedValue[index] = slicedValues;
     insertedSize[index] = size;
@@ -72,17 +73,7 @@ class ValueVector {
       }
     }
 
-    // float* slicedValues = new float[size];
-    // std::copy(newValues + offset, newValues + offset + size, slicedValues);
-    // intermediateValue = slicedValues;
-    // size_ = size;
   }
-  // void extractValues (FlatVector<float>& values, vector_size_t offset) {
-  //   vector_size_t index = offset;
-  //   for (vector_size_t i = 0; i < size_; ++i) {
-  //     values.set(index++, storedValue[i]);
-  //   }
-  // }
     void extractValues (FlatVector<float>& values, vector_size_t index) {
         values.set(index, storedValue[index]);
     }
@@ -92,14 +83,42 @@ class ValueVector {
         values.set(offset + i, intermediateValue[i]);
       }
 
-      // for (auto entry: insertedValue) {
-      //   int indexs = entry.first;
-      //   auto sizes = insertedSize[indexs];
-      //   for (int i = 0; i< sizes; i++){
-      //     values.set(offset + indexs * block_size + i, entry.second[i]);
-      //   }
-      // }
     }
+
+    void extractIntermediate(VectorPtr& mapKeys, ArrayVector& mapValueArrays, vector_size_t& keyOffset, vector_size_t& valueOffset) {
+        auto flatKeys = mapKeys->asFlatVector<float>();
+        auto mapValues = mapValueArrays.elements();
+        // mapValues->as<FlatVector<float>>();
+        auto mapValuesFloat = mapValues->as<FlatVector<float>>();
+        for (auto& entry : insertedSize) {
+          int blockIndex = entry.first;
+          auto blockSize = entry.second;
+          auto blockValues = insertedValue[blockIndex];
+
+          flatKeys->set(keyOffset, entry.first);
+          mapValueArrays.setOffsetAndSize(keyOffset, valueOffset, blockSize);
+          for (auto i = 0; i < blockSize; i++) {
+            // mapValues
+            mapValuesFloat->set(valueOffset, blockValues[i]);
+            valueOffset++;
+          }
+          keyOffset++;
+        }
+  }
+
+    void extractAndConcatValue(FlatVector<float>& values, vector_size_t offset) {
+      vector_size_t valueIndex = 0;
+      for (auto entry: insertedSize) {
+        int blockIndex = entry.first;
+        auto blockSize = entry.second;
+        auto blockValues = insertedValue[blockIndex];
+        for (int i = 0; i < blockSize; i++) {
+          values.set(offset + valueIndex, blockValues[i]);
+          valueIndex++;
+        }
+      }
+    }
+
 
 
     void extractInterValue(FlatVector<float>& values, vector_size_t offset) {
@@ -137,6 +156,10 @@ class ValueVector {
 
   int32_t size() const {
     return size_;
+  }
+
+  vector_size_t numBlocks() const {
+    return insertedSize.size();
   }
 
 
