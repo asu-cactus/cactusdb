@@ -64,18 +64,13 @@ class RandomGenerator {
     std::vector<std::vector<float>> float2dVector;
 
     for (int i = 0; i < numRow; i++) {
-      float2dVector.push_back(genFloat1dVector(numCol));
+      std::vector<float> floatVector;
+      for (int j = 0; j < numCol; j++) {
+        floatVector.push_back(genRandomFloatValue());
+      }
+      float2dVector.push_back(floatVector);
     }
     return float2dVector;
-  }
-
-  std::vector<float> genFloat1dVector(int size) {
-    // Initialize the input1 feature vector
-    std::vector<float> float1dVector;
-    for (int i = 0; i < size; i++) {
-        float1dVector.push_back(genRandomFloatValue());
-    }
-    return float1dVector;
   }
 
  private:

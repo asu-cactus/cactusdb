@@ -35,36 +35,36 @@ class Embedding : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-      BaseVector::ensureWritable(rows, type, context.pool(), output);
-      auto indicesVector = args[0]->as<ArrayVector>()->elements();
-      int* indicesValues = indicesVector->values()->asMutable<int>();
-      int numInputs = rows.size();
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+    auto indicesVector = args[0]->as<ArrayVector>()->elements();
+    int* indicesValues = indicesVector->values()->asMutable<int>();
+    int numInputs = rows.size();
 
-      auto indicesRowVector = args[0];
+    auto indicesRowVector = args[0];
 
-      auto arrayVector = args[0]->as<ArrayVector>();
+    auto arrayVector = args[0]->as<ArrayVector>();
 
-      // You can also use sizeof(*arrayVector->rawSizes()) to compute the size of
-      // a single entry in BufferPtr
-      std::vector<std::vector<float>> result;
-      for (int i = 0; i < numInputs; i++) {
-        int numSubIndices = arrayVector->sizeAt(i);
-        int indicesOffset = arrayVector->offsetAt(i);
-        std::vector<float> retrievedEmbedding;
-        for (int j = 0; j < numSubIndices; j++) {
-          // Support of variadic indexes
-          int embedIndex = indicesValues[indicesOffset + j];
-          std::vector<float> embedVector(
-              weights_ + embedIndex * dims[1],
-              weights_ + embedIndex * dims[1] + dims[1]);
-          retrievedEmbedding.insert(
-              retrievedEmbedding.end(), embedVector.begin(), embedVector.end());
-        }
-        result.push_back(retrievedEmbedding);
+    // You can also use sizeof(*arrayVector->rawSizes()) to compute the size of
+    // a single entry in BufferPtr
+    std::vector<std::vector<float>> result;
+    for (int i = 0; i < numInputs; i++) {
+      int numSubIndices = arrayVector->sizeAt(i);
+      int indicesOffset = arrayVector->offsetAt(i);
+      std::vector<float> retrievedEmbedding;
+      for (int j = 0; j < numSubIndices; j++) {
+        // Support of variadic indexes
+        int embedIndex = indicesValues[indicesOffset + j];
+        std::vector<float> embedVector(
+            weights_ + embedIndex * dims[1],
+            weights_ + embedIndex * dims[1] + dims[1]);
+        retrievedEmbedding.insert(
+            retrievedEmbedding.end(), embedVector.begin(), embedVector.end());
       }
+      result.push_back(retrievedEmbedding);
+    }
 
-      VectorMaker maker{context.pool()};
-      output = maker.arrayVector<float>(result, REAL());
+    VectorMaker maker{context.pool()};
+    output = maker.arrayVector<float>(result, REAL());
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

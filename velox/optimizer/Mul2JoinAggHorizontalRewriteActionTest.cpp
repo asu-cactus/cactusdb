@@ -426,10 +426,15 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     // Create rowVector for data source
     // auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
     
+    std::vector<float> indices(num_samples);
+    for (int i = 0; i < num_samples; ++i) {
+        indices[i] = static_cast<float>(i);
+    }
 
     auto inputRowVector = maker.rowVector(
-          {"v"},
-          {featureArrayVector});
+          {"v", "v_row"},
+          {featureArrayVector,
+           maker.flatVector(indices)});
     // Create file path
     auto file = TempFilePath::create();
     // Create file config
@@ -460,6 +465,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     // Initialize planNodeID
     core::PlanNodeId p0;
+    core::PlanNodeId p1;
+    core::PlanNodeId p2;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs

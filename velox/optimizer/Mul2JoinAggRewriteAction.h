@@ -146,8 +146,6 @@ public:
 																.finalAggregation()
 																// .project({"r1"})
 																.unnest({}, {"r1"}) // after unnest velox will automatically add + "_e" to its original name. PlanBuilder.cpp/unnest
-																// .rowNumber({}) // TODO: need further investigation to see if performance can be improved
-																// .localPartition({"row_number"})
 																.project({"r1_e AS r1"})
 																// TODO: performance degradation observed, temporary disable the repartition
 																// .localPartitionRoundRobinRow() 

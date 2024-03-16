@@ -196,6 +196,3 @@ target_link_libraries(
 )
 
 # set (CMAKE_CXX_FLAGS "-fopenmp -march=corei7-avx")
-if(${VELOX_BUILD_TESTING})
-  add_subdirectory(tests)
-endif()

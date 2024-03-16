@@ -79,9 +79,8 @@ def load_ffnn_data_to_postgres(num_generated_data=50, num_features=597540, table
     x_df_new["val"] = "{" + x_df_new["val"] + "}"
     x_df_new = x_df_new[["val"]]
     x_df_new.reset_index(inplace=True)
-    csv_path = "./data/ffnn_data_{}_{}.csv".format(num_generated_data, num_features)
-    x_df_new.to_csv(csv_path, index=False)
-    data_file_abs_path = os.path.abspath(csv_path)
+    x_df_new.to_csv("./data/ffnn_data.csv", index=False)
+    data_file_abs_path = os.path.abspath('./data/ffnn_data.csv')
     print("[INFO] temp data is saved to ", data_file_abs_path)
     # Load data into postgres
     cursor.query(

@@ -75,11 +75,11 @@ class SequencePooling : public exec::VectorFunction {
 
         Eigen::VectorXf mergedValues;
         if (mode_ == "MIN") {
-          mergedValues = varaidicEmbedding.colwise().minCoeff();
+          mergedValues = varaidicEmbedding.rowwise().minCoeff();
         } else if (mode_ == "MAX") {
-          mergedValues = varaidicEmbedding.colwise().maxCoeff();
+          mergedValues = varaidicEmbedding.rowwise().maxCoeff();
         } else if (mode_ == "MEAN") {
-          mergedValues = varaidicEmbedding.colwise().mean();
+          mergedValues = varaidicEmbedding.rowwise().mean();
         }
 
         std::memcpy(

@@ -1,5 +1,4 @@
 // TODO: Resolve dependencies
-#define EIGEN_USE_BLAS
 #include <folly/init/Init.h>
 #include <torch/torch.h>
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
@@ -13,7 +12,6 @@
 #include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
-#include "velox/ml_functions/Encoder.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -49,7 +47,6 @@ class EmbeddingTest : public HiveConnectorTestBase {
   void testConcat3();
   void testCosineSimilarity();
   void testSequencePooling();
-  void testEmbedding_MatMul();
 
   void TestBody() override {}
 
@@ -513,12 +510,9 @@ void EmbeddingTest::testCosineSimilarity() {
 // Test Embedding Layer
 void EmbeddingTest::testSequencePooling() {
   std::cout << "[INFO] Test of SequencePooling." << std::endl;
-  int numEmbeddings = std::atoi(std::getenv("numEmbeddings"));
-  int embeddingDims = std::atoi(std::getenv("embeddingDims"));
-  int numSamples = std::atoi(std::getenv("numSamples"));
-  int maxSampleLen = std::atoi(std::getenv("maxInputLen"));
-  
-  std::cout << numEmbeddings << " " << embeddingDims << " " << numSamples << " " << maxSampleLen;
+  int numEmbeddings = 5;
+  int embeddingDims = 2;
+  int numSamples = 5;
 
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
   randomGenerator.setIntRange(0, numEmbeddings - 1);
@@ -531,8 +525,10 @@ void EmbeddingTest::testSequencePooling() {
   std::vector<std::vector<int>> indicesVectors;
   for (int i = 0; i < numSamples; i++) {
     std::vector<int> inputVector;
-    int numI = std::max(1, i % maxSampleLen);
-
+    int numI = i % 3;
+    if (numI == 0) {
+      numI = 1;
+    }
     for (int j = 0; j < numI; j++) {
       inputVector.push_back(randomGenerator.genRandomIntValue());
     }
@@ -542,11 +538,11 @@ void EmbeddingTest::testSequencePooling() {
   auto indicesArrayVector = maker.arrayVector<int>(indicesVectors, INTEGER());
   auto inputRowVector = maker.rowVector({"x"}, {indicesArrayVector});
 
-  // std::cout << "[INFO] Generated Embedding:\n"
-  //           << weightsVector->toString(0, weightsVector->size()) << std::endl;
+  std::cout << "[INFO] Generated Embedding:\n"
+            << weightsVector->toString(0, weightsVector->size()) << std::endl;
 
-  // std::cout << "[INFO] Generated Indices:\n"
-  //           << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
+  std::cout << "[INFO] Generated Indices:\n"
+            << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
 
   exec::registerVectorFunction(
       "embedding",
@@ -556,121 +552,33 @@ void EmbeddingTest::testSequencePooling() {
           numEmbeddings,
           embeddingDims));
 
-  exec::registerVectorFunction(
-    "sequence_pooling",
-    SequencePooling::signatures(),
-    std::make_unique<SequencePooling>(std::string("MEAN"), embeddingDims));
-
   auto myPlan1 = exec::test::PlanBuilder(pool_.get())
                      .values({inputRowVector})
-                     .project({"sequence_pooling(embedding(x))"})
+                     .project({"embedding(x) as o1"})
                      .planNode();
 
-  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  auto result1 = exec::test::AssertQueryBuilder(myPlan1).copyResults(pool_.get());
-  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Time for SequencePooling (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  auto result1 =
+      exec::test::AssertQueryBuilder(myPlan1).copyResults(pool_.get());
 
-  // std::cout << "[INFO] Result1: \n"
-  //           << result1->toString(0, result1->size()) << std::endl;
-
-
-  
-  // auto myPlan2 = exec::test::PlanBuilder(pool_.get())
-  //                    .values({result1})
-  //                    .project({"sequence_pooling(o1)"})
-  //                    .planNode();
-
-  // auto result2 =
-  //     exec::test::AssertQueryBuilder(myPlan2).copyResults(pool_.get());
-
-  // std::cout << "[INFO] Result2: \n"
-  //           << result2->toString(0, result2->size()) << std::endl;
-};
-
-
-// Test Embedding Layer
-// 6.75
-void EmbeddingTest::testEmbedding_MatMul() {
-  std::cout << "[INFO] Test of Embedding Mat Mul." << std::endl;
-  int numEmbeddings = std::atoi(std::getenv("numEmbeddings"));
-  int embeddingDims = std::atoi(std::getenv("embeddingDims"));
-  int numSamples = std::atoi(std::getenv("numSamples"));
-  
-  int maxSampleLen = std::atoi(std::getenv("maxInputLen"));
-  std::cout << numEmbeddings << " " << embeddingDims << " " << numSamples << " " << maxSampleLen;
-
-  RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
-  randomGenerator.setIntRange(0, numEmbeddings - 1);
-
-  std::vector<float> weights =
-      randomGenerator.genFloat1dVector(numEmbeddings * embeddingDims);
-
-  auto weightsVector = maker.flatVector<float>(weights, REAL());
-
-  // Initialize the indices vector
-  std::vector<std::vector<int>> indicesVectors;
-  for (int i = 0; i < numSamples; i++) {
-    std::vector<int> inputVector;
-    int numI = std::max(1, i % maxSampleLen);
-    
-    
-    for (int j = 0; j < numI; j++) {
-      inputVector.push_back(randomGenerator.genRandomIntValue());
-    }
-    indicesVectors.push_back(inputVector);
-  }
-
-  auto indicesArrayVector = maker.arrayVector<int>(indicesVectors, INTEGER());
-  auto inputRowVector = maker.rowVector({"x"}, {indicesArrayVector});
-
-  // std::cout << "[INFO] Generated Embedding:\n"
-  //           << weightsVector->toString(0, weightsVector->size()) << std::endl;
-
-  // std::cout << "[INFO] Generated Indices:\n"
-  //           << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
+  std::cout << "[INFO] Result1: \n"
+            << result1->toString(0, result1->size()) << std::endl;
 
   exec::registerVectorFunction(
-    "multi_hot_norm_encoder",
-    MultiHotNormalizedEncoder::signatures(),
-    std::make_unique<MultiHotNormalizedEncoder>(numEmbeddings)
-  );
+      "sequence_pooling",
+      SequencePooling::signatures(),
+      std::make_unique<SequencePooling>(std::string("MEAN"), embeddingDims));
 
-  exec::registerVectorFunction(
-    "mat_mul",
-    MatrixMultiply::signatures(),
-    std::make_unique<MatrixMultiply>(weightsVector->values()->asMutable<float>(), numEmbeddings, embeddingDims)
-  );
-
-  auto myPlan1 = exec::test::PlanBuilder(pool_.get())
-                     .values({inputRowVector})
-                     .project({"mat_mul(multi_hot_norm_encoder(x))"})
+  auto myPlan2 = exec::test::PlanBuilder(pool_.get())
+                     .values({result1})
+                     .project({"sequence_pooling(o1)"})
                      .planNode();
 
-  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  auto result1 = exec::test::AssertQueryBuilder(myPlan1).copyResults(pool_.get());
-  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Time for Embedding mat mul (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  auto result2 =
+      exec::test::AssertQueryBuilder(myPlan2).copyResults(pool_.get());
 
-
-  // std::cout << "[INFO] Result1: \n"
-  //           << result1->toString(0, result1->size()) << std::endl;
-
-
-  // steps : normalised 1 hot encoding E.g [0 1 0 1 0 0] sould be divided by 2 since there are 2 1s
-  // multiply by embedding matrix matrix [ n * vector_dims]
-  // auto myPlan2 = exec::test::PlanBuilder(pool_.get())
-  //                    .values({result1})
-  //                    .project({"sequence_pooling(o1)"})
-  //                    .planNode();
-
-  // auto result2 =
-  //     exec::test::AssertQueryBuilder(myPlan2).copyResults(pool_.get());
-
-  // std::cout << "[INFO] Result2: \n"
-  //           << result2->toString(0, result2->size()) << std::endl;
+  std::cout << "[INFO] Result2: \n"
+            << result2->toString(0, result2->size()) << std::endl;
 };
-
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
@@ -680,10 +588,8 @@ int main(int argc, char** argv) {
   // demo.testBatchNorm1D();
   // demo.testDropout();
   // demo.testConcat1();
-  // demo.testConcat2();
-  // demo.testConcat3();
+  demo.testConcat2();
+  demo.testConcat3();
   // demo.testCosineSimilarity();
-  demo.testEmbedding_MatMul();
-  demo.testSequencePooling();
-   
+  // demo.testSequencePooling();
 }
