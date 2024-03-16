@@ -129,25 +129,34 @@ public:
 												weightSchema = cataLog.getUDFSchema(target+"_weights_vertical");
 												// Regular expression match
 												std::regex pattern(target + R"(\([^)]+\))");
-												exprStr = std::regex_replace(exprStr, pattern, "R1");
+												exprStr = std::regex_replace(exprStr, pattern, "v");
 												// Build new plan
-
+												// Note: In NestedLoopJoin, each row from the left side is iterated over and 
+												// joined with every row from the right side. Given that the weight matrix is 
+												// already partitioned and has fewer rows to iterate compared to the input,
+												// it is recommended to place the partitioned weight matrix on the left side
+												// to enhance the performance of the nested loop join due to reduced iteration overhead.
 												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
-														.tableScan(valueSchema)
-														.capturePlanNodeId(p1)
+														.tableScan(weightSchema)
+														.capturePlanNodeId(p2)
+														// automatically generate row number for input values
 														.nestedLoopJoin(
 															PlanBuilder(planNodeIdGenerator)
-															.tableScan(weightSchema)
-															.capturePlanNodeId(p2)
+															.tableScan(valueSchema)
+															.capturePlanNodeId(p1)
+															.rowNumber({})
 															.planNode(),
-															{"v_row", "v", "w", "w_row", "w_col"}
+															{"row_number", "v", "w", "w_row", "w_col"}
 															)
-														.project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
-														.partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-														.localPartition({"v_row"})
+														.project({"mat_mul_h(v, w) AS t", "row_number", "w_col"})
+														// .localPartition({"row_number"})
+														// .singleAggregation({"row_number"}, {"array_cat(t, w_col) AS v"})
+														.partialAggregation({"row_number"}, {"array_cat(t, w_col) AS v"})
+														.localPartition({"row_number"})
 														.intermediateAggregation()
 														.finalAggregation()
-														.project({exprStr});
+														.project({exprStr})
+														;
 												// Delete old nodeId-fileAddress map
 												auto valueFileAddr = cataLog.getFileAddress(cataLog.getVectorIdMap("v"));
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
@@ -222,21 +231,26 @@ public:
 									exprStr = std::regex_replace(exprStr, pattern, "R1");
 									// Build new plan
 									planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
-														.tableScan(valueSchema)
-														.capturePlanNodeId(p1)
+														.tableScan(weightSchema)
+														.capturePlanNodeId(p2)
+														// automatically generate row number for input values
 														.nestedLoopJoin(
 															PlanBuilder(planNodeIdGenerator)
-															.tableScan(weightSchema)
-															.capturePlanNodeId(p2)
+															.tableScan(valueSchema)
+															.capturePlanNodeId(p1)
+															.rowNumber({})
 															.planNode(),
-															{"v_row", "v", "w", "w_row", "w_col"}
+															{"row_number", "v", "w", "w_row", "w_col"}
 															)
-														.project({"mat_mul_h(v, w) AS t", "v_row", "w_col"})
-														.partialAggregation({"v_row"}, {"array_cat(t, w_col) AS R1"})
-														.localPartition({"v_row"})
+														.project({"mat_mul_h(v, w) AS t", "row_number", "w_col"})
+														// .localPartition({"row_number"})
+														// .singleAggregation({"row_number"}, {"array_cat(t, w_col) AS v"})
+														.partialAggregation({"row_number"}, {"array_cat(t, w_col) AS v"})
+														.localPartition({"row_number"})
 														.intermediateAggregation()
 														.finalAggregation()
-														.project({exprStr});
+														.project({exprStr})
+														;
 												// Delete old nodeId-fileAddress map
 												auto valueFileAddr = cataLog.getFileAddress(cataLog.getVectorIdMap("v"));
 												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
