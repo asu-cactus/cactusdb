@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <iostream>
 #include "velox/exec/ContainerRowSerde.h"
 #include "velox/expression/FunctionSignature.h"
 #include "velox/functions/prestosql/aggregates/AggregateNames.h"
 #include "velox/functions/prestosql/aggregates/ValueVector.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/FlatVector.h"
-#include <iostream>
 
 namespace facebook::velox::aggregate::prestosql {
 namespace {
@@ -64,7 +64,7 @@ class CatArrayAggregate : public exec::Aggregate {
       auto arraySize = values.size();
       if (arraySize) {
         clearNull(rawNulls, i);
-        
+
         vector->setOffsetAndSize(i, offset, arraySize);
         values.extractAndConcatValue(*elementsFloat, offset);
         offset += arraySize;
@@ -72,13 +72,13 @@ class CatArrayAggregate : public exec::Aggregate {
         vector->setNull(i, true);
       }
     }
-
   }
 
-  // In cases where the block size cannot perfectly match the tensor shape in the second dimension
-  // and the final size of the output tensor can only be determined at the final aggregation stage,
-  // the intermediate aggregation results are stored in a map structure.
-  // The block ID and block's values serve as a key-value pair in the map for each gorup.
+  // In cases where the block size cannot perfectly match the tensor shape in
+  // the second dimension and the final size of the output tensor can only be
+  // determined at the final aggregation stage, the intermediate aggregation
+  // results are stored in a map structure. The block ID and block's values
+  // serve as a key-value pair in the map for each gorup.
   void extractAccumulators(char** groups, int32_t numGroups, VectorPtr* result)
       override {
     // extractValues(groups, numGroups, result);
@@ -108,7 +108,8 @@ class CatArrayAggregate : public exec::Aggregate {
       auto arraySize = accumulatorValues.size();
       if (arraySize) {
         mapVector->setOffsetAndSize(i, keyOffset, numBlocks);
-        accumulatorValues.extractIntermediate(mapKeys, *mapValueArrays, keyOffset, valueOffset);
+        accumulatorValues.extractIntermediate(
+            mapKeys, *mapValueArrays, keyOffset, valueOffset);
       } else {
         mapVector->setOffsetAndSize(i, 0, 0);
       }
@@ -116,39 +117,42 @@ class CatArrayAggregate : public exec::Aggregate {
   }
 
   void addRawInput(
-    char** groups,
-    const SelectivityVector& rows,
-    const std::vector<VectorPtr>& args,
-    bool /*mayPushdown*/) override {
-  decodedElements_.decode(*args[0], rows);
-  auto Values = decodedElements_.base()->as<ArrayVector>();
-  float* Valuesfloat = Values->elements()->values()->asMutable<float>();
-  
-  decodedIndexes.decode(*args[1], rows);
-  auto indexs = decodedIndexes.base()->asFlatVector<float>();//intermediate result changed to dict, TODO
-  float* indexsFloat = indexs->values()->asMutable<float>();
-  rows.applyToSelected([&](vector_size_t row) {
-    auto group = groups[row];
-    auto tracker = trackRowSize(group);
-    // auto decodedRow = decodedElements_.index(row);
-    auto rowOffset =  Values->offsetAt(row);
-    auto rowSize = Values->sizeAt(row);
- 
-    auto& oldValues = value<ArrayAccumulator>(group)->elements;
-    oldValues.insertValue(Valuesfloat, rowOffset, rowSize, decodedIndexes.valueAt<float>(row));
-  });
-}
+      char** groups,
+      const SelectivityVector& rows,
+      const std::vector<VectorPtr>& args,
+      bool /*mayPushdown*/) override {
+    decodedElements_.decode(*args[0], rows);
+    auto values = decodedElements_.base()->as<ArrayVector>();
+    float* valuesFloat = values->elements()->values()->asMutable<float>();
 
-  // In cases where the block size cannot perfectly match the tensor shape in the second dimension
-  // and the final size of the output tensor can only be determined at the final aggregation stage,
-  // the intermediate aggregation results are stored in a map structure.
-  // The block ID and block's values serve as a key-value pair in the map for each gorup.
+    decodedIndexes.decode(*args[1], rows);
+    auto indexs =
+        decodedIndexes.base()->asFlatVector<float>(); // intermediate result
+                                                      // changed to dict, TODO
+    float* indexsFloat = indexs->values()->asMutable<float>();
+    rows.applyToSelected([&](vector_size_t row) {
+      auto group = groups[row];
+      auto tracker = trackRowSize(group);
+      // auto decodedRow = decodedElements_.index(row);
+      auto rowOffset = values->offsetAt(row);
+      auto rowSize = values->sizeAt(row);
+
+      auto& oldValues = value<ArrayAccumulator>(group)->elements;
+      oldValues.insertValue(
+          valuesFloat, rowOffset, rowSize, decodedIndexes.valueAt<float>(row));
+    });
+  }
+
+  // In cases where the block size cannot perfectly match the tensor shape in
+  // the second dimension and the final size of the output tensor can only be
+  // determined at the final aggregation stage, the intermediate aggregation
+  // results are stored in a map structure. The block ID and block's values
+  // serve as a key-value pair in the map for each gorup.
   void addIntermediateResults(
       char** groups,
       const SelectivityVector& rows,
       const std::vector<VectorPtr>& args,
       bool /*mayPushdown*/) override {
-    
     decodedMaps_.decode(*args[0], rows);
     auto mapVector = decodedMaps_.base()->template as<MapVector>();
 
@@ -158,7 +162,7 @@ class CatArrayAggregate : public exec::Aggregate {
     auto* valueArrays_ = decodedValueArrays_.base()->template as<ArrayVector>();
     decodedValues_.decode(*valueArrays_->elements());
 
-    float* Valuesfloat = valueArrays_->elements()->values()->asMutable<float>();
+    float* valuesFloat = valueArrays_->elements()->values()->asMutable<float>();
 
     rows.applyToSelected([&](vector_size_t row) {
       auto group = groups[row];
@@ -171,15 +175,14 @@ class CatArrayAggregate : public exec::Aggregate {
       for (auto i = offset; i < offset + size; i++) {
         auto rowKey = decodedKeys_.valueAt<float>(i);
         auto numValues = valueArrays_->sizeAt(decodedValueArrays_.index(i));
-        auto valueOffset =
-              valueArrays_->offsetAt(decodedValueArrays_.index(i));
-        accumulatorElements.insertValue(Valuesfloat, valueOffset, numValues, rowKey);
+        auto valueOffset = valueArrays_->offsetAt(decodedValueArrays_.index(i));
+        accumulatorElements.insertValue(
+            valuesFloat, valueOffset, numValues, rowKey);
       }
 
       auto decodedKeyRow = decodedKeys_.index(row);
       auto keySize = decodedKeys_.valueAt<float>(decodedKeyRow);
     });
-
   }
 
   void addSingleGroupRawInput(
@@ -187,23 +190,24 @@ class CatArrayAggregate : public exec::Aggregate {
       const SelectivityVector& rows,
       const std::vector<VectorPtr>& args,
       bool /* mayPushdown */) override {
-    auto& values = value<ArrayAccumulator>(group)->elements;
+    auto& groupElements = value<ArrayAccumulator>(group)->elements;
 
     decodedElements_.decode(*args[0], rows);
     auto tracker = trackRowSize(group);
-    auto Values = decodedElements_.base()->as<ArrayVector>();
-    float* Valuesfloat = Values->elements()->values()->asMutable<float>();
+    auto values = decodedElements_.base()->as<ArrayVector>();
+    float* valuesFloat = values->elements()->values()->asMutable<float>();
 
     decodedElements_.decode(*args[1], rows);
     auto indexs = decodedElements_.base()->asFlatVector<float>();
     float* indexsFloat = indexs->values()->asMutable<float>();
 
     rows.applyToSelected([&](vector_size_t row) {
-    auto decodedRow = decodedElements_.index(row);
-    auto rowOffset =  Values->offsetAt(decodedRow);
-    auto rowSize = Values->sizeAt(decodedRow);
+      auto decodedRow = decodedElements_.index(row);
+      auto rowOffset = values->offsetAt(decodedRow);
+      auto rowSize = values->sizeAt(decodedRow);
 
-    values.insertValue(Valuesfloat, row, rowSize, decodedIndexes.valueAt<float>(row));
+      groupElements.insertValue(
+          valuesFloat, row, rowSize, decodedIndexes.valueAt<float>(row));
     });
   }
 
@@ -216,16 +220,17 @@ class CatArrayAggregate : public exec::Aggregate {
     auto arrayVector = decodedIntermediate_.base()->as<ArrayVector>();
 
     auto& values = value<ArrayAccumulator>(group)->elements;
-    float* Valuesfloat = arrayVector->elements()->values()->asMutable<float>();
+    float* valuesFloat = arrayVector->elements()->values()->asMutable<float>();
 
     decodedIntermediate_.decode(*args[1], rows);
     auto indexs = decodedIntermediate_.base()->asFlatVector<float>();
     float* indexsFloat = indexs->values()->asMutable<float>();
     rows.applyToSelected([&](vector_size_t row) {
       auto decodedRow = decodedIntermediate_.index(row);
-      auto rowOffset =  arrayVector->offsetAt(decodedRow);
+      auto rowOffset = arrayVector->offsetAt(decodedRow);
       auto rowSize = arrayVector->sizeAt(decodedRow);
-      values.insertValue(Valuesfloat, row, rowSize, decodedIndexes.valueAt<float>(row));
+      values.insertValue(
+          valuesFloat, row, rowSize, decodedIndexes.valueAt<float>(row));
     });
   }
 
