@@ -139,7 +139,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // Set queryCtx config.
       queryCtx_->testingOverrideConfigUnsafe(
           {
-            // {core::QueryConfig::kPreferredOutputBatchBytes, "10000"},
+            {core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
            {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
            {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
 
@@ -270,7 +270,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       for (int j = 0; j < input_features_size; j++) {
         featureVector.push_back(
             (i * input_features_size + j) / input_total_size);
-            // featureVector.push_back(j);
+            // featureVector.push_back(1);
       }
 
       featureVectors.push_back(featureVector);
@@ -290,6 +290,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     float* weight_layer1 = new float[weight_layer1_size];
 
     for (int i = 0; i < weight_layer1_size; ++i) {
+      // weight_layer1[i] = i;
       weight_layer1[i] = 0.000001;
     }
     float* weight_layer2 = new float[weight_layer2_size];

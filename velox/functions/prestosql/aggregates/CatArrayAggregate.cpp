@@ -19,6 +19,7 @@
 #include "velox/functions/prestosql/aggregates/ValueVector.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/FlatVector.h"
+#include <iostream>
 
 namespace facebook::velox::aggregate::prestosql {
 namespace {
@@ -63,102 +64,53 @@ class CatArrayAggregate : public exec::Aggregate {
       auto arraySize = values.size();
       if (arraySize) {
         clearNull(rawNulls, i);
-
-        // ValueListReader reader(values);
-        // for (auto index = 0; index < arraySize; ++index) {
-        //   reader.next(*elements, offset + index);
-        // }
-        if (values.isIntermediate()) {
-          values.concatValues(*elementsFloat, offset);
-        }
-        else {
-        values.extractInterValue(*elementsFloat, offset);
-        }
-        // values.concatValues(*elements, offset);
+        
         vector->setOffsetAndSize(i, offset, arraySize);
+        values.extractAndConcatValue(*elementsFloat, offset);
         offset += arraySize;
       } else {
         vector->setNull(i, true);
       }
     }
 
-    // for (int32_t i = 0; i < 1000; ++i) {
-    //   auto& values = value<ArrayAccumulator>(groups[0])->elements;
-    //   auto arraySize = 1024;//this is the first layer output size
-    //   if (arraySize) {
-    //     clearNull(rawNulls, i);
-
-    //     // ValueListReader reader(values);
-    //     // for (auto index = 0; index < arraySize; ++index) {
-    //     //   reader.next(*elements, offset + index);
-    //     // }
-    //     //we extra value from one group which contains all items to sample size of groups with arraySize of items
-    //   for (auto index = 0; index < arraySize; ++index) {
-    //       values.extractValues(*elements, offset + index);
-    //     }
-    //     vector->setOffsetAndSize(i, offset, arraySize);
-    //     offset += arraySize;
-    //   } else {
-    //     vector->setNull(i, true);
-    //   }
-    // }
-
-    // auto& values = value<ArrayAccumulator>(groups[0])->elements;
-    // for (int32_t i = 0; i < 1000; ++i) {
-      
-    //   auto arraySize = 1024;
-    //   if (arraySize) {
-    //     clearNull(rawNulls, i);
-
-    //     // ValueListReader reader(values);
-    //     // for (auto index = 0; index < arraySize; ++index) {
-    //     //   reader.next(*elements, offset + index);
-    //     // }
-    //     for (auto index = 0; index < arraySize; ++index) {
-    //       values.extractValues(*elements, offset + index);
-    //     }
-
-    //     vector->setOffsetAndSize(i, offset, arraySize);
-    //     offset += arraySize;
-    //   } else {
-    //     vector->setNull(i, true);
-    //   }
-    // }
   }
 
+  // In cases where the block size cannot perfectly match the tensor shape in the second dimension
+  // and the final size of the output tensor can only be determined at the final aggregation stage,
+  // the intermediate aggregation results are stored in a map structure.
+  // The block ID and block's values serve as a key-value pair in the map for each gorup.
   void extractAccumulators(char** groups, int32_t numGroups, VectorPtr* result)
       override {
     // extractValues(groups, numGroups, result);
-    auto vector = (*result)->as<ArrayVector>();
-    VELOX_CHECK(vector);
-    vector->resize(numGroups);
-    auto originElements = vector->elements();
-    auto elementsFloat = originElements->as<FlatVector<float>>();
-    elementsFloat->resize(countElements(groups, numGroups));
+    auto mapVector = (*result)->as<MapVector>();
+    VELOX_CHECK(mapVector);
+    mapVector->resize(numGroups);
 
-    uint64_t* rawNulls = getRawNulls(vector);
-    vector_size_t offset = 0;
-    for (int32_t i = 0; i < numGroups; ++i) {
-      auto& values = value<ArrayAccumulator>(groups[i])->elements;
-      auto arraySize = values.size();
+    auto mapKeys = mapVector->mapKeys();
+    auto mapValueArrays = mapVector->mapValues()->as<ArrayVector>();
+    auto numKeys = countBlocks(groups, numGroups);
+    mapKeys->resize(numKeys);
+    mapValueArrays->resize(numKeys);
+
+    auto mapKeysVector = mapKeys->asFlatVector<float>();
+
+    auto mapValuesElements = mapValueArrays->elements();
+    mapValuesElements->resize(countElements(groups, numGroups));
+
+    auto* rawNulls = getRawNulls(mapVector);
+    vector_size_t keyOffset = 0;
+    vector_size_t valueOffset = 0;
+
+    for (int32_t i = 0; i < numGroups; i++) {
+      char* group = groups[i];
+      auto accumulatorValues = value<ArrayAccumulator>(group)->elements;
+      auto numBlocks = accumulatorValues.numBlocks();
+      auto arraySize = accumulatorValues.size();
       if (arraySize) {
-        clearNull(rawNulls, i);
-
-        // ValueListReader reader(values);
-        // for (auto index = 0; index < arraySize; ++index) {
-        //   reader.next(*elements, offset + index);
-        // }
-        if (values.isIntermediate()) {
-          values.concatValues(*elementsFloat, offset);
-        }
-        else {
-        values.extractInterValue(*elementsFloat, offset);
-        }
-        // values.concatValues(*elements, offset);
-        vector->setOffsetAndSize(i, offset, arraySize);
-        offset += arraySize;
+        mapVector->setOffsetAndSize(i, keyOffset, numBlocks);
+        accumulatorValues.extractIntermediate(mapKeys, *mapValueArrays, keyOffset, valueOffset);
       } else {
-        vector->setNull(i, true);
+        mapVector->setOffsetAndSize(i, 0, 0);
       }
     }
   }
@@ -171,71 +123,63 @@ class CatArrayAggregate : public exec::Aggregate {
   decodedElements_.decode(*args[0], rows);
   auto Values = decodedElements_.base()->as<ArrayVector>();
   float* Valuesfloat = Values->elements()->values()->asMutable<float>();
-
-  decodedElements_.decode(*args[1], rows);
-  auto indexs = decodedElements_.base()->asFlatVector<float>();//intermediate result changed to dict, TODO
+  
+  decodedIndexes.decode(*args[1], rows);
+  auto indexs = decodedIndexes.base()->asFlatVector<float>();//intermediate result changed to dict, TODO
   float* indexsFloat = indexs->values()->asMutable<float>();
   rows.applyToSelected([&](vector_size_t row) {
     auto group = groups[row];
     auto tracker = trackRowSize(group);
-    auto decodedRow = decodedElements_.index(row);
-    auto rowOffset =  Values->offsetAt(decodedRow);
-    auto rowSize = Values->sizeAt(decodedRow);
+    // auto decodedRow = decodedElements_.index(row);
+    auto rowOffset =  Values->offsetAt(row);
+    auto rowSize = Values->sizeAt(row);
  
     auto& oldValues = value<ArrayAccumulator>(group)->elements;
-    oldValues.insertValue(Valuesfloat, row, rowSize, indexsFloat);
-    // auto newValues = decodedElements_.base()->as<ArrayVector>();
-    // if (oldValues.size() == 0) {
-    //   oldValues.appendValue(decodedElements_, row, allocator_);//index is row old.addvalue(newvalue[index,offsetsize])
-    // } else {
-    //   auto size = oldValues.size();
-    //   const auto newValues = decodedElements_.base()->as<ArrayVector>();
-
-    //   float* input_values_new = newValues->elements()->values()->asMutable<float>();
-    //   // auto resultVector = BaseVector::create(args[0].type(), 0, allocator_);
-    //   // auto resultVector = args[0]->as<ArrayVector>()->elements();
-    //   // auto resultVector = BaseVector::create(newValues->type(), 0, allocator_);
-
-
-    //   // for (auto index = 0; index < size; ++index) {
-    //   //   valueListReader.next(*resultVector, index);
-    //   // }
-    //   // auto ss = resultVector->values()->asMutable<float>();
-    //   // for (vector_size_t i = 0; i < size; ++i) {
-    //   //   // auto newv = newValues->as<float>()[i];
-    //   //   // resultVector->values()->asMutable<float>()[i] += newv;
-    //   // }
-
-    // }
+    oldValues.insertValue(Valuesfloat, rowOffset, rowSize, decodedIndexes.valueAt<float>(row));
   });
 }
 
-
+  // In cases where the block size cannot perfectly match the tensor shape in the second dimension
+  // and the final size of the output tensor can only be determined at the final aggregation stage,
+  // the intermediate aggregation results are stored in a map structure.
+  // The block ID and block's values serve as a key-value pair in the map for each gorup.
   void addIntermediateResults(
       char** groups,
       const SelectivityVector& rows,
       const std::vector<VectorPtr>& args,
       bool /*mayPushdown*/) override {
-    decodedIntermediate_.decode(*args[0], rows);
+    
+    decodedMaps_.decode(*args[0], rows);
+    auto mapVector = decodedMaps_.base()->template as<MapVector>();
 
-    auto arrayVector = decodedIntermediate_.base()->as<ArrayVector>();
-    auto& elements = arrayVector->elements();
-    float* Valuesfloat = arrayVector->elements()->values()->asMutable<float>();
+    decodedKeys_.decode(*mapVector->mapKeys());
+    decodedValueArrays_.decode(*mapVector->mapValues());
 
-    // decodedIntermediate_.decode(*args[1], rows);
-    // auto indexs = decodedIntermediate_.base()->asFlatVector<float>();
-    // float* indexsFloat = indexs->values()->asMutable<float>();
+    auto* valueArrays_ = decodedValueArrays_.base()->template as<ArrayVector>();
+    decodedValues_.decode(*valueArrays_->elements());
+
+    float* Valuesfloat = valueArrays_->elements()->values()->asMutable<float>();
 
     rows.applyToSelected([&](vector_size_t row) {
       auto group = groups[row];
-      auto decodedRow = decodedIntermediate_.index(row);
-      auto tracker = trackRowSize(group);
-      auto rowOffset =  arrayVector->offsetAt(decodedRow);
-      auto rowSize = arrayVector->sizeAt(decodedRow);
-      auto& values = value<ArrayAccumulator>(group)->elements;
-      values.insertIntermediateValue(Valuesfloat, rowOffset, rowSize);
-      // values.insertValue(Valuesfloat, row, rowSize, indexsFloat);
+      auto& accumulatorElements = value<ArrayAccumulator>(group)->elements;
+      clearNull(group);
+      auto decodedRow = decodedMaps_.index(row);
+      auto offset = mapVector->offsetAt(decodedRow);
+      auto size = mapVector->sizeAt(decodedRow);
+
+      for (auto i = offset; i < offset + size; i++) {
+        auto rowKey = decodedKeys_.valueAt<float>(i);
+        auto numValues = valueArrays_->sizeAt(decodedValueArrays_.index(i));
+        auto valueOffset =
+              valueArrays_->offsetAt(decodedValueArrays_.index(i));
+        accumulatorElements.insertValue(Valuesfloat, valueOffset, numValues, rowKey);
+      }
+
+      auto decodedKeyRow = decodedKeys_.index(row);
+      auto keySize = decodedKeys_.valueAt<float>(decodedKeyRow);
     });
+
   }
 
   void addSingleGroupRawInput(
@@ -258,9 +202,8 @@ class CatArrayAggregate : public exec::Aggregate {
     auto decodedRow = decodedElements_.index(row);
     auto rowOffset =  Values->offsetAt(decodedRow);
     auto rowSize = Values->sizeAt(decodedRow);
- 
 
-    values.insertValue(Valuesfloat, row, rowSize, indexsFloat);
+    values.insertValue(Valuesfloat, row, rowSize, decodedIndexes.valueAt<float>(row));
     });
   }
 
@@ -282,7 +225,7 @@ class CatArrayAggregate : public exec::Aggregate {
       auto decodedRow = decodedIntermediate_.index(row);
       auto rowOffset =  arrayVector->offsetAt(decodedRow);
       auto rowSize = arrayVector->sizeAt(decodedRow);
-      values.insertValue(Valuesfloat, row, rowSize, indexsFloat);
+      values.insertValue(Valuesfloat, row, rowSize, decodedIndexes.valueAt<float>(row));
     });
   }
 
@@ -301,24 +244,33 @@ class CatArrayAggregate : public exec::Aggregate {
     return size;
   }
 
+  vector_size_t countBlocks(char** groups, int32_t numGroups) const {
+    vector_size_t size = 0;
+    for (int32_t i = 0; i < numGroups; ++i) {
+      size += value<ArrayAccumulator>(groups[i])->elements.numBlocks();
+    }
+    return size;
+  }
+
   // Reusable instance of DecodedVector for decoding input vectors.
   DecodedVector decodedElements_;
+  DecodedVector decodedIndexes;
   DecodedVector decodedIntermediate_;
+
+  DecodedVector decodedKeys_;
+  DecodedVector decodedValues_;
+  DecodedVector decodedMaps_;
+  DecodedVector decodedValueArrays_;
 };
 
 bool registerCatArray(const std::string& name) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures{
       exec::AggregateFunctionSignatureBuilder()
-          .returnType("array(REAL)")
-          .intermediateType("array(REAL)")
           .argumentType("array(REAL)")
           .argumentType("REAL")
+          .intermediateType("map(REAL,array(REAL))")
+          .returnType("array(REAL)")
           .build()};
-          // .typeVariable("E")
-          // .returnType("array(E)")
-          // .intermediateType("array(E)")
-          // .argumentType("E")
-          // .build()};
 
   exec::registerAggregateFunction(
       name,
