@@ -221,7 +221,7 @@ add_executable(my_program_openblas_openmp BasicMulTest.cpp)
 #     add_definitions(-DEIGEN_USE_BLAS)
 # endif()
 
-add_definitions(-DEIGEN_USE_BLAS)
+# add_definitions(-DEIGEN_USE_BLAS)
 
 # Link against OpenBLAS for targets that require it
 target_link_libraries(
@@ -298,5 +298,39 @@ if(OPENMP_FOUND)
         openblas)
     endif()
 endif()
+
+add_executable(horizontalmul_test HorizontalMul.cpp)
+target_link_libraries(
+  horizontalmul_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(verticalmul_test VerticalMul.cpp)
+target_link_libraries(
+  verticalmul_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
 
 

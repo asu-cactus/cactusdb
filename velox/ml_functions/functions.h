@@ -2,12 +2,19 @@
 #include "velox/expression/VectorFunction.h"
 #include "velox/vector/DictionaryVector.h"
 #include <Eigen/Dense>
-#include <cblas.h>
+// #include <cblas.h>
 #include <chrono>
 #include "velox/exec/Task.h"
 #include "velox/cost_model/CostEstimate.h"
 #include "velox/cost_model/UdfCostCoefficient.h"
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#ifdef EIGEN_USE_BLAS
+#include <cblas.h>
+#endif
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -76,6 +83,13 @@ public:
         dims.push_back(num_cols);
     }
 
+    MatrixMultiply(float* weights, int num_rows, int num_cols, int threads) {
+        weights_ = weights; 
+        dims.push_back(num_rows);
+        dims.push_back(num_cols);
+        dims.push_back(threads);
+    }
+
 
     void apply(
         const SelectivityVector& rows,
@@ -104,9 +118,39 @@ public:
 
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
-            
+            Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m;
             // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-            Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
+            if (dims.size() < 3) {
+                m  =  m1 * m2;
+            }
+            else {
+                #ifdef _OPENMP
+                    // std::cout << "Using OpenMP" << std::endl;
+                    omp_set_num_threads(dims[2]); // Set to the number of cores you want to utilize
+                    #ifdef EIGEN_USE_BLAS
+                        // std::cout << "Using Eigen with OpenBLAS" << std::endl;
+                        openblas_set_num_threads(dims[2]);
+                        m  =  m1 * m2;
+                    #else
+                    // Perform matrix multiplication using OpenMP
+                        #pragma omp parallel
+                        {
+                            m  =  m1 * m2;
+                        }
+                    #endif
+                #else
+                    // Perform matrix multiplication without OpenMP
+                    #ifdef EIGEN_USE_BLAS
+                        // std::cout << "Using Eigen with OpenBLAS" << std::endl;
+                        openblas_set_num_threads(dims[2]);
+                        m  =  m1 * m2;
+                    #else
+                        // std::cout << "Using Eigen without OpenBLAS" << std::endl;
+                        m  =  m1 * m2;
+                    #endif
+
+                #endif
+            }
 
             
             for (int i = 0; i < m.rows(); i++) {
@@ -208,21 +252,27 @@ public:
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
             Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m;
             #ifdef _OPENMP
-                std::cout << "Using OpenMP" << std::endl;
+                // std::cout << "Using OpenMP" << std::endl;
                 omp_set_num_threads(dims[2]); // Set to the number of cores you want to utilize
-
-                // Perform matrix multiplication using OpenMP
-                #pragma omp parallel
-                {
+                #ifdef EIGEN_USE_BLAS
+                    // std::cout << "Using Eigen with OpenBLAS" << std::endl;
+                    openblas_set_num_threads(dims[2]);
                     m  =  m1 * m2;
-                }
+                #else
+                // Perform matrix multiplication using OpenMP
+                    #pragma omp parallel
+                    {
+                        m  =  m1 * m2;
+                    }
+                #endif
             #else
                 // Perform matrix multiplication without OpenMP
                 #ifdef EIGEN_USE_BLAS
-                    std::cout << "Using Eigen with OpenBLAS" << std::endl;
+                    // std::cout << "Using Eigen with OpenBLAS" << std::endl;
+                    openblas_set_num_threads(dims[2]);
                     m  =  m1 * m2;
                 #else
-                    std::cout << "Using Eigen without OpenBLAS" << std::endl;
+                    // std::cout << "Using Eigen without OpenBLAS" << std::endl;
                     m  =  m1 * m2;
                 #endif
 
