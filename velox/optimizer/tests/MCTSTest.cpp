@@ -121,7 +121,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int numSplits,
       PlanBuilder& myPlan,
       CataLog& cataLog,
-      int repeatRun = 1) {
+      int repeatRun = 1,
+      int verbose = 1) {
     float totalElapsedTime = 0;
     std::vector<RowVectorPtr> finalResult;
     int dataIdx;
@@ -138,7 +139,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // Set queryCtx config.
       queryCtx_->testingOverrideConfigUnsafe(
           {
-            // {core::QueryConfig::kPreferredOutputBatchBytes, "10000"},
+            {core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
            {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
            {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
 
@@ -197,7 +198,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         for (auto batchedData : finalResult) {
           batchedData = std::move(batchedData);
           int batchSize = batchedData->size();
-          std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << batchedData->toString(0, batchedData->size()) << std::endl;
+          if (verbose == 1) {
+            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
+          } else if (verbose == 2) {
+            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << "\n" << batchedData->toString(0, batchedData->size()) << std::endl;
+          }
           dataIdx += 1;
           totalDataNum += batchSize;
         }
@@ -265,6 +270,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       for (int j = 0; j < input_features_size; j++) {
         featureVector.push_back(
             (i * input_features_size + j) / input_total_size);
+            // featureVector.push_back(1);
       }
 
       featureVectors.push_back(featureVector);
@@ -284,6 +290,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     float* weight_layer1 = new float[weight_layer1_size];
 
     for (int i = 0; i < weight_layer1_size; ++i) {
+      // weight_layer1[i] = i;
       weight_layer1[i] = 0.000001;
     }
     float* weight_layer2 = new float[weight_layer2_size];
@@ -401,6 +408,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         true,
         catalog);
     // Compose and return the vector function expression
+    // return "mat_mul0({})";
     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
   }
 
@@ -417,14 +425,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int featureSize,
       int numSamples,
       int numDriver,
-      std::string benchmarkMode) {
+      std::string benchmarkMode,
+      int verbose) {
     // Set data source config.
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
     // Set splits number
-    int num_splits = 4;
     // Initialize CataLog
     CataLog cataLog;
     cataLog.setDefaultBlocksSize(256);
@@ -469,6 +477,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // Set data source statistics in cataLog
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
+    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
     // Build two dense layers UDFs using registerFunction in optimization
     // namespace
     bool isVerticalPartition = true;
@@ -516,15 +525,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     if (rewrite) {
       // Get possible actions for this plan
       planState.getPossibleActions(planNode, cataLog);
-      // std::cout << "action size" << planState.actionsPair.size() <<
-      // std::endl; Print possible actions for (const auto& entry :
-      std::cout << "[INFO] All possible actions:" << std::endl;
-      for (auto entry: planState.actionsPair) {
-        std::cout << entry.first << ": " << entry.second << std::endl;
-      }
-      // Choose one action from possible actions (Now we only pick the first
-      // one, later it would be choosen by MCTS)
-      // auto it = planState.actionsPair.begin();
       std::pair<std::string, std::string> testAction;
       if (benchmarkMode == "mul2joinAgg") {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
@@ -535,8 +535,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       } else {
          throw std::runtime_error(fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
       }
-      // std::pair<std::string, std::string> testAction("mat_mul0", "Mul2JoinAggRewriteAction");
-      std::cout << "Taken action: " << testAction << std::endl;
+
+      if (verbose != 0) {
+        std::cout << "[INFO] All possible actions:" << std::endl;
+        for (auto entry: planState.actionsPair) {
+          std::cout << entry.first << ": " << entry.second << std::endl;
+        }
+        std::cout << "Taken action: " << testAction << std::endl;
+      }
       // Take one rewritten action
       planState.takeAction(
           planNode,
@@ -552,9 +558,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
 
     // Run the rewritten plan
-    std::cout << myPlan.planNode()->toString(true, true) << std::endl;
+    if (verbose != 0) {
+      std::cout << "Executed Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
+    }
     float averageExectuionTime =
-        runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun);
+        runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
     std::cout << averageExectuionTime;
   }
 
@@ -567,8 +575,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int first_layer_output_size = 1024;
     int second_layer_output_size = 14588;
     CataLog cataLog;
+    cataLog.setDefaultBlocksSize(256);
+    cataLog.setBlockingThreshold(1);
     // Set splits number
-    int num_splits = 4;
     // Generate data source
     auto data = data_generate(
         input_features_size,
@@ -608,7 +617,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
 
-    bool isVerticalPartition = true;
+    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+
+    bool isVerticalPartition = false;
     std::string compute = registerFunctions(
         first_layer_output_size,
         second_layer_output_size,
@@ -693,7 +704,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                      .project({fmt::format(compute, "v")});
         cataLog.setIdAddressMap(p0, {file});
         cataLog.setVectorIdMap(p0, "v");
+        cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
         planNode = myPlan.planNode();
+        planState.getPossibleActions(planNode, cataLog);
         // send acknowledgement for synchronization 
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getQueryPlan") {
@@ -708,9 +721,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
         for (const auto& entry : planState.actionsPair) {
-          // std::cout << "[ACTION SBACE] " << entry.first << ", " <<
+          // std::cout << "[ACTION SBACE] " << entry.first << s't'd
           // entry.second << std::endl;
-          // TODO: need to change corresponding in python side
           Json::Value jsonEntry;
           jsonEntry["expression"] = entry.first;
           jsonEntry["action"] = Json::arrayValue;
@@ -746,7 +758,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
-          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 1);
+          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
           jsonMessage["reward"] = executeTime;
           std::cout << "[INFO] get Cost(offline): "
                     << " time: " << executeTime << std::endl;
@@ -789,7 +801,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << std::endl;
     std::cout << "[INFO] Optimized query plan"
               << myPlan.planNode()->toString(true, true) << std::endl;
-    runPlanWithCataLog(8, 8, myPlan, cataLog, 1);
+    runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
   }
 
  private:
@@ -804,6 +816,7 @@ DEFINE_int32(num_repeat, 5, "Number of repeat run");
 DEFINE_int32(feature_size, 1000, "FFNN Feature size");
 DEFINE_int32(num_sample, 1000, "Number of samples");
 DEFINE_int32(num_driver, 8, "Number of drivers");
+DEFINE_int32(verbose, 1, "Verbose");
 
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -815,6 +828,7 @@ int main(int argc, char** argv) {
   int featureSize = FLAGS_feature_size;
   int numSample = FLAGS_num_sample;
   int numDriver = FLAGS_num_driver;
+  int verbose = FLAGS_verbose;
   IntegratedMCTSTest demo;
   // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
@@ -822,6 +836,6 @@ int main(int argc, char** argv) {
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
-        rewrite, repeatRun, featureSize, numSample, numDriver, mode);
+        rewrite, repeatRun, featureSize, numSample, numDriver, mode, verbose);
   }
 }
