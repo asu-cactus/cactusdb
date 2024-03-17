@@ -183,9 +183,9 @@ class BenchmarkTest : public HiveConnectorTestBase {
           batchedData = std::move(batchedData);
           int batchSize = batchedData->size();
           if (verbose == 1) {
-            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
+            // std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
           } else if (verbose == 2) {
-            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << "\n" << batchedData->toString(0, batchedData->size()) << std::endl;
+            // std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << "\n" << batchedData->toString(0, batchedData->size()) << std::endl;
           }
           dataIdx += 1;
           totalDataNum += batchSize;
@@ -194,7 +194,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
       }
     }
 
-    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
+    // std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
     // std::cout << "DEBUG, REACHED here";
     // finalResult = std::move(finalResult);
 
@@ -340,12 +340,13 @@ class BenchmarkTest : public HiveConnectorTestBase {
       float* biasFile_1,
       float* biasFile_2,
       CataLog& catalog,
-      bool isVerticalPartition) {
+      bool isVerticalPartition,
+      int numThreads) {
     // Register matrix multiplication function for the first layer
     optimization::registerVectorFunction(
         "mat_mul0",
         MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1),
+        std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1, numThreads),
         {},
         true,
         catalog,
@@ -369,6 +370,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
       int outputSize,
       int numSamples,
       int numDriver,
+      int numThreads,
       std::string benchmarkMode,
       int verbose) {
     // Set data source config.
@@ -438,7 +440,8 @@ class BenchmarkTest : public HiveConnectorTestBase {
         data.bias[0],
         data.bias[1],
         cataLog,
-        isVerticalPartition);
+        isVerticalPartition,
+        numThreads);
 
     // Initialize planNodeID
     core::PlanNodeId p0;
@@ -510,6 +513,7 @@ DEFINE_int32(feature_size, 1000, "FFNN Feature size");
 DEFINE_int32(num_sample, 1000, "Number of samples");
 DEFINE_int32(output_size, 1024, "output size");
 DEFINE_int32(num_driver, 8, "Number of drivers");
+DEFINE_int32(num_function_threads, 8, "Number of core function threads");
 DEFINE_int32(verbose, 1, "Verbose");
 
 int main(int argc, char** argv) {
@@ -523,9 +527,10 @@ int main(int argc, char** argv) {
   int outputSize = FLAGS_output_size;
   int numSample = FLAGS_num_sample;
   int numDriver = FLAGS_num_driver;
+  int numThreads = FLAGS_num_function_threads;
   int verbose = FLAGS_verbose;
   BenchmarkTest demo;
   // available single benchmark mode: mul2joinAgg, mul2joinAggHorizontal
   demo.testSingleRewrite(
-          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, mode, verbose);
+          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, numThreads, mode, verbose);
 }
