@@ -532,6 +532,24 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         testAction = std::make_pair("softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0(ROW[\"v\"]))))))", "MultiLayerUDF2TorchNNRewriteAction");
       } else if (benchmarkMode == "mul2joinAggHorizontal") {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
+      } else if (benchmarkMode == "cost") {
+        std::shared_ptr<Catalog> catalog =
+              std::make_shared<Catalog>(Catalog("db-catalog"));
+
+          std::shared_ptr<OutputStat> stat =
+              std::make_shared<OutputStat>(OutputStat(1, 2));
+
+          Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
+
+          catalog->addSource(std::make_shared<Source>(src1));
+
+          CostModel* cm = new SimpleCostModel(catalog);
+          CostEstimator* ce =
+              new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+
+          planNode = myPlan.planNode();
+          CostEstimate cost = ce->estimateCost(planNode);
+          return ;
       } else {
          throw std::runtime_error(fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
       }
