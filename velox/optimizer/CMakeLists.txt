@@ -299,9 +299,9 @@ if(OPENMP_FOUND)
     endif()
 endif()
 
-add_executable(horizontalmul_test HorizontalMul.cpp)
+add_executable(benchmarkmul_test tests/BenchmarkMul.cpp)
 target_link_libraries(
-  horizontalmul_test
+  benchmarkmul_test
   velox_aggregates
   velox_type
   velox_vector
@@ -334,3 +334,21 @@ target_link_libraries(
 )
 
 
+add_executable(mcts_test tests/MCTSTest.cpp)
+
+target_link_libraries(
+    mcts_test
+    velox_aggregates
+    velox_type
+    velox_vector
+    velox_vector_test_lib
+    velox_exec
+    velox_exec_test_lib
+    velox_tpch_connector
+    velox_memory
+    velox_common_base
+    velox_vector_fuzzer
+    velox_dwio_parquet_reader
+    jsoncpp_lib
+    ${TORCH_LIBRARIES}
+)
