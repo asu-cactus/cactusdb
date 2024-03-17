@@ -14,7 +14,14 @@ private:
     }
 
     void loadCoefficients() { 
-        std::ifstream inputFile("../../../../resources/data/udf_coefficient.txt");
+        const char* homePath = std::getenv("HOME");
+        std::string udfCoefficientPath = "";
+        if (homePath) {
+            udfCoefficientPath = std::string(homePath) + "/velox/resources/data/udf_coefficient.txt";
+        } else {
+            udfCoefficientPath = "/home/velox/resources/data/udf_coefficient.txt";
+        }
+        std::ifstream inputFile(udfCoefficientPath);
 
         if (!inputFile.is_open()) {
             std::cerr << "Error opening the file." << std::endl;
