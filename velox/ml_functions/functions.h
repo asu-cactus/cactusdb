@@ -418,10 +418,11 @@ private:
 
 class MatrixMultiply_h: public MLFunction {
 public:
-    MatrixMultiply_h(int num_rows, int num_cols, int block_size) {
+    MatrixMultiply_h(int num_rows, int num_cols, int block_size, int threads) {
         dims.push_back(num_rows);
         dims.push_back(num_cols);
         dims.push_back(block_size);
+        dims.push_back(threads);
         // weights_ = weights;
     }
 
@@ -456,6 +457,7 @@ public:
         std::vector<std::vector<float>> result; //6000*500
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, input_elements_v->size()/dims[0], dims[0]);//3*2
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], current_block_size); //2*5
+        openblas_set_num_threads(dims[3]);
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
         
         for (int i = 0; i < m.rows(); i++) {
@@ -492,11 +494,12 @@ private:
 
 class MatrixMultiply_Block: public MLFunction {
 public:
-    MatrixMultiply_Block(int num_rows, int num_cols, int num_samples, int blocks) {
+    MatrixMultiply_Block(int num_rows, int num_cols, int num_samples, int blocks, int threads) {
         dims.push_back(num_rows);
         dims.push_back(num_cols);
         dims.push_back(num_samples);
         dims.push_back(blocks);
+        dims.push_back(threads);
         // weights_ = weights;
     }
 
@@ -530,6 +533,7 @@ public:
         // std::vector<std::vector<float>> result(1, std::vector<float>(dims[1]*dims[2])); //6000*500
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, dims[2], dims[0]);//3*2
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], dims[1]); //2*5
+        openblas_set_num_threads(dims[4]);
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
 
         std::vector<std::vector<float>> result;

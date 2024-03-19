@@ -371,6 +371,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
       int numSamples,
       int numDriver,
       int numThreads,
+      int numBlocks,
       std::string benchmarkMode,
       int verbose) {
     // Set data source config.
@@ -381,8 +382,12 @@ class BenchmarkTest : public HiveConnectorTestBase {
     // Set splits number
     // Initialize CataLog
     CataLog cataLog;
-    cataLog.setDefaultBlocksSize(256);
+    int blockSize = outputSize / numBlocks;
+    std::cout << "blockSize:" << blockSize << std::endl;
+    // cataLog.setDefaultBlocksSize(256);
+    cataLog.setDefaultBlocksSize(blockSize);
     cataLog.setBlockingThreshold(1);
+    cataLog.setDefaultBlocksNum(numBlocks);
     // Generate data source
     auto data = data_generate(
         input_features_size,
@@ -474,8 +479,10 @@ class BenchmarkTest : public HiveConnectorTestBase {
       std::pair<std::string, std::string> testAction;
       if (benchmarkMode == "mul2joinAgg") {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
+        cataLog.setVerticalMulThreads(numThreads);
       } else if (benchmarkMode == "mul2joinAggHorizontal") {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
+        cataLog.setHorizontalMulThreads(numThreads);
       } else {
          throw std::runtime_error(fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
       }
@@ -514,6 +521,7 @@ DEFINE_int32(num_sample, 1000, "Number of samples");
 DEFINE_int32(output_size, 1024, "output size");
 DEFINE_int32(num_driver, 8, "Number of drivers");
 DEFINE_int32(num_function_threads, 8, "Number of core function threads");
+DEFINE_int32(num_blocks, 4, "Number of blocks in partition");
 DEFINE_int32(verbose, 1, "Verbose");
 
 int main(int argc, char** argv) {
@@ -528,9 +536,10 @@ int main(int argc, char** argv) {
   int numSample = FLAGS_num_sample;
   int numDriver = FLAGS_num_driver;
   int numThreads = FLAGS_num_function_threads;
+  int numBlocks = FLAGS_num_blocks;
   int verbose = FLAGS_verbose;
   BenchmarkTest demo;
   // available single benchmark mode: mul2joinAgg, mul2joinAggHorizontal
   demo.testSingleRewrite(
-          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, numThreads, mode, verbose);
+          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, numThreads, numBlocks, mode, verbose);
 }

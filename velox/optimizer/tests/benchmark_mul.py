@@ -19,28 +19,31 @@ def run_cpp_program(path, params):
 
 if __name__ == "__main__":
     list_feature_size = [597540]
-    # list_sample_size = [1, 10, 100, 1000, 10000, 100000]
-    list_sample_size = [1, 10, 100, 1000]
+    list_sample_size = [1000]
+    # list_sample_size = [100000]
     list_output_size = [1024]
-    list_transform = ["false","true"]
+    list_rewrite = ["false","true"]
     # list_mode = ["mul2joinAgg", "mul2joinAggHorizontal"]
     list_mode = ["mul2joinAgg"]
-    list_velox_driver = [1,2,4,8]
+    list_velox_driver = [2,4,8]
     list_function_threads = [1,2,4,8]
+    list_blocks = [8]
     num_repeat = 1
 
     run_configs = list(
         itertools.product(
-            list_sample_size, list_feature_size, list_output_size, list_velox_driver, list_function_threads, list_mode
+            list_sample_size, list_feature_size, list_output_size, list_velox_driver, list_function_threads, list_blocks, list_mode
         )
     )
     result_df = None
     for config in tqdm(run_configs):
-        sample_size, feature_size, output_size, velox_driver, function_threads, mode = config
-        params = "-mode={} -feature_size={} -num_sample={} -num_repeat={} -rewrite={} -output_size={} -num_driver={} -num_function_threads={} -verbose=1".format(
-            mode, feature_size, sample_size, num_repeat, "false", output_size, velox_driver, function_threads
+        sample_size, feature_size, output_size, velox_driver, function_threads, list_blocks, mode = config
+        params = "-mode={} -feature_size={} -num_sample={} -num_repeat={} -rewrite={} -output_size={} -num_driver={} -num_function_threads={} -num_blocks={} -verbose=1".format(
+            mode, feature_size, sample_size, num_repeat, "false", output_size, velox_driver, function_threads, list_blocks
         )
-
+        print("velox driver:", velox_driver)
+        print("function_threads:", function_threads)
+        print("num_blocks:", list_blocks)
         try:
             latency = run_cpp_program("/", params)
             df = pd.DataFrame(
@@ -72,5 +75,5 @@ if __name__ == "__main__":
         else:
             result_df = pd.concat([result_df, df], axis=0)
 
-        result_df.to_csv("result_benchmark_core.csv", index=False)
+        result_df.to_csv("result_benchmark_core_10240.csv", index=False)
 

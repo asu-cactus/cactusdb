@@ -197,6 +197,22 @@ class CataLog {
             return defaultSplits;
         }
 
+        void setVerticalMulThreads (int numThreads) {
+            defaultThreads = numThreads;
+        }
+
+        int getVerticalMulThreads () {
+            return defaultThreads;
+        }
+
+        void setHorizontalMulThreads (int numThreads) {
+            defaultThreads = numThreads;
+        }
+
+        int getHorizontalMulThreads () {
+            return defaultThreads;
+        }
+
 
     private:
         // Default values
@@ -204,6 +220,7 @@ class CataLog {
         int defaultBlocksSize = 256;
         int blockingThreshold = 1;
         int defaultSplits = 392;
+        int defaultThreads = 1;
         // Maps for storing data
         std::map<std::string, std::vector<int>> dataSourceStatMap;
         std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> idFileAddrMap;

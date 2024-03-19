@@ -102,12 +102,12 @@ public:
 													// Get information (defaultBlocksnumber, number of samples) from cataLog
 													int blocks = cataLog.getDefaultBlocksNum();
 													int samples = cataLog.getDataSourceStat("values")[0];
-
+													int threads = cataLog.getVerticalMulThreads();
 													// Register matrix blocks multiply function
 													registerVectorFunction(
 														"mat_mul_block",
 														MatrixMultiply_Block::signatures(),
-														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks)
+														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks, threads)
 													);
 													// Add UDF associate information (UDF with input values) to cataLog
 													std::string nameSuffix = "_vertical";
@@ -210,13 +210,14 @@ public:
 										// Get information (defaultBlocksnumber, number of samples) from cataLog
 										int blocks = cataLog.getDefaultBlocksNum();
 										int samples = cataLog.getDataSourceStat("values")[0];
-
+										int threads = cataLog.getVerticalMulThreads();
+										std::cout << "threads:"<<threads << std::endl;
 										// Register matrix blocks multiply function
 
 										registerVectorFunction(
 														"mat_mul_block",
 														MatrixMultiply_Block::signatures(),
-														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks)
+														std::make_unique<MatrixMultiply_Block>(dims[0]/blocks, dims[1], samples, blocks, threads)
 													);
 										// Add UDF associate information (UDF with input values) to cataLog
 										// Should blocking source here

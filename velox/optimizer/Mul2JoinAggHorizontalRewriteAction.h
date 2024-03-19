@@ -109,7 +109,7 @@ public:
 													registerVectorFunction(
 														"mat_mul_h",
 														MatrixMultiply_h::signatures(),
-														std::make_unique<MatrixMultiply_h>(dims[0], dims[1], cataLog.getDefaultBlocksSize())
+														std::make_unique<MatrixMultiply_h>(dims[0], dims[1], cataLog.getDefaultBlocksSize(), cataLog.getHorizontalMulThreads())
 													);
 
 													// Add UDF associate information (UDF with input values) to cataLog
@@ -210,7 +210,7 @@ public:
 											"mat_mul_h",
 											MatrixMultiply_h::signatures(),
 											// std::make_unique<MatrixMultiply_h>(dims[0]/blocks, dims[1], samples, weights, blocks)
-											std::make_unique<MatrixMultiply_h>(dims[0], dims[1], cataLog.getDefaultBlocksSize())
+											std::make_unique<MatrixMultiply_h>(dims[0], dims[1], cataLog.getDefaultBlocksSize(), cataLog.getHorizontalMulThreads())
 										);
 										// Add UDF associate information (UDF with input values) to cataLog
 										// Should blocking source here
