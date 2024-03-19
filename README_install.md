@@ -44,6 +44,8 @@ sudo ln -sf eigen3/unsupported unsupported
 ```shell
 sudo apt-get install libopenblas-dev
 ```
+## CUDA
+[Reference URL](https://www.cherryservers.com/blog/install-cuda-ubuntu)
 ## gcc update(may needed)
 ```shell
 # update gcc-9 to gcc-11
