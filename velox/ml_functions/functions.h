@@ -724,6 +724,17 @@ public:
         exec::EvalCtx& context,
         VectorPtr& output) const override {
 
+        bool use_gpu = false;
+        if (args.size() == 2) {
+            // an optional parameter can be passed to enable the GPU for mat_mul
+            use_gpu = args[1]->as<ConstantVector<bool>>()->valueAt(0);
+        }
+        torch::Device device = torch::kCPU;
+        if(use_gpu){
+            device = (torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
+
+        }
+        std::cout << "Using device:" << device <<std::endl;
         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
         torch::nn::Linear dense1(dims[0], dims[1]);
         torch::nn::Linear dense2(dims[1],dims[2]);
@@ -738,17 +749,21 @@ public:
         dense2->weight.set_data(weightTensor2);
         dense1->bias.set_data(bias1);
         dense2->bias.set_data(bias2);
+        dense1->to(device);
+        dense2->to(device);
         
         auto input_elements = args[0]->as<ArrayVector>()->elements();
         float* input_values = input_elements->values()->asMutable<float>();
         int input_size = input_elements->size();
         
         torch::Tensor input = torch::from_blob(input_values, {rows.size(), dims[0]});
+        input = input.to(device);
 
         torch::Tensor layer1_output = dense1->forward(input);
         torch::Tensor reluOutput = relu->forward(layer1_output);
         torch::Tensor layer2_output = dense2->forward(reluOutput);
         torch::Tensor softmax_output = torch::nn::functional::softmax(layer2_output, 1);
+        softmax_output = softmax_output.to(torch::kCPU);
         float* data = softmax_output.data_ptr<float>();
 
         std::vector<std::vector<float>> results;
