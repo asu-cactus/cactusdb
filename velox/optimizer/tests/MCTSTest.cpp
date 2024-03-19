@@ -198,9 +198,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         for (auto batchedData : finalResult) {
           batchedData = std::move(batchedData);
           int batchSize = batchedData->size();
-          if (verbose == 1) {
+          if (verbose == 2) {
             std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
-          } else if (verbose == 2) {
+          } else if (verbose == 3) {
             std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << "\n" << batchedData->toString(0, batchedData->size()) << std::endl;
           }
           dataIdx += 1;
@@ -209,8 +209,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         finalResult = std::move(finalResult);
       }
     }
-
-    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
+    if (verbose >= 1) {
+      std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
+    }
     // std::cout << "DEBUG, REACHED here";
     // finalResult = std::move(finalResult);
 
@@ -426,16 +427,17 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int numSamples,
       int numDriver,
       std::string benchmarkMode,
+      int blockSize,
       int verbose) {
     // Set data source config.
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
     int first_layer_output_size = 1024;
-    int second_layer_output_size = 14588;
+    int second_layer_output_size = 100;
     // Set splits number
     // Initialize CataLog
     CataLog cataLog;
-    cataLog.setDefaultBlocksSize(256);
+    cataLog.setDefaultBlocksSize(blockSize);
     cataLog.setBlockingThreshold(1);
     // Generate data source
     auto data = data_generate(
@@ -584,16 +586,16 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << averageExectuionTime;
   }
 
-  void testIntegratedMCTS(int featureSize, int numSamples, int repeatRun) {
+  void testIntegratedMCTS(int featureSize, int numSamples, int repeatRun, int blockSize) {
     // Set data source config.
     // int input_features_size = 800; // 597540
     int input_features_size = featureSize; // 597540
     // int num_samples = 1000;
     int num_samples = numSamples;
     int first_layer_output_size = 1024;
-    int second_layer_output_size = 14588;
+    int second_layer_output_size = 100;
     CataLog cataLog;
-    cataLog.setDefaultBlocksSize(256);
+    cataLog.setDefaultBlocksSize(blockSize);
     cataLog.setBlockingThreshold(1);
     // Set splits number
     // Generate data source
@@ -708,6 +710,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::cout << "===================================" << std::endl;
       std::cout << "Received message with mcts action: " << mctsAction
                 << std::endl;
+      if (mctsAction == "") {
+        std::cout << "Un-captured error happened" << std::endl;
+        return;
+      }
       std::cout << "JSON Message: " << receivedJsonMessage << std::endl;
       if (mctsAction == "resetPlan") {
         // if it is root node, it needs to start with original plan
@@ -731,7 +737,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         jsonMessage["communicateFlag"] = true;
         jsonMessage["mctsAction"] = "recQueryPlan";
-        jsonMessage["queryPlan"] = myPlan.planNode()->toString(true, true);
+        jsonMessage["queryPlan"] =  "\"" + myPlan.planNode()->toString(true, true) + "\"";
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "getActionSpace") {
@@ -834,7 +840,8 @@ DEFINE_int32(num_repeat, 5, "Number of repeat run");
 DEFINE_int32(feature_size, 1000, "FFNN Feature size");
 DEFINE_int32(num_sample, 1000, "Number of samples");
 DEFINE_int32(num_driver, 8, "Number of drivers");
-DEFINE_int32(verbose, 1, "Verbose");
+DEFINE_int32(verbose, 2, "Verbose");
+DEFINE_int32(block_size, 256, "Block Size");
 
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -847,13 +854,14 @@ int main(int argc, char** argv) {
   int numSample = FLAGS_num_sample;
   int numDriver = FLAGS_num_driver;
   int verbose = FLAGS_verbose;
+  int blockSize = FLAGS_block_size;
   IntegratedMCTSTest demo;
   // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
-    demo.testIntegratedMCTS(featureSize, numSample, repeatRun);
+    demo.testIntegratedMCTS(featureSize, numSample, repeatRun, blockSize);
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
-        rewrite, repeatRun, featureSize, numSample, numDriver, mode, verbose);
+        rewrite, repeatRun, featureSize, numSample, numDriver, mode, blockSize, verbose);
   }
 }

@@ -40,6 +40,12 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
  public:
   MultiLayerUDF2TorchNNRewriteAction() {}
 
+  void clearVectors() {
+    dims.clear();
+    weights.clear();
+    bias.clear();
+  }
+
   /**
    * @brief A function to apply a rule for rewriting the logical plan.
    *
@@ -71,6 +77,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
       std::vector<std::string> targets,
       CataLog& cataLog) override {
+    clearVectors();
     bool transformationApplied = false;
     // Iterate over each target in the targets container
     for (auto target : targets) {
