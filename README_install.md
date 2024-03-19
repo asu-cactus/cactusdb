@@ -45,7 +45,13 @@ sudo ln -sf eigen3/unsupported unsupported
 sudo apt-get install libopenblas-dev
 ```
 ## CUDA
-[Reference URL](https://www.cherryservers.com/blog/install-cuda-ubuntu)
+CUDA version 11.8 should be installed because of the libtorch.
+
+[CUDA Toolkit 11.8 Downloads](https://developer.nvidia.com/cuda-11-8-0-download-archive)
+
+[CUDA install Reference URL](https://www.cherryservers.com/blog/install-cuda-ubuntu)
+
+
 ## gcc update(may needed)
 ```shell
 # update gcc-9 to gcc-11
