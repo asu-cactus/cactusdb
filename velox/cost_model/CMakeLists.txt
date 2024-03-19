@@ -23,6 +23,7 @@ find_package(Torch REQUIRED)
 add_executable(nn_test tests/NNTests.cpp)
 target_link_libraries(
   nn_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector

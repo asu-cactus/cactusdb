@@ -19,10 +19,14 @@ set(CMAKE_PREFIX_PATH "$CONDA_PREFIX")
 
 find_package(Torch REQUIRED)
 find_package(xgboost REQUIRED)
+find_package(CUDA REQUIRED)
 
+add_library(mat_mul_cublas STATIC tests/GPUFunctions.cu)
+target_link_libraries(mat_mul_cublas cublas ${CUDA_LIBRARIES})
 add_executable(ml_functions_test tests/MLFunctionsTest.cpp)
 target_link_libraries(
   ml_functions_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -40,6 +44,7 @@ target_link_libraries(
 add_executable(nn_tests tests/NNTest.cpp)
 target_link_libraries(
   nn_tests
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -57,6 +62,7 @@ target_link_libraries(
 add_executable(embedding_test tests/EmbeddingTest.cpp)
 target_link_libraries(
   embedding_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -74,6 +80,7 @@ target_link_libraries(
 add_executable(two_tower_model_test tests/TwoTowerModelTest.cpp)
 target_link_libraries(
   two_tower_model_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -92,6 +99,7 @@ target_link_libraries(
 add_executable(two_tower_model_pipeline_test tests/TowTowerModelPipelineTest.cpp)
 target_link_libraries(
   two_tower_model_pipeline_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -110,6 +118,7 @@ target_link_libraries(
 add_executable(decision_forest_prediction_test tests/DecisionForestTest.cpp)
 target_link_libraries(
   decision_forest_prediction_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -145,6 +154,7 @@ target_link_libraries(
 add_executable(ml_sql_test tests/MLSQLTest.cpp)
 target_link_libraries(
   ml_sql_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -162,6 +172,7 @@ target_link_libraries(
 add_executable(array_array_unnest_test tests/ArrayofArrayUnnestTest.cpp)
 target_link_libraries(
   array_array_unnest_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector

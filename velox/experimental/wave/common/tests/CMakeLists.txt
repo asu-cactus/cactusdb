@@ -16,7 +16,7 @@ add_executable(velox_wave_common_test GpuArenaTest.cpp CudaTest.cpp CudaTest.cu
                                       BlockTest.cpp BlockTest.cu)
 
 set_target_properties(velox_wave_common_test PROPERTIES CUDA_ARCHITECTURES
-                                                        native)
+                                                        75)
 
 add_test(velox_wave_common_test velox_wave_common_test)
 

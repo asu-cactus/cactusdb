@@ -27,6 +27,7 @@ find_package(jsoncpp REQUIRED)
 add_executable(velox_op ${SOURCES})
 target_link_libraries(
   velox_op
+  mat_mul_cublas
   velox_type
   velox_vector
   velox_exec
@@ -42,6 +43,7 @@ target_link_libraries(
 add_executable(traversal_test TraversalTest.cpp)
 target_link_libraries(
   traversal_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -61,6 +63,7 @@ target_link_libraries(
 add_executable(torch2twolayer_test TorchNN2TwoLayerUDFRewriteActionTest.cpp)
 target_link_libraries(
   torch2twolayer_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -78,6 +81,7 @@ target_link_libraries(
 add_executable(twolayer2torch_test TwoLayerUDF2TorchNNRewriteActionTest.cpp)
 target_link_libraries(
   twolayer2torch_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -95,6 +99,7 @@ target_link_libraries(
 add_executable(multilayer2torch_test MultiLayerUDF2TorchNNRewriteActionTest.cpp)
 target_link_libraries(
   multilayer2torch_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -113,6 +118,7 @@ target_link_libraries(
 add_executable(decisionforest2rel_test DecisionForestUDF2RelationRewriteActionTest.cpp)
 target_link_libraries(
   decisionforest2rel_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -130,6 +136,7 @@ target_link_libraries(
 add_executable(mul2joinagg_test Mul2JoinAggRewriteActionTest.cpp)
 target_link_libraries(
   mul2joinagg_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -147,6 +154,7 @@ target_link_libraries(
 add_executable(mul2joinagghorizontal_test Mul2JoinAggHorizontalRewriteActionTest.cpp)
 target_link_libraries(
   mul2joinagghorizontal_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
@@ -164,6 +172,7 @@ target_link_libraries(
 add_executable(conv_test Conv2dActionTest.cpp)
 target_link_libraries(
   conv_test
+  mat_mul_cublas
   velox_aggregates
   velox_type
   velox_vector
