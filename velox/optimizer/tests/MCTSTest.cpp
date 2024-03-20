@@ -428,7 +428,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int numDriver,
       std::string benchmarkMode,
       int blockSize,
-      int verbose) {
+      int verbose,
+      bool getCost) {
     // Set data source config.
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
@@ -534,24 +535,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         testAction = std::make_pair("softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0(ROW[\"v\"]))))))", "MultiLayerUDF2TorchNNRewriteAction");
       } else if (benchmarkMode == "mul2joinAggHorizontal") {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
-      } else if (benchmarkMode == "cost") {
-        std::shared_ptr<Catalog> catalog =
-              std::make_shared<Catalog>(Catalog("db-catalog"));
-
-          std::shared_ptr<OutputStat> stat =
-              std::make_shared<OutputStat>(OutputStat(1, 2));
-
-          Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
-
-          catalog->addSource(std::make_shared<Source>(src1));
-
-          CostModel* cm = new SimpleCostModel(catalog);
-          CostEstimator* ce =
-              new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
-
-          planNode = myPlan.planNode();
-          CostEstimate cost = ce->estimateCost(planNode);
-          return ;
       } else {
          throw std::runtime_error(fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
       }
@@ -581,6 +564,28 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     if (verbose != 0) {
       std::cout << "Executed Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
     }
+
+    if (getCost) {
+        std::shared_ptr<Catalog> catalog =
+              std::make_shared<Catalog>(Catalog("db-catalog"));
+
+          std::shared_ptr<OutputStat> stat =
+              std::make_shared<OutputStat>(OutputStat(1, 2));
+
+          Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
+
+          catalog->addSource(std::make_shared<Source>(src1));
+
+          CostModel* cm = new SimpleCostModel(catalog);
+          CostEstimator* ce =
+              new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+
+          planNode = myPlan.planNode();
+          CostEstimate cost = ce->estimateCost(planNode);
+          std::cout << "[INFO] Current query plan cost: " << cost.cost << std::endl;
+          return ;
+    }
+
     float averageExectuionTime =
         runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
     std::cout << averageExectuionTime;
@@ -842,6 +847,7 @@ DEFINE_int32(num_sample, 1000, "Number of samples");
 DEFINE_int32(num_driver, 8, "Number of drivers");
 DEFINE_int32(verbose, 2, "Verbose");
 DEFINE_int32(block_size, 256, "Block Size");
+DEFINE_bool(cost, false, "Whether get cost");
 
 int main(int argc, char** argv) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -855,6 +861,7 @@ int main(int argc, char** argv) {
   int numDriver = FLAGS_num_driver;
   int verbose = FLAGS_verbose;
   int blockSize = FLAGS_block_size;
+  bool getCost = FLAGS_cost;
   IntegratedMCTSTest demo;
   // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
@@ -862,6 +869,6 @@ int main(int argc, char** argv) {
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
-        rewrite, repeatRun, featureSize, numSample, numDriver, mode, blockSize, verbose);
+        rewrite, repeatRun, featureSize, numSample, numDriver, mode, blockSize, verbose, getCost);
   }
 }
