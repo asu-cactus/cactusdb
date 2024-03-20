@@ -126,10 +126,10 @@ class CatArrayAggregate : public exec::Aggregate {
     float* valuesFloat = values->elements()->values()->asMutable<float>();
 
     decodedIndexes.decode(*args[1], rows);
-    auto indexs =
+    auto indexes =
         decodedIndexes.base()->asFlatVector<float>(); // intermediate result
                                                       // changed to dict, TODO
-    float* indexsFloat = indexs->values()->asMutable<float>();
+    float* indexesFloat = indexes->values()->asMutable<float>();
     rows.applyToSelected([&](vector_size_t row) {
       auto group = groups[row];
       auto tracker = trackRowSize(group);
@@ -198,8 +198,8 @@ class CatArrayAggregate : public exec::Aggregate {
     float* valuesFloat = values->elements()->values()->asMutable<float>();
 
     decodedElements_.decode(*args[1], rows);
-    auto indexs = decodedElements_.base()->asFlatVector<float>();
-    float* indexsFloat = indexs->values()->asMutable<float>();
+    auto indexes = decodedElements_.base()->asFlatVector<float>();
+    float* indexesFloat = indexes->values()->asMutable<float>();
 
     rows.applyToSelected([&](vector_size_t row) {
       auto decodedRow = decodedElements_.index(row);
@@ -223,8 +223,8 @@ class CatArrayAggregate : public exec::Aggregate {
     float* valuesFloat = arrayVector->elements()->values()->asMutable<float>();
 
     decodedIntermediate_.decode(*args[1], rows);
-    auto indexs = decodedIntermediate_.base()->asFlatVector<float>();
-    float* indexsFloat = indexs->values()->asMutable<float>();
+    auto indexes = decodedIntermediate_.base()->asFlatVector<float>();
+    float* indexesFloat = indexes->values()->asMutable<float>();
     rows.applyToSelected([&](vector_size_t row) {
       auto decodedRow = decodedIntermediate_.index(row);
       auto rowOffset = arrayVector->offsetAt(decodedRow);
