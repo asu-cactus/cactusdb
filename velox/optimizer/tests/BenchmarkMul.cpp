@@ -146,7 +146,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
 
 
             auto hiveSplits = makeHiveConnectorSplits(fileAddr);
-
+            
 
 
             for (auto& split : hiveSplits) {
@@ -372,6 +372,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
       int numDriver,
       int numThreads,
       int numBlocks,
+      bool splitToDisk,
       std::string benchmarkMode,
       int verbose) {
     // Set data source config.
@@ -383,7 +384,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
     // Initialize CataLog
     CataLog cataLog;
     int blockSize = outputSize / numBlocks;
-    std::cout << "blockSize:" << blockSize << std::endl;
+    // std::cout << "blockSize:" << blockSize << std::endl;
     // cataLog.setDefaultBlocksSize(256);
     cataLog.setDefaultBlocksSize(blockSize);
     cataLog.setBlockingThreshold(1);
@@ -459,9 +460,39 @@ class BenchmarkTest : public HiveConnectorTestBase {
                       .project({fmt::format(compute, "v")})
                       .planBuild();
     // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, {file});
-    // Set vector name and nodeId of data source
-    cataLog.setVectorIdMap(p0, "v");
+    if (splitToDisk) {
+
+      std::vector<std::shared_ptr<TempFilePath>> paths;
+          // Calculate the number of elements in each part (except the last one)
+      size_t partSize = numSamples / (numBlocks - 1);
+    // Calculate the number of elements in the last part
+      size_t lastPartSize = numSamples - partSize * (numBlocks - 1);
+      for (size_t i = 0; i < numBlocks - 1; ++i) {
+          std::vector<std::vector<float>> result(data.features.begin() + i * partSize, data.features.begin() + (i + 1) * partSize);
+          auto featureArrayVector = maker.arrayVector<float>(result, REAL());
+          auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+          auto file = TempFilePath::create();
+          auto config = std::make_shared<facebook::velox::dwrf::Config>();
+          writeToFile(file->path, {inputRowVector}, config);
+          paths.push_back(file);
+      }
+      std::vector<std::vector<float>> result(data.features.end() - lastPartSize, data.features.end());
+      auto featureArrayVector = maker.arrayVector<float>(result, REAL());
+      auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      auto file = TempFilePath::create();
+      auto config = std::make_shared<facebook::velox::dwrf::Config>();
+      writeToFile(file->path, {inputRowVector}, config);
+      paths.push_back(file);
+
+      cataLog.setIdAddressMap(p0, paths);
+      cataLog.setVectorIdMap(p0, "v");
+    }
+    else {
+
+      cataLog.setIdAddressMap(p0, {file});
+      // Set vector name and nodeId of data source
+      cataLog.setVectorIdMap(p0, "v");
+    }
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -522,6 +553,7 @@ DEFINE_int32(output_size, 1024, "output size");
 DEFINE_int32(num_driver, 8, "Number of drivers");
 DEFINE_int32(num_function_threads, 8, "Number of core function threads");
 DEFINE_int32(num_blocks, 4, "Number of blocks in partition");
+DEFINE_bool(split_disk, false, "Whether  split to disk");
 DEFINE_int32(verbose, 1, "Verbose");
 
 int main(int argc, char** argv) {
@@ -537,9 +569,10 @@ int main(int argc, char** argv) {
   int numDriver = FLAGS_num_driver;
   int numThreads = FLAGS_num_function_threads;
   int numBlocks = FLAGS_num_blocks;
+  bool splitToDisk = FLAGS_split_disk;
   int verbose = FLAGS_verbose;
   BenchmarkTest demo;
   // available single benchmark mode: mul2joinAgg, mul2joinAggHorizontal
   demo.testSingleRewrite(
-          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, numThreads, numBlocks, mode, verbose);
+          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, numThreads, numBlocks, splitToDisk, mode, verbose);
 }
