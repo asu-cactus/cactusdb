@@ -99,6 +99,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
   float runPlanWithCataLog(
       int numThreads,
       int numSplits,
+      std::string batchSize,
       PlanBuilder& myPlan,
       CataLog& cataLog,
       int repeatRun = 1,
@@ -119,9 +120,9 @@ class BenchmarkTest : public HiveConnectorTestBase {
       // Set queryCtx config.
       queryCtx_->testingOverrideConfigUnsafe(
           {
-            {core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
-           {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
-           {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
+            {core::QueryConfig::kPreferredOutputBatchBytes, "10000000000000000000"},
+           {core::QueryConfig::kMaxOutputBatchRows, batchSize},
+           {core::QueryConfig::kPreferredOutputBatchRows, batchSize}});
 
 
       // Add hivesplits to the target plan node (data source node).
@@ -373,6 +374,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
       int numThreads,
       int numBlocks,
       bool splitToDisk,
+      std::string batchSize,
       std::string benchmarkMode,
       int verbose) {
     // Set data source config.
@@ -534,7 +536,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
 
     // Run the rewritten plan
     float averageExectuionTime =
-        runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
+        runPlanWithCataLog(numDriver, numDriver, batchSize, myPlan, cataLog, repeatRun, verbose);
     std::cout << averageExectuionTime;
   }
 
@@ -554,6 +556,7 @@ DEFINE_int32(num_driver, 8, "Number of drivers");
 DEFINE_int32(num_function_threads, 8, "Number of core function threads");
 DEFINE_int32(num_blocks, 4, "Number of blocks in partition");
 DEFINE_bool(split_disk, false, "Whether  split to disk");
+DEFINE_string(batch_size, "1000", "batch size of ouput");
 DEFINE_int32(verbose, 1, "Verbose");
 
 int main(int argc, char** argv) {
@@ -570,9 +573,10 @@ int main(int argc, char** argv) {
   int numThreads = FLAGS_num_function_threads;
   int numBlocks = FLAGS_num_blocks;
   bool splitToDisk = FLAGS_split_disk;
+  std::string batchSize = FLAGS_batch_size;
   int verbose = FLAGS_verbose;
   BenchmarkTest demo;
   // available single benchmark mode: mul2joinAgg, mul2joinAggHorizontal
   demo.testSingleRewrite(
-          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, numThreads, numBlocks, splitToDisk, mode, verbose);
+          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, numThreads, numBlocks, splitToDisk, batchSize, mode, verbose);
 }
