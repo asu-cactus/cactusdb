@@ -1378,11 +1378,12 @@ public:
         // std::cout << "output_height:" << output_height << std::endl;
         // std::cout << "output_width:" << output_width << std::endl;
         // std::cout << "dims[0]:" << dims[0] << std::endl;
-        std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
+        // std::vector<std::vector<float>> results(rows.size(), std::vector<float>(output_height * output_width * dims[0]));
         // std::cout << "ok" << std::endl;
-        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[0], dims[3], {dims[1], dims[2]}).bias(false));
+        torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}).bias(false));
+
         // torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(dims[3], dims[0], {dims[1], dims[2]}));
-        torch::Tensor conv_weights = torch::from_blob(weights_, {dims[3], dims[0], dims[1], dims[2]}).to(torch::kFloat);
+        torch::Tensor conv_weights = torch::from_blob(weights_, {dims[0], dims[3], dims[1], dims[2]}).to(torch::kFloat);
 
         auto parameters = conv_layer->named_parameters();
 
@@ -1393,6 +1394,7 @@ public:
                 break;
             }
         }
+
         torch::Tensor input_data = torch::from_blob(input_values, {rows.size(), dims[3], input_height, input_width}).to(torch::kFloat);
 
        
@@ -1409,18 +1411,22 @@ public:
         // output_data = torch::max_pool2d(output_data, {dims[6], dims[6]});
         
         float* data = output_data.data_ptr<float>();
-        
+
         int row_size = output_height * output_width * dims[0];
 
         // std::cout << "row_size" << row_size << std::endl;
-       
-        for (int i = 0; i < rows.size(); ++i) {
-            std::vector<float> result;
-            for (int j = 0; j < row_size; ++j) {
-                result.push_back(data[i*row_size + j]);
-            }
+        std::vector<std::vector<float>> results;
+        for(int i=0, cursor = 0; i < rows.size(); i++, cursor += row_size){
+            std::vector<float> result(data + cursor, data + cursor + row_size);
             results.push_back(result);
         }
+        // for (int i = 0; i < rows.size(); ++i) {
+        //     std::vector<float> result;
+        //     for (int j = 0; j < row_size; ++j) {
+        //         result.push_back(data[i*row_size + j]);
+        //     }
+        //     results.push_back(result);
+        // }
 
         // for (auto entry: results) {
         //     for (int i =0; i < 1000; i++){
@@ -1429,6 +1435,7 @@ public:
         // }
         // std::cout << "ok" << std::endl;
         VectorMaker maker{context.pool()};
+        // output = maker.arrayVector<float>(results, REAL());
         output = maker.arrayVector<float>(results, REAL());
         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
         //std::cout << "Time for conv2d (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
