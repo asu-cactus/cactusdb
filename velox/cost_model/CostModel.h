@@ -178,7 +178,7 @@ class SimpleCostModel : public CostModel {
                     }    
                 }
             });
-            std::cout<< finalEstimate.cost;
+            std::cout<< finalEstimate.cost << std::endl;
             return finalEstimate;
 	    }
 	 
