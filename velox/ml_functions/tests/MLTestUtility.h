@@ -5,6 +5,12 @@
 
 class RandomGenerator {
  public:
+  
+  RandomGenerator() {
+    gen_ = std::mt19937(0);
+    distR_ = std::uniform_real_distribution<float>(0, 1);
+    distI_ = std::uniform_int_distribution<int>((int)0, (int)10);
+  }
   RandomGenerator(float lb, float ub, int randomSeed = 0) {
     gen_ = std::mt19937(randomSeed);
     distR_ = std::uniform_real_distribution<float>(lb, ub);
