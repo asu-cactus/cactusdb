@@ -123,9 +123,9 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
           std::make_shared<core::QueryCtx>(executor_.get())};
       // Set queryCtx config.
       queryCtx_->testingOverrideConfigUnsafe(
-          {{core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
+          {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000000000"},
            {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
-           {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
+           {core::QueryConfig::kPreferredOutputBatchRows, "1000000"}});
 
       // Add hivesplits to the target plan node (data source node).
       std::chrono::steady_clock::time_point begin =
@@ -176,7 +176,6 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
           dataIdx += 1;
           totalDataNum += batchSize;
         }
-        
       }
       finalResult = std::move(finalResult);
     }
@@ -191,15 +190,16 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     return totalElapsedTime / repeatRun;
   }
 
-  PlanBuilder benchmarkMatMul(int batchSize, int featureSize, int dim2) {
+  PlanBuilder getMatMulPlan(int batchSize, int featureSize, int dim2) {
     VectorMaker maker{pool_.get()};
     std::vector<std::vector<float>> leftMatrix =
         randomGenerator.genFloat2dVector(batchSize, featureSize);
     std::vector<std::vector<float>> rightMatrix =
-        randomGenerator.genFloat2dVector(batchSize, dim2);
+        randomGenerator.genFloat2dVector(featureSize, dim2);
     auto leftMatrixVector = maker.arrayVector<float>(leftMatrix, REAL());
     auto rightMatrixVector = maker.arrayVector<float>(rightMatrix, REAL());
-
+    // std::cout << "[DEBUG] right size: " << rightMatrix.size() << " " << rightMatrix[0].size() << std::endl;
+    // std::cout << rightData[0] << "," << rightData[1] << std::endl;
     exec::registerVectorFunction(
         "mat_mul",
         MatrixMultiply::signatures(),
@@ -207,12 +207,69 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
             rightMatrixVector->elements()->values()->asMutable<float>(),
             featureSize,
             dim2));
-
     auto inputRowVector = maker.rowVector({"x"}, {leftMatrixVector});
 
     auto myPlan = exec::test::PlanBuilder(pool_.get())
                       .values({inputRowVector})
                       .project({"mat_mul(x)"});
+
+    return myPlan;
+  }
+
+  PlanBuilder getMatAddPlan(int batchSize, int featureSize) {
+    VectorMaker maker{pool_.get()};
+    std::vector<std::vector<float>> leftMatrix =
+        randomGenerator.genFloat2dVector(batchSize, featureSize);
+    std::vector<std::vector<float>> rightMatrix =
+        randomGenerator.genFloat2dVector(featureSize, 1);
+    auto leftMatrixVector = maker.arrayVector<float>(leftMatrix, REAL());
+    auto rightMatrixVector = maker.arrayVector<float>(rightMatrix, REAL());
+
+    exec::registerVectorFunction(
+        "mat_vector_add",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            rightMatrixVector->elements()->values()->asMutable<float>(), featureSize));
+
+    auto inputRowVector = maker.rowVector({"x"}, {leftMatrixVector});
+
+    auto myPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({inputRowVector})
+                      .project({"mat_vector_add(x)"});
+    return myPlan;
+  }
+
+  PlanBuilder getReluPlan(int batchSize, int featureSize) {
+    VectorMaker maker{pool_.get()};
+    std::vector<std::vector<float>> leftMatrix =
+        randomGenerator.genFloat2dVector(batchSize, featureSize);
+    auto leftMatrixVector = maker.arrayVector<float>(leftMatrix, REAL());
+
+    exec::registerVectorFunction(
+        "relu", Relu::signatures(), std::make_unique<Relu>());
+
+    auto inputRowVector = maker.rowVector({"x"}, {leftMatrixVector});
+
+    auto myPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({inputRowVector})
+                      .project({"relu(x)"});
+    return myPlan;
+  }
+
+  PlanBuilder getSoftmaxPlan(int batchSize, int featureSize) {
+    VectorMaker maker{pool_.get()};
+    std::vector<std::vector<float>> leftMatrix =
+        randomGenerator.genFloat2dVector(batchSize, featureSize);
+    auto leftMatrixVector = maker.arrayVector<float>(leftMatrix, REAL());
+
+    exec::registerVectorFunction(
+        "softmax", Softmax::signatures(), std::make_unique<Softmax>());
+
+    auto inputRowVector = maker.rowVector({"x"}, {leftMatrixVector});
+
+    auto myPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({inputRowVector})
+                      .project({"softmax(x)"});
     return myPlan;
   }
 
@@ -225,7 +282,13 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
       int numRepeat) {
     PlanBuilder plan;
     if (kernel == "MatMul") {
-      plan = benchmarkMatMul(batchSize, featureSize, dim2);
+      plan = getMatMulPlan(batchSize, featureSize, dim2);
+    } else if (kernel == "MatAdd") {
+      plan = getMatAddPlan(batchSize, featureSize);
+    } else if (kernel == "Relu") {
+      plan = getReluPlan(batchSize, featureSize);
+    } else if (kernel == "Softmax") {
+      plan = getSoftmaxPlan(batchSize, featureSize);
     }
 
     if (verbose == 1) {
@@ -262,15 +325,17 @@ int main(int argc, char** argv) {
   int dim2 = FLAGS_dim2;
   int verbose = FLAGS_verbose;
 
-  std::cout
-      << fmt::format(
-             "[INFO] Benchmark Kernel: {} \n \t # Batch Size: {}, numRepeat: {}, featureSize: {}, dim2: {}",
-             kernel,
-             batchSize,
-             numRepeat,
-             featureSize,
-             dim2)
-      << std::endl;
+  if (verbose >= 1) {
+    std::cout
+        << fmt::format(
+              "[INFO] Benchmark Kernel: {} \n \t # Batch Size: {}, numRepeat: {}, featureSize: {}, dim2: {}",
+              kernel,
+              batchSize,
+              numRepeat,
+              featureSize,
+              dim2)
+        << std::endl;
+  }
 
   DLKernelBenchmarkTest dlKernelBenchmark;
 
