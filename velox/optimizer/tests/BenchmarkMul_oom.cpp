@@ -126,7 +126,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
             {core::QueryConfig::kPreferredOutputBatchBytes, "25000000000"},
            {core::QueryConfig::kMaxOutputBatchRows, batchSize}});
 
-
+      std::cout << "check 1" << std::endl;
       // Add hivesplits to the target plan node (data source node).
       std::chrono::steady_clock::time_point begin =
           std::chrono::steady_clock::now();
@@ -292,37 +292,86 @@ class BenchmarkTest : public HiveConnectorTestBase {
       // weight_layer1[i] = i;
       weight_layer1[i] = 0.000001;
     }
-    float* weight_layer2 = new float[weight_layer2_size];
-
-    for (int i = 0; i < weight_layer2_size; ++i) {
-      weight_layer2[i] = 0.000001;
-    }
 
     std::vector<float*> weights;
     weights.push_back(weight_layer1);
-    weights.push_back(weight_layer2);
 
-    // Generate bias
-    float* bias_layer1 = new float[bias_layer1_size];
-
-    for (int i = 0; i < bias_layer1_size; ++i) {
-      bias_layer1[i] = 0.00001;
-    }
-    float* bias_layer2 = new float[bias_layer2_size];
-
-    for (int i = 0; i < bias_layer2_size; ++i) {
-      bias_layer2[i] = 0.00001;
-    }
 
     std::vector<float*> bias;
-    bias.push_back(bias_layer1);
-    bias.push_back(bias_layer2);
 
     // Create DataFrame
     DataFrame data;
     data.features = featureVectors;
     data.weights = weights;
-    data.bias = bias;
+    data.featuresFloat = floatArray;
+
+    return data;
+  }
+
+  DataFrame
+  data_generate_blocks(int features, int samples, int first_layer, int second_layer, CataLog& cataLog) {
+    // Example:
+    // ( 1000 * 597540 x 597540 * 1024 + 1000*1024) first layer, data x weights
+    // + bias. ( 1000 * 1024 x 1024 * 14588 + 1000*14588) second layer, data x
+    // weights + bias.
+    int input_features_size = features;
+    int num_samples = samples;
+
+    int first_layer_output_size = first_layer;
+    int second_layer_output_size = second_layer;
+
+    int input_total_size = input_features_size * num_samples;
+
+    long weight_layer1_size = input_features_size * static_cast<long>(first_layer_output_size);
+    long weight_layer2_size = first_layer_output_size * second_layer_output_size;
+    int weight_test = input_features_size * first_layer_output_size;
+    int bias_layer1_size = num_samples * first_layer_output_size;
+    int bias_layer2_size = num_samples * second_layer_output_size;
+    // Seed the random number generator
+    std::random_device rd;
+    // Initialize the Mersenne Twister engine
+    std::mt19937 gen(rd());
+    // Define the range
+    std::uniform_real_distribution<float> distribution(0.0009, 0.0011);
+
+    // Generate input
+    std::vector<std::vector<float>> featureVectors;
+
+    for (int i = 0; i < num_samples; i++) {
+      std::vector<float> featureVector;
+
+      for (int j = 0; j < input_features_size; j++) {
+        featureVector.push_back(
+            (i * input_features_size + j) / input_total_size);
+            // featureVector.push_back(1);
+      }
+
+      featureVectors.push_back(featureVector);
+    }
+
+    float* floatArray = new float[num_samples * input_features_size];
+
+    int index = 0;
+
+    for (const auto& row : featureVectors) {
+      for (const float& value : row) {
+        floatArray[index++] = value;
+      }
+    }
+
+    // Generate weight
+
+    optimization::FileStructure weightsFileStructure;
+    int blocksSize = cataLog.getDefaultBlocksSize();
+    weightsFileStructure = create_blocks_to_files(input_features_size, first_layer_output_size, blocksSize);
+    std::string nameSuffix = "_vertical";
+    cataLog.add("mat_mul0", weightsFileStructure.schema, weightsFileStructure.paths, 1, nameSuffix);
+
+    // Create DataFrame
+
+    DataFrame data;
+    data.features = featureVectors;
+
     data.featuresFloat = floatArray;
 
     return data;
@@ -347,13 +396,8 @@ class BenchmarkTest : public HiveConnectorTestBase {
    */
   std::string registerFunctions(
       int units1,
-      int units2,
       int input_size1,
-      int input_size2,
       float* weightsFile_1,
-      float* weightsFile_2,
-      float* biasFile_1,
-      float* biasFile_2,
       CataLog& catalog,
       bool isVerticalPartition,
       int numThreads) {
@@ -388,6 +432,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
       int numThreads,
       int numBlocks,
       bool splitToDisk,
+      int option,
       std::string batchSize,
       std::string benchmarkMode,
       int verbose) {
@@ -404,17 +449,16 @@ class BenchmarkTest : public HiveConnectorTestBase {
     // std::cout << "blockSize:" << blockSize << std::endl;
     // cataLog.setDefaultBlocksSize(256);
     cataLog.setDefaultBlocksSize(blockSize);
-    cataLog.setBlockingThreshold(1000000);
     cataLog.setDefaultBlocksNum(numBlocks);
     // Generate data source
-    auto data = data_generate(
+    if (option == 1) {
+      cataLog.setBlockingThreshold(1000000);
+      auto data = data_generate(
         input_features_size,
         num_samples,
         first_layer_output_size,
         second_layer_output_size);
-    // Create arrayVector for data source
-
-    auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+            auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
     // Create rowVector for data source
     auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
     // Create file path
@@ -423,35 +467,11 @@ class BenchmarkTest : public HiveConnectorTestBase {
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
     // Write the data source to a file, with the format defined by the rowVector
     writeToFile(file->path, {inputRowVector}, config);
-    //  Check the input size against the blocking threshold in cataLog.
-    //  If yes, preblock the input vector, store it, and add information in
-    //  cataLog. If not, set dataSource in cataLog.
-
-    if (input_features_size > cataLog.getBlockingThreshold()) {
-      // If input size is larger than blocking threshold, preblock and store in
-      // cataLog
-      std::vector<std::vector<float>> valuesBlock =
-          optimization::create_input_block(
-              input_features_size * num_samples,
-              data.features,
-              cataLog.getDefaultBlocksNum());
-      optimization::FileStructure values = optimization::block_to_files(
-          valuesBlock, cataLog.getDefaultBlocksNum(), 0);
-      // Set data source blocks in cataLog
-      cataLog.setDataSourceBlocks(values.schema, values.paths);
+    cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
       // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
-    } else {
-      // If input size is not larger than blocking threshold, set dataSource in
-      // cataLog
-      cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
-    }
-    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
-    // Build two dense layers UDFs using registerFunction in optimization
-    // namespace
-    bool isVerticalPartition = true;
+    cataLog.setDataSourceStat({num_samples, input_features_size});
+     cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+     bool isVerticalPartition = true;
     if (benchmarkMode == "mul2joinAggHorizontal") {
       isVerticalPartition = false;
       
@@ -459,18 +479,13 @@ class BenchmarkTest : public HiveConnectorTestBase {
 
     std::string compute = registerFunctions(
         first_layer_output_size,
-        second_layer_output_size,
         input_features_size,
-        first_layer_output_size,
         data.weights[0],
-        data.weights[1],
-        data.bias[0],
-        data.bias[1],
         cataLog,
         isVerticalPartition,
         numThreads);
 
-    // Initialize planNodeID
+
     core::PlanNodeId p0;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
@@ -481,41 +496,70 @@ class BenchmarkTest : public HiveConnectorTestBase {
                       .project({fmt::format(compute, "v")})
                       .planBuild();
     // Set original plan nodeId and file address of data source
-    if (splitToDisk) {
 
-      std::vector<std::shared_ptr<TempFilePath>> paths;
-          // Calculate the number of elements in each part (except the last one)
-      size_t partSize = numSamples / (numBlocks - 1);
-    // Calculate the number of elements in the last part
-      size_t lastPartSize = numSamples - partSize * (numBlocks - 1);
-      for (size_t i = 0; i < numBlocks - 1; ++i) {
-          std::vector<std::vector<float>> result(data.features.begin() + i * partSize, data.features.begin() + (i + 1) * partSize);
-          auto featureArrayVector = maker.arrayVector<float>(result, REAL());
-          auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-          auto file = TempFilePath::create();
-          auto config = std::make_shared<facebook::velox::dwrf::Config>();
-          writeToFile(file->path, {inputRowVector}, config);
-          paths.push_back(file);
-      }
-      std::vector<std::vector<float>> result(data.features.end() - lastPartSize, data.features.end());
-      auto featureArrayVector = maker.arrayVector<float>(result, REAL());
-      auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-      auto file = TempFilePath::create();
-      auto config = std::make_shared<facebook::velox::dwrf::Config>();
-      writeToFile(file->path, {inputRowVector}, config);
-      paths.push_back(file);
-
-      cataLog.setIdAddressMap(p0, paths);
-      cataLog.setVectorIdMap(p0, "v");
-    }
-    else {
 
       cataLog.setIdAddressMap(p0, {file});
       // Set vector name and nodeId of data source
       cataLog.setVectorIdMap(p0, "v");
-    }
 
-    // Get the logical plan
+      float averageExectuionTime =
+        runPlanWithCataLog(numDriver, numDriver, batchSize, myPlan, cataLog, repeatRun, verbose);
+      std::cout << averageExectuionTime;
+
+    }
+    else {
+      cataLog.setBlockingThreshold(1000000);
+      auto data = data_generate_blocks(
+        input_features_size,
+        num_samples,
+        first_layer_output_size,
+        second_layer_output_size,
+        cataLog);
+    auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+    // Create rowVector for data source
+    auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+    // Create file path
+    auto file = TempFilePath::create();
+    // Create file config
+    auto config = std::make_shared<facebook::velox::dwrf::Config>();
+    // Write the data source to a file, with the format defined by the rowVector
+    writeToFile(file->path, {inputRowVector}, config);
+    cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+      // Set data source statistics in cataLog
+    cataLog.setDataSourceStat({num_samples, input_features_size});
+     cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+     bool isVerticalPartition = true;
+    if (benchmarkMode == "mul2joinAggHorizontal") {
+      isVerticalPartition = false;
+      
+    }
+    float* w;
+    std::string compute = registerFunctions(
+        first_layer_output_size,
+        input_features_size,
+        w,
+        cataLog,
+        isVerticalPartition,
+        numThreads);
+
+
+    core::PlanNodeId p0;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    // Create a plan for FFNN using two dense layers UDFs
+    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(asRowType(inputRowVector->type()))
+                      .capturePlanNodeId(p0)
+                      .project({fmt::format(compute, "v")})
+                      .planBuild();
+    // Set original plan nodeId and file address of data source
+
+
+      cataLog.setIdAddressMap(p0, {file});
+      // Set vector name and nodeId of data source
+      cataLog.setVectorIdMap(p0, "v");
+
+      // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
     RuleManager ruleManager;
@@ -526,7 +570,6 @@ class BenchmarkTest : public HiveConnectorTestBase {
     // Create planState
     PlanState planState(ruleManager);
     // Run rewriten rule
-    if (rewrite) {
       // Get possible actions for this plan
       planState.getPossibleActions(planNode, cataLog);
       std::pair<std::string, std::string> testAction;
@@ -552,11 +595,17 @@ class BenchmarkTest : public HiveConnectorTestBase {
           cataLog);
       // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan, cataLog);
-    }
+    
     // Run the rewritten plan
     float averageExectuionTime =
         runPlanWithCataLog(numDriver, numDriver, batchSize, myPlan, cataLog, repeatRun, verbose);
     std::cout << averageExectuionTime;
+    }
+
+
+
+
+    
   }
 
  private:
@@ -575,6 +624,7 @@ DEFINE_int32(num_driver, 8, "Number of drivers");
 DEFINE_int32(num_function_threads, 8, "Number of core function threads");
 DEFINE_int32(num_blocks, 4, "Number of blocks in partition");
 DEFINE_bool(split_disk, false, "Whether  split to disk");
+DEFINE_int32(option, 1, "option of oom");
 DEFINE_string(batch_size, "1000", "batch size of ouput");
 DEFINE_int32(verbose, 1, "Verbose");
 
@@ -592,10 +642,11 @@ int main(int argc, char** argv) {
   int numThreads = FLAGS_num_function_threads;
   int numBlocks = FLAGS_num_blocks;
   bool splitToDisk = FLAGS_split_disk;
+  int option = FLAGS_option;
   std::string batchSize = FLAGS_batch_size;
   int verbose = FLAGS_verbose;
   BenchmarkTest demo;
   // available single benchmark mode: mul2joinAgg, mul2joinAggHorizontal
   demo.testSingleRewrite(
-          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, numThreads, numBlocks, splitToDisk, batchSize, mode, verbose);
+          rewrite, repeatRun, featureSize, outputSize, numSample, numDriver, numThreads, numBlocks, splitToDisk, option, batchSize, mode, verbose);
 }

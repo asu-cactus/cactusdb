@@ -319,6 +319,26 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(benchmarkmul_oom_test tests/BenchmarkMul_oom.cpp)
+# target_compile_options(benchmarkmul_test PRIVATE ${OpenMP_CXX_FLAGS})
+target_link_libraries(
+  benchmarkmul_oom_test
+  # PRIVATE ${OpenMP_CXX_FLAGS}
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  openblas
+  ${TORCH_LIBRARIES}
+)
+
 
 
 
