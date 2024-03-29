@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 def run_cpp_program(path, params):
     # return 0
     execution_command = [
-        "/home/ubuntu/velox/build/velox/optimizer/benchmarkmul_oom_test {}".format(params)
+        "/home/local/ASUAD/qlin36/velox/build/velox/optimizer/benchmarkmul_oom_test {}".format(params)
     ]
     result = float(
     subprocess.run(execution_command, stdout=subprocess.PIPE, shell=True).stdout
@@ -18,22 +18,22 @@ def run_cpp_program(path, params):
 
 
 if __name__ == "__main__":
-    list_feature_size = [597540]
-    list_sample_size = [1]
+    list_feature_size = [100000]
+    list_sample_size = [10000]
     # list_sample_size = [100000]
-    list_output_size = [40960]
+    list_output_size = [10240]
     # list_rewrite = ["false","true"]
-    list_rewrite = ["true"]
+    list_rewrite = ["false"]
     # list_mode = ["mul2joinAgg", "mul2joinAggHorizontal"]
     list_mode = ["mul2joinAggHorizontal"]
     list_velox_driver = [8]
     list_function_threads = [1]
-    list_blocks = [160]
+    list_blocks = [8]
     list_split_disk = ["false"]
-    list_option =[2]
+    list_option =[1]
     num_repeat = 1
     # list_batch_size = ["100", "1000", "10000", "100000"]
-    list_batch_size = ["100"] # kPreferredOutputBatchBytes 2500000 (597540*4) bytes per item, until 10000 *2500000, then kMaxOutputBatchRows determine the output, we all set it as 250000000000 to make kMaxOutputBatchRows control it.
+    list_batch_size = ["10000"] # kPreferredOutputBatchBytes 2500000 (597540*4) bytes per item, until 10000 *2500000, then kMaxOutputBatchRows determine the output, we all set it as 250000000000 to make kMaxOutputBatchRows control it.
 
     run_configs = list(
         itertools.product(

@@ -126,7 +126,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
             {core::QueryConfig::kPreferredOutputBatchBytes, "25000000000"},
            {core::QueryConfig::kMaxOutputBatchRows, batchSize}});
 
-      std::cout << "check 1" << std::endl;
+      // std::cout << "check 1" << std::endl;
       // Add hivesplits to the target plan node (data source node).
       std::chrono::steady_clock::time_point begin =
           std::chrono::steady_clock::now();
@@ -458,25 +458,24 @@ class BenchmarkTest : public HiveConnectorTestBase {
         num_samples,
         first_layer_output_size,
         second_layer_output_size);
-            auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+    auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
     // Create rowVector for data source
     auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
     // Create file path
-    auto file = TempFilePath::create();
+    // auto file = TempFilePath::create();
     // Create file config
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
     // Write the data source to a file, with the format defined by the rowVector
-    writeToFile(file->path, {inputRowVector}, config);
-    cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+    // writeToFile(file->path, {inputRowVector}, config);
+    // cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
       // Set data source statistics in cataLog
-    cataLog.setDataSourceStat({num_samples, input_features_size});
-     cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+    // cataLog.setDataSourceStat({num_samples, input_features_size});
+    //  cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
      bool isVerticalPartition = true;
     if (benchmarkMode == "mul2joinAggHorizontal") {
       isVerticalPartition = false;
       
     }
-
     std::string compute = registerFunctions(
         first_layer_output_size,
         input_features_size,
@@ -487,7 +486,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
 
 
     core::PlanNodeId p0;
-    // Initialize planNodeIdGenerator
+
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
@@ -495,13 +494,35 @@ class BenchmarkTest : public HiveConnectorTestBase {
                       .capturePlanNodeId(p0)
                       .project({fmt::format(compute, "v")})
                       .planBuild();
-    // Set original plan nodeId and file address of data source
 
+      if (true) {
+      std::vector<std::shared_ptr<TempFilePath>> paths;
+          // Calculate the number of elements in each part (except the last one)
+      size_t partSize = numSamples / (8 - 1);
+    // Calculate the number of elements in the last part
+      size_t lastPartSize = numSamples - partSize * (8 - 1);
+      for (size_t i = 0; i < 8 - 1; ++i) {
+          std::vector<std::vector<float>> result(data.features.begin() + i * partSize, data.features.begin() + (i + 1) * partSize);
+          auto featureArrayVector = maker.arrayVector<float>(result, REAL());
+          auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+          auto file = TempFilePath::create();
+          auto config = std::make_shared<facebook::velox::dwrf::Config>();
+          writeToFile(file->path, {inputRowVector}, config);
+          paths.push_back(file);
+      }
+      std::vector<std::vector<float>> result(data.features.end() - lastPartSize, data.features.end());
+      auto featureArrayVector = maker.arrayVector<float>(result, REAL());
+      auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      auto file = TempFilePath::create();
+      // auto config = std::make_shared<facebook::velox::dwrf::Config>();
+      writeToFile(file->path, {inputRowVector}, config);
+      paths.push_back(file);
 
-      cataLog.setIdAddressMap(p0, {file});
-      // Set vector name and nodeId of data source
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+      cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+      cataLog.setIdAddressMap(p0, paths);
       cataLog.setVectorIdMap(p0, "v");
-
+      }
       float averageExectuionTime =
         runPlanWithCataLog(numDriver, numDriver, batchSize, myPlan, cataLog, repeatRun, verbose);
       std::cout << averageExectuionTime;
@@ -519,15 +540,15 @@ class BenchmarkTest : public HiveConnectorTestBase {
     // Create rowVector for data source
     auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
     // Create file path
-    auto file = TempFilePath::create();
+    // auto file = TempFilePath::create();
     // Create file config
     auto config = std::make_shared<facebook::velox::dwrf::Config>();
     // Write the data source to a file, with the format defined by the rowVector
-    writeToFile(file->path, {inputRowVector}, config);
-    cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
-      // Set data source statistics in cataLog
-    cataLog.setDataSourceStat({num_samples, input_features_size});
-     cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+    // writeToFile(file->path, {inputRowVector}, config);
+    // cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+    //   // Set data source statistics in cataLog
+    // cataLog.setDataSourceStat({num_samples, input_features_size});
+    //  cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
      bool isVerticalPartition = true;
     if (benchmarkMode == "mul2joinAggHorizontal") {
       isVerticalPartition = false;
@@ -545,19 +566,44 @@ class BenchmarkTest : public HiveConnectorTestBase {
 
     core::PlanNodeId p0;
     // Initialize planNodeIdGenerator
-    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    // Set original plan nodeId and file address of data source
+      auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs
-    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+      auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                       .tableScan(asRowType(inputRowVector->type()))
                       .capturePlanNodeId(p0)
                       .project({fmt::format(compute, "v")})
                       .planBuild();
-    // Set original plan nodeId and file address of data source
 
+      if (true) {
+      std::vector<std::shared_ptr<TempFilePath>> paths;
+          // Calculate the number of elements in each part (except the last one)
+      size_t partSize = numSamples / (8 - 1);
+    // Calculate the number of elements in the last part
+      size_t lastPartSize = numSamples - partSize * (8 - 1);
+      for (size_t i = 0; i < 8 - 1; ++i) {
+          std::vector<std::vector<float>> result(data.features.begin() + i * partSize, data.features.begin() + (i + 1) * partSize);
+          auto featureArrayVector = maker.arrayVector<float>(result, REAL());
+          auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+          auto file = TempFilePath::create();
+          auto config = std::make_shared<facebook::velox::dwrf::Config>();
+          writeToFile(file->path, {inputRowVector}, config);
+          paths.push_back(file);
+      }
+      std::vector<std::vector<float>> result(data.features.end() - lastPartSize, data.features.end());
+      auto featureArrayVector = maker.arrayVector<float>(result, REAL());
+      auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      auto file = TempFilePath::create();
 
-      cataLog.setIdAddressMap(p0, {file});
-      // Set vector name and nodeId of data source
+      writeToFile(file->path, {inputRowVector}, config);
+      paths.push_back(file);
+
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+      cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+      cataLog.setIdAddressMap(p0, paths);
       cataLog.setVectorIdMap(p0, "v");
+      }
+
 
       // Get the logical plan
     auto planNode = myPlan.planNode();
