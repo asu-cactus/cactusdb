@@ -531,14 +531,14 @@ class Conv2dActionTest : public HiveConnectorTestBase {
   */
   void testConv2dActionPlan(bool rewrite, int flag, int samples, int blockSize) {
     // Set data source config.
-    int cnn_filters = 64;
-    int cnn_filter_dims[] = {1,1,64}; // height * width * channels
-    // int cnn_filters = 2048;
-    // int cnn_filter_dims[] = {1,1,3};
+    // int cnn_filters = 64;
+    // int cnn_filter_dims[] = {1,1,64}; // height * width * channels
+    int cnn_filters = 2048;
+    int cnn_filter_dims[] = {1,1,3};
     int weights_size = cnn_filter_dims[0] * cnn_filter_dims[1] * cnn_filter_dims[2] * cnn_filters;
 
-    int input_dims[] = {1000,1000,64}; 
-    // int input_dims[] = {2500,2500,3};
+    // int input_dims[] = {1000,1000,64}; 
+    int input_dims[] = {2500,2500,3};
     int input_size = input_dims[0] * input_dims[1] * input_dims[2];
     int num_samples = samples;
     int max_pool_size = 2;
@@ -614,7 +614,13 @@ class Conv2dActionTest : public HiveConnectorTestBase {
     }
     else if(flag == 2) {
     // Create arrayVector for data source
-    auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
+    std::vector<std::vector<float>> featureVectors;
+    for(int i=0, cursor = 0; i < num_samples; i++, cursor += input_size){
+      std::vector<float> featureVector(data.featuresFloat + cursor, data.featuresFloat + cursor + input_size);
+      featureVectors.push_back(featureVector);
+    }
+
+    auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
     // Create rowVector for data source
     auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
     
@@ -661,22 +667,22 @@ class Conv2dActionTest : public HiveConnectorTestBase {
     RowTypePtr schema;
     std::vector<std::shared_ptr<TempFilePath>> paths;
     std::vector<std::vector<float>> blocks;
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 1; ++i) {
       // Generate 10 samples and convert them to blocks
         std::cout<< "i:" << i << std::endl;
-          auto blocks = convert2Blocks(input_dims[0], input_dims[1], input_dims[2], num_samples, cnn_filter_dims[0], cnn_filter_dims[2], 1, 0, blockSize);
-          // Append the blocks to the total_blocks vector
-          for (auto& block : blocks) {
-            std::vector<std::vector<float>> result;
-            result.push_back(block);
-            auto featureArrayVector = maker.arrayVector<float>(result, REAL());
-            auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-            schema = asRowType(inputRowVector->type());
-            auto file = TempFilePath::create();
-            auto config = std::make_shared<facebook::velox::dwrf::Config>();
-            writeToFile(file->path, {inputRowVector}, config);
-            paths.push_back(file);
-          }
+        auto blocks = convert2Blocks(input_dims[0], input_dims[1], input_dims[2], num_samples, cnn_filter_dims[0], cnn_filter_dims[2], 1, 0, blockSize);
+        // Append the blocks to the total_blocks vector
+        for (auto& block : blocks) {
+          std::vector<std::vector<float>> result;
+          result.push_back(block);
+          auto featureArrayVector = maker.arrayVector<float>(result, REAL());
+          auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+          schema = asRowType(inputRowVector->type());
+          auto file = TempFilePath::create();
+          auto config = std::make_shared<facebook::velox::dwrf::Config>();
+          writeToFile(file->path, {inputRowVector}, config);
+          paths.push_back(file);
+        }
           
       
   }
@@ -779,7 +785,7 @@ class Conv2dActionTest : public HiveConnectorTestBase {
     // auto blocks = convert2Blocks(input_dims[0], input_dims[1], input_dims[2], num_samples, cnn_filter_dims[0], cnn_filter_dims[2], 1, 0, 32);
     ImageMatrix kernel = convert2Matrix(cnn_filter_dims, cnn_filters, data.weights[0], data.bias[0]);
     // ImageMatrix images = convert2Matrix(cnn_filter_dims, input_dims, num_samples, data.featuresFloat);
-    auto values = convert2Matrix(input_dims[0], input_dims[1], input_dims[2], num_samples, cnn_filter_dims[0], cnn_filter_dims[2], 1, 0, 12544);
+    auto values = convert2Matrix(input_dims[0], input_dims[1], input_dims[2], num_samples, cnn_filter_dims[0], cnn_filter_dims[2], 1, 0, 6250000); //6250000 for (2500*2500) singel image matrix rows
 
 
     // saveToFile("kernel.txt", kernel);
