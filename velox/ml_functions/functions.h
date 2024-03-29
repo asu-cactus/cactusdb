@@ -65,7 +65,8 @@ class MatrixMultiply: public MLFunction {
 
 public:
     MatrixMultiply(float* weights, int num_rows, int num_cols) {
-        weights_ = weights; 
+        weights_ = new float[num_rows * num_cols]; 
+        std::memcpy(weights_, weights, num_rows * num_cols * sizeof(float));
         dims.push_back(num_rows);
         dims.push_back(num_cols);
     }
