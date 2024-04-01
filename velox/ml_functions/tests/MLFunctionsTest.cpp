@@ -15,6 +15,7 @@
  */
 #define EIGEN_USE_BLAS
 #include <folly/init/Init.h>
+#include "velox/common/base/Fs.h"
 #include "velox/connectors/tpch/TpchConnector.h"
 #include "velox/connectors/tpch/TpchConnectorSplit.h"
 #include "velox/core/Expressions.h"
@@ -29,6 +30,9 @@
 #include "velox/tpch/gen/TpchGen.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 #include "velox/expression/VectorFunction.h"
+#include "velox/dwio/parquet/RegisterParquetReader.h"
+#include "velox/dwio/parquet/RegisterParquetWriter.h"
+#include "velox/dwio/parquet/writer/Writer.h"
 #include <Eigen/Dense>
 #include <cblas.h>
 #include <chrono>
@@ -70,6 +74,11 @@ class MLFunctionsTest : public HiveConnectorTestBase {
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
 
+    parquet::registerParquetReaderFactory();
+    parquet::registerParquetWriterFactory();
+    filesystems::registerLocalFileSystem();
+    dwio::common::LocalFileSink::registerFactory();
+
     SetUp();
 
   }
@@ -77,8 +86,34 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   ~MLFunctionsTest() {
   }
 
+  // Function from ParquetTestBase.h
+  std::unique_ptr<dwio::common::FileSink> createSink(
+      const std::string& filePath) {
+    auto sink = dwio::common::FileSink::create(
+        fmt::format("file:{}", filePath), {.pool = rootPool_.get()});
+    return sink;
+  }
+
+  // Function from ParquetTestBase.h
+  std::unique_ptr<facebook::velox::parquet::Writer> createWriter(
+      std::unique_ptr<dwio::common::FileSink> sink,
+      std::function<
+          std::unique_ptr<facebook::velox::parquet::DefaultFlushPolicy>()>
+          flushPolicy,
+      const RowTypePtr& rowType,
+      facebook::velox::common::CompressionKind compressionKind =
+          facebook::velox::common::CompressionKind_NONE) {
+    facebook::velox::parquet::WriterOptions options;
+    options.memoryPool = rootPool_.get();
+    options.flushPolicyFactory = flushPolicy;
+    options.compression = compressionKind;
+    return std::make_unique<facebook::velox::parquet::Writer>(
+        std::move(sink), options, rowType);
+  }
+
+
   /// Run the demo.
-  void run();
+  void run(int numDriver, int memoryPoolSizeMB, int spillMemThresholdMB, bool enableSpill, int repeatRun);
   void test_mat_mul();
   void test_mat_add();
   void test_relu();
@@ -91,7 +126,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   void test_batching();
   void test_conv2d();
   void test_deep_bench_conv1();
-  void test_spill();
+  void test_spill(int numDriver, int memoryPoolSizeMB, int spillMemThresholdMB, bool enableSpill, int repeatRun);
   void test_mnist_multithreading();
   void test_torch_dense_layer_multithreading();
   void mytest();
@@ -111,10 +146,11 @@ class MLFunctionsTest : public HiveConnectorTestBase {
     std::unordered_map<std::string, std::shared_ptr<Config>> configs;
     std::shared_ptr<MemoryPool> pool = memory::MemoryManager::getInstance()->addRootPool(
         "", memoryCapacity, memory::MemoryReclaimer::create());
+    std::unordered_map<std::string, std::string> queryConfigValues = {};
    std::unordered_map<std::string, std::string> myMapWithValues = {{core::QueryConfig::kSpillEnabled, "true"}, 
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
-                                      {core::QueryConfig::kJoinSpillMemoryThreshold, "1"},
-                                       {core::QueryConfig::kSpillableReservationGrowthPct, "1"},
+                                      {core::QueryConfig::kJoinSpillMemoryThreshold, "10485760"},
+                                      //  {core::QueryConfig::kSpillableReservationGrowthPct, "1"},
                                       /* 
                                       kSpillPartitionBits is removed after PR 5890, 
                                       kJoinSpillPartitionBits and kAggregationSpillPartitionBits are introduced 
@@ -125,15 +161,9 @@ class MLFunctionsTest : public HiveConnectorTestBase {
                                       };
     auto queryCtx = std::make_shared<core::QueryCtx>(
         executor_.get(),
-        myMapWithValues,
+        queryConfigValues,
         configs,
         cache::AsyncDataCache::getInstance(),
-        /*
-        Note from origin PR: Removing the relationship of AsyncDataCache inheritance from MemoryAllocator.
-        Please check the following commit:
-        https://github.com/facebookincubator/velox/commit/ad9ffa1fca3fbb3a550ab426a00ebb745b339b34
-        */
-        // memory::MemoryAllocator::getInstance(),
         std::move(pool));
     return queryCtx;
   }
@@ -947,8 +977,8 @@ void MLFunctionsTest::test_batching() {
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 }
 
-void MLFunctionsTest::test_spill(){
-
+void MLFunctionsTest::test_spill(int numDriver = 4, int memoryPoolSizeMB = 100, int spillMemThresholdMB = 20, bool enableSpill = false, int repeatRun = 5){
+  std::cout << fmt::format("[INFO] Test Spill, memoryPoolSizeMB: {}, spillMemThresholdMB: {}, enable_spill: {}", memoryPoolSizeMB, spillMemThresholdMB, enableSpill) << std::endl;
   int lsize = 10000;
   int rsize = 1000;
 
@@ -973,50 +1003,64 @@ void MLFunctionsTest::test_spill(){
 
   auto leftVectors = maker.rowVector({"l1","l2"}, {a, b});
   auto rightVectors = maker.rowVector({"r1", "r2"}, {c, d});
+
+  auto leftRowType =
+      ROW({"l1", "l2"}, {INTEGER(), INTEGER()});
+
+  auto rightRowType =
+      ROW({"r1", "r2"}, {INTEGER(), INTEGER()});
+
+  auto tempPath = exec::test::TempDirectoryPath::create();
+  auto leftFilePath =
+      fs::path(fmt::format("{}/left.parquet", tempPath->path));
+  auto sink = createSink(leftFilePath);
+  auto sinkPtr = sink.get();
+  uint64_t kRowsInRowGroup = 100;
+  uint64_t kBytesInRowGroup = 128 * 1024 * 1024;
+  auto writer = createWriter(std::move(sink), [&]() {
+    return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
+        kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
+  }, leftRowType);
+  writer->write(leftVectors);
+  writer->flush();
+  writer->close();
+
+  auto rightFilePath =
+      fs::path(fmt::format("{}/right.parquet", tempPath->path));
+  sink = createSink(rightFilePath);
+  sinkPtr = sink.get();
+  writer = createWriter(std::move(sink), [&]() {
+    return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
+        kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
+  }, rightRowType);
+  writer->write(rightVectors);
+  writer->flush();
+  writer->close();
+
+
   const auto spillDirectory = exec::test::TempDirectoryPath::create();
 
-  auto qctx = newQueryCtx(27 * MB);
-  queryCtx_->testingOverrideMemoryPool(memory::MemoryManager::getInstance()->addRootPool("root", 28 * MB));
-  queryCtx_->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}, 
+  auto qctx = newQueryCtx(memoryPoolSizeMB * MB);
+  if (enableSpill) {
+    qctx->testingOverrideConfigUnsafe({{core::QueryConfig::kSpillEnabled, "true"}, 
                                       {core::QueryConfig::kJoinSpillEnabled, "true"},  
-                                      {core::QueryConfig::kJoinSpillMemoryThreshold, std::to_string(27 * MB)},
-                                       {core::QueryConfig::kSpillableReservationGrowthPct, "0"},
-                                       /* 
-                                      kSpillPartitionBits is removed after PR 5890, 
-                                      kJoinSpillPartitionBits and kAggregationSpillPartitionBits are introduced 
-                                      Please consider how to replace it by check the following link: 
-                                      https://github.com/facebookincubator/velox/pull/5890 
-                                      */
-                                      //  {core::QueryConfig::kSpillPartitionBits, "1"}
-                                      /*
-                                      PR 7317 remove the kAggregationSpillPartitionBits flag
-                                      Comments copied from PR
-                                      
-                                        Simplify the hash aggregation spill processing by removing the
-                                        fine-grained partition control logic in grouping set:
+                                      {core::QueryConfig::kJoinSpillMemoryThreshold, std::to_string(spillMemThresholdMB * MB)},
+    });
+  }
 
-                                        Always create aggregation spiller with single partition
-                                        Always spill all the rows from spiller no matter it is triggered by memory arbitration,
-                                        threshold or test injection
-                                        Simplify the corresponding un-spilling code path.
-                                        The final or single aggregation is multi-threaded executed on a worker which means
-                                        that each aggregate operator runs a subset of data so that fine-grained partitioning
-                                        inside an operator is not that necessary.
-
-                                        The followup is to remove the corresponding query configs and simplification inside
-                                        the spiller.
-                                      */
-                                      //  {core::QueryConfig::kAggregationSpillPartitionBits, "1"}
-                                      });
+  core::PlanNodeId rightTableScanNodeId;
+  core::PlanNodeId leftTableScanNodeId;
 
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   auto buildSide = PlanBuilder(planNodeIdGenerator)
-                       .values({rightVectors})
+                       .tableScan(rightRowType, {}, "")
+                       .capturePlanNodeId(rightTableScanNodeId)
                        .project({"r1 AS u_r1", "r2 AS u_r2"})
                        .planNode();
 
   auto joinPlan = PlanBuilder(planNodeIdGenerator)
-                        .values({leftVectors})
+                        .tableScan(leftRowType, {}, "")
+                        .capturePlanNodeId(leftTableScanNodeId)
                         .project({"l1 AS u_l1", "l2 AS u_l2"})
                         .hashJoin(
                             {"u_l1"},
@@ -1024,30 +1068,57 @@ void MLFunctionsTest::test_spill(){
                             buildSide,
                             "",
                             {"u_l1", "u_r1", "u_l2"},
-                            core::JoinType::kFull)
-                        .planFragment();
+                            core::JoinType::kFull);
 
+
+  auto rightDataHiveSplits = makeHiveConnectorSplits(
+        {rightFilePath},
+        5,
+        dwio::common::FileFormat::PARQUET);
+
+  auto leftDataHiveSplits = makeHiveConnectorSplits(
+      {leftFilePath},
+      5,
+      dwio::common::FileFormat::PARQUET);
   
   
-  auto task = exec::Task::create("0", joinPlan , 0, std::move(qctx), 
-        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          return exec::BlockingReason::kNotBlocked;
-  });
-  task->setSpillDirectory(spillDirectory->path);
-  //auto task = exec::Task::create("0", joinPlan , 0, std::move(queryCtx_));
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  task->start(1);
-  
-  waitForFinishedDrivers(task);
-  auto stats = task->taskStats().pipelineStats;
-  for(auto stat : stats){
-    for(auto ops : stat.operatorStats){
-      std::cout << ops.spilledBytes << " ";
-    }
-    std::cout << std::endl;
+  for (int i = 0; i < repeatRun; i++) {
+    
+    CursorParameters params;
+    params.maxDrivers = numDriver;
+    params.planNode = joinPlan.planNode();
+    params.queryCtx = qctx;
+    params.spillDirectory = spillDirectory->path;
+    bool noMoreSplits = false;
+    auto addSplits = [&noMoreSplits, &rightDataHiveSplits, &rightTableScanNodeId, 
+                      &leftDataHiveSplits, &leftTableScanNodeId](exec::Task* task) {
+      if (!noMoreSplits) {
+        for (auto& split : rightDataHiveSplits) {
+          task->addSplit(rightTableScanNodeId, exec::Split(std::move(split)));
+        }
+        task->noMoreSplits(rightTableScanNodeId);
+
+        for (auto& split : leftDataHiveSplits) {
+          task->addSplit(leftTableScanNodeId, exec::Split(std::move(split)));
+        }
+        task->noMoreSplits(leftTableScanNodeId);
+      }
+      noMoreSplits = true;
+    };
+
+    auto [cursor, actualResults] = readCursor(params, addSplits);
+    waitForTaskCompletion(cursor->task().get());
   }
+
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Time for Test (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+
+  auto elapsedTime =
+          (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
+               .count()) /
+          1000000.0;
+  auto avgElapsedTime = elapsedTime / repeatRun;
+  std::cout << "Time for Test (sec) = " <<  avgElapsedTime << std::endl;
 }
 
 void MLFunctionsTest::test_mnist_multithreading() {
@@ -1724,8 +1795,8 @@ void MLFunctionsTest::test_land_cover_conv3() {
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 }
 
-void MLFunctionsTest::run() {
-   test_mat_mul();
+void MLFunctionsTest::run(int numDriver, int memoryPoolSizeMB, int spillMemThresholdMB, bool enableSpill, int repeatRun) {
+  //  test_mat_mul();
   //  test_mat_add();
   //  test_relu();
   //  test_softmax()
@@ -1738,7 +1809,7 @@ void MLFunctionsTest::run() {
   //  test_conv2d();
   //  test_deep_bench_conv1();
   //  test_land_cover_conv3();
-  //  test_spill();
+   test_spill(numDriver, memoryPoolSizeMB, spillMemThresholdMB, enableSpill, repeatRun);
   //  mytest();
   //  test_mnist_multithreading();
   //  test_mnist_oom_weights();
@@ -1746,9 +1817,21 @@ void MLFunctionsTest::run() {
 
 }
 
+DEFINE_bool(spill, false, "Whether enable spilling");
+DEFINE_int32(spill_threshold, 30, "Set spill memory threshold");
+DEFINE_int32(memory_pool, 100, "Set memory pool size");
+DEFINE_int32(repeat, 5, "Number of repeat run");
+DEFINE_int32(num_driver, 1, "Number of driver");
 int main(int argc, char** argv) {
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   folly::init(&argc, &argv, false);
   memory::MemoryManager::initialize({});
+
+  bool enableSpill = FLAGS_spill;
+  int memoryPoolSizeMB = FLAGS_memory_pool;
+  int spillMemoryThresholdMB = FLAGS_spill_threshold;
+  int repeatRun = FLAGS_repeat;
+  int numDriver = FLAGS_num_driver;
   MLFunctionsTest demo;
-  demo.run();
+  demo.run(numDriver, memoryPoolSizeMB, spillMemoryThresholdMB, enableSpill, repeatRun);
 }

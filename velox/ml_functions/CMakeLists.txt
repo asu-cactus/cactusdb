@@ -34,6 +34,7 @@ target_link_libraries(
   velox_common_base 
   velox_vector_fuzzer
   openblas
+  velox_dwio_parquet_reader
   ${TORCH_LIBRARIES}
 )
 

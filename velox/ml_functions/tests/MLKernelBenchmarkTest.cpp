@@ -198,8 +198,6 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
         randomGenerator.genFloat2dVector(featureSize, dim2);
     auto leftMatrixVector = maker.arrayVector<float>(leftMatrix, REAL());
     auto rightMatrixVector = maker.arrayVector<float>(rightMatrix, REAL());
-    // std::cout << "[DEBUG] right size: " << rightMatrix.size() << " " << rightMatrix[0].size() << std::endl;
-    // std::cout << rightData[0] << "," << rightData[1] << std::endl;
     exec::registerVectorFunction(
         "mat_mul",
         MatrixMultiply::signatures(),
@@ -229,7 +227,8 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
         "mat_vector_add",
         MatrixVectorAddition::signatures(),
         std::make_unique<MatrixVectorAddition>(
-            rightMatrixVector->elements()->values()->asMutable<float>(), featureSize));
+            rightMatrixVector->elements()->values()->asMutable<float>(),
+            featureSize));
 
     auto inputRowVector = maker.rowVector({"x"}, {leftMatrixVector});
 
@@ -273,6 +272,112 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     return myPlan;
   }
 
+  PlanBuilder getHashJoinPlan(
+      int lIndexMax,
+      int rIndexMax,
+      int dim1,
+      int dim2,
+      bool reverseOrder) {
+    VectorMaker maker{pool_.get()};
+    std::vector<int> leftIds = randomGenerator.genIntRange(0, lIndexMax);
+    std::vector<std::vector<float>> leftMatrix =
+        randomGenerator.genFloat2dVector(lIndexMax, dim1);
+
+    std::vector<int> rightIds = randomGenerator.genIntRange(0, rIndexMax);
+    std::vector<std::vector<float>> rightMatrix =
+        randomGenerator.genFloat2dVector(rIndexMax, dim2);
+    auto leftIdVector = maker.flatVector<int>(leftIds, INTEGER());
+    auto leftMatrixVector = maker.arrayVector<float>(leftMatrix, REAL());
+    auto rightIdVector = maker.flatVector<int>(rightIds, INTEGER());
+    auto rightMatrixVector = maker.arrayVector<float>(rightMatrix, REAL());
+
+    RowVectorPtr leftRowVector;
+    RowVectorPtr rightRowVector;
+    if (!reverseOrder) {
+      leftRowVector =
+          maker.rowVector({"l_id", "m1"}, {leftIdVector, leftMatrixVector});
+      rightRowVector =
+          maker.rowVector({"r_id", "m2"}, {rightIdVector, rightMatrixVector});
+    } else {
+      leftRowVector =
+          maker.rowVector({"l_id", "m1"}, {rightIdVector, rightMatrixVector});
+      rightRowVector =
+          maker.rowVector({"r_id", "m2"}, {leftIdVector, leftMatrixVector});
+    }
+
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+
+    core::PlanNodeId leftTableScanNodeId;
+    core::PlanNodeId rightTableScanNodeId;
+
+    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator)
+                      .values({leftRowVector})
+                      .capturePlanNodeId(leftTableScanNodeId)
+                      .hashJoin(
+                          {"l_id"},
+                          {"r_id"},
+                          PlanBuilder(planNodeIdGenerator)
+                              .values({rightRowVector})
+                              .capturePlanNodeId(rightTableScanNodeId)
+                              .planNode(),
+                          "",
+                          {"l_id", "r_id", "m1", "m2"});
+
+    return myPlan;
+  }
+
+  PlanBuilder getNestedLoopJoinPlan(
+      int lIndexMax,
+      int rIndexMax,
+      int dim1,
+      int dim2,
+      bool reverseOrder) {
+    VectorMaker maker{pool_.get()};
+    std::vector<int> leftIds = randomGenerator.genIntRange(0, lIndexMax);
+    std::vector<std::vector<float>> leftMatrix =
+        randomGenerator.genFloat2dVector(lIndexMax, dim1);
+
+    std::vector<int> rightIds = randomGenerator.genIntRange(0, rIndexMax);
+    std::vector<std::vector<float>> rightMatrix =
+        randomGenerator.genFloat2dVector(rIndexMax, dim2);
+    auto leftIdVector = maker.flatVector<int>(leftIds, INTEGER());
+    auto leftMatrixVector = maker.arrayVector<float>(leftMatrix, REAL());
+    auto rightIdVector = maker.flatVector<int>(rightIds, INTEGER());
+    auto rightMatrixVector = maker.arrayVector<float>(rightMatrix, REAL());
+
+    RowVectorPtr leftRowVector;
+    RowVectorPtr rightRowVector;
+    if (!reverseOrder) {
+      leftRowVector =
+          maker.rowVector({"l_id", "m1"}, {leftIdVector, leftMatrixVector});
+      rightRowVector =
+          maker.rowVector({"r_id", "m2"}, {rightIdVector, rightMatrixVector});
+    } else {
+      leftRowVector =
+          maker.rowVector({"l_id", "m1"}, {rightIdVector, rightMatrixVector});
+      rightRowVector =
+          maker.rowVector({"r_id", "m2"}, {leftIdVector, leftMatrixVector});
+    }
+
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+
+    core::PlanNodeId leftTableScanNodeId;
+    core::PlanNodeId rightTableScanNodeId;
+
+    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator)
+                      .values({leftRowVector})
+                      .capturePlanNodeId(leftTableScanNodeId)
+                      .nestedLoopJoin(
+                          PlanBuilder(planNodeIdGenerator)
+                              .values({rightRowVector})
+                              .capturePlanNodeId(rightTableScanNodeId)
+                              .planNode(),
+                          "",
+                          {"l_id", "r_id", "m1", "m2"});
+
+    return myPlan;
+  }
+
   void benchmarkKernel(
       std::string kernel,
       int batchSize,
@@ -289,6 +394,40 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
       plan = getReluPlan(batchSize, featureSize);
     } else if (kernel == "Softmax") {
       plan = getSoftmaxPlan(batchSize, featureSize);
+    } else {
+      throw std::runtime_error(
+          fmt::format("Non-supported benchmark kernel: {}", kernel));
+    }
+
+    if (verbose == 1) {
+      std::cout << fmt::format(
+                       "[INFO] Query Plan: \n {}",
+                       plan.planNode()->toString(true, true))
+                << std::endl;
+    }
+
+    float latency = runPlan(plan, numRepeat, verbose);
+    std::cout << latency << std::endl;
+  }
+
+  void benchmarkOperator(
+      std::string op,
+      int lIndexMax,
+      int rIndexMax,
+      int dim1,
+      int dim2,
+      bool reverseOrder,
+      int verbose,
+      int numRepeat) {
+    PlanBuilder plan;
+    if (op == "HashJoin") {
+      plan = getHashJoinPlan(lIndexMax, rIndexMax, dim1, dim2, reverseOrder);
+    } else if (op == "NestedLoopJoin") {
+      plan =
+          getNestedLoopJoinPlan(lIndexMax, rIndexMax, dim1, dim2, reverseOrder);
+    } else {
+      throw std::runtime_error(
+          fmt::format("Non-supported benchmark Op: {}", op));
     }
 
     if (verbose == 1) {
@@ -304,12 +443,23 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
 };
 
 // DEFINE_string(data_path, "../../../../data", "Path to data dir");
+DEFINE_string(mode, "DL", "Benchmark mode: DL or DB");
 DEFINE_int32(batch_size, 500, "Batch Size");
-DEFINE_string(kernel, "MatMul", "Benchmark kernel");
+DEFINE_string(kernel, "", "Benchmark DL kernel");
+DEFINE_string(op, "", "Benchmark DB Op");
 DEFINE_int32(feature_size, 100, "Feature Size");
+DEFINE_int32(l_max_index, 100, "");
+DEFINE_int32(r_max_index, 100, "");
+DEFINE_int32(dim1, 100, "Second dimension of left table");
 DEFINE_int32(dim2, 100, "Second dimension of right table");
+// DEFINE_int32(dim3, 100, "Second dimension of right table");
+// DEFINE_int32(dim4, 100, "Second dimension of right table");
 DEFINE_int32(num_repeat, 5, "Number of repeat run");
 DEFINE_int32(verbose, 0, "Verbose");
+DEFINE_bool(
+    reverse_order,
+    false,
+    "Whether reverse order(if applicable, like JOIN)");
 // DEFINE_int32(num_driver, 8, "Number of driver");
 
 int main(int argc, char** argv) {
@@ -318,27 +468,60 @@ int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   memory::MemoryManager::initialize({});
 
+  std::string mode = FLAGS_mode;
   int batchSize = FLAGS_batch_size;
   int numRepeat = FLAGS_num_repeat;
   std::string kernel = FLAGS_kernel;
+  std::string op = FLAGS_op;
   int featureSize = FLAGS_feature_size;
   int dim2 = FLAGS_dim2;
   int verbose = FLAGS_verbose;
 
-  if (verbose >= 1) {
-    std::cout
-        << fmt::format(
-              "[INFO] Benchmark Kernel: {} \n \t # Batch Size: {}, numRepeat: {}, featureSize: {}, dim2: {}",
-              kernel,
-              batchSize,
-              numRepeat,
-              featureSize,
-              dim2)
-        << std::endl;
-  }
-
   DLKernelBenchmarkTest dlKernelBenchmark;
 
-  dlKernelBenchmark.benchmarkKernel(
-      kernel, batchSize, featureSize, dim2, verbose, numRepeat);
+  // Check if flag is valid
+  if (mode == "DL" && kernel != "") {
+    if (verbose >= 1) {
+      std::cout
+          << fmt::format(
+                 "[INFO] Benchmark Kernel: {} \n \t # Batch Size: {}, numRepeat: {}, featureSize: {}, dim2: {}",
+                 kernel,
+                 batchSize,
+                 numRepeat,
+                 featureSize,
+                 dim2)
+          << std::endl;
+    }
+    dlKernelBenchmark.benchmarkKernel(
+        kernel, batchSize, featureSize, dim2, verbose, numRepeat);
+  } else if (mode == "DB" && op != "") {
+    bool reverseOrder = FLAGS_reverse_order;
+    int lIndexMax = FLAGS_l_max_index;
+    int rIndexMax = FLAGS_r_max_index;
+    int dim1 = FLAGS_dim1;
+    // int dim3 = FLAGS_dim3;
+    // int dim4 = FLAGS_dim4;
+
+    if (verbose >= 1) {
+      std::cout
+          << fmt::format(
+                 "[INFO] Benchmark Op: {} \n \t # lIndexMax: {}, rIndexMax: {}, numRepeat: {}, dim1: {}, dim2: {}, reverseOrder: {}",
+                 op,
+                 lIndexMax,
+                 rIndexMax,
+                 numRepeat,
+                 dim1,
+                 dim2,
+                 reverseOrder)
+          << std::endl;
+    }
+    dlKernelBenchmark.benchmarkOperator(
+        op, lIndexMax, rIndexMax, dim1, dim2, reverseOrder, verbose, numRepeat);
+  } else {
+    throw std::runtime_error(fmt::format(
+        "Non-valid Configs! kernel needs to work with mode: DL. Op needs to work with mode: DB. \n \t\t Current Setting: mode: {}, kernel: {}, op: {} ",
+        mode,
+        kernel,
+        op));
+  }
 }
