@@ -40,7 +40,7 @@ if __name__ == "__main__":
     result_df = None
     for config in tqdm(run_configs):
         kernel, batch_size, feature_size = config
-        params_base = "-kernel={} -batch_size={} -feature_size={} -num_repeat={}".format(
+        params_base = "-mode=DL -kernel={} -batch_size={} -feature_size={} -num_repeat={}".format(
             kernel, batch_size, feature_size, num_repeat
         )
         list_dim2_to_test = list_dims2

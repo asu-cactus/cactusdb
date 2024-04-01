@@ -84,6 +84,14 @@ class RandomGenerator {
     return float1dVector;
   }
 
+  std::vector<int> genIntRange(int low, int high) {
+    std::vector<int> result;
+    for (int i = low; i < high; ++i) {
+        result.push_back(i);
+    }
+    return result;
+  }
+
  private:
   std::mt19937 gen_;
   std::uniform_real_distribution<float> distR_;
