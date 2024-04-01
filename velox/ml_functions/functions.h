@@ -2,6 +2,7 @@
 #include "velox/expression/VectorFunction.h"
 #include "velox/vector/DictionaryVector.h"
 #include <Eigen/Dense>
+#include <fstream>
 // #include <cblas.h>
 #include <chrono>
 #include "velox/exec/Task.h"
@@ -38,6 +39,97 @@ using namespace facebook::velox::memory;
 */
 
 // TODO: Refactor
+
+// float* loadFloatArray(const std::string& filename) {
+//     std::ifstream infile(filename);
+//     float* array = nullptr;
+//     long size = 0;
+
+//     if (infile.is_open()) {
+//         // Read the size from the file
+//         std::string sizeStr;
+//         if (getline(infile, sizeStr)) {
+//             size = std::stol(sizeStr);
+//         }
+        
+//         // Allocate memory for the float array
+//         array = new float[size];
+
+//         // Read the values from the file
+//         for (long i = 0; i < size; ++i) {
+//             infile >> array[i];
+//         }
+
+//         infile.close();
+//     } else {
+//         std::cerr << "Unable to open file " << filename << std::endl;
+//     }
+
+//     return array;
+// }
+
+constexpr int NUM_THREADS = 8; // Number of threads to use for file reading
+constexpr int BUFFER_SIZE = 1024; // Size of the buffer for each thread
+
+std::atomic<long> g_index(0); // Atomic variable to track the current position in the file
+
+void readFloatsFromFile(const std::string& filename, float* array, long start, long end) {
+    std::ifstream infile(filename);
+    infile.seekg(start);
+
+    for (long i = start; i < end; ++i) {
+        float value;
+        if (infile >> value) {
+            array[i] = value;
+        } else {
+            std::cerr << "Error reading from file" << std::endl;
+            break;
+        }
+    }
+
+    infile.close();
+}
+
+float* loadFloatArray(const std::string& filename) {
+    std::ifstream infile(filename);
+    float* array = nullptr;
+    long size = 0;
+
+    if (!infile.is_open()) {
+        std::cerr << "Unable to open file " << filename << std::endl;
+        return nullptr;
+    }
+
+    // Read the size from the file
+    std::string sizeStr;
+    if (getline(infile, sizeStr)) {
+        size = std::stol(sizeStr);
+    }
+    
+    // Allocate memory for the float array
+    array = new float[size];
+
+    // Calculate the range for each thread
+    long chunkSize = size / NUM_THREADS;
+    std::vector<std::thread> threads;
+
+    // Start threads to read different parts of the file concurrently
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        long start = i * chunkSize;
+        long end = (i == NUM_THREADS - 1) ? size : start + chunkSize;
+        threads.emplace_back(readFloatsFromFile, filename, array, start, end);
+    }
+
+    // Join threads
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    infile.close();
+
+    return array;
+}
+
 class MLFunction : public exec::VectorFunction {
     public:
 
@@ -77,10 +169,17 @@ public:
         dims.push_back(num_cols);
     }
 
-     MatrixMultiply(std::string weightsFile, int num_rows, int num_cols) {
+    MatrixMultiply(std::string weightsFile, int num_rows, int num_cols) {
         weightsFile_ = weightsFile; 
         dims.push_back(num_rows);
         dims.push_back(num_cols);
+    }
+
+    MatrixMultiply(std::string weightsFile, int num_rows, int num_cols, int threads) {
+        weightsFile_ = weightsFile; 
+        dims.push_back(num_rows);
+        dims.push_back(num_cols);
+        dims.push_back(threads);
     }
 
     MatrixMultiply(float* weights, int num_rows, int num_cols, int threads) {
@@ -116,6 +215,11 @@ public:
             float* input_values = input_elements->values()->asMutable<float>();
             int input_size = input_elements->size();
 
+            if (!weightsFile_.empty() && loadFlag == false){
+                weights_ = loadFloatArray(weightsFile_);
+                loadFlag = true;
+            }
+
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
             Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m;
@@ -124,33 +228,40 @@ public:
                 m  =  m1 * m2;
             }
             else {
-                #ifdef _OPENMP
-                    // std::cout << "Using OpenMP" << std::endl;
-                    omp_set_num_threads(dims[2]); // Set to the number of cores you want to utilize
-                    #ifdef EIGEN_USE_BLAS
-                        // std::cout << "Using Eigen with OpenBLAS" << std::endl;
-                        openblas_set_num_threads(dims[2]);
-                        m  =  m1 * m2;
-                    #else
-                    // Perform matrix multiplication using OpenMP
-                        #pragma omp parallel
-                        {
-                            m  =  m1 * m2;
-                        }
-                    #endif
-                #else
-                    // Perform matrix multiplication without OpenMP
-                    #ifdef EIGEN_USE_BLAS
-                        // std::cout << "Using Eigen with OpenBLAS" << std::endl;
-                        openblas_set_num_threads(dims[2]);
-                        m  =  m1 * m2;
-                    #else
-                        // std::cout << "Using Eigen without OpenBLAS" << std::endl;
-                        m  =  m1 * m2;
-                    #endif
-
-                #endif
+                openblas_set_num_threads(dims[2]);
+                m  =  m1 * m2;
             }
+            // if (dims.size() < 3) {
+            //     m  =  m1 * m2;
+            // }
+            // else {
+            //     #ifdef _OPENMP
+            //         // std::cout << "Using OpenMP" << std::endl;
+            //         omp_set_num_threads(dims[2]); // Set to the number of cores you want to utilize
+            //         #ifdef EIGEN_USE_BLAS
+            //             // std::cout << "Using Eigen with OpenBLAS" << std::endl;
+            //             openblas_set_num_threads(dims[2]);
+            //             m  =  m1 * m2;
+            //         #else
+            //         // Perform matrix multiplication using OpenMP
+            //             #pragma omp parallel
+            //             {
+            //                 m  =  m1 * m2;
+            //             }
+            //         #endif
+            //     #else
+            //         // Perform matrix multiplication without OpenMP
+            //         #ifdef EIGEN_USE_BLAS
+            //             // std::cout << "Using Eigen with OpenBLAS" << std::endl;
+            //             openblas_set_num_threads(dims[2]);
+            //             m  =  m1 * m2;
+            //         #else
+            //             // std::cout << "Using Eigen without OpenBLAS" << std::endl;
+            //             m  =  m1 * m2;
+            //         #endif
+
+            //     #endif
+            // }
 
             
             for (int i = 0; i < m.rows(); i++) {
@@ -185,13 +296,14 @@ public:
         return "mat_mul";
     };
 
-    std::string getWeightsFile() {
+    std::string getWeightsFile() const{
         return weightsFile_;
     }
 
     void setWeights(float* weights){
         weights_ = weights;
     }
+
 
     CostEstimate getCost(std::vector<int> inputDims){
         float cost = getWeightedCost(getName(), inputDims[0] * inputDims[1] * dims[0] * dims[1]);
@@ -200,8 +312,9 @@ public:
 
 
 private:
-    float* weights_;
+    mutable float* weights_;
     std::string weightsFile_;
+    mutable bool loadFlag = false;
     
 };
 

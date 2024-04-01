@@ -210,6 +210,7 @@ class BenchmarkTest : public HiveConnectorTestBase {
     std::vector<float*> weights;
     std::vector<float*> bias;
     float* featuresFloat;
+    std::string weightsFile;
       ~DataFrame() {
       // Deallocate memory for each float* in weights and bias vectors
       for (float* ptr : weights) {
@@ -223,6 +224,22 @@ class BenchmarkTest : public HiveConnectorTestBase {
       delete[] featuresFloat;
   }
 };
+
+void saveFloatArray(const char* filename, float* array, long size) {
+    ofstream outfile(filename);
+    if (outfile.is_open()) {
+        // Convert size to string and save it first
+        outfile << size << "\n";
+        
+        // Save the array elements
+        for (long i = 0; i < size; ++i) {
+            outfile << array[i] << "\n";
+        }
+        outfile.close();
+    } else {
+        cerr << "Unable to open file " << filename << endl;
+    }
+}
 
   /**
    * @brief A function generates random data source.
@@ -293,15 +310,19 @@ class BenchmarkTest : public HiveConnectorTestBase {
       weight_layer1[i] = 0.000001;
     }
 
+    saveFloatArray("/home/ubuntu/velox/weights.txt", weight_layer1, weight_layer1_size);
+
+
     std::vector<float*> weights;
     weights.push_back(weight_layer1);
 
 
-    std::vector<float*> bias;
+    // std::vector<float*> bias;
 
     // Create DataFrame
     DataFrame data;
     data.features = featureVectors;
+    data.weightsFile = "/home/ubuntu/velox/weights.txt";
     data.weights = weights;
     data.featuresFloat = floatArray;
 
@@ -397,7 +418,8 @@ class BenchmarkTest : public HiveConnectorTestBase {
   std::string registerFunctions(
       int units1,
       int input_size1,
-      float* weightsFile_1,
+      std::string weightsFile_1,
+      // float* weightsFile_1,
       CataLog& catalog,
       bool isVerticalPartition,
       int numThreads) {
@@ -479,7 +501,8 @@ class BenchmarkTest : public HiveConnectorTestBase {
     std::string compute = registerFunctions(
         first_layer_output_size,
         input_features_size,
-        data.weights[0],
+        data.weightsFile,
+        // data.weights[0],
         cataLog,
         isVerticalPartition,
         numThreads);
@@ -558,7 +581,8 @@ class BenchmarkTest : public HiveConnectorTestBase {
     std::string compute = registerFunctions(
         first_layer_output_size,
         input_features_size,
-        w,
+        "",
+        // w,
         cataLog,
         isVerticalPartition,
         numThreads);
