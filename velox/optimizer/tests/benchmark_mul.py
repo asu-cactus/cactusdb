@@ -18,22 +18,22 @@ def run_cpp_program(path, params):
 
 
 if __name__ == "__main__":
-    list_feature_size = [10000]
-    list_sample_size = [100]
+    list_feature_size = [1,10,100,1000,10000,100000]
+    list_sample_size = [1,10,100,1000,10000]
     # list_sample_size = [100000]
-    list_output_size = [10240]
+    list_output_size = [2048, 4096, 8192, 10240]
     # list_rewrite = ["false","true"]
-    list_rewrite = ["false"]
+    list_rewrite = ["true"]
     # list_mode = ["mul2joinAgg", "mul2joinAggHorizontal"]
     list_mode = ["mul2joinAggHorizontal"]
     list_velox_driver = [8]
     list_function_threads = [1]
-    list_blocks = [4,8,16,32,64,128,256,512,1024]
+    list_blocks = [4,8,16,32,64,128,256,512,1024,2048]
     list_split_disk = ["true"]
     list_option =[2]
     num_repeat = 20
     # list_batch_size = ["100", "1000", "10000", "100000"]
-    list_batch_size = ["1000"] # kPreferredOutputBatchBytes 2500000 (597540*4) bytes per item, until 10000 *2500000, then kMaxOutputBatchRows determine the output, we all set it as 250000000000 to make kMaxOutputBatchRows control it.
+    list_batch_size = ["10000"] # kPreferredOutputBatchBytes 2500000 (597540*4) bytes per item, until 10000 *2500000, then kMaxOutputBatchRows determine the output, we all set it as 250000000000 to make kMaxOutputBatchRows control it.
 
     run_configs = list(
         itertools.product(
@@ -90,5 +90,5 @@ if __name__ == "__main__":
         else:
             result_df = pd.concat([result_df, df], axis=0)
 
-        result_df.to_csv("result_benchmark_arms_weightsfile_ct_10240_test.csv", index=False)
+        result_df.to_csv("result_benchmark_arms_weightsfile_h_2048_test.csv", index=False)
 
