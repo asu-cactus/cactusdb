@@ -224,45 +224,7 @@ public:
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
             Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m;
             // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-            if (dims.size() < 3) {
-                m  =  m1 * m2;
-            }
-            else {
-                openblas_set_num_threads(dims[2]);
-                m  =  m1 * m2;
-            }
-            // if (dims.size() < 3) {
-            //     m  =  m1 * m2;
-            // }
-            // else {
-            //     #ifdef _OPENMP
-            //         // std::cout << "Using OpenMP" << std::endl;
-            //         omp_set_num_threads(dims[2]); // Set to the number of cores you want to utilize
-            //         #ifdef EIGEN_USE_BLAS
-            //             // std::cout << "Using Eigen with OpenBLAS" << std::endl;
-            //             openblas_set_num_threads(dims[2]);
-            //             m  =  m1 * m2;
-            //         #else
-            //         // Perform matrix multiplication using OpenMP
-            //             #pragma omp parallel
-            //             {
-            //                 m  =  m1 * m2;
-            //             }
-            //         #endif
-            //     #else
-            //         // Perform matrix multiplication without OpenMP
-            //         #ifdef EIGEN_USE_BLAS
-            //             // std::cout << "Using Eigen with OpenBLAS" << std::endl;
-            //             openblas_set_num_threads(dims[2]);
-            //             m  =  m1 * m2;
-            //         #else
-            //             // std::cout << "Using Eigen without OpenBLAS" << std::endl;
-            //             m  =  m1 * m2;
-            //         #endif
-
-            //     #endif
-            // }
-
+            m  =  m1 * m2;
             
             for (int i = 0; i < m.rows(); i++) {
                 std::vector<float> row(

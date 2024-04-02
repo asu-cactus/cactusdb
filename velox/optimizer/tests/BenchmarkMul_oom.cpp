@@ -43,6 +43,9 @@
 #include "velox/optimizer/RuleManager.h"
 #include "velox/optimizer/TwoLayerUDF2TorchNNRewriteAction.h"
 
+#include <omp.h>
+
+
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
@@ -128,6 +131,10 @@ class BenchmarkTest : public HiveConnectorTestBase {
 
       // std::cout << "check 1" << std::endl;
       // Add hivesplits to the target plan node (data source node).
+      openblas_set_num_threads(numSplits);//eigen
+      torch::set_num_threads(8);//torch
+      omp_set_num_threads(4);//omp for xgboost
+
       std::chrono::steady_clock::time_point begin =
           std::chrono::steady_clock::now();
 
@@ -418,8 +425,8 @@ void saveFloatArray(const char* filename, float* array, long size) {
   std::string registerFunctions(
       int units1,
       int input_size1,
-      std::string weightsFile_1,
-      // float* weightsFile_1,
+      // std::string weightsFile_1,
+      float* weightsFile_1,
       CataLog& catalog,
       bool isVerticalPartition,
       int numThreads) {
@@ -501,8 +508,8 @@ void saveFloatArray(const char* filename, float* array, long size) {
     std::string compute = registerFunctions(
         first_layer_output_size,
         input_features_size,
-        data.weightsFile,
-        // data.weights[0],
+        // data.weightsFile,
+        data.weights[0],
         cataLog,
         isVerticalPartition,
         numThreads);
@@ -547,7 +554,7 @@ void saveFloatArray(const char* filename, float* array, long size) {
       cataLog.setVectorIdMap(p0, "v");
       }
       float averageExectuionTime =
-        runPlanWithCataLog(numDriver, numDriver, batchSize, myPlan, cataLog, repeatRun, verbose);
+        runPlanWithCataLog(numDriver, numThreads, batchSize, myPlan, cataLog, repeatRun, verbose);
       std::cout << averageExectuionTime;
 
     }
@@ -581,8 +588,8 @@ void saveFloatArray(const char* filename, float* array, long size) {
     std::string compute = registerFunctions(
         first_layer_output_size,
         input_features_size,
-        "",
-        // w,
+        // "",
+        w,
         cataLog,
         isVerticalPartition,
         numThreads);
@@ -668,7 +675,7 @@ void saveFloatArray(const char* filename, float* array, long size) {
     
     // Run the rewritten plan
     float averageExectuionTime =
-        runPlanWithCataLog(numDriver, numDriver, batchSize, myPlan, cataLog, repeatRun, verbose);
+        runPlanWithCataLog(numDriver, numThreads, batchSize, myPlan, cataLog, repeatRun, verbose);
     std::cout << averageExectuionTime;
     }
 

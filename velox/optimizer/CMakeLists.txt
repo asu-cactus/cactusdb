@@ -320,10 +320,10 @@ target_link_libraries(
 )
 
 add_executable(benchmarkmul_oom_test tests/BenchmarkMul_oom.cpp)
-# target_compile_options(benchmarkmul_test PRIVATE ${OpenMP_CXX_FLAGS})
+target_compile_options(benchmarkmul_oom_test PRIVATE ${OpenMP_CXX_FLAGS})
 target_link_libraries(
   benchmarkmul_oom_test
-  # PRIVATE ${OpenMP_CXX_FLAGS}
+  PRIVATE ${OpenMP_CXX_FLAGS}
   velox_aggregates
   velox_type
   velox_vector
