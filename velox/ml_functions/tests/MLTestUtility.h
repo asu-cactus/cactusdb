@@ -75,6 +75,16 @@ class RandomGenerator {
     return float2dVector;
   }
 
+  float* genFloat1dArray(int size) {
+    // Initialize the input1 feature vector
+    float* float1dArray = new float[size];
+
+    for (int i = 0; i < size; i++) {
+      float1dArray[i] = genRandomFloatValue();
+    }
+    return float1dArray;
+  }
+
   std::vector<float> genFloat1dVector(int size) {
     // Initialize the input1 feature vector
     std::vector<float> float1dVector;
