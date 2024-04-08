@@ -272,6 +272,35 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     return myPlan;
   }
 
+  PlanBuilder getTorchDNNPlan(int batchSize, int featureSize, int layer1Size, int layer2Size) {
+    VectorMaker maker{pool_.get()};
+    std::vector<std::vector<float>> inputValue =
+        randomGenerator.genFloat2dVector(batchSize, featureSize);
+    auto inputValueVector = maker.arrayVector<float>(inputValue, REAL());
+
+    float* w1Weight = randomGenerator.genFloat1dArray(featureSize*layer1Size);
+    float* w1Bias = randomGenerator.genFloat1dArray(layer1Size);
+    float* w2Weight = randomGenerator.genFloat1dArray(layer1Size*layer2Size);
+    float* w2Bias = randomGenerator.genFloat1dArray(layer2Size);
+    std::vector<float*> weights = {w1Weight, w2Weight};
+    std::vector<float*> bias = {w1Bias, w2Bias};
+    std::vector<int> dims = {featureSize, layer1Size, layer2Size};
+
+
+    registerVectorFunction(
+                          "torchDNN",
+                          TorchDNN::signatures(),
+                          std::make_unique<TorchDNN>(
+                              weights, bias, dims));
+
+    auto inputRowVector = maker.rowVector({"x"}, {inputValueVector});
+
+    auto myPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({inputRowVector})
+                      .project({"torchDNN(x)"});
+    return myPlan;
+  }
+
   PlanBuilder getHashJoinPlan(
       int lIndexMax,
       int rIndexMax,
@@ -410,6 +439,33 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     std::cout << latency << std::endl;
   }
 
+  void benchmarkTorchNN(
+      std::string model,
+      int batchSize,
+      int featureSize,
+      int layer1Size,
+      int layer2Size,
+      int verbose,
+      int numRepeat) {
+    PlanBuilder plan;
+    if (model == "FFNN") {
+      plan = getTorchDNNPlan(batchSize, featureSize, layer1Size, layer2Size);
+    } else {
+      throw std::runtime_error(
+          fmt::format("Non-supported benchmark model: {}", model));
+    }
+
+    if (verbose == 1) {
+      std::cout << fmt::format(
+                       "[INFO] Query Plan: \n {}",
+                       plan.planNode()->toString(true, true))
+                << std::endl;
+    }
+
+    float latency = runPlan(plan, numRepeat, verbose);
+    std::cout << latency << std::endl;
+  }
+
   void benchmarkOperator(
       std::string op,
       int lIndexMax,
@@ -444,6 +500,7 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
 
 // DEFINE_string(data_path, "../../../../data", "Path to data dir");
 DEFINE_string(mode, "DL", "Benchmark mode: DL or DB");
+DEFINE_string(model, "", "FFNN");
 DEFINE_int32(batch_size, 500, "Batch Size");
 DEFINE_string(kernel, "", "Benchmark DL kernel");
 DEFINE_string(op, "", "Benchmark DB Op");
@@ -452,6 +509,8 @@ DEFINE_int32(l_max_index, 100, "");
 DEFINE_int32(r_max_index, 100, "");
 DEFINE_int32(dim1, 100, "Second dimension of left table");
 DEFINE_int32(dim2, 100, "Second dimension of right table");
+DEFINE_int32(l1size, 100, "Size of hidden layer 1");
+DEFINE_int32(l2size, 100, "Size of hidden layer 2");
 // DEFINE_int32(dim3, 100, "Second dimension of right table");
 // DEFINE_int32(dim4, 100, "Second dimension of right table");
 DEFINE_int32(num_repeat, 5, "Number of repeat run");
@@ -469,6 +528,7 @@ int main(int argc, char** argv) {
   memory::MemoryManager::initialize({});
 
   std::string mode = FLAGS_mode;
+  std::string model = FLAGS_model;
   int batchSize = FLAGS_batch_size;
   int numRepeat = FLAGS_num_repeat;
   std::string kernel = FLAGS_kernel;
@@ -494,6 +554,24 @@ int main(int argc, char** argv) {
     }
     dlKernelBenchmark.benchmarkKernel(
         kernel, batchSize, featureSize, dim2, verbose, numRepeat);
+  } else if (mode == "TorchNN" && model != "") { 
+    int layer1Size = FLAGS_l1size;
+    int layer2Size = FLAGS_l2size;
+
+    if (verbose >= 1) {
+      std::cout
+          << fmt::format(
+                 "[INFO] Benchmark TorchNN Model: {} \n \t # Batch Size: {}, numRepeat: {}, featureSize: {}, l1Size: {}, l2Size: {}",
+                 model,
+                 batchSize,
+                 numRepeat,
+                 featureSize,
+                 layer1Size,
+                 layer2Size)
+          << std::endl;
+    }
+    dlKernelBenchmark.benchmarkTorchNN(model, batchSize, featureSize, layer1Size, layer2Size, verbose, numRepeat);
+  
   } else if (mode == "DB" && op != "") {
     bool reverseOrder = FLAGS_reverse_order;
     int lIndexMax = FLAGS_l_max_index;
