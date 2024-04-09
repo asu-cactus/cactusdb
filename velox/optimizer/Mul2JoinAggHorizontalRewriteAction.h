@@ -141,6 +141,8 @@ public:
 												// already partitioned and has fewer rows to iterate compared to the input,
 												// it is recommended to place the partitioned weight matrix on the left side
 												// to enhance the performance of the nested loop join due to reduced iteration overhead.
+
+												// TODO accomodate automatic join reording here
 												planBuilder = exec::test::PlanBuilder(planNodeIdGenerator)
 														.tableScan(weightSchema)
 														.capturePlanNodeId(p2)
@@ -164,10 +166,27 @@ public:
 														;
 												// Delete old nodeId-fileAddress map
 												auto valueFileAddr = cataLog.getFileAddress(cataLog.getVectorIdMap("v"));
-												cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
+												auto oldPlanNodeIdToDelete = cataLog.getVectorIdMap("v");
+												cataLog.deleteIdAddressMap(oldPlanNodeIdToDelete);
 												// Insert new nodeId-fileAddress maps
 												cataLog.setIdAddressMap(p1, valueFileAddr);
 												cataLog.setIdAddressMap(p2, cataLog.getUDFFileAddr(target+"_weights_vertical"));
+
+												int numSamples = cataLog.getDataSourceStat("values")[0];
+												int numFeatures = dims[0];
+												int blockSize = cataLog.getDefaultBlocksSize();
+												int numBlocks = ceil(dims[1] / blockSize);
+												std::shared_ptr<OutputStat> inputStat = std::make_shared<OutputStat>(OutputStat(numSamples,numFeatures));
+												Source inputSource = Source(p1, Source::Type::FILE, std::move(inputStat));
+												cataLog.addSource(std::make_shared<Source>(inputSource));
+
+												std::shared_ptr<OutputStat> weightStat = std::make_shared<OutputStat>(OutputStat(numBlocks,blockSize));
+												Source weightSource = Source(p2, Source::Type::FILE, std::move(weightStat));
+												cataLog.addSource(std::make_shared<Source>(weightSource));
+
+												LOG(INFO) << "[Rewrite] mul2joinAggHorizontal rewrite updated catalog: " << std::endl;
+												LOG(INFO) << fmt::format("\t\t p1: {}, {}, {}", p1, numSamples,numFeatures) << std::endl;
+												LOG(INFO) << fmt::format("\t\t p2: {}, {}, {}", p2, numBlocks,blockSize) << std::endl;
 
 												transformationApplied = true;
 											}
