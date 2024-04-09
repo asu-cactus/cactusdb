@@ -424,8 +424,8 @@ if __name__ == "__main__":
                 client_socket=client_socket,
                 max_iteration_num=6,
                 max_sim_iteration_num=3,
-                # reward_mode="online", # FIXME online mode is not working yet
-                reward_mode="offline",
+                reward_mode="online", 
+                # reward_mode="offline",
                 max_iteration_time = 1000 * 3600,
                 verbose = VERBOSE
             )
