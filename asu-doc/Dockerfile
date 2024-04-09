@@ -41,6 +41,7 @@ RUN apt-get install -y libxsimd-dev
 RUN apt-get install -y curl
 RUN apt-get install -y zip
 RUN apt-get install -y default-jre 
+RUN apt-get install -y kmod
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
 RUN ln -s /usr/bin/python3 /usr/bin/python
 # install github cli (optional)
@@ -50,6 +51,13 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 #     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
 #     && sudo apt update \
 #     && sudo apt install gh -y
+
+# TODO: add support of CUDA, still some issues there
+# RUN wget https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
+# RUN chmod +x ./cuda_11.8.0_520.61.05_linux.run && ./cuda_11.8.0_520.61.05_linux.run --silent
+# # install cudnn
+# RUN apt-get install -y libnccl3-dev
+
 
 
 # set-up eigen
