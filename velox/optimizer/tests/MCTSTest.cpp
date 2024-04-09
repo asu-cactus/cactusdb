@@ -212,7 +212,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     if (verbose >= 1) {
       std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
     }
-    // std::cout << "DEBUG, REACHED here";
     // finalResult = std::move(finalResult);
 
 
@@ -513,6 +512,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     cataLog.setIdAddressMap(p0, {file});
     // Set vector name and nodeId of data source
     cataLog.setVectorIdMap(p0, "v");
+    // Add source to catalog
+    std::shared_ptr<OutputStat> stat =
+    std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+    Source src = Source(p0, Source::Type::FILE, std::move(stat));
+    cataLog.addSource(std::make_shared<Source>(src));
+
+
+
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -566,29 +573,34 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
 
     if (getCost) {
-        std::shared_ptr<Catalog> catalog =
-              std::make_shared<Catalog>(Catalog("db-catalog"));
+        // std::shared_ptr<Catalog> catalog =
+        //       std::make_shared<Catalog>(Catalog("db-catalog"));
 
-          std::shared_ptr<OutputStat> stat =
-              std::make_shared<OutputStat>(OutputStat(1, 2));
 
-          Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
+          
+          std::chrono::steady_clock::time_point begin =
+          std::chrono::steady_clock::now();
 
-          catalog->addSource(std::make_shared<Source>(src1));
-
-          CostModel* cm = new SimpleCostModel(catalog);
+          CostModel* cm = new SimpleCostModel(cataLog);
           CostEstimator* ce =
               new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
 
           planNode = myPlan.planNode();
           CostEstimate cost = ce->estimateCost(planNode);
-          std::cout << "[INFO] Current query plan cost: " << cost.cost << std::endl;
-          return ;
+
+          std::chrono::steady_clock::time_point end =
+          std::chrono::steady_clock::now();
+          auto costComputationTime =
+          (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
+               .count()) /
+          1000000.0;
+          std::cout << "[INFO] Current query plan cost: " << cost.cost << ", Computation Time: " << costComputationTime << std::endl;
+          // return ;
     }
 
     float averageExectuionTime =
         runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
-    std::cout << averageExectuionTime;
+    std::cout << averageExectuionTime << std::endl;
   }
 
   void testIntegratedMCTS(int featureSize, int numSamples, int repeatRun, int blockSize) {
@@ -671,6 +683,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     cataLog.setIdAddressMap(p0, {file});
     // Set vector name and nodeId of data source
     cataLog.setVectorIdMap(p0, "v");
+    // Add source to catalog
+    std::shared_ptr<OutputStat> stat =
+    std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+    Source src = Source(p0, Source::Type::FILE, std::move(stat));
+    cataLog.addSource(std::make_shared<Source>(src));
+
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -712,14 +730,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // received json message from MCTS
       Json::Value receivedJsonMessage = receiveJsonFromSocket(clientSocket);
       std::string mctsAction = receivedJsonMessage["mctsAction"].asString();
-      std::cout << "===================================" << std::endl;
-      std::cout << "Received message with mcts action: " << mctsAction
+      LOG(INFO) << "===================================" << std::endl;
+      LOG(INFO) << "Received message with mcts action: " << mctsAction
                 << std::endl;
       if (mctsAction == "") {
-        std::cout << "Un-captured error happened" << std::endl;
+        LOG(INFO) << "Un-captured error happened" << std::endl;
         return;
       }
-      std::cout << "JSON Message: " << receivedJsonMessage << std::endl;
+      LOG(INFO) << "JSON Message: " << receivedJsonMessage << std::endl;
       if (mctsAction == "resetPlan") {
         // if it is root node, it needs to start with original plan
         // the p0 will be increased after capturePlanNodeId is called
@@ -727,6 +745,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         // before reset the myPlan
         cataLog.clearIdAddressMap();
         cataLog.clearVectorIdMap();
+        cataLog.clearSourceMap();
         myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                      .tableScan(asRowType(inputRowVector->type()))
                      .capturePlanNodeId(p0)
@@ -734,6 +753,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         cataLog.setIdAddressMap(p0, {file});
         cataLog.setVectorIdMap(p0, "v");
         cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+        std::shared_ptr<OutputStat> stat1 =
+              std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+        Source src1 = Source(p0, Source::Type::FILE, std::move(stat1));
+        cataLog.addSource(std::make_shared<Source>(src1));
         planNode = myPlan.planNode();
         planState.getPossibleActions(planNode, cataLog);
         // send acknowledgement for synchronization 
@@ -750,7 +773,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
         for (const auto& entry : planState.actionsPair) {
-          // std::cout << "[ACTION SBACE] " << entry.first << s't'd
+          // LOG(INFO) << "[ACTION SBACE] " << entry.first << s't'd
           // entry.second << std::endl;
           Json::Value jsonEntry;
           jsonEntry["expression"] = entry.first;
@@ -767,7 +790,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         targetAction.first = receivedJsonMessage["targetString"].asString();
         targetAction.second = receivedJsonMessage["targetAction"].asString();
 
-        std::cout << "[INFO] take action: " << targetAction << std::endl;
+        LOG(INFO) << "[INFO] take action: " << targetAction << std::endl;
         if (targetAction.first != "None") {
           // None action is selected
           planState.takeAction(
@@ -781,7 +804,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               cataLog);
           planState.update(myPlan, cataLog);
         }
-        std::cout << "[INFO] current my query plan"
+        LOG(INFO) << "[INFO] current my query plan"
                   << myPlan.planNode()->toString(true, true) << std::endl;
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getCost") {
@@ -789,27 +812,26 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         if (receivedJsonMessage["costMode"] == "offline") {
           float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
           jsonMessage["reward"] = executeTime;
-          std::cout << "[INFO] get Cost(offline): "
+          LOG(INFO) << "[INFO] get Cost(offline): "
                     << " time: " << executeTime << std::endl;
         } else if (receivedJsonMessage["costMode"] == "online") {
-          std::shared_ptr<Catalog> catalog =
-              std::make_shared<Catalog>(Catalog("db-catalog"));
+          // std::shared_ptr<Catalog> catalog =
+          //     std::make_shared<Catalog>(Catalog("db-catalog"));
 
-          std::shared_ptr<OutputStat> stat =
-              std::make_shared<OutputStat>(OutputStat(1, 2));
+          // std::shared_ptr<OutputStat> stat =
+          //     std::make_shared<OutputStat>(OutputStat(1, 2));
 
-          Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
+          // Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
 
-          catalog->addSource(std::make_shared<Source>(src1));
-
-          CostModel* cm = new SimpleCostModel(catalog);
+          // cataLog.addSource(std::make_shared<Source>(src1));
+          CostModel* cm = new SimpleCostModel(cataLog);
           CostEstimator* ce =
               new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
 
           planNode = myPlan.planNode();
           CostEstimate cost = ce->estimateCost(planNode);
           jsonMessage["reward"] = cost.cost + 1;
-          std::cout << "[INFO] get Cost(online): " << cost.cost << std::endl;
+          LOG(INFO) << "[INFO] get Cost(online): " << cost.cost << std::endl;
         }
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
@@ -821,14 +843,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
       optimizationIsFinished =
           receivedJsonMessage["optimizationIsFinished"].asBool();
-      std::cout << "[INFO] reached end of the loop, current opt flag: "
+      LOG(INFO) << "[INFO] reached end of the loop, current opt flag: "
                 << optimizationIsFinished << std::endl;
     };
 
     // Run the rewritten plan
-    std::cout << "[INFO] MCTS finished, run the optimized query plan"
+    LOG(INFO) << "[INFO] MCTS finished, run the optimized query plan"
               << std::endl;
-    std::cout << "[INFO] Optimized query plan"
+    LOG(INFO) << "[INFO] Optimized query plan"
               << myPlan.planNode()->toString(true, true) << std::endl;
     runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
   }
@@ -850,10 +872,12 @@ DEFINE_int32(block_size, 256, "Block Size");
 DEFINE_bool(cost, false, "Whether get cost");
 
 int main(int argc, char** argv) {
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
-  folly::init(&argc, &argv, false);
+
   memory::MemoryManager::initialize({});
+  folly::init(&argc, &argv, false);
+  // gflags::ParseCommandLineFlags(&argc, &argv, true);
   std::string mode = FLAGS_mode;
+
   bool rewrite = FLAGS_rewrite;
   int repeatRun = FLAGS_num_repeat;
   int featureSize = FLAGS_feature_size;
@@ -863,6 +887,7 @@ int main(int argc, char** argv) {
   int blockSize = FLAGS_block_size;
   bool getCost = FLAGS_cost;
   IntegratedMCTSTest demo;
+ 
   // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
     demo.testIntegratedMCTS(featureSize, numSample, repeatRun, blockSize);

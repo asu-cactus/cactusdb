@@ -1,4 +1,4 @@
-
+#pragma once
 struct CostEstimate {
     float cost;
     int outputRows;
