@@ -220,11 +220,11 @@ class MCTS:
             node = self.select(node, use_factor=False)
 
         # get reward via simulation after reaching the terminal state
-        reward = self.simulate(node)
         t_elapsed_time = self.timer.toc()
+        latency = self.run_plan()
         
-        
-        print("[INFO] MCTS search finished, query execution time: {} ms".format(-reward))
+        print("[INFO] MCTS search time: {} ms".format(t_elapsed_time))
+        print("[INFO] MCTS search finished, query execution time: {} s".format(latency))
         current_query_plan = self.get_current_query_plan()
         print("[INFO] Searched query plan: {}".format(current_query_plan))
         
@@ -297,6 +297,16 @@ class MCTS:
         node.children.append(new_node)
 
         return new_node
+
+    def run_plan(self):
+        """Communicate with Velox to get reward with given state"""
+        send_message = dict()
+        send_message["mctsAction"] = "runPlan"
+        send_message["optimizationIsFinished"] = False
+        send_message_by_socket(send_message, self.client_socket, self.verbose)
+        received_message = receive_message_by_socket(self.client_socket, self.verbose)
+        latency = received_message['latency']
+        return latency
 
     def simulate(self, node: MCTSTreeNode) -> float:
         """Run simulation to get reward"""

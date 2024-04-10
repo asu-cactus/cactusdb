@@ -18,9 +18,9 @@ private:
         const char* homePath = std::getenv("HOME");
         std::string udfCoefficientPath = "";
         if (homePath) {
-            udfCoefficientPath = std::string(homePath) + "/velox/resources/data/udf_coefficient.txt";
+            udfCoefficientPath = std::string(homePath) + "/velox/resources/data/udf_coefficient_aws.txt";
         } else {
-            udfCoefficientPath = "/home/velox/resources/data/udf_coefficient.txt";
+            udfCoefficientPath = "/home/velox/resources/data/udf_coefficient_aws.txt";
         }
         std::ifstream inputFile(udfCoefficientPath);
 
@@ -43,7 +43,7 @@ private:
                 value.erase(0, value.find_first_not_of(" \t\n\r\f\v"));
                 value.erase(value.find_last_not_of(" \t\n\r\f\v") + 1);
 
-                coefficientMap[key].push_back(std::stof(value));
+                coefficientMap[key].push_back(std::stod(value));
             } else {
                 std::cerr << "Invalid line format: " << line << std::endl;
             }
@@ -59,14 +59,14 @@ private:
 
     static UdfCostCoefficient instance;
 
-    std::unordered_map<std::string, std::vector<float>> coefficientMap;
+    std::unordered_map<std::string, std::vector<double>> coefficientMap;
 
 public:
     static UdfCostCoefficient& getInstance() {
         return instance;
     }
 
-    std::vector<float> getCoefficient(const std::string& udf) {
+    std::vector<double> getCoefficient(const std::string& udf) {
         LOG(INFO) << "[INFO] UdfCostCoefficient, retrieved coefficient for: " << udf << std::endl;
         if (coefficientMap.find(udf) != coefficientMap.end()) {
             return coefficientMap[udf];
