@@ -433,7 +433,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
     int first_layer_output_size = 1024;
-    int second_layer_output_size = 100;
+    int second_layer_output_size = 14588;
     // Set splits number
     // Initialize CataLog
     CataLog cataLog;
@@ -595,7 +595,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                .count()) /
           1000000.0;
           std::cout << "[INFO] Current query plan cost: " << cost.cost << ", Computation Time: " << costComputationTime << std::endl;
-          // return ;
+          return ;
     }
 
     float averageExectuionTime =
@@ -610,7 +610,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // int num_samples = 1000;
     int num_samples = numSamples;
     int first_layer_output_size = 1024;
-    int second_layer_output_size = 100;
+    int second_layer_output_size = 14588;
     CataLog cataLog;
     cataLog.setDefaultBlocksSize(blockSize);
     cataLog.setBlockingThreshold(1);
@@ -830,12 +830,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
           planNode = myPlan.planNode();
           CostEstimate cost = ce->estimateCost(planNode);
-          jsonMessage["reward"] = cost.cost + 1;
+          jsonMessage["reward"] = cost.cost;
           LOG(INFO) << "[INFO] get Cost(online): " << cost.cost << std::endl;
         }
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
 
+      } else if (mctsAction == "runPlan") {
+        auto latency = runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
+        Json::Value jsonMessage;
+        jsonMessage["latency"] = latency;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "finished") {
         // finished
         // nothing to do
@@ -848,11 +854,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     };
 
     // Run the rewritten plan
-    LOG(INFO) << "[INFO] MCTS finished, run the optimized query plan"
-              << std::endl;
-    LOG(INFO) << "[INFO] Optimized query plan"
-              << myPlan.planNode()->toString(true, true) << std::endl;
-    runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
+    // LOG(INFO) << "[INFO] MCTS finished, run the optimized query plan"
+    //           << std::endl;
+    // LOG(INFO) << "[INFO] Optimized query plan"
+    //           << myPlan.planNode()->toString(true, true) << std::endl;
+    
   }
 
  private:

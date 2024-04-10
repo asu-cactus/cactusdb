@@ -116,7 +116,7 @@ class SimpleCostModel : public CostModel {
             if(sources.empty())
                 throw std::runtime_error("Source not found for node: " + node->id() + ":" + std::string(node->name()));
             LOG(INFO) << fmt::format("[INFO] InternalNode: {}", node->name()) << std::endl;
-            std::vector<float> coefficientVector = UdfCostCoefficient::getInstance().getCoefficient(std::string(node->name())); 
+            std::vector<double> coefficientVector = UdfCostCoefficient::getInstance().getCoefficient(std::string(node->name())); 
             switch (hashPlanNode(node->name())) {
                 case Aggregation:
                 case OrderBy:{
@@ -194,6 +194,8 @@ class SimpleCostModel : public CostModel {
                     float gamma = coefficientVector[2];
                     std::shared_ptr<OutputStat> stats1 =  std::static_pointer_cast<OutputStat>(sources[0].getStats());
                     std::shared_ptr<OutputStat> stats2 =  std::static_pointer_cast<OutputStat>(sources[1].getStats());
+                    LOG(INFO) << fmt::format("[INFO] - NestedLoopJoin Stat1: r: {}, c: {}",stats1->getRows(), stats1->getCols());
+                    LOG(INFO) << fmt::format("[INFO] - NestedLoopJoin Stat2: r: {}, c: {}",stats2->getRows(), stats2->getCols());
                     float cost = alpha * stats1->getRows() + beta * stats1->getRows() * stats1->getCols() + gamma * stats2->getRows() * stats2->getCols();
                     int maxRowNumber = (stats1->getRows() > stats2->getRows()) ? stats1->getRows() : stats2->getRows();
                     return CostEstimate(cost, maxRowNumber, stats2->getCols());
@@ -239,7 +241,7 @@ class SimpleCostModel : public CostModel {
                         finalEstimate.cost += curCost.cost;
                         finalEstimate.outputRows = curCost.outputRows;
                         finalEstimate.outputCols = curCost.outputCols;
-                        LOG(INFO) << fmt::format("[INFO] CostModel - getUDFCost: {}, cost: {}", mlFunc->getFuncName(), finalEstimate.cost) << std:: endl;
+                        LOG(INFO) << fmt::format("[INFO] CostModel - getUDFCost: {}, cost: {}, accumulated cost: {}", mlFunc->getFuncName(), curCost.cost, finalEstimate.cost) << std:: endl;
                         LOG(INFO) << fmt::format("\t\t outputRows: {}, outputCols: {}", finalEstimate.outputRows, finalEstimate.outputCols) << std::endl;
                     }    
                 }

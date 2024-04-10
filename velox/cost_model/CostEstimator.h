@@ -52,7 +52,7 @@ class SimpleCostEstimator : public CostEstimator {
                 CostEstimate estimate =  estimateCost(source);
                 
                 srcCost += estimate.cost;
-                LOG(INFO) << fmt::format("[INFO] Finished estimateCost for source: {} of node: {}, outputRows: {}, outputCols: {}, cost: {}, srcCost: {}", source->name(), plan->name(), estimate.outputRows, estimate.outputCols, estimate.cost, srcCost) << std::endl;
+                LOG(INFO) << fmt::format("[INFO] Finished estimateCost for source: {} of node: {}, outputRows: {}, outputCols: {}, cost: {}, accumulated cost: {}", source->name(), plan->name(), estimate.outputRows, estimate.outputCols, estimate.cost, srcCost) << std::endl;
                 std::shared_ptr<OutputStat> stat = std::make_shared<OutputStat>(OutputStat(estimate.outputRows , estimate.outputCols));
                 // inputs to the current node
                 // output from previous step is input to the current node

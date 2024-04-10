@@ -56,13 +56,13 @@ class MLFunction : public exec::VectorFunction {
 
     protected:
         std::vector<int> dims;
-        float getWeightedCost(std::string name, float cost) {
-            std::vector<float> coefficient = UdfCostCoefficient::getInstance().getCoefficient(name);
+        double getWeightedCost(std::string name, float cost) {
+            std::vector<double> coefficient = UdfCostCoefficient::getInstance().getCoefficient(name);
             // FIXME
             return 0;
             // return coefficient[0] * cost; 
         }
-        std::vector<float> getCoefficientVector(std::string name) {
+        std::vector<double> getCoefficientVector(std::string name) {
             return UdfCostCoefficient::getInstance().getCoefficient(name);
         }
 
@@ -164,7 +164,7 @@ public:
     }
 
     CostEstimate getCost(std::vector<int> inputDims){
-        std::vector<float> coefficientVector = getCoefficientVector(getName()); 
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
         int factor1 = inputDims[0];
         int factor2 = dims[0];
         int factor3 = dims[1];
@@ -343,7 +343,7 @@ public:
     };
 
     CostEstimate getCost(std::vector<int> inputDims){
-        std::vector<float> coefficientVector = getCoefficientVector("mat_mul"); 
+        std::vector<double> coefficientVector = getCoefficientVector("mat_mul"); 
         int factor1 = inputDims[0];
         int factor2 = inputDims[1];
         int factor3 = dims[2];
@@ -528,7 +528,7 @@ public:
     }
 
     CostEstimate getCost(std::vector<int> inputDims){
-        std::vector<float> coefficientVector = getCoefficientVector(getName()); 
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
         float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
 
         return CostEstimate(cost , inputDims[0], inputDims[1]);
@@ -683,7 +683,7 @@ public:
     };
 
     CostEstimate getCost(std::vector<int> inputDims){
-        std::vector<float> coefficientVector = getCoefficientVector(getName()); 
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
         float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
         return CostEstimate(cost, inputDims[0], inputDims[1]);
     }
@@ -750,7 +750,7 @@ public:
     };
 
     CostEstimate getCost(std::vector<int> inputDims){
-        std::vector<float> coefficientVector = getCoefficientVector(getName()); 
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
         float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
         return CostEstimate(cost, inputDims[0], inputDims[1]);
     }
@@ -942,16 +942,24 @@ public:
 
     CostEstimate getCost(std::vector<int> inputDims){
         // TODO: need to compute cost based on dims
-        std::vector<float> coefficientVector = getCoefficientVector(getName()); 
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
         int factor1 = inputDims[0]*dims[0]*dims[1];
         int factor2 = inputDims[0]*dims[1]*dims[2];
         int factor3 = dims[0]*dims[1];
         int factor4 = dims[1]*dims[2];
         float cost = coefficientVector[0] * factor1 
                     + coefficientVector[1] * factor2 + coefficientVector[2] * factor3 
-                    + coefficientVector[3] * factor3 + coefficientVector[4] * inputDims[0]
+                    + coefficientVector[3] * factor4 + coefficientVector[4] * inputDims[0]
                     + coefficientVector[5] * dims[0] + coefficientVector[6] * dims[1]
-                    + coefficientVector[6] * dims[2];
+                    + coefficientVector[7] * dims[2];
+        LOG(INFO) << fmt::format("[DEBUG] 4 values: {}, {}, {}, {}",inputDims[0], inputDims[1], dims[0], dims[1]);
+        LOG(INFO) << fmt::format("[DEBUG] coeff: {}",coefficientVector);
+        LOG(INFO) << fmt::format("[DEBUG] Cost Computation: {}, {}, {}, {}, {}, {}, {}, {}", 
+        coefficientVector[0] * factor1, coefficientVector[1] * factor2, coefficientVector[2] * factor3 
+                    , coefficientVector[3] * factor4,  coefficientVector[4] * inputDims[0]
+                    , coefficientVector[5] * dims[0], coefficientVector[6] * dims[1]
+                    , coefficientVector[7] * dims[2]);
+
         return CostEstimate(cost, inputDims[0], dims[2]);
     }
 
