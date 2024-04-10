@@ -943,22 +943,23 @@ public:
     CostEstimate getCost(std::vector<int> inputDims){
         // TODO: need to compute cost based on dims
         std::vector<double> coefficientVector = getCoefficientVector(getName()); 
-        int factor1 = inputDims[0]*dims[0]*dims[1];
-        int factor2 = inputDims[0]*dims[1]*dims[2];
-        int factor3 = dims[0]*dims[1];
-        int factor4 = dims[1]*dims[2];
+        uint64_t  factor1 = inputDims[0]*dims[0]*dims[1];
+        uint64_t  factor2 = inputDims[0]*dims[1]*dims[2];
+        uint64_t  factor3 = dims[0]*dims[1];
+        uint64_t  factor4 = dims[1]*dims[2];
         float cost = coefficientVector[0] * factor1 
                     + coefficientVector[1] * factor2 + coefficientVector[2] * factor3 
                     + coefficientVector[3] * factor4 + coefficientVector[4] * inputDims[0]
                     + coefficientVector[5] * dims[0] + coefficientVector[6] * dims[1]
                     + coefficientVector[7] * dims[2];
-        LOG(INFO) << fmt::format("[DEBUG] 4 values: {}, {}, {}, {}",inputDims[0], inputDims[1], dims[0], dims[1]);
-        LOG(INFO) << fmt::format("[DEBUG] coeff: {}",coefficientVector);
-        LOG(INFO) << fmt::format("[DEBUG] Cost Computation: {}, {}, {}, {}, {}, {}, {}, {}", 
-        coefficientVector[0] * factor1, coefficientVector[1] * factor2, coefficientVector[2] * factor3 
-                    , coefficientVector[3] * factor4,  coefficientVector[4] * inputDims[0]
-                    , coefficientVector[5] * dims[0], coefficientVector[6] * dims[1]
-                    , coefficientVector[7] * dims[2]);
+        // LOG(INFO) << fmt::format("[DEBUG] 4 values: {}, {}, {}, {}",inputDims[0], inputDims[1], dims[0], dims[1]);
+        // LOG(INFO) << fmt::format("[DEBUG] coeff: {}",coefficientVector);
+        // LOG(INFO) << fmt::format("[DEBUG] Cost Computation: {}, {}, {}, {}, {}, {}, {}, {}", 
+        // coefficientVector[0] * factor1, coefficientVector[1] * factor2, coefficientVector[2] * factor3 
+        //             , coefficientVector[3] * factor4,  coefficientVector[4] * inputDims[0]
+        //             , coefficientVector[5] * dims[0], coefficientVector[6] * dims[1]
+        //             , coefficientVector[7] * dims[2]);
+        // LOG(INFO) << fmt::format("[DEBUG] compute debug: {}, {}, {}, {}, {}", inputDims[0], inputDims[0]*dims[1], inputDims[0]*dims[1]*dims[2], factor2, coefficientVector[1] * factor2); 
 
         return CostEstimate(cost, inputDims[0], dims[2]);
     }
