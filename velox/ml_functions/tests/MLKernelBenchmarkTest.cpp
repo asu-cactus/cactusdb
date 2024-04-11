@@ -301,6 +301,33 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     return myPlan;
   }
 
+  PlanBuilder getTorchDNNKernelPlan(std::string kernel, int batchSize, int featureSize, int outputSize) {
+    VectorMaker maker{pool_.get()};
+    std::vector<std::vector<float>> inputValue =
+        randomGenerator.genFloat2dVector(batchSize, featureSize);
+    auto inputValueVector = maker.arrayVector<float>(inputValue, REAL());
+
+    float* w1Weight = randomGenerator.genFloat1dArray(featureSize*outputSize);
+    float* w1Bias = randomGenerator.genFloat1dArray(outputSize);
+    // std::vector<float*> weights = {w1Weight, w2Weight};
+    // std::vector<float*> bias = {w1Bias, w2Bias};
+    std::vector<int> dims = {featureSize, outputSize};
+
+
+    registerVectorFunction(
+                          "torchDNNKernel",
+                          TorchDNNKernel::signatures(),
+                          std::make_unique<TorchDNNKernel>(
+                              kernel, w1Weight, w1Bias, dims));
+
+    auto inputRowVector = maker.rowVector({"x"}, {inputValueVector});
+
+    auto myPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({inputRowVector})
+                      .project({"torchDNNKernel(x)"});
+    return myPlan;
+  }
+
   PlanBuilder getHashJoinPlan(
       int lIndexMax,
       int rIndexMax,
@@ -407,6 +434,33 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     return myPlan;
   }
 
+  PlanBuilder getRowNumber(
+      int lIndexMax,
+      int dim1) {
+    VectorMaker maker{pool_.get()};
+    std::vector<int> leftIds = randomGenerator.genIntRange(0, lIndexMax);
+    std::vector<std::vector<float>> leftMatrix =
+        randomGenerator.genFloat2dVector(lIndexMax, dim1);
+
+    auto leftIdVector = maker.flatVector<int>(leftIds, INTEGER());
+    auto leftMatrixVector = maker.arrayVector<float>(leftMatrix, REAL());
+
+    RowVectorPtr leftRowVector =
+          maker.rowVector({"l_id", "m1"}, {leftIdVector, leftMatrixVector});
+
+
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+
+    core::PlanNodeId leftTableScanNodeId;
+
+    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator)
+                      .values({leftRowVector})
+                      .capturePlanNodeId(leftTableScanNodeId)
+                      .rowNumber({});
+
+    return myPlan;
+  }
+
   void benchmarkKernel(
       std::string kernel,
       int batchSize,
@@ -450,6 +504,8 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     PlanBuilder plan;
     if (model == "FFNN") {
       plan = getTorchDNNPlan(batchSize, featureSize, layer1Size, layer2Size);
+    } else if (model == "Dense" || model == "Relu" || model == "Softmax") {
+      plan = getTorchDNNKernelPlan(model, batchSize, featureSize, layer1Size);
     } else {
       throw std::runtime_error(
           fmt::format("Non-supported benchmark model: {}", model));
