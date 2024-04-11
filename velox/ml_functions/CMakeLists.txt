@@ -206,5 +206,3 @@ target_link_libraries(
 #   ${TEST_LINK_LIBS}
 #   ${TORCH_LIBRARIES}
 # )
-
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -march=corei7-avx")

@@ -971,6 +971,100 @@ private:
     std::vector<float*> bias;
 };
 
+class TorchDNNKernel : public MLFunction {
+public:
+    TorchDNNKernel(std::string kernel, float* weights, float* bias, std::vector<int> dimensions) {
+        this->kernel = kernel;
+        this->weights = weights;
+        this->bias = bias;
+        dims = dimensions;
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        std::vector<torch::nn::Linear> dense_layers;
+        std::vector<torch::Tensor> weights_tensors;
+        std::vector<torch::Tensor> bias_tensors;
+        std::vector<torch::nn::ReLU> relus;
+
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        torch::Tensor input = torch::from_blob(input_values, {rows.size(), dims[0]});
+        torch::Tensor output_tensor = input;
+
+        if (kernel == "Dense") {
+            torch::nn::Linear denseLayer = torch::nn::Linear(dims[0], dims[1]);
+            torch::Tensor weightsTensor = torch::from_blob(weights, {dims[0], dims[1]}).t();
+            torch::Tensor biasTensor = torch::from_blob(bias, {dims[1]});
+            denseLayer->weight.set_data(weightsTensor);
+            denseLayer->bias.set_data(biasTensor);
+            
+            output_tensor = denseLayer->forward(output_tensor);
+        } else if (kernel == "Relu") {
+            torch::nn::ReLU reluLayer = torch::nn::ReLU();
+
+            output_tensor = reluLayer->forward(output_tensor);
+        } else if (kernel == "Softmax") {
+            output_tensor = torch::nn::functional::softmax(output_tensor, 1);
+        }
+
+        
+        // output_tensor = torch::nn::functional::softmax(output_tensor, 1);
+        float* data = output_tensor.data_ptr<float>();
+
+        // Prepare results
+        std::vector<std::vector<float>> results;
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
+            results.push_back(result);
+        }
+        
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+    
+    // Getter method for weights
+    const float* getWeights() const {
+        return weights;
+    }
+
+    // Getter method for bias
+    const float* getBias() const {
+        return bias;
+    }
+
+     std::string getFuncName() {
+        return getName();
+    };
+
+    static std::string getName() {
+        return "torchnn_kernel";
+    };
+    
+
+private:
+    float* weights;
+    float* bias;
+    std::string kernel;
+};
+
 class TorchDNN_Multi : public MLFunction {
 public:
     TorchDNN_Multi(std::vector<float*> weights, std::vector<float*> bias, std::vector<int> dimensions) {
