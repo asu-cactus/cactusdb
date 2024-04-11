@@ -1,10 +1,10 @@
 <!-- TOC -->
 
 - [Use Docker to Build Your Development Environment](#use-docker-to-build-your-development-environment)
-    - [Build Docker Image](#build-docker-image)
-    - [Link to Our Private Velox Repository](#link-to-our-private-velox-repository)
-    - [Set-Up Dependencies and Compile](#set-up-dependencies-and-compile)
-    - [Develop with Visual Studio Code](#develop-with-visual-studio-code)
+  - [Build Docker Image](#build-docker-image)
+  - [Link to Our Private Velox Repository](#link-to-our-private-velox-repository)
+  - [Set-Up Dependencies and Compile](#set-up-dependencies-and-compile)
+  - [Develop with Visual Studio Code](#develop-with-visual-studio-code)
 - [Run Two-Tower Model Pipeline](#run-two-tower-model-pipeline)
 
 <!-- /TOC -->
@@ -18,6 +18,13 @@ Using the following command to build your docker image and start a container
 docker build --tag velox-asu .
 docker run --name velox-container -it velox-asu
 ```
+
+NOTE: if you are using arm chip, you need to use the following command:
+```bash
+docker build -t velox-arm -f Dockerfile_ARM .
+docker run --name velox-container-arm -it velox-arm
+```
+
 
 ### Link to Our Private Velox Repository
 Because the docker image is not expected to contain any confidential credentials and our GitHub repository is private now. You are required to configure your git configuration by using the following commands:
@@ -43,6 +50,24 @@ git switch origin/main
 # compile Velox in release mode
 make release
 ```
+
+**Note:** If you are using arm chip, you need to set `CPU_TARGET="aarch64"` before setup-ubuntu.sh
+
+Since PyTorch does not provides pre-built files for aarch64, you are required to built locally by using the following command.
+
+```
+cd pytorch
+python3 setup.py install
+```
+
+Before `make release` in Velox folder, you are required to set the following two environment variables:
+
+The following paths can be directly used if you are using docker. Otherwise, you need to accordingly adjust it.
+```
+Caffe2_DIR=/usr/local/lib/python3.10/dist-packages/torch/share/cmake/Caffe2
+Torch_DIR=/usr/local/lib/python3.10/dist-packages/torch/share/cmake/Torch
+```
+
 
 3rd-party dependecies 
 
