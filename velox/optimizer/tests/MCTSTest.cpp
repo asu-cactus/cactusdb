@@ -276,15 +276,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       featureVectors.push_back(featureVector);
     }
 
-    float* floatArray = new float[num_samples * input_features_size];
-
-    int index = 0;
-
-    for (const auto& row : featureVectors) {
-      for (const float& value : row) {
-        floatArray[index++] = value;
-      }
-    }
 
     // Generate weight
     float* weight_layer1 = new float[weight_layer1_size];
@@ -324,7 +315,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     data.features = featureVectors;
     data.weights = weights;
     data.bias = bias;
-    data.featuresFloat = floatArray;
 
     return data;
   }
@@ -412,6 +402,28 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
   }
 
+  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(std::vector<std::vector<float>> data, int numSplit=4) {
+    std::vector<std::shared_ptr<TempFilePath>> paths;
+
+    size_t numSamples = data.size();
+    size_t partitionSize = ceil(numSamples / numSplit);
+    for (size_t i = 0; i < numSplit; i++) {
+      auto startIdx = data.begin() + i * partitionSize;
+      auto endIdx = data.begin() + (i+1) * partitionSize;
+      endIdx = (endIdx < data.end()) ? endIdx : data.end();
+
+      std::vector<std::vector<float>> partialData(startIdx, endIdx);
+      auto featureArrayVector = maker.arrayVector<float>(partialData, REAL());
+      auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      auto file = TempFilePath::create();
+      auto config = std::make_shared<facebook::velox::dwrf::Config>();
+      writeToFile(file->path, {inputRowVector}, config);
+      paths.push_back(file);
+    }
+
+    return paths;
+  }
+
 
   /**
    * @brief A test function to test the rewrite rule of
@@ -445,16 +457,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         num_samples,
         first_layer_output_size,
         second_layer_output_size);
-    // Create arrayVector for data source
-    auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
-    // Create rowVector for data source
-    auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-    // Create file path
-    auto file = TempFilePath::create();
-    // Create file config
-    auto config = std::make_shared<facebook::velox::dwrf::Config>();
-    // Write the data source to a file, with the format defined by the rowVector
-    writeToFile(file->path, {inputRowVector}, config);
+
+    // Split inputs into many splits and return paths as a std::vector
+    std::vector<std::shared_ptr<TempFilePath>> files = splitDataToFiles(data.features);
+    RowTypePtr inputRowType = ROW({"v"}, {ARRAY(REAL())});
     //  Check the input size against the blocking threshold in cataLog.
     //  If yes, preblock the input vector, store it, and add information in
     //  cataLog. If not, set dataSource in cataLog.
@@ -475,11 +481,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     } else {
       // If input size is not larger than blocking threshold, set dataSource in
       // cataLog
-      cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+      cataLog.setDataSource(inputRowType, files);
       // Set data source statistics in cataLog
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
-    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+    cataLog.setUDFSchema("value", inputRowType);
     // Build two dense layers UDFs using registerFunction in optimization
     // namespace
     bool isVerticalPartition = true;
@@ -504,12 +510,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(asRowType(inputRowVector->type()))
+                      .tableScan(inputRowType)
                       .capturePlanNodeId(p0)
                       .project({fmt::format(compute, "v")})
                       .planBuild();
     // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, {file});
+    cataLog.setIdAddressMap(p0, files);
     // Set vector name and nodeId of data source
     cataLog.setVectorIdMap(p0, "v");
     // Add source to catalog
@@ -621,16 +627,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         num_samples,
         first_layer_output_size,
         second_layer_output_size);
-    // Create arrayVector for data source
-    auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
-    // Create rowVector for data source
-    auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-    // Create file path
-    auto file = TempFilePath::create();
-    // Create file config
-    auto config = std::make_shared<facebook::velox::dwrf::Config>();
-    // Write the data source to a file, with the format defined by the rowVector
-    writeToFile(file->path, {inputRowVector}, config);
+    // Split inputs into many splits and return paths as a std::vector
+    std::vector<std::shared_ptr<TempFilePath>> files = splitDataToFiles(data.features);
+    RowTypePtr inputRowType = ROW({"v"}, {ARRAY(REAL())});
 
     if (input_features_size > cataLog.getBlockingThreshold()) {
       // If input size is larger than blocking threshold, preblock and store in
@@ -649,12 +648,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     } else {
       // If input size is not larger than blocking threshold, set dataSource in
       // cataLog
-      cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
+      cataLog.setDataSource(inputRowType, files);
       // Set data source statistics in cataLog
       cataLog.setDataSourceStat({num_samples, input_features_size});
     }
 
-    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+    cataLog.setUDFSchema("value", inputRowType);
 
     bool isVerticalPartition = false;
     std::string compute = registerFunctions(
@@ -675,12 +674,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                 .tableScan(asRowType(inputRowVector->type()))
+                 .tableScan(inputRowType)
                  .capturePlanNodeId(p0)
                  .project({fmt::format(compute, "v")});
 
     // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, {file});
+    cataLog.setIdAddressMap(p0, files);
     // Set vector name and nodeId of data source
     cataLog.setVectorIdMap(p0, "v");
     // Add source to catalog
@@ -747,12 +746,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         cataLog.clearVectorIdMap();
         cataLog.clearSourceMap();
         myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                     .tableScan(asRowType(inputRowVector->type()))
+                     .tableScan(inputRowType)
                      .capturePlanNodeId(p0)
                      .project({fmt::format(compute, "v")});
-        cataLog.setIdAddressMap(p0, {file});
+        cataLog.setIdAddressMap(p0, files);
         cataLog.setVectorIdMap(p0, "v");
-        cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+        cataLog.setUDFSchema("value", inputRowType);
         std::shared_ptr<OutputStat> stat1 =
               std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
         Source src1 = Source(p0, Source::Type::FILE, std::move(stat1));
