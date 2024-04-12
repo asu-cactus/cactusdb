@@ -5,6 +5,7 @@ import pandas as pd
 import utils
 import argparse
 import os
+import gc
 from tqdm.auto import tqdm
 from sqlalchemy import create_engine
 from sklearn.preprocessing import LabelEncoder
@@ -46,53 +47,70 @@ def load_movielens_to_postgres():
     print("[INFO] load movielens to postgres success!")
 
 
-def load_ffnn_data_to_postgres(num_generated_data=50, num_features=597540, table_name = "ffnn_data"):
+def load_ffnn_data_to_postgres(num_generated_data=50, num_features=597540, table_name = "ffnn_data", overwrite=False):
     import evadb
 
     # Register postgres in evadb
+    # TODO need to move this line of code to somewhere else
     utils.setup_postgres_for_evadb()
 
-    cursor = evadb.connect().cursor()
-    cursor.query(
-        """
-        USE postgres_data {{
-            DROP TABLE IF EXISTS {}
-        }}
-        """.format(table_name)
-    ).df()
-    cursor.query(
-        """
-        USE postgres_data {{
-        CREATE TABLE IF NOT EXISTS {} (
+    db_connection = utils.get_psycopg2_connection()
+    cursor = db_connection.cursor()
+    if utils.check_table_exist(cursor, table_name) and not overwrite:
+        print("[INFO] table: {} already exists, no need to reload again.".format(table_name))
+        return
+    else:
+        if overwrite:
+            cursor.execute("DROP TABLE IF EXISTS {}".format(table_name))
+
+        cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS {} (
         index INTEGER,
         val REAL[]
-        )
-        }}
-        """.format(table_name)
-    ).df()
-    x = np.random.rand(num_generated_data, num_features).astype(np.float32)
-    x_df = pd.DataFrame(x)
-    x_df_new = x_df.copy()
-    x_df_new["val"] = None
-    for idx, row in tqdm(x_df.iterrows(), total=len(x_df)):
-        x_df_new.loc[idx, "val"] = ",".join(x_df.loc[idx].values.astype(str))
-    x_df_new["val"] = "{" + x_df_new["val"] + "}"
-    x_df_new = x_df_new[["val"]]
-    x_df_new.reset_index(inplace=True)
+        )""".format(table_name))
+        db_connection.commit()
+
     csv_path = "./data/ffnn_data_{}_{}.csv".format(num_generated_data, num_features)
-    x_df_new.to_csv(csv_path, index=False)
+    if not os.path.exists(csv_path):
+        x = np.random.rand(num_generated_data, num_features).astype(np.float32)
+        x_df = pd.DataFrame(x)
+        x_df_new = x_df.copy()
+        x_df_new["val"] = None
+        def create_feature_vec(row):
+            return "{" + ",".join(row.values.astype(str)) + "}"
+        
+        x_df_new["val"] = x_df.apply(create_feature_vec, axis=1)
+        x_df_new = x_df_new[["val"]]
+        x_df_new.reset_index(inplace=True)
+        
+        x_df_new.to_csv(csv_path, index=False)
+        del x_df_new
+        gc.collect()
+    
     data_file_abs_path = os.path.abspath(csv_path)
     print("[INFO] temp data is saved to ", data_file_abs_path)
     # Load data into postgres
-    cursor.query(
-        """
-        USE postgres_data {{
+
+    
+
+    cursor.execute("""    
         COPY {}(index,val)
         FROM '{}'
         DELIMITER ',' CSV HEADER
-        }}
-        """.format(table_name, data_file_abs_path)
-    ).df()
+        """.format(table_name, data_file_abs_path))
+
+    db_connection.commit()
+    db_connection.close()
+
+    # cursor.query(
+    #     """
+    #     USE postgres_data {{
+    #     COPY {}(index,val)
+    #     FROM '{}'
+    #     DELIMITER ',' CSV HEADER
+    #     }}
+    #     """.format(table_name, data_file_abs_path)
+    # ).df()
     print("[INFO] load FFNN data to postgres success!")
 
 

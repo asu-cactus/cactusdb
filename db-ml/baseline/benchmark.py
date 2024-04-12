@@ -108,15 +108,16 @@ def main():
     # list_benchmark += [benchmark_two_tower_model_pipeline_pytorch, benchmark_two_tower_model_pipeline_tf]
     # list_benchmark += [benchmark_two_tower_model_pipeline_evadb]
     # list_benchmark = [benchmark_ffnn_pipeline_sparksql]
-    list_benchmark += [benchmark_ffnn_pipeline_evadb]
-    list_benchmark += [benchmark_ffnn_pipeline_tf, benchmark_ffnn_pipeline_pytorch]
+    # list_benchmark += [benchmark_ffnn_pipeline_evadb]
+    # list_benchmark += [benchmark_ffnn_pipeline_tf, benchmark_ffnn_pipeline_pytorch]
+    list_benchmark += [benchmark_ffnn_pipeline_pytorch]
     num_feature = 597540
     list_hidden_layer_sizes = [num_feature, 1024, 14588]
     # list_num_sample = [100, 500, 1000, 5000]
-    list_num_sample = [3000]
+    list_num_sample = [100]
     result_df = None
     num_loop = 5
-    num_total_record = 5000
+    num_total_record = 50000
     
     result_output_file = "result_{}.csv".format(num_feature)
     

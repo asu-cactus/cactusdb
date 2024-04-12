@@ -26,6 +26,21 @@ def get_sparksql_postgres_connection_properties():
         "driver": "org.postgresql.Driver",
     }
 
+def get_psycopg2_connection():
+    db_params = {
+        "dbname": "postgresdb",
+        "user": "postgresdb",
+        "password": "postgresdb",
+        "host": "localhost",
+        "port": "5432",
+    }
+    try:
+        # Establish a connection to the PostgreSQL database
+        connection = psycopg2.connect(**db_params)
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"Error: {error}")
+    return connection
+
 
 def fetch_data_from_postgres_via_sql(command):
     # Database connection parameters
@@ -99,3 +114,8 @@ def setup_postgres_for_evadb():
     query = f"CREATE DATABASE IF NOT EXISTS postgres_data WITH ENGINE = 'postgres', PARAMETERS = {params};"
     cursor = evadb.connect().cursor()
     cursor.query(query).df()
+
+def check_table_exist(cursor, table_name):
+    cursor.execute("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = %s)", (table_name,))
+    exists = cursor.fetchone()[0]
+    return exists
