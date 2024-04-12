@@ -307,12 +307,23 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
         randomGenerator.genFloat2dVector(batchSize, featureSize);
     auto inputValueVector = maker.arrayVector<float>(inputValue, REAL());
 
-    float* w1Weight = randomGenerator.genFloat1dArray(featureSize*outputSize);
-    float* w1Bias = randomGenerator.genFloat1dArray(outputSize);
+    float* w1Weight;
+    float* w1Bias;
+    std::vector<int> dims;
+    
+    if (kernel == "Dense") {
+      w1Weight = randomGenerator.genFloat1dArray(featureSize*outputSize);
+      w1Bias = randomGenerator.genFloat1dArray(outputSize);
+      dims = {featureSize, outputSize};
+    } else if (kernel == "Relu" || kernel == "Softmax") {
+      dims = {featureSize};
+    } else {
+      throw std::runtime_error(
+          fmt::format("Non-supported TorchNN model: {}", kernel));
+    }
     // std::vector<float*> weights = {w1Weight, w2Weight};
     // std::vector<float*> bias = {w1Bias, w2Bias};
-    std::vector<int> dims = {featureSize, outputSize};
-
+     
 
     registerVectorFunction(
                           "torchDNNKernel",
