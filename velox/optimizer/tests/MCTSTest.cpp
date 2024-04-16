@@ -223,6 +223,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<float*> weights;
     std::vector<float*> bias;
     float* featuresFloat;
+    std::vector<std::shared_ptr<TempFilePath>> feature_paths;
   };
 
   /**
@@ -236,7 +237,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
    * @return DataFrame The structure used to denote the generated data.
    */
   DataFrame
-  data_generate(int features, int samples, int first_layer, int second_layer) {
+  data_generate(int features, int samples, int first_layer, int second_layer, int num_split=8) {
     // Example:
     // ( 1000 * 597540 x 597540 * 1024 + 1000*1024) first layer, data x weights
     // + bias. ( 1000 * 1024 x 1024 * 14588 + 1000*14588) second layer, data x
@@ -247,33 +248,37 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int first_layer_output_size = first_layer;
     int second_layer_output_size = second_layer;
 
-    int input_total_size = input_features_size * num_samples;
+    long input_total_size = input_features_size * num_samples;
 
     int weight_layer1_size = input_features_size * first_layer_output_size;
     int weight_layer2_size = first_layer_output_size * second_layer_output_size;
 
-    int bias_layer1_size = num_samples * first_layer_output_size;
-    int bias_layer2_size = num_samples * second_layer_output_size;
+    int bias_layer1_size = first_layer_output_size;
+    int bias_layer2_size = second_layer_output_size;
     // Seed the random number generator
     std::random_device rd;
     // Initialize the Mersenne Twister engine
     std::mt19937 gen(rd());
     // Define the range
     std::uniform_real_distribution<float> distribution(0.0009, 0.0011);
-
     // Generate input
-    std::vector<std::vector<float>> featureVectors;
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
 
-    for (int i = 0; i < num_samples; i++) {
-      std::vector<float> featureVector;
-
-      for (int j = 0; j < input_features_size; j++) {
-        featureVector.push_back(
-            (i * input_features_size + j) / input_total_size);
-            // featureVector.push_back(1);
-      }
-
-      featureVectors.push_back(featureVector);
+    std::vector<std::shared_ptr<TempFilePath>> feature_paths;
+    size_t partition_size = ceil(num_samples / num_split);
+    for (size_t i = 0; i < num_split; i++) {
+      size_t num_samples_in_partition = ((i+1)*partition_size < num_samples) ? partition_size : num_samples - (i+1)*partition_size;
+      std::vector<std::vector<float>> partialFeature = randomGenerator.genFloat2dVector(num_samples_in_partition, input_features_size);
+      auto featureArrayVector = maker.arrayVector<float>(std::move(partialFeature), REAL());
+      auto inputRowVector = maker.rowVector({"v"}, {std::move(featureArrayVector)});
+      auto file = TempFilePath::create();
+      auto config = std::make_shared<facebook::velox::dwrf::Config>();
+      writeToFile(file->path, {std::move(inputRowVector)}, config);
+      feature_paths.push_back(file);
+      inputRowVector.reset();
+      featureArrayVector.reset();
+      partialFeature.clear();
+      partialFeature.shrink_to_fit();
     }
 
 
@@ -291,8 +296,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
 
     std::vector<float*> weights;
-    weights.push_back(weight_layer1);
-    weights.push_back(weight_layer2);
+    weights.push_back(std::move(weight_layer1));
+    weights.push_back(std::move(weight_layer2));
 
     // Generate bias
     float* bias_layer1 = new float[bias_layer1_size];
@@ -305,17 +310,15 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     for (int i = 0; i < bias_layer2_size; ++i) {
       bias_layer2[i] = 0.00001;
     }
-
     std::vector<float*> bias;
-    bias.push_back(bias_layer1);
-    bias.push_back(bias_layer2);
-
+    bias.push_back(std::move(bias_layer1));
+    bias.push_back(std::move(bias_layer2));
     // Create DataFrame
     DataFrame data;
-    data.features = featureVectors;
-    data.weights = weights;
-    data.bias = bias;
-
+    // data.features = featureVectors;
+    data.weights = std::move(weights);
+    data.bias = std::move(bias);
+    data.feature_paths = std::move(feature_paths);
     return data;
   }
 
@@ -351,7 +354,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "mat_mul0",
         MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1),
+        std::make_unique<MatrixMultiply>(std::move(weightsFile_1), input_size1, units1),
         {},
         true,
         catalog,
@@ -359,8 +362,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Register matrix addition function for the first layer
     optimization::registerVectorFunction(
         "mat_add0",
-        MatrixAddition::signatures(),
-        std::make_unique<MatrixAddition>(biasFile_1, units1),
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(std::move(biasFile_1), units1),
         {},
         true,
         catalog);
@@ -376,7 +379,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "mat_mul1",
         MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(weightsFile_2, input_size2, units2),
+        std::make_unique<MatrixMultiply>(std::move(weightsFile_2), input_size2, units2),
         {},
         true,
         catalog,
@@ -384,8 +387,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Register matrix addition function for the second layer
     optimization::registerVectorFunction(
         "mat_add1",
-        MatrixAddition::signatures(),
-        std::make_unique<MatrixAddition>(biasFile_2, units2),
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(std::move(biasFile_2), units2),
         {},
         true,
         catalog);
@@ -424,6 +427,46 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return paths;
   }
 
+  std::string process_mem_usage() {
+    using std::ios_base;
+    using std::ifstream;
+    using std::string;
+
+    double vm_usage = 0.0;
+    double resident_set = 0.0;
+
+    // Read data from /proc/self/stat
+    ifstream stat_stream("/proc/self/stat", ios_base::in);
+    if (!stat_stream) {
+        std::cerr << "Error opening /proc/self/stat" << std::endl;
+        return "";
+    }
+
+    // Extract relevant fields
+    string pid, comm, state, ppid, pgrp, session, tty_nr;
+    string tpgid, flags, minflt, cminflt, majflt, cmajflt;
+    string utime, stime, cutime, cstime, priority, nice;
+    string O, itrealvalue, starttime;
+    unsigned long vsize;
+    long rss;
+
+    stat_stream >> pid >> comm >> state >> ppid >> pgrp >> session >> tty_nr
+                >> tpgid >> flags >> minflt >> cminflt >> majflt >> cmajflt
+                >> utime >> stime >> cutime >> cstime >> priority >> nice
+                >> O >> itrealvalue >> starttime >> vsize >> rss;
+
+    stat_stream.close();
+
+    // Get page size in KB
+    long page_size_kb = sysconf(_SC_PAGE_SIZE) / 1024 / 1024 / 1024;
+
+    // Calculate memory usage
+    vm_usage = vsize / 1024.0 / 1024.0 / 1024.0;
+    resident_set = rss * page_size_kb;
+    std::cout << fmt::format(" vm_usage: {:.2f} , resident_set: {:.2f}", vm_usage, resident_set) << std::endl;
+    return "";
+}
+
 
   /**
    * @brief A test function to test the rewrite rule of
@@ -457,15 +500,17 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         num_samples,
         first_layer_output_size,
         second_layer_output_size);
-
     // Split inputs into many splits and return paths as a std::vector
-    std::vector<std::shared_ptr<TempFilePath>> files = splitDataToFiles(data.features);
+    std::vector<std::shared_ptr<TempFilePath>> files = data.feature_paths;
     RowTypePtr inputRowType = ROW({"v"}, {ARRAY(REAL())});
     //  Check the input size against the blocking threshold in cataLog.
     //  If yes, preblock the input vector, store it, and add information in
     //  cataLog. If not, set dataSource in cataLog.
     if (input_features_size > cataLog.getBlockingThreshold()) {
-      // If input size is larger than blocking threshold, preblock and store in
+      // FIXME: temporary disable the following blocking for vertical partition since
+      // we have deallocate the data.features in data_generate function to save 
+      // unnecessary memory usage.
+      /* // If input size is larger than blocking threshold, preblock and store in
       // cataLog
       std::vector<std::vector<float>> valuesBlock =
           optimization::create_input_block(
@@ -475,16 +520,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       optimization::FileStructure values = optimization::block_to_files(
           valuesBlock, cataLog.getDefaultBlocksNum(), 0);
       // Set data source blocks in cataLog
-      cataLog.setDataSourceBlocks(values.schema, values.paths);
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
+      cataLog.setDataSourceBlocks(values.schema, values.paths); */
     } else {
       // If input size is not larger than blocking threshold, set dataSource in
       // cataLog
       cataLog.setDataSource(inputRowType, files);
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
     }
+    // Set data source statistics in cataLog
+    cataLog.setDataSourceStat({num_samples, input_features_size});
     cataLog.setUDFSchema("value", inputRowType);
     // Build two dense layers UDFs using registerFunction in optimization
     // namespace
@@ -503,7 +546,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         data.bias[1],
         cataLog,
         isVerticalPartition);
-
     // Initialize planNodeID
     core::PlanNodeId p0;
     // Initialize planNodeIdGenerator
@@ -628,11 +670,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         first_layer_output_size,
         second_layer_output_size);
     // Split inputs into many splits and return paths as a std::vector
-    std::vector<std::shared_ptr<TempFilePath>> files = splitDataToFiles(data.features);
+    std::vector<std::shared_ptr<TempFilePath>> files = data.feature_paths;
     RowTypePtr inputRowType = ROW({"v"}, {ARRAY(REAL())});
 
     if (input_features_size > cataLog.getBlockingThreshold()) {
-      // If input size is larger than blocking threshold, preblock and store in
+      // FIXME: temporary disable the following blocking for vertical partition since
+      // we have deallocate the data.features in data_generate function to save 
+      // unnecessary memory usage.
+      /* // If input size is larger than blocking threshold, preblock and store in
       // cataLog
       std::vector<std::vector<float>> valuesBlock =
           optimization::create_input_block(
@@ -642,17 +687,15 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       optimization::FileStructure values = optimization::block_to_files(
           valuesBlock, cataLog.getDefaultBlocksNum(), 0);
       // Set data source blocks in cataLog
-      cataLog.setDataSourceBlocks(values.schema, values.paths);
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
+      cataLog.setDataSourceBlocks(values.schema, values.paths); */
     } else {
       // If input size is not larger than blocking threshold, set dataSource in
       // cataLog
       cataLog.setDataSource(inputRowType, files);
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
     }
 
+    // Set data source statistics in cataLog
+    cataLog.setDataSourceStat({num_samples, input_features_size});
     cataLog.setUDFSchema("value", inputRowType);
 
     bool isVerticalPartition = false;

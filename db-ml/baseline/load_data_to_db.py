@@ -6,6 +6,7 @@ import utils
 import argparse
 import os
 import gc
+import math
 from tqdm.auto import tqdm
 from sqlalchemy import create_engine
 from sklearn.preprocessing import LabelEncoder
@@ -72,20 +73,32 @@ def load_ffnn_data_to_postgres(num_generated_data=50, num_features=597540, table
 
     csv_path = "./data/ffnn_data_{}_{}.csv".format(num_generated_data, num_features)
     if not os.path.exists(csv_path):
-        x = np.random.rand(num_generated_data, num_features).astype(np.float32)
-        x_df = pd.DataFrame(x)
-        x_df_new = x_df.copy()
-        x_df_new["val"] = None
-        def create_feature_vec(row):
-            return "{" + ",".join(row.values.astype(str)) + "}"
-        
-        x_df_new["val"] = x_df.apply(create_feature_vec, axis=1)
-        x_df_new = x_df_new[["val"]]
-        x_df_new.reset_index(inplace=True)
-        
-        x_df_new.to_csv(csv_path, index=False)
-        del x_df_new
-        gc.collect()
+
+        size_per_tuple = num_features * 4
+        SIZE_PER_GENERATION = 1*256*1024*1024
+        num_tuple_per_generation = math.ceil(SIZE_PER_GENERATION / size_per_tuple)
+        num_generations = math.ceil(num_generated_data / num_tuple_per_generation)
+        print("[INFO] generate data: num_generations: {}, num_tuple_per_generation: {}".format(num_generations, num_tuple_per_generation))
+        for gen_idx in tqdm(range(num_generations)):
+            idx_start = gen_idx*num_tuple_per_generation
+            idx_end = (gen_idx+1)*num_tuple_per_generation
+            idx_end = idx_end if idx_end < num_generated_data else num_generated_data
+            x = np.random.rand(idx_end - idx_start, num_features).astype(np.float32)
+            x_df = pd.DataFrame(x)
+            x_df_new = x_df.copy()
+            x_df_new["val"] = None
+            def create_feature_vec(row):
+                return "{" + ",".join(row.values.astype(str)) + "}"
+            
+            x_df_new["val"] = x_df.apply(create_feature_vec, axis=1)
+            x_df_new = x_df_new[["val"]]
+            x_df_new.reset_index(inplace=True)
+            x_df_new['index'] = range(idx_start, idx_end)
+            
+            x_df_new.to_csv(csv_path, index=False, mode='a')
+            del x_df_new
+            del x_df
+            gc.collect()
     
     data_file_abs_path = os.path.abspath(csv_path)
     print("[INFO] temp data is saved to ", data_file_abs_path)
