@@ -146,7 +146,7 @@ create_blocks(int row, int col, float* values, int block_size) {
             }
         }
 
-        blocks[i] = block; // Store the block in the vector of blocks
+        blocks[i] = std::move(block); // Store the block in the vector of blocks
         current_col += current_block_size; // Move to the next column
     }
 

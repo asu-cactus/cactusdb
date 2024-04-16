@@ -55,7 +55,7 @@ class NNBuilder {
   NNBuilder& denseLayer(int units, int input_size, float* weights, float* bias, Activation ac){
 
     std::string mat_mul_name = MatrixMultiply::getName() + std::to_string(function_count++);
-    std::string mat_add_name = MatrixAddition::getName() + std::to_string(function_count++);
+    std::string mat_add_name = MatrixVectorAddition::getName() + std::to_string(function_count++);
     std::string act_name = "";
 
     exec::registerVectorFunction(
@@ -66,8 +66,8 @@ class NNBuilder {
 
     exec::registerVectorFunction(
         mat_add_name,
-        MatrixAddition::signatures(),
-        std::make_unique<MatrixAddition>(bias, units)
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(bias, units)
     );  
 
     if(ac == RELU){

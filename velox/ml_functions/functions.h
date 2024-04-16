@@ -74,8 +74,9 @@ class MatrixMultiply: public MLFunction {
 
 public:
     MatrixMultiply(float* weights, int num_rows, int num_cols) {
-        weights_ = new float[num_rows * num_cols]; 
-        std::memcpy(weights_, weights, num_rows * num_cols * sizeof(float));
+        // weights_ = new float[num_rows * num_cols]; 
+        // std::memcpy(weights_, weights, num_rows * num_cols * sizeof(float));
+        weights_ = weights;
         dims.push_back(num_rows);
         dims.push_back(num_cols);
     }
@@ -599,7 +600,7 @@ public:
     };
 
     static std::string getName() {
-        return "mat_vector_add";
+        return "mat_add";
     };
 
     std::string getWeightsFile() {

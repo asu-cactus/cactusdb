@@ -70,7 +70,7 @@ class RandomGenerator {
     std::vector<std::vector<float>> float2dVector;
 
     for (int i = 0; i < numRow; i++) {
-      float2dVector.push_back(genFloat1dVector(numCol));
+      float2dVector.push_back(std::move(genFloat1dVector(numCol)));
     }
     return float2dVector;
   }
