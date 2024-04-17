@@ -10,6 +10,8 @@ import math
 from tqdm.auto import tqdm
 from sqlalchemy import create_engine
 from sklearn.preprocessing import LabelEncoder
+import concurrent.futures
+import multiprocessing
 
 
 def load_movielens_to_postgres():
@@ -48,7 +50,48 @@ def load_movielens_to_postgres():
     print("[INFO] load movielens to postgres success!")
 
 
-def load_ffnn_data_to_postgres(num_generated_data=50, num_features=597540, table_name = "ffnn_data", overwrite=False):
+def generate_data_to_disk(
+    start_gen_idx,
+    end_gen_idx,
+    num_tuple_per_generation,
+    num_total_data,
+    num_features,
+    file_path,
+    lock,
+):
+    enable_progress_bar = end_gen_idx * num_tuple_per_generation >= num_total_data
+    if enable_progress_bar:
+        progress_bar = tqdm(range(start_gen_idx, end_gen_idx), desc="Progress")
+
+    for gen_idx in range(start_gen_idx, end_gen_idx):
+        idx_start = gen_idx * num_tuple_per_generation
+        idx_end = (gen_idx + 1) * num_tuple_per_generation
+        idx_end = idx_end if idx_end <= num_total_data else num_total_data
+        x = np.random.rand(idx_end - idx_start, num_features).astype(np.float32)
+        x_df = pd.DataFrame(x)
+        x_df_new = x_df.copy()
+        x_df_new["val"] = None
+
+        def create_feature_vec(row):
+            return "{" + ",".join(row.values.astype(str)) + "}"
+
+        x_df_new["val"] = x_df.apply(create_feature_vec, axis=1)
+        x_df_new = x_df_new[["val"]]
+        x_df_new.reset_index(inplace=True)
+        x_df_new["index"] = range(idx_start, idx_end)
+
+        with lock:
+            x_df_new.to_csv(file_path, index=False, mode="a")
+        del x_df_new
+        del x_df
+        gc.collect()
+        if enable_progress_bar:
+            progress_bar.update(1)
+
+
+def load_ffnn_data_to_postgres(
+    num_generated_data=50, num_features=597540, table_name="ffnn_data", overwrite=False
+):
     import evadb
 
     # Register postgres in evadb
@@ -57,73 +100,102 @@ def load_ffnn_data_to_postgres(num_generated_data=50, num_features=597540, table
 
     db_connection = utils.get_psycopg2_connection()
     cursor = db_connection.cursor()
+    overwrite = False
+    csv_path = "./data/ffnn_data_{}_{}.csv".format(num_generated_data, num_features)
+
     if utils.check_table_exist(cursor, table_name) and not overwrite:
-        print("[INFO] table: {} already exists, no need to reload again.".format(table_name))
+        print(
+            "[INFO] table: {} already exists, no need to reload again.".format(
+                table_name
+            )
+        )
         return
     else:
-        if overwrite:
-            cursor.execute("DROP TABLE IF EXISTS {}".format(table_name))
-
-        cursor.execute("""
+        cursor.execute("DROP TABLE IF EXISTS {}".format(table_name))
+        cursor.execute(
+            """
                     CREATE TABLE IF NOT EXISTS {} (
         index INTEGER,
         val REAL[]
-        )""".format(table_name))
+        )""".format(
+                table_name
+            )
+        )
         db_connection.commit()
 
-    csv_path = "./data/ffnn_data_{}_{}.csv".format(num_generated_data, num_features)
+        if os.path.exists(csv_path):
+            os.remove(csv_path)
+
     if not os.path.exists(csv_path):
 
         size_per_tuple = num_features * 4
-        SIZE_PER_GENERATION = 1*256*1024*1024
+        SIZE_PER_GENERATION = 1 * 256 * 1024 * 1024
         num_tuple_per_generation = math.ceil(SIZE_PER_GENERATION / size_per_tuple)
         num_generations = math.ceil(num_generated_data / num_tuple_per_generation)
-        print("[INFO] generate data: num_generations: {}, num_tuple_per_generation: {}".format(num_generations, num_tuple_per_generation))
-        for gen_idx in tqdm(range(num_generations)):
-            idx_start = gen_idx*num_tuple_per_generation
-            idx_end = (gen_idx+1)*num_tuple_per_generation
-            idx_end = idx_end if idx_end < num_generated_data else num_generated_data
-            x = np.random.rand(idx_end - idx_start, num_features).astype(np.float32)
-            x_df = pd.DataFrame(x)
-            x_df_new = x_df.copy()
-            x_df_new["val"] = None
-            def create_feature_vec(row):
-                return "{" + ",".join(row.values.astype(str)) + "}"
-            
-            x_df_new["val"] = x_df.apply(create_feature_vec, axis=1)
-            x_df_new = x_df_new[["val"]]
-            x_df_new.reset_index(inplace=True)
-            x_df_new['index'] = range(idx_start, idx_end)
-            
-            x_df_new.to_csv(csv_path, index=False, mode='a')
-            del x_df_new
-            del x_df
-            gc.collect()
-    
+        print(
+            "[INFO] generate data: num_generations: {}, num_tuple_per_generation: {}".format(
+                num_generations, num_tuple_per_generation
+            )
+        )
+        num_threads_to_generate_file = utils.get_sys_num_threads()
+        num_threads_to_generate_file = (
+            num_threads_to_generate_file
+            if num_threads_to_generate_file <= num_generations
+            else num_generations
+        )
+
+        num_generation_per_core = int(
+            np.ceil(num_generations / num_threads_to_generate_file)
+        )
+        m = multiprocessing.Manager()
+        lock = m.Lock()
+        print(
+            "[INFO] DATA GEN INFO \n \t size_per_generation: {}, \n\t num_tuple_per_generation: {}, \n\t num_generations: {}, \n\t num_threads_to_generate_file: {}, \n\t num_generation_per_core: {}".format(
+                SIZE_PER_GENERATION,
+                num_tuple_per_generation,
+                num_generations,
+                num_threads_to_generate_file,
+                num_generation_per_core,
+            )
+        )
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=num_threads_to_generate_file
+        ) as executor:
+            futures = [
+                executor.submit(
+                    generate_data_to_disk,
+                    i * num_generation_per_core,
+                    (i + 1) * num_generation_per_core,
+                    num_tuple_per_generation,
+                    num_generated_data,
+                    num_features,
+                    csv_path,
+                    lock,
+                )
+                for i in range(num_threads_to_generate_file)
+            ]
+            # Retrieve the results from each thread
+            for future in concurrent.futures.as_completed(futures):
+                future.result()
+
+
     data_file_abs_path = os.path.abspath(csv_path)
     print("[INFO] temp data is saved to ", data_file_abs_path)
     # Load data into postgres
 
-    
-
-    cursor.execute("""    
+    cursor.execute(
+        """    
         COPY {}(index,val)
         FROM '{}'
         DELIMITER ',' CSV HEADER
-        """.format(table_name, data_file_abs_path))
+        """.format(
+            table_name, data_file_abs_path
+        )
+    )
 
     db_connection.commit()
     db_connection.close()
 
-    # cursor.query(
-    #     """
-    #     USE postgres_data {{
-    #     COPY {}(index,val)
-    #     FROM '{}'
-    #     DELIMITER ',' CSV HEADER
-    #     }}
-    #     """.format(table_name, data_file_abs_path)
-    # ).df()
     print("[INFO] load FFNN data to postgres success!")
 
 
