@@ -151,15 +151,14 @@ public:
 															PlanBuilder(planNodeIdGenerator)
 															.tableScan(valueSchema)
 															.capturePlanNodeId(p1)
-															.rowNumber({})
 															.planNode(),
-															{"row_number", "v", "w", "w_row", "w_col"}
+															{"idx", "v", "w", "w_row", "w_col"}
 															)
-														.project({"mat_mul_h(v, w) AS t", "row_number", "w_col"})
-														// .localPartition({"row_number"})
-														// .singleAggregation({"row_number"}, {"array_cat(t, w_col) AS v"})
-														.partialAggregation({"row_number"}, {"array_cat(t, w_col) AS v"})
-														.localPartition({"row_number"})
+														.project({"mat_mul_h(v, w) AS t", "idx", "w_col"})
+														// .localPartition({"idx"})
+														// .singleAggregation({"idx"}, {"array_cat(t, w_col) AS v"})
+														.partialAggregation({"idx"}, {"array_cat(t, w_col) AS v"})
+														.localPartition({"idx"})
 														.intermediateAggregation()
 														.finalAggregation()
 														.project({exprStr})
@@ -262,15 +261,14 @@ public:
 															PlanBuilder(planNodeIdGenerator)
 															.tableScan(valueSchema)
 															.capturePlanNodeId(p1)
-															.rowNumber({})
 															.planNode(),
-															{"row_number", "v", "w", "w_row", "w_col"}
+															{"idx", "v", "w", "w_row", "w_col"}
 															)
-														.project({"mat_mul_h(v, w) AS t", "row_number", "w_col"})
-														// .localPartition({"row_number"})
-														// .singleAggregation({"row_number"}, {"array_cat(t, w_col) AS v"})
-														.partialAggregation({"row_number"}, {"array_cat(t, w_col) AS v"})
-														.localPartition({"row_number"})
+														.project({"mat_mul_h(v, w) AS t", "idx", "w_col"})
+														// .localPartition({"idx"})
+														// .singleAggregation({"idx"}, {"array_cat(t, w_col) AS v"})
+														.partialAggregation({"idx"}, {"array_cat(t, w_col) AS v"})
+														.localPartition({"idx"})
 														.intermediateAggregation()
 														.finalAggregation()
 														.project({exprStr})

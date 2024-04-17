@@ -4,6 +4,11 @@ import psycopg2
 import pandas as pd
 import os
 import evadb
+import multiprocessing
+
+
+def get_sys_num_threads():
+    return multiprocessing.cpu_count()
 
 
 def mkdir(dir_path):

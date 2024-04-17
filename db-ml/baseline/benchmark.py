@@ -3,6 +3,7 @@ import pandas as pd
 import warnings
 import load_data_to_db
 import itertools
+import datetime
 
 warnings.filterwarnings("ignore")
 from tqdm.auto import tqdm
@@ -107,19 +108,22 @@ def main():
     list_benchmark = []
     # list_benchmark += [benchmark_two_tower_model_pipeline_pytorch, benchmark_two_tower_model_pipeline_tf]
     # list_benchmark += [benchmark_two_tower_model_pipeline_evadb]
-    # list_benchmark = [benchmark_ffnn_pipeline_sparksql]
+    # list_benchmark += [benchmark_ffnn_pipeline_sparksql]
     # list_benchmark += [benchmark_ffnn_pipeline_evadb]
-    # list_benchmark += [benchmark_ffnn_pipeline_tf, benchmark_ffnn_pipeline_pytorch]
+    # list_benchmark += [benchmark_ffnn_pipeline_tf]
     list_benchmark += [benchmark_ffnn_pipeline_pytorch]
-    num_feature = 597540
+    num_feature = 100000
     list_hidden_layer_sizes = [num_feature, 1024, 14588]
     # list_num_sample = [100, 500, 1000, 5000]
     list_num_sample = [100]
     result_df = None
     num_loop = 5
-    num_total_record = 50000
+    num_total_record = 100000
     
-    result_output_file = "result_{}.csv".format(num_feature)
+    today = datetime.date.today()
+    formatted_date = today.strftime("%m-%d-%Y")
+
+    result_output_file = "result_{}_.csv".format(num_feature, formatted_date)
     
     ffnn_table_name = "ffnn_data_{}".format(num_feature)
     load_data_to_db.load_ffnn_data_to_postgres(num_total_record, num_feature, ffnn_table_name)

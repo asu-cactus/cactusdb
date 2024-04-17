@@ -162,7 +162,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
             const std::vector<std::shared_ptr<TempFilePath>> fileAddr =
                 entry.second;
-
             auto hiveSplits = makeHiveConnectorSplits(fileAddr);
 
             for (auto& split : hiveSplits) {
@@ -265,17 +264,24 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
 
     std::vector<std::shared_ptr<TempFilePath>> feature_paths;
-    size_t partition_size = ceil(num_samples / num_split);
+    size_t partition_size = ceil(num_samples / float(num_split));
     for (size_t i = 0; i < num_split; i++) {
-      size_t num_samples_in_partition = ((i+1)*partition_size < num_samples) ? partition_size : num_samples - (i+1)*partition_size;
+      size_t num_samples_in_partition = (i+1)*partition_size <= num_samples ? partition_size : num_samples - i*partition_size;
+      if (num_samples_in_partition == 0) {
+        continue;
+      }
+      std::vector<int> indexes = randomGenerator.genIntRange(i*partition_size, i*partition_size+num_samples_in_partition);
+      auto indexFlaVector = maker.flatVector<int>(indexes);
       std::vector<std::vector<float>> partialFeature = randomGenerator.genFloat2dVector(num_samples_in_partition, input_features_size);
       auto featureArrayVector = maker.arrayVector<float>(std::move(partialFeature), REAL());
-      auto inputRowVector = maker.rowVector({"v"}, {std::move(featureArrayVector)});
+      auto inputRowVector = maker.rowVector({"idx", "v"}, {std::move(indexFlaVector), std::move(featureArrayVector)});
       auto file = TempFilePath::create();
       auto config = std::make_shared<facebook::velox::dwrf::Config>();
       writeToFile(file->path, {std::move(inputRowVector)}, config);
       feature_paths.push_back(file);
       inputRowVector.reset();
+      indexFlaVector.reset();
+      indexes.clear();
       featureArrayVector.reset();
       partialFeature.clear();
       partialFeature.shrink_to_fit();
@@ -502,7 +508,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         second_layer_output_size);
     // Split inputs into many splits and return paths as a std::vector
     std::vector<std::shared_ptr<TempFilePath>> files = data.feature_paths;
-    RowTypePtr inputRowType = ROW({"v"}, {ARRAY(REAL())});
+    RowTypePtr inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
     //  Check the input size against the blocking threshold in cataLog.
     //  If yes, preblock the input vector, store it, and add information in
     //  cataLog. If not, set dataSource in cataLog.
@@ -651,7 +657,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << averageExectuionTime << std::endl;
   }
 
-  void testIntegratedMCTS(int featureSize, int numSamples, int repeatRun, int blockSize) {
+  void testIntegratedMCTS(int featureSize, int numSamples, int repeatRun, int blockSize, int verbose) {
     // Set data source config.
     // int input_features_size = 800; // 597540
     int input_features_size = featureSize; // 597540
@@ -671,7 +677,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         second_layer_output_size);
     // Split inputs into many splits and return paths as a std::vector
     std::vector<std::shared_ptr<TempFilePath>> files = data.feature_paths;
-    RowTypePtr inputRowType = ROW({"v"}, {ARRAY(REAL())});
+    RowTypePtr inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
 
     if (input_features_size > cataLog.getBlockingThreshold()) {
       // FIXME: temporary disable the following blocking for vertical partition since
@@ -852,7 +858,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
-          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
+          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 4, verbose);
           jsonMessage["reward"] = executeTime;
           LOG(INFO) << "[INFO] get Cost(offline): "
                     << " time: " << executeTime << std::endl;
@@ -879,7 +885,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         sendJsonBySocket(jsonMessage, clientSocket);
 
       } else if (mctsAction == "runPlan") {
-        auto latency = runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
+        auto latency = runPlanWithCataLog(8, 8, myPlan, cataLog, 4, verbose);
         Json::Value jsonMessage;
         jsonMessage["latency"] = latency;
         sendAcknowledgment(clientSocket);
@@ -938,7 +944,7 @@ int main(int argc, char** argv) {
  
   // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
-    demo.testIntegratedMCTS(featureSize, numSample, repeatRun, blockSize);
+    demo.testIntegratedMCTS(featureSize, numSample, repeatRun, blockSize, verbose);
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
