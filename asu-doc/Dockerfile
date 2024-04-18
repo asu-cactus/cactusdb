@@ -87,6 +87,14 @@ WORKDIR /home/evadb
 RUN git checkout array
 RUN pip install ./[ray]
 
+# install cpr
+WORKDIR /home
+RUN git clone https://github.com/libcpr/cpr.git \
+    && cd cpr && mkdir build && cd build \
+    && cmake .. -DCPR_USE_SYSTEM_CURL=ON \
+    && cmake --build . --parallel \
+    && cmake --install .
+
 # set up duckdb
 WORKDIR /home
 RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
@@ -127,11 +135,11 @@ RUN git remote set-url --push upstream no_push
 ENV NUM_THREADS=16
 
 # download data
-RUN mkdir data
-WORKDIR /home/velox/data
-RUN gdown 1iCmXYbCMaSyT5dH5pYQ275-pPjuEPf3D
-RUN unzip two_tower_data.zip
-WORKDIR /home/velox
+# RUN mkdir data
+# WORKDIR /home/velox/data
+# RUN gdown 1iCmXYbCMaSyT5dH5pYQ275-pPjuEPf3D
+# RUN unzip two_tower_data.zip
+# WORKDIR /home/velox
 
 # set-up vscode
 WORKDIR /home

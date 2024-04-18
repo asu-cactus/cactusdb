@@ -19,6 +19,8 @@ set(CMAKE_PREFIX_PATH "$CONDA_PREFIX")
 
 find_package(Torch REQUIRED)
 find_package(xgboost REQUIRED)
+find_package(cpr REQUIRED)
+find_package(jsoncpp REQUIRED)
 
 add_executable(ml_functions_test tests/MLFunctionsTest.cpp)
 target_link_libraries(
@@ -68,8 +70,10 @@ target_link_libraries(
   velox_memory
   velox_common_base 
   velox_vector_fuzzer
+  jsoncpp_lib
   openblas
   ${TORCH_LIBRARIES}
+  cpr::cpr
 )
 
 add_executable(two_tower_model_test tests/TwoTowerModelTest.cpp)
