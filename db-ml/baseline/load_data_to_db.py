@@ -65,6 +65,8 @@ def generate_data_to_disk(
 
     for gen_idx in range(start_gen_idx, end_gen_idx):
         idx_start = gen_idx * num_tuple_per_generation
+        if idx_start >= end_gen_idx:
+            return
         idx_end = (gen_idx + 1) * num_tuple_per_generation
         idx_end = idx_end if idx_end <= num_total_data else num_total_data
         x = np.random.rand(idx_end - idx_start, num_features).astype(np.float32)
@@ -81,7 +83,7 @@ def generate_data_to_disk(
         x_df_new["index"] = range(idx_start, idx_end)
 
         with lock:
-            x_df_new.to_csv(file_path, index=False, mode="a")
+            x_df_new.to_csv(file_path, index=False, header=False, mode="a")
         del x_df_new
         del x_df
         gc.collect()
@@ -102,6 +104,7 @@ def load_ffnn_data_to_postgres(
     cursor = db_connection.cursor()
     overwrite = False
     csv_path = "./data/ffnn_data_{}_{}.csv".format(num_generated_data, num_features)
+    pd.DataFrame({"index": [], "val": []}).to_csv(csv_path, index=False)
 
     if utils.check_table_exist(cursor, table_name) and not overwrite:
         print(
