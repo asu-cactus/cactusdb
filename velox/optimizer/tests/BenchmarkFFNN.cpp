@@ -287,7 +287,7 @@ std::vector<float> generatePosEmbedding(int position, int dims) {
   std::vector<std::vector<float>> libsEncoder() {
     std::vector<std::vector<float>> encodedLibs;
 
-    for (auto& pair : NodeIdLibsMap) {
+    for (auto& pair : NodeIdLibsMap) { // torchnn(relu(add(mul))) -> torch0(eigen0(e1(e2))) 4*4
         int nodeId = std::stoi(pair.first);
 
         std::vector<float> libEmbeddings;
@@ -307,7 +307,7 @@ std::vector<float> generatePosEmbedding(int position, int dims) {
         for (int m = 0; m < libEmbeddings.size(); ++m) {
           libEmbeddings[m] += queryPosEmbedding[m % 4];
         }
-        encodedLibs.push_back(libEmbeddings);
+        encodedLibs.push_back(libEmbeddings);// length is not fix, 4*n, e1 and e2, eigen = e1 + e2, then the length is fixed
     }
     return encodedLibs;
 
@@ -425,11 +425,11 @@ void writeCSV(const std::vector<std::vector<T>>& data, const std::string& filena
       // Add hivesplits to the target plan node (data source node).
       encoder(myPlan.planNode());
 
-      auto embedding_1 = planEncoder(NodeIdTypesMap);
+      auto embedding_1 = planEncoder(NodeIdTypesMap); //2*4
 
-      auto embedding_2 = libsEncoder();
+      auto embedding_2 = libsEncoder();//1*16(4*4)
 
-      auto embedding_3 = metaDataEncoder();
+      auto embedding_3 = metaDataEncoder();//1*4
 
       // auto embedding_4 = 
       int libsNum = 3;
