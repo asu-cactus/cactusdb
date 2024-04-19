@@ -31,6 +31,17 @@ def get_sparksql_postgres_connection_properties():
         "driver": "org.postgresql.Driver",
     }
 
+def get_connectorx_configuration():
+    db_params = {
+        "dbname": "postgresdb",
+        "user": "postgresdb",
+        "password": "postgresdb",
+        "host": "localhost",
+        "port": "5432",
+    }
+    
+    return db_params
+
 def get_psycopg2_connection():
     db_params = {
         "dbname": "postgresdb",

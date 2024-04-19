@@ -42,6 +42,7 @@ RUN apt-get install -y curl
 RUN apt-get install -y zip
 RUN apt-get install -y default-jre 
 RUN apt-get install -y kmod
+RUN apt-get install -y nlohmann-json3-dev
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
 RUN ln -s /usr/bin/python3 /usr/bin/python
 # install github cli (optional)

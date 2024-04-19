@@ -7,6 +7,7 @@ import argparse
 import os
 import gc
 import math
+import fcntl
 from tqdm.auto import tqdm
 from sqlalchemy import create_engine
 from sklearn.preprocessing import LabelEncoder
@@ -63,9 +64,11 @@ def generate_data_to_disk(
     if enable_progress_bar:
         progress_bar = tqdm(range(start_gen_idx, end_gen_idx), desc="Progress")
 
+
     for gen_idx in range(start_gen_idx, end_gen_idx):
+        # print("thread: ", start_gen_idx, enable_progress_bar)
         idx_start = gen_idx * num_tuple_per_generation
-        if idx_start >= end_gen_idx:
+        if idx_start >= num_total_data:
             return
         idx_end = (gen_idx + 1) * num_tuple_per_generation
         idx_end = idx_end if idx_end <= num_total_data else num_total_data
@@ -73,6 +76,8 @@ def generate_data_to_disk(
         x_df = pd.DataFrame(x)
         x_df_new = x_df.copy()
         x_df_new["val"] = None
+
+        
 
         def create_feature_vec(row):
             return "{" + ",".join(row.values.astype(str)) + "}"
@@ -82,13 +87,23 @@ def generate_data_to_disk(
         x_df_new.reset_index(inplace=True)
         x_df_new["index"] = range(idx_start, idx_end)
 
+        # with open(file_path, "a") as g:
+        #     print(1)
+        #     fcntl.flock(g, fcntl.LOCK_EX)
+        #     print("write to csv: ", file_path)
+        #     x_df_new.to_csv(file_path, index=False, header=False, mode="a")
+        #     fcntl.flock(g, fcntl.LOCK_UN)
+
         with lock:
+            print("write to csv: ", file_path)
             x_df_new.to_csv(file_path, index=False, header=False, mode="a")
         del x_df_new
         del x_df
         gc.collect()
         if enable_progress_bar:
             progress_bar.update(1)
+    
+    return "DONE"
 
 
 def load_ffnn_data_to_postgres(
@@ -102,9 +117,11 @@ def load_ffnn_data_to_postgres(
 
     db_connection = utils.get_psycopg2_connection()
     cursor = db_connection.cursor()
-    overwrite = False
+    # overwrite = True
+
     csv_path = "./data/ffnn_data_{}_{}.csv".format(num_generated_data, num_features)
-    pd.DataFrame({"index": [], "val": []}).to_csv(csv_path, index=False)
+    
+    # return 
 
     if utils.check_table_exist(cursor, table_name) and not overwrite:
         print(
@@ -126,11 +143,11 @@ def load_ffnn_data_to_postgres(
         )
         db_connection.commit()
 
-        if os.path.exists(csv_path):
-            os.remove(csv_path)
+        # if os.path.exists(csv_path):
+        #     os.remove(csv_path)
 
-    if not os.path.exists(csv_path):
-
+    if not os.path.exists(csv_path) or overwrite :
+        pd.DataFrame({"index": [], "val": []}).to_csv(csv_path, index=False)
         size_per_tuple = num_features * 4
         SIZE_PER_GENERATION = 1 * 256 * 1024 * 1024
         num_tuple_per_generation = math.ceil(SIZE_PER_GENERATION / size_per_tuple)
@@ -179,7 +196,7 @@ def load_ffnn_data_to_postgres(
             ]
             # Retrieve the results from each thread
             for future in concurrent.futures.as_completed(futures):
-                future.result()
+                print(future.result())
 
 
     data_file_abs_path = os.path.abspath(csv_path)
