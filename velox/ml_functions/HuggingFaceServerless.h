@@ -28,7 +28,6 @@ enum HuggingFaceTaskType {
   TEXT_FEATURE_EXTRACTION
 };
 
-
 class HuggingFaceServerless : public exec::VectorFunction {
  public:
   HuggingFaceServerless(std::string apiURL, HuggingFaceTaskType taskType) {
@@ -58,7 +57,9 @@ class HuggingFaceServerless : public exec::VectorFunction {
     std::vector<std::vector<float>> result;
 
     // Limit of number of inputs can be sent to serverless API at once
-    // HuggingFace itself suggest maximum number is 10K
+    // HuggingFace itself suggest maximum number is 10K, sometime the API
+    // itself is busy and cannot work. Try reduce the limit or deploy a dedicated
+    // endpoint
     const int HF_SERVERLESS_INPUT_LIMIT = 5000;
 
     // HuggingFace inputs are formatted as follows:
@@ -86,9 +87,10 @@ class HuggingFaceServerless : public exec::VectorFunction {
         if (response.status_code == 200) {
           // The response text can be parsed as json objects,
           // it should be a list of result for each input
-          if (taskType_ == HuggingFaceTaskType::TEXT_CLASSIFICATION) {
-            auto jsonObj = nlohmann::json::parse(response.text);
-            for (const auto& innerVector : jsonObj) {
+          auto jsonObj = nlohmann::json::parse(response.text);
+          for (const auto& innerVector : jsonObj) {
+            // iterate response for each sample
+            if (taskType_ == HuggingFaceTaskType::TEXT_CLASSIFICATION) {
               std::vector<float> floatVector(3);
               for (const auto& value : innerVector) {
                 int dataIdx = 0;
@@ -101,17 +103,38 @@ class HuggingFaceServerless : public exec::VectorFunction {
                 } else if (value["label"] == "negative") {
                   dataIdx = 2;
                 }
-                floatVector[dataIdx] = value["score"];                
+                floatVector[dataIdx] = value["score"];
               }
               result.push_back(floatVector);
+            } else if (
+                taskType_ == HuggingFaceTaskType::TEXT_FEATURE_EXTRACTION) {
+              auto returnedEmbedding = innerVector[0];
+              int processedEmbeddingCount = 0;
+              // FIXME sometimes it returns unfixed number of embeeding, need further investigation
+              for (const auto& value : returnedEmbedding) {
+                std::vector<float> embeddingVector;
+                for (const auto& val : value) {
+                  embeddingVector.push_back(val);
+                }
+                processedEmbeddingCount += 1;
+                result.push_back(embeddingVector);
+                if (processedEmbeddingCount == accuInputCount) {
+                  break;
+                }
+              }
+            } else {
+              throw std::runtime_error(fmt::format(
+                  "Current HuggingFace Task Type {} is not supported",
+                  taskType_));
             }
-          } else {
-            throw std::runtime_error(fmt::format("Current HuggingFace Task Type {} is not supported", taskType_));
           }
         } else {
           // Handle error cases
-          std::cerr << "Error: " << response.error.message << std::endl;
-          result.push_back({0.0});
+          std::cerr << "Error in fetchting the results: "
+                    << response.error.message << std::endl;
+          for (int l = 0; i < accuInputCount; i++) {
+            result.push_back({0.0});
+          }
         }
 
         // reset

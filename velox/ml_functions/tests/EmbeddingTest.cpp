@@ -630,29 +630,43 @@ void EmbeddingTest::testHuggingFace() {
   std::cout << "[INFO] input: \n"
             << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
 
-  // exec::registerVectorFunction(
-  //     "huggingface",
-  //     HuggingFaceServerless::signatures(),
-  //     std::make_unique<HuggingFaceServerless>("https://api-inference.huggingface.co/pipeline/feature-extraction/cardiffnlp/twitter-roberta-base-sentiment-latest"));
+  std::string textEmbeddingExtractionAPI =
+      "https://api-inference.huggingface.co/pipeline/feature-extraction/cardiffnlp/twitter-roberta-base-sentiment-latest";
+
+  exec::registerVectorFunction(
+      "hf_embedding_extractor",
+      HuggingFaceServerless::signatures(),
+      std::make_unique<HuggingFaceServerless>(textEmbeddingExtractionAPI, HuggingFaceTaskType::TEXT_FEATURE_EXTRACTION));
 
   std::string textClassificationAPI =
       "https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-sentiment-latest";
   exec::registerVectorFunction(
-      "huggingface",
+      "hf_sentiment_classifier",
       HuggingFaceServerless::signatures(),
       std::make_unique<HuggingFaceServerless>(
           textClassificationAPI, HuggingFaceTaskType::TEXT_CLASSIFICATION));
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                     .values({inputRowVector})
-                    .project({"in1", "huggingface(in1)"})
+                    .project({"in1", "hf_sentiment_classifier(in1)"})
                     .planNode();
 
   auto results =
       exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
 
-  std::cout << "[INFO] Results \n"
-            << results->toString(0, results->size()) << std::endl;
+  std::cout << "[INFO] Sentiment Classification Results \n\n\n"
+            << results->toString(0, results->size()) << "\n\n\n\n" << std::endl;
+
+   auto myPlan1 = exec::test::PlanBuilder(pool_.get())
+                    .values({inputRowVector})
+                    .project({"in1", "hf_embedding_extractor(in1)"})
+                    .planNode();
+
+  auto results1 =
+      exec::test::AssertQueryBuilder(myPlan1).copyResults(pool_.get());
+
+  std::cout << "[INFO] Embedding Extraction Results: \n\n\n"
+            << results1->toString(0, results1->size()) << std::endl;
 };
 
 // Test Embedding Layer
