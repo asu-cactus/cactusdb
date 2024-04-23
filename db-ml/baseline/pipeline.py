@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import torch
+from torch.utils.data import DataLoader
 import utils
 from abc import ABC, abstractmethod
 from models.preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
@@ -210,7 +211,7 @@ class TwoTowerModelPipelinePyTorch(Pipeline):
         query_df.to_sql(
             "movielens_q_temp", self.postgres_conn, index=False, if_exists="replace"
         )
-        data = utils.fetch_data_from_postgres_via_sql(sql_movielens_integrated_result)
+        data = utils.fetch_data_from_postgres_via_psycopg2(sql_movielens_integrated_result)
         return data
 
     def data_processing_impl(self, data):
@@ -247,9 +248,6 @@ class TwoTowerModelPipelineTF(Pipeline):
         super(TwoTowerModelPipelineTF, self).__init__(
             "two-tower-model-tensorflow", num_loop, num_sample
         )
-        # self.model = None  # TODO
-        # self.model.eval()
-        # self.num_sample = num_sample
         self.postgres_conn = utils.get_postgres_connection_config()
 
     def loading_meta_impl(self):
@@ -327,7 +325,7 @@ class TwoTowerModelPipelineTF(Pipeline):
         query_df.to_sql(
             "movielens_q_temp", self.postgres_conn, index=False, if_exists="replace"
         )
-        data = utils.fetch_data_from_postgres_via_sql(sql_movielens_integrated_result)
+        data = utils.fetch_data_from_postgres_via_psycopg2(sql_movielens_integrated_result)
         return data
 
     def data_processing_impl(self, data):
@@ -631,7 +629,7 @@ class FFNNPipelineTF(Pipeline):
 
     def data_loading_impl(self):
         sql_ffnn_query = """
-        select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index;
+        select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index
         """.format(
             ffnn_table_name=self.ffnn_table_name
         )
@@ -640,7 +638,7 @@ class FFNNPipelineTF(Pipeline):
         query_df.to_sql(
             "ffnn_q_temp", self.postgres_conn, index=False, if_exists="replace"
         )
-        data = utils.fetch_data_from_postgres_via_sql(sql_ffnn_query)
+        data = utils.fetch_data_from_postgres_via_connectorx(sql_ffnn_query)
         return data
 
     def data_processing_impl(self, data):
@@ -649,7 +647,10 @@ class FFNNPipelineTF(Pipeline):
         return data
 
     def model_inference_impl(self, data):
+        # once the data can fit to memory, using model(data) will lead to best performance
         data = self.model(data)
+        # batch_size = 1024*10
+        # data = self.model.predict(data, batch_size=batch_size)
         return data
 
 
@@ -676,7 +677,7 @@ class FFNNPipelinePyTorch(Pipeline):
 
     def data_loading_impl(self):
         sql_ffnn_query = """
-        select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index;
+        select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index
         """.format(
             ffnn_table_name=self.ffnn_table_name
         )
@@ -685,7 +686,7 @@ class FFNNPipelinePyTorch(Pipeline):
         query_df.to_sql(
             "ffnn_q_temp", self.postgres_conn, index=False, if_exists="replace"
         )
-        data = utils.fetch_data_from_postgres_via_sql(sql_ffnn_query)
+        data = utils.fetch_data_from_postgres_via_connectorx(sql_ffnn_query)
         return data
 
     def data_processing_impl(self, data):
@@ -695,8 +696,21 @@ class FFNNPipelinePyTorch(Pipeline):
         return data
 
     def model_inference_impl(self, data):
-        data = self.model(data)
-        return data
+        self.model.eval()
+        result  = self.model(data)
+        # batch_size = 1024*10*5
+        # dataloader = DataLoader(data, batch_size=batch_size)
+        # result = None
+        # for batch in dataloader:
+        #     # Unpack the batch
+        #     inputs = batch  # Assuming you're not using labels for prediction
+        #     # Perform inference
+        #     predictions = self.model(inputs)
+        #     if result is None:
+        #         result = predictions
+        #     else:
+        #         result = torch.cat((result, predictions), axis=0)
+        return result
 
 
 # @pandas_udf(FloatType())

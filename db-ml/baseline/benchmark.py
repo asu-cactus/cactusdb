@@ -123,7 +123,7 @@ def main():
     today = datetime.date.today()
     formatted_date = today.strftime("%m-%d-%Y")
 
-    result_output_file = "result_{}_.csv".format(num_feature, formatted_date)
+    result_output_file = "result_{}_{}.csv".format(num_feature, formatted_date)
     
     ffnn_table_name = "ffnn_data_{}".format(num_feature)
     load_data_to_db.load_ffnn_data_to_postgres(num_total_record, num_feature, ffnn_table_name)
