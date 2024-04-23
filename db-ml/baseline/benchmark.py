@@ -1,3 +1,5 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import pipeline
 import pandas as pd
 import warnings
@@ -103,19 +105,36 @@ def benchmark_ffnn_pipeline_sparksql(
     benchmark_result = ffnn_pipeline.run_pipeline()
     return benchmark_result
 
+def benchmark_ffnn_pipeline_sparksqlhadoop(
+    list_hidden_layer_sizes,
+    num_sample=500,
+    num_total_record=1000,
+    num_loop=10,
+    **kwargs
+):
+    ffnn_pipeline = pipeline.FFNNPipelineSparkSQLHadoop(
+        list_hidden_layer_sizes=list_hidden_layer_sizes,
+        num_sample=num_sample,
+        num_total_record=num_total_record,
+        num_loop=num_loop,
+        ffnn_table_name=kwargs['ffnn_table_name']
+    )
+    benchmark_result = ffnn_pipeline.run_pipeline()
+    return benchmark_result
 
 def main():
     list_benchmark = []
     # list_benchmark += [benchmark_two_tower_model_pipeline_pytorch, benchmark_two_tower_model_pipeline_tf]
     # list_benchmark += [benchmark_two_tower_model_pipeline_evadb]
-    # list_benchmark += [benchmark_ffnn_pipeline_sparksql]
+    list_benchmark += [benchmark_ffnn_pipeline_sparksql]
     # list_benchmark += [benchmark_ffnn_pipeline_evadb]
     # list_benchmark += [benchmark_ffnn_pipeline_tf]
-    list_benchmark += [benchmark_ffnn_pipeline_pytorch]
-    num_feature = 100000
+    # list_benchmark += [benchmark_ffnn_pipeline_pytorch]
+    # list_benchmark += [benchmark_ffnn_pipeline_sparksqlhadoop]
+    num_feature = 100
     list_hidden_layer_sizes = [num_feature, 1024, 14588]
     # list_num_sample = [100, 500, 1000, 5000]
-    list_num_sample = [100]
+    list_num_sample = [5000]
     result_df = None
     num_loop = 5
     num_total_record = 100000

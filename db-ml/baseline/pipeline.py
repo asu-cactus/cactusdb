@@ -14,7 +14,7 @@ from sklearn.preprocessing import LabelEncoder
 from tqdm.auto import tqdm
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, pandas_udf
-from pyspark.sql.types import ArrayType, FloatType
+from pyspark.sql.types import ArrayType, FloatType, StringType
 
 
 class Pipeline(object):
@@ -716,7 +716,8 @@ class FFNNPipelinePyTorch(Pipeline):
 # @pandas_udf(FloatType())
 @pandas_udf(ArrayType(FloatType()))
 def predict_batch_udf(features: pd.Series) -> pd.Series:
-    features = np.stack(features.apply(np.array)).astype(np.float32)
+    # features = np.stack(features.apply(np.array)).astype(np.float32)
+    features = np.stack(features).astype(np.float32)
     features = torch.Tensor(features)
     list_hidden_layer_sizes = np.load("evadb_ffnn_reg.npy")
     model = ffnn.FFNNPyTorch(list_hidden_layer_sizes)
@@ -743,6 +744,7 @@ class FFNNPipelineSparkSQL(Pipeline):
         self.spark = (
             SparkSession.builder.appName("ModelInference")
             .config("spark.jars.packages", "org.postgresql:postgresql:42.7.1")
+            .config("spark.driver.memory", "40g")
             .getOrCreate()
         )
         self.num_total_record = num_total_record
@@ -787,6 +789,83 @@ class FFNNPipelineSparkSQL(Pipeline):
 
     def model_inference_impl(self, data):
         result_df = data.select(predict_batch_udf(col("val")).alias("prediction"))
+        # result_df.count()
+        # result_df.cache().count()
+        # result_df.rdd.count()
+        result_df.collect()
+        # print("count:", result_df.count())
+        # print(result_df.show())
+        return result_df
+
+@pandas_udf(ArrayType(FloatType()))
+def predict_batch_udf_hadoop(features: pd.Series) -> pd.Series:
+    features = np.stack(features.str.strip('{}').str.split(',')).astype(np.float32)
+    features = torch.Tensor(features)
+    list_hidden_layer_sizes = np.load("evadb_ffnn_reg.npy")
+    model = ffnn.FFNNPyTorch(list_hidden_layer_sizes)
+    result = model(features)
+    # result = np.argmax(result.detach().numpy(), axis=1)
+    result = result.detach().numpy()
+    result = [result[i, :] for i in range(result.shape[0])]
+    return pd.Series(result)
+
+class FFNNPipelineSparkSQLHadoop(Pipeline):
+    def __init__(
+        self,
+        list_hidden_layer_sizes,
+        num_sample=500,
+        num_total_record=10000,
+        num_loop=10,
+        ffnn_table_name="ffnn_data",
+    ):
+        super(FFNNPipelineSparkSQLHadoop, self).__init__(
+            "ffnn-sparksqlhadoop", num_sample=num_sample, num_loop=num_loop
+        )
+        np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "40g")
+            .getOrCreate()
+        )
+        self.num_total_record = num_total_record
+        # self.postgres_conn = utils.get_postgres_connection_config()
+        # self.jdbc_url = utils.get_jdbc_postgres_connection_config()
+        # self.connection_properties = utils.get_sparksql_postgres_connection_properties()
+        self.ffnn_table_name = ffnn_table_name
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self):
+        sampledIndex = np.random.randint(1, self.num_total_record, self.num_sample)
+        query_df = pd.DataFrame({"q_index": sampledIndex})
+        spark_df = self.spark.createDataFrame(query_df)
+        spark_df.createOrReplaceTempView("ffnn_q_temp")
+
+        feature_hdfs_path = "hdfs://localhost:9900/user/velox/data/{}".format(self.ffnn_table_name)
+        spark_feature_data = self.spark.read.csv(feature_hdfs_path, header=True, inferSchema=True)
+        spark_feature_data.createOrReplaceTempView(self.ffnn_table_name)
+
+        join_query = """
+            select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index
+        """.format(
+            ffnn_table_name=self.ffnn_table_name
+        )
+        joined_df = self.spark.sql(join_query)
+
+        # joined_df = self.spark.read.jdbc(
+        #     url=self.jdbc_url,
+        #     table="({0}) AS temp".format(join_query),
+        #     properties=self.connection_properties,
+        # )
+        # joined_df.collect()
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        result_df = data.select(predict_batch_udf_hadoop(col("val")).alias("prediction"))
         # result_df.count()
         # result_df.cache().count()
         # result_df.rdd.count()
