@@ -117,7 +117,6 @@ def load_ffnn_data_to_postgres(
 
     db_connection = utils.get_psycopg2_connection()
     cursor = db_connection.cursor()
-    # overwrite = True
 
     csv_path = "./data/ffnn_data_{}_{}.csv".format(num_generated_data, num_features)
     
@@ -217,6 +216,15 @@ def load_ffnn_data_to_postgres(
     db_connection.close()
 
     print("[INFO] load FFNN data to postgres success!")
+
+    # check hdfs path exist
+    if not utils.check_hdfs_dir_exist("/user/velox/data/"):
+        utils.create_hdfs_dir("/user/velox/data/")
+    
+    path_in_hdfs = "/user/velox/data/{}".format(table_name)
+    utils.load_csv_to_hdfs(data_file_abs_path, path_in_hdfs)
+
+    print("[INFO] load FFNN data to HDFS success!")
 
 
 def main():
