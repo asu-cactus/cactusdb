@@ -50,6 +50,7 @@ class Pipeline(object):
         self.list_batches = [num_sample]
         if hasattr(self, 'batch_size'):
             self.list_batches = get_batch_sizes(self.num_sample, self.batch_size)
+        print("[INFO] Batches: ", self.list_batches)
 
     @abstractmethod
     def loading_meta_impl(self):
@@ -414,6 +415,7 @@ class FFNNPipelineEvaDB(Pipeline):
             IMPL './ffnn.py';
             """
         self.cursor.query(sql_register_function).df()
+        self.batch_size = 1000
         super(FFNNPipelineEvaDB, self).__init__(
             "ffnn-evadb", num_sample=num_sample, num_loop=num_loop
         )
@@ -653,7 +655,7 @@ class FFNNPipelineTF(Pipeline):
         self.num_total_record = num_total_record
         self.postgres_conn = utils.get_postgres_connection_config()
         self.ffnn_table_name = ffnn_table_name
-        self.batch_size=5000
+        self.batch_size = 1000
         super(FFNNPipelineTF, self).__init__(
             "ffnn-tensorflow", num_sample=num_sample, num_loop=num_loop
         )
@@ -703,6 +705,7 @@ class FFNNPipelinePyTorch(Pipeline):
         self.num_total_record = num_total_record
         self.postgres_conn = utils.get_postgres_connection_config()
         self.ffnn_table_name = ffnn_table_name
+        self.batch_size = 1000
         super(FFNNPipelinePyTorch, self).__init__(
             "ffnn-torch", num_sample=num_sample, num_loop=num_loop
         )
@@ -784,6 +787,7 @@ class FFNNPipelineSparkSQL(Pipeline):
         self.jdbc_url = utils.get_jdbc_postgres_connection_config()
         self.connection_properties = utils.get_sparksql_postgres_connection_properties()
         self.ffnn_table_name = ffnn_table_name
+        self.batch_size = 1000
         super(FFNNPipelineSparkSQL, self).__init__(
             "ffnn-sparksql", num_sample=num_sample, num_loop=num_loop
         )
@@ -861,6 +865,7 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
         )
         self.num_total_record = num_total_record
         self.ffnn_table_name = ffnn_table_name
+        self.batch_size = 1000
         super(FFNNPipelineSparkSQLHadoop, self).__init__(
             "ffnn-sparksqlhadoop", num_sample=num_sample, num_loop=num_loop
         )
