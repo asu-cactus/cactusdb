@@ -17,6 +17,28 @@ from pyspark.sql.functions import col, pandas_udf
 from pyspark.sql.types import ArrayType, FloatType, StringType
 
 
+
+def get_batch_sizes(num_samples, batch_size):
+    """
+    Returns a list of batch sizes that fit the given number of samples.
+    
+    Args:
+        num_samples (int): The total number of samples.
+        batch_size (int): The desired batch size.
+        
+    Returns:
+        list: A list of batch sizes that fit the number of samples.
+    """
+    batch_sizes = []
+    remaining_samples = num_samples
+    
+    while remaining_samples > 0:
+        current_batch_size = min(remaining_samples, batch_size)
+        batch_sizes.append(current_batch_size)
+        remaining_samples -= current_batch_size
+    
+    return batch_sizes
+
 class Pipeline(object):
     """A convenient class to measure the running time of a program"""
 
@@ -25,14 +47,16 @@ class Pipeline(object):
         self.num_loop = num_loop
         self.num_sample = num_sample
         self.meta = dict()
-        pass
+        self.list_batches = [num_sample]
+        if hasattr(self, 'batch_size'):
+            self.list_batches = get_batch_sizes(self.num_sample, self.batch_size)
 
     @abstractmethod
     def loading_meta_impl(self):
         raise NotImplementedError("Not implemented")
 
     @abstractmethod
-    def data_loading_impl(self):
+    def data_loading_impl(self, batch_size):
         raise NotImplementedError("Not implemented")
 
     @abstractmethod
@@ -53,7 +77,6 @@ class Pipeline(object):
 
     def run_pipeline(self):
         self.loading_meta_impl()
-
         timer_end_end = utils.Timer()
         timer_data_loading = utils.Timer()
         timer_data_processing = utils.Timer()
@@ -63,24 +86,27 @@ class Pipeline(object):
         t_data_processing = 0
         t_model_inference = 0
 
-        data = None
-
         for _ in tqdm(range(self.num_loop)):
+            return_data = []
             timer_end_end.tic()
-            timer_data_loading.tic()
-            data = self.data_loading_impl()
-            t_data_loading += timer_data_loading.toc()
+            for batch_size in self.list_batches:
+                data = None
+                timer_data_loading.tic()
+                data = self.data_loading_impl(batch_size)
+                t_data_loading += timer_data_loading.toc()
 
-            timer_data_processing.tic()
-            data = self.data_processing_impl(data)
-            t_data_processing += timer_data_processing.toc()
+                timer_data_processing.tic()
+                data = self.data_processing_impl(data)
+                t_data_processing += timer_data_processing.toc()
 
-            timer_model_inference.tic()
-            data = self.model_inference_impl(data)
-            t_model_inference += timer_model_inference.toc()
+                timer_model_inference.tic()
+                data = self.model_inference_impl(data)
+                t_model_inference += timer_model_inference.toc()
+                return_data.append(data)
 
             t_end_end += timer_end_end.toc()
             self.clean_up(data)
+
 
         t_data_loading /= self.num_loop
         t_data_processing /= self.num_loop
@@ -130,10 +156,10 @@ where mqt.q_user_id = tur.user_id AND mqt.q_movie_id = tmr.movie_id;
 
 class TwoTowerModelPipelinePyTorch(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
+        self.postgres_conn = utils.get_postgres_connection_config()
         super(TwoTowerModelPipelinePyTorch, self).__init__(
             "two-tower-model-pytorch", num_sample=num_sample, num_loop=num_loop
         )
-        self.postgres_conn = utils.get_postgres_connection_config()
 
     def loading_meta_impl(self):
         embedding_dim = 32
@@ -202,9 +228,9 @@ class TwoTowerModelPipelinePyTorch(Pipeline):
         self.meta["genres_key2index"] = genres_key2index
         self.meta["genres_maxlen"] = genres_maxlen
 
-    def data_loading_impl(self):
-        sampledUserId = np.random.randint(1, 6041, self.num_sample)
-        sampledMovieId = np.random.randint(1, 3707, self.num_sample)
+    def data_loading_impl(self, batch_size):
+        sampledUserId = np.random.randint(1, 6041, batch_size)
+        sampledMovieId = np.random.randint(1, 3707, batch_size)
         query_df = pd.DataFrame(
             {"q_user_id": sampledUserId, "q_movie_id": sampledMovieId}
         )
@@ -245,10 +271,10 @@ class TwoTowerModelPipelinePyTorch(Pipeline):
 
 class TwoTowerModelPipelineTF(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
-        super(TwoTowerModelPipelineTF, self).__init__(
-            "two-tower-model-tensorflow", num_loop, num_sample
-        )
         self.postgres_conn = utils.get_postgres_connection_config()
+        super(TwoTowerModelPipelineTF, self).__init__(
+            "two-tower-model-tensorflow", num_sample=num_sample, num_loop=num_loop
+        )
 
     def loading_meta_impl(self):
         embedding_dim = 32
@@ -316,9 +342,9 @@ class TwoTowerModelPipelineTF(Pipeline):
         self.meta["genres_key2index"] = genres_key2index
         self.meta["genres_maxlen"] = genres_maxlen
 
-    def data_loading_impl(self):
-        sampledUserId = np.random.randint(1, 6041, self.num_sample)
-        sampledMovieId = np.random.randint(1, 3707, self.num_sample)
+    def data_loading_impl(self, batch_size):
+        sampledUserId = np.random.randint(1, 6041, batch_size)
+        sampledMovieId = np.random.randint(1, 3707, batch_size)
         query_df = pd.DataFrame(
             {"q_user_id": sampledUserId, "q_movie_id": sampledMovieId}
         )
@@ -374,9 +400,6 @@ class FFNNPipelineEvaDB(Pipeline):
         num_loop=10,
         ffnn_table_name="ffnn_data",
     ):
-        super(FFNNPipelineEvaDB, self).__init__(
-            "ffnn-evadb", num_sample=num_sample, num_loop=num_loop
-        )
         self.num_total_record = num_total_record
         self.postgres_conn = utils.get_postgres_connection_config()
         self.cursor = evadb.connect().cursor()
@@ -391,12 +414,15 @@ class FFNNPipelineEvaDB(Pipeline):
             IMPL './ffnn.py';
             """
         self.cursor.query(sql_register_function).df()
+        super(FFNNPipelineEvaDB, self).__init__(
+            "ffnn-evadb", num_sample=num_sample, num_loop=num_loop
+        )
 
     def loading_meta_impl(self):
         pass
 
-    def data_loading_impl(self):
-        sampledIndex = np.random.randint(1, self.num_total_record, self.num_sample)
+    def data_loading_impl(self, batch_size):
+        sampledIndex = np.random.randint(1, self.num_total_record, batch_size)
         query_df = pd.DataFrame({"q_index": sampledIndex})
         query_df.to_sql(
             "ffnn_q_temp", self.postgres_conn, index=False, if_exists="replace"
@@ -421,39 +447,43 @@ class FFNNPipelineEvaDB(Pipeline):
         t_data_processing = 0
         t_model_inference = 0
 
-        data = None
-        timer_end_end.tic()
         for _ in tqdm(range(self.num_loop)):
-            timer_data_loading.tic()
-            data = self.data_loading_impl()
-            t_data_loading += timer_data_loading.toc()
+            return_data = []
+            timer_end_end.tic() 
+            for batch_size in self.list_batches:
+                data = None
+                timer_data_loading.tic()
+                data = self.data_loading_impl(batch_size)
+                t_data_loading += timer_data_loading.toc()
 
-            timer_data_processing.tic()
-            data = self.data_processing_impl(data)
-            t_data_processing += timer_data_processing.toc()
+                timer_data_processing.tic()
+                data = self.data_processing_impl(data)
+                t_data_processing += timer_data_processing.toc()
 
-            timer_model_inference.tic()
-            data = self.model_inference_impl(data)
-            t_model_inference += timer_model_inference.toc()
+                timer_model_inference.tic()
+                data = self.model_inference_impl(data)
+                t_model_inference += timer_model_inference.toc()
 
-            result_df = self.cursor.query(
-                """
-            SELECT FFNN_EVADB(val)
-            FROM postgres_data.{} fd JOIN postgres_data.ffnn_q_temp fqt
-            ON fd.index=fqt.q_index;
-            """.format(
-                    self.ffnn_table_name
-                )
-            ).df()
+                result_df = self.cursor.query(
+                    """
+                SELECT FFNN_EVADB(val)
+                FROM postgres_data.{} fd JOIN postgres_data.ffnn_q_temp fqt
+                ON fd.index=fqt.q_index;
+                """.format(
+                        self.ffnn_table_name
+                    )
+                ).df()
 
-            t_data_processing += result_df["t_process"].values[-1]
-            t_model_inference += result_df["t_model_inference"].values[-1]
+                t_data_processing += result_df["t_process"].values[-1]
+                t_model_inference += result_df["t_model_inference"].values[-1]
+                return_data.append(result_df["label"])
 
-        t_end_end += timer_end_end.toc() / self.num_loop
+            t_end_end += timer_end_end.toc() 
         t_data_processing /= self.num_loop
         t_model_inference /= self.num_loop
         t_data_loading = t_end_end - t_data_processing - t_model_inference
         # t_data_loading /= self.num_loop
+        t_end_end /= self.num_loop
 
         result_df = pd.DataFrame(
             {
@@ -468,12 +498,8 @@ class FFNNPipelineEvaDB(Pipeline):
         )
         return result_df
 
-
-class TowTowerModelPipelineEvaDB(Pipeline):
+class TwoTowerModelPipelineEvaDB(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
-        super(TowTowerModelPipelineEvaDB, self).__init__(
-            "two-tower-evadb", num_loop, num_sample
-        )
         self.cursor = evadb.connect().cursor()
         # create changed_rating_view
         self.cursor.query(
@@ -524,13 +550,16 @@ class TowTowerModelPipelineEvaDB(Pipeline):
             """
         ).df()
         self.postgres_conn = utils.get_postgres_connection_config()
+        super(TwoTowerModelPipelineEvaDB, self).__init__(
+            "two-tower-evadb", num_sample=num_sample, num_loop=num_loop
+        )
 
     def loading_meta_impl(self):
         pass
 
-    def data_loading_impl(self):
-        sampledUserId = np.random.randint(1, 6041, self.num_sample)
-        sampledMovieId = np.random.randint(1, 3707, self.num_sample)
+    def data_loading_impl(self, batch_size):
+        sampledUserId = np.random.randint(1, 6041, batch_size)
+        sampledMovieId = np.random.randint(1, 3707, batch_size)
         query_df = pd.DataFrame(
             {"q_user_id": sampledUserId, "q_movie_id": sampledMovieId}
         )
@@ -559,39 +588,43 @@ class TowTowerModelPipelineEvaDB(Pipeline):
         t_data_processing = 0
         t_model_inference = 0
 
-        data = None
-        timer_end_end.tic()
         for _ in tqdm(range(self.num_loop)):
-            timer_data_loading.tic()
-            data = self.data_loading_impl()
-            t_data_loading += timer_data_loading.toc()
+            timer_end_end.tic()
+            return_data = []
+            for batch_size in self.list_batches:
+                data = None
+                timer_data_loading.tic()
+                data = self.data_loading_impl(batch_size)
+                t_data_loading += timer_data_loading.toc()
 
-            timer_data_processing.tic()
-            data = self.data_processing_impl(data)
-            t_data_processing += timer_data_processing.toc()
+                timer_data_processing.tic()
+                data = self.data_processing_impl(data)
+                t_data_processing += timer_data_processing.toc()
 
-            timer_model_inference.tic()
-            data = self.model_inference_impl(data)
-            t_model_inference += timer_model_inference.toc()
+                timer_model_inference.tic()
+                data = self.model_inference_impl(data)
+                t_model_inference += timer_model_inference.toc()
 
-            result_df = self.cursor.query(
-                """
-            select DSSM_EVADB(user_id, gender, age, occupation, user_mean_rating, movie_id, genres, movie_mean_rating)
-            from postgres_data.movielens_q_temp mqt JOIN postgres_data.evadb_v_user_rating tur
-            ON mqt.q_user_id=tur.user_id JOIN postgres_data.evadb_v_movie_rating tmr
-            ON mqt.q_movie_id=tmr.movie_id;
-            """.format(
-                    self.num_sample
-                )
-            ).df()
+                result_df = self.cursor.query(
+                    """
+                select DSSM_EVADB(user_id, gender, age, occupation, user_mean_rating, movie_id, genres, movie_mean_rating)
+                from postgres_data.movielens_q_temp mqt JOIN postgres_data.evadb_v_user_rating tur
+                ON mqt.q_user_id=tur.user_id JOIN postgres_data.evadb_v_movie_rating tmr
+                ON mqt.q_movie_id=tmr.movie_id;
+                """.format(
+                        self.num_sample
+                    )
+                ).df()
 
-            t_data_processing += result_df["t_process"].values[-1]
-            t_model_inference += result_df["t_model_inference"].values[-1]
+                t_data_processing += result_df["t_process"].values[-1]
+                t_model_inference += result_df["t_model_inference"].values[-1]
+                return_data.append(result_df["label"])
 
-        t_end_end += timer_end_end.toc() / self.num_loop
+            t_end_end += timer_end_end.toc()
         t_data_loading /= self.num_loop
         t_data_processing /= self.num_loop
         t_model_inference /= self.num_loop
+        t_end_end /= self.num_loop
 
         result_df = pd.DataFrame(
             {
@@ -616,24 +649,26 @@ class FFNNPipelineTF(Pipeline):
         num_loop=10,
         ffnn_table_name="ffnn_data",
     ):
-        super(FFNNPipelineTF, self).__init__(
-            "ffnn-tensorflow", num_sample=num_sample, num_loop=num_loop
-        )
         self.model = ffnn.FFNNTensorFlow(list_hidden_layer_sizes)
         self.num_total_record = num_total_record
         self.postgres_conn = utils.get_postgres_connection_config()
         self.ffnn_table_name = ffnn_table_name
+        self.batch_size=5000
+        super(FFNNPipelineTF, self).__init__(
+            "ffnn-tensorflow", num_sample=num_sample, num_loop=num_loop
+        )
+        print(self.list_batches)
 
     def loading_meta_impl(self):
         pass
 
-    def data_loading_impl(self):
+    def data_loading_impl(self, batch_size):
         sql_ffnn_query = """
         select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index
         """.format(
             ffnn_table_name=self.ffnn_table_name
         )
-        sampledIndex = np.random.randint(1, self.num_total_record, self.num_sample)
+        sampledIndex = np.random.randint(1, self.num_total_record, batch_size)
         query_df = pd.DataFrame({"q_index": sampledIndex})
         query_df.to_sql(
             "ffnn_q_temp", self.postgres_conn, index=False, if_exists="replace"
@@ -663,25 +698,25 @@ class FFNNPipelinePyTorch(Pipeline):
         num_loop=10,
         ffnn_table_name="ffnn_data",
     ):
-        super(FFNNPipelinePyTorch, self).__init__(
-            "ffnn-torch", num_sample=num_sample, num_loop=num_loop
-        )
         self.model = ffnn.FFNNPyTorch(list_hidden_layer_sizes)
         self.model.eval()
         self.num_total_record = num_total_record
         self.postgres_conn = utils.get_postgres_connection_config()
         self.ffnn_table_name = ffnn_table_name
+        super(FFNNPipelinePyTorch, self).__init__(
+            "ffnn-torch", num_sample=num_sample, num_loop=num_loop
+        )
 
     def loading_meta_impl(self):
         pass
 
-    def data_loading_impl(self):
+    def data_loading_impl(self, batch_size):
         sql_ffnn_query = """
         select * from {ffnn_table_name},ffnn_q_temp where {ffnn_table_name}.index=ffnn_q_temp.q_index
         """.format(
             ffnn_table_name=self.ffnn_table_name
         )
-        sampledIndex = np.random.randint(1, self.num_total_record, self.num_sample)
+        sampledIndex = np.random.randint(1, self.num_total_record, batch_size)
         query_df = pd.DataFrame({"q_index": sampledIndex})
         query_df.to_sql(
             "ffnn_q_temp", self.postgres_conn, index=False, if_exists="replace"
@@ -737,9 +772,6 @@ class FFNNPipelineSparkSQL(Pipeline):
         num_loop=10,
         ffnn_table_name="ffnn_data",
     ):
-        super(FFNNPipelineSparkSQL, self).__init__(
-            "ffnn-sparksql", num_sample=num_sample, num_loop=num_loop
-        )
         np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
         self.spark = (
             SparkSession.builder.appName("ModelInference")
@@ -752,12 +784,15 @@ class FFNNPipelineSparkSQL(Pipeline):
         self.jdbc_url = utils.get_jdbc_postgres_connection_config()
         self.connection_properties = utils.get_sparksql_postgres_connection_properties()
         self.ffnn_table_name = ffnn_table_name
+        super(FFNNPipelineSparkSQL, self).__init__(
+            "ffnn-sparksql", num_sample=num_sample, num_loop=num_loop
+        )
 
     def loading_meta_impl(self):
         pass
 
-    def data_loading_impl(self):
-        sampledIndex = np.random.randint(1, self.num_total_record, self.num_sample)
+    def data_loading_impl(self, batch_size):
+        sampledIndex = np.random.randint(1, self.num_total_record, batch_size)
         query_df = pd.DataFrame({"q_index": sampledIndex})
         query_df.to_sql(
             "ffnn_q_temp", self.postgres_conn, index=False, if_exists="replace"
@@ -818,9 +853,6 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
         num_loop=10,
         ffnn_table_name="ffnn_data",
     ):
-        super(FFNNPipelineSparkSQLHadoop, self).__init__(
-            "ffnn-sparksqlhadoop", num_sample=num_sample, num_loop=num_loop
-        )
         np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
         self.spark = (
             SparkSession.builder.appName("ModelInference")
@@ -828,16 +860,16 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
             .getOrCreate()
         )
         self.num_total_record = num_total_record
-        # self.postgres_conn = utils.get_postgres_connection_config()
-        # self.jdbc_url = utils.get_jdbc_postgres_connection_config()
-        # self.connection_properties = utils.get_sparksql_postgres_connection_properties()
         self.ffnn_table_name = ffnn_table_name
+        super(FFNNPipelineSparkSQLHadoop, self).__init__(
+            "ffnn-sparksqlhadoop", num_sample=num_sample, num_loop=num_loop
+        )
 
     def loading_meta_impl(self):
         pass
 
-    def data_loading_impl(self):
-        sampledIndex = np.random.randint(1, self.num_total_record, self.num_sample)
+    def data_loading_impl(self, batch_size):
+        sampledIndex = np.random.randint(1, self.num_total_record, batch_size)
         query_df = pd.DataFrame({"q_index": sampledIndex})
         spark_df = self.spark.createDataFrame(query_df)
         spark_df.createOrReplaceTempView("ffnn_q_temp")
