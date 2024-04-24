@@ -541,7 +541,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     if (benchmarkMode == "mul2joinAggHorizontal") {
       isVerticalPartition = false;
     }
-    std::string compute = registerFunctions(
+    std::string computationStr = registerFunctions(
         first_layer_output_size,
         second_layer_output_size,
         input_features_size,
@@ -560,7 +560,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                       .tableScan(inputRowType)
                       .capturePlanNodeId(p0)
-                      .project({fmt::format(compute, "v")})
+                      .project({fmt::format(computationStr, "v")})
                       .planBuild();
     // Set original plan nodeId and file address of data source
     cataLog.setIdAddressMap(p0, files);
@@ -657,85 +657,92 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << averageExectuionTime << std::endl;
   }
 
-  void testIntegratedMCTS(int featureSize, int numSamples, int repeatRun, int blockSize, int verbose) {
-    // Set data source config.
-    // int input_features_size = 800; // 597540
-    int input_features_size = featureSize; // 597540
-    // int num_samples = 1000;
-    int num_samples = numSamples;
-    int first_layer_output_size = 1024;
-    int second_layer_output_size = 14588;
+  void testIntegratedMCTS(std::string model, int featureSize, int numSamples, int repeatRun, int blockSize, int verbose) {
+    PlanBuilder myPlan;
     CataLog cataLog;
-    cataLog.setDefaultBlocksSize(blockSize);
-    cataLog.setBlockingThreshold(1);
-    // Set splits number
-    // Generate data source
-    auto data = data_generate(
-        input_features_size,
-        num_samples,
-        first_layer_output_size,
-        second_layer_output_size);
-    // Split inputs into many splits and return paths as a std::vector
-    std::vector<std::shared_ptr<TempFilePath>> files = data.feature_paths;
-    RowTypePtr inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
-
-    if (input_features_size > cataLog.getBlockingThreshold()) {
-      // FIXME: temporary disable the following blocking for vertical partition since
-      // we have deallocate the data.features in data_generate function to save 
-      // unnecessary memory usage.
-      /* // If input size is larger than blocking threshold, preblock and store in
-      // cataLog
-      std::vector<std::vector<float>> valuesBlock =
-          optimization::create_input_block(
-              input_features_size * num_samples,
-              data.features,
-              cataLog.getDefaultBlocksNum());
-      optimization::FileStructure values = optimization::block_to_files(
-          valuesBlock, cataLog.getDefaultBlocksNum(), 0);
-      // Set data source blocks in cataLog
-      cataLog.setDataSourceBlocks(values.schema, values.paths); */
-    } else {
-      // If input size is not larger than blocking threshold, set dataSource in
-      // cataLog
-      cataLog.setDataSource(inputRowType, files);
-    }
-
-    // Set data source statistics in cataLog
-    cataLog.setDataSourceStat({num_samples, input_features_size});
-    cataLog.setUDFSchema("value", inputRowType);
-
-    bool isVerticalPartition = false;
-    std::string compute = registerFunctions(
-        first_layer_output_size,
-        second_layer_output_size,
-        input_features_size,
-        first_layer_output_size,
-        data.weights[0],
-        data.weights[1],
-        data.bias[0],
-        data.bias[1],
-        cataLog,
-        isVerticalPartition);
-
+    RowTypePtr inputRowType;
     // Initialize planNodeID
     core::PlanNodeId p0;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    // Create a plan for FFNN using two dense layers UDFs
-    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                 .tableScan(inputRowType)
-                 .capturePlanNodeId(p0)
-                 .project({fmt::format(compute, "v")});
+    std::vector<std::shared_ptr<TempFilePath>> files;
+    std::string computationStr;
 
-    // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, files);
-    // Set vector name and nodeId of data source
-    cataLog.setVectorIdMap(p0, "v");
-    // Add source to catalog
-    std::shared_ptr<OutputStat> stat =
-    std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
-    Source src = Source(p0, Source::Type::FILE, std::move(stat));
-    cataLog.addSource(std::make_shared<Source>(src));
+    if (model == "ffnn") {
+       // Set data source config.
+      int input_features_size = featureSize; // 597540
+      int num_samples = numSamples;
+      int first_layer_output_size = 1024;
+      int second_layer_output_size = 14588;
+      cataLog.setDefaultBlocksSize(blockSize);
+      cataLog.setBlockingThreshold(1);
+      // Set splits number
+      // Generate data source
+      auto data = data_generate(
+          input_features_size,
+          num_samples,
+          first_layer_output_size,
+          second_layer_output_size);
+      // Split inputs into many splits and return paths as a std::vector
+      files = data.feature_paths;
+      inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
+      if (input_features_size > cataLog.getBlockingThreshold()) {
+        // FIXME: temporary disable the following blocking for vertical partition since
+        // we have deallocate the data.features in data_generate function to save 
+        // unnecessary memory usage.
+        /* // If input size is larger than blocking threshold, preblock and store in
+        // cataLog
+        std::vector<std::vector<float>> valuesBlock =
+            optimization::create_input_block(
+                input_features_size * num_samples,
+                data.features,
+                cataLog.getDefaultBlocksNum());
+        optimization::FileStructure values = optimization::block_to_files(
+            valuesBlock, cataLog.getDefaultBlocksNum(), 0);
+        // Set data source blocks in cataLog
+        cataLog.setDataSourceBlocks(values.schema, values.paths); */
+      } else {
+        // If input size is not larger than blocking threshold, set dataSource in
+        // cataLog
+        cataLog.setDataSource(inputRowType, files);
+      }
+
+      // Set data source statistics in cataLog
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+      cataLog.setUDFSchema("value", inputRowType);
+
+      bool isVerticalPartition = false;
+      computationStr = registerFunctions(
+          first_layer_output_size,
+          second_layer_output_size,
+          input_features_size,
+          first_layer_output_size,
+          data.weights[0],
+          data.weights[1],
+          data.bias[0],
+          data.bias[1],
+          cataLog,
+          isVerticalPartition);
+
+      // Create a plan for FFNN using two dense layers UDFs
+      myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(inputRowType)
+                  .capturePlanNodeId(p0)
+                  .project({fmt::format(computationStr, "v")});
+
+      // Set original plan nodeId and file address of data source
+      cataLog.setIdAddressMap(p0, files);
+      // Set vector name and nodeId of data source
+      cataLog.setVectorIdMap(p0, "v");
+      // Add source to catalog
+      std::shared_ptr<OutputStat> stat =
+      std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+      Source src = Source(p0, Source::Type::FILE, std::move(stat));
+      cataLog.addSource(std::make_shared<Source>(src));
+    }
+   
+
+    
 
     // Get the logical plan
     auto planNode = myPlan.planNode();
@@ -797,7 +804,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                      .tableScan(inputRowType)
                      .capturePlanNodeId(p0)
-                     .project({fmt::format(compute, "v")});
+                     .project({fmt::format(computationStr, "v")});
         cataLog.setIdAddressMap(p0, files);
         cataLog.setVectorIdMap(p0, "v");
         cataLog.setUDFSchema("value", inputRowType);
@@ -863,15 +870,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           LOG(INFO) << "[INFO] get Cost(offline): "
                     << " time: " << executeTime << std::endl;
         } else if (receivedJsonMessage["costMode"] == "online") {
-          // std::shared_ptr<Catalog> catalog =
-          //     std::make_shared<Catalog>(Catalog("db-catalog"));
-
-          // std::shared_ptr<OutputStat> stat =
-          //     std::make_shared<OutputStat>(OutputStat(1, 2));
-
-          // Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
-
-          // cataLog.addSource(std::make_shared<Source>(src1));
           CostModel* cm = new SimpleCostModel(cataLog);
           CostEstimator* ce =
               new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
@@ -916,6 +914,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 };
 
 DEFINE_string(mode, "mcts", "Mode: mcts or benchmark");
+DEFINE_string(model, "ffnn", "Model: ffnn or df");
 DEFINE_bool(rewrite, true, "Whether  rewrite");
 DEFINE_int32(num_repeat, 5, "Number of repeat run");
 DEFINE_int32(feature_size, 1000, "FFNN Feature size");
@@ -931,6 +930,7 @@ int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   // gflags::ParseCommandLineFlags(&argc, &argv, true);
   std::string mode = FLAGS_mode;
+  std::string model = FLAGS_model;
 
   bool rewrite = FLAGS_rewrite;
   int repeatRun = FLAGS_num_repeat;
@@ -944,7 +944,7 @@ int main(int argc, char** argv) {
  
   // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
-    demo.testIntegratedMCTS(featureSize, numSample, repeatRun, blockSize, verbose);
+    demo.testIntegratedMCTS(model, featureSize, numSample, repeatRun, blockSize, verbose);
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
