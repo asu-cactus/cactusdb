@@ -31,9 +31,11 @@ def delete_hdfs_data():
     if result.returncode == 0:
         # Parse the output to extract filenames (assuming basic format)
         output_lines = result.stdout.decode().strip().splitlines()
-    ffnn_table_names = [table_name for table_name in output_lines if "ffnn_data" in table_name]
-    if len(ffnn_table_names) == 0:
+    else:
         return 
+    if len(output_lines) == 0:
+        return 
+    ffnn_table_names = [table_name for table_name in output_lines if "ffnn_data" in table_name]
     
     print("[IMPORTANT] The following tables will be deleted: ")
     for table_name in ffnn_table_names:

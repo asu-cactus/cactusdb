@@ -61,6 +61,13 @@ It is recommended to code with Visual Studio Code. You can use the following scr
 bash ~/start_vscode_tunnel.sh
 ```
 
+### Start Hadoop
+
+```bash
+start-dfs.sh
+start-yarn.sh
+```
+
 ## Run Two-Tower Model Pipeline
 
 If you are going to run the two-tower model pipeline in the docker, there is no need to modify the path to the data parquet file. Otherwise, you are required to modify it correspondingly. After compilation, you will the executable file located at `_build/release/velox/ml_functions/two_tower_model_pipeline_test`. You can run the code with the following command.
