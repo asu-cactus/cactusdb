@@ -260,8 +260,6 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
       PlanBuilder& myPlan,
       core::PlanNodeId p0) {
     // Create hivesplits for file.
-    auto hiveSplits = makeHiveConnectorSplits(
-        filePath, numSplits, dwio::common::FileFormat::DWRF);
     // Initializes executor.
     std::shared_ptr<folly::Executor> executor_{
         std::make_shared<folly::CPUThreadPoolExecutor>(
@@ -273,41 +271,56 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
-    // Create task for logical plan.
-    auto task = exec::Task::create(
-        "0",
-        myPlan.planFragment(),
-        0,
-        queryCtx_,
-        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          if (result)
-            std::cout << result->toString() << std::endl;
-          return exec::BlockingReason::kNotBlocked;
-        });
 
-    std::cout << "Hive splits:" << std::endl;
-    // Add hivesplits to the target plan node (data source node).
-    for (auto& split : hiveSplits) {
-      // std::cout << split->toString() << std::endl;
-      task->addSplit(p0, exec::Split(std::move(split)));
-    }
+    int veloxThreads = 8;
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
 
-    int veloxThreads = 8;
-    // Start the task by setting the number of drivers.
-    task->start(veloxThreads);
-    // Add all splits.
-    task->noMoreSplits(p0);
-    // Wait for all drivers to finish.
-    waitForFinishedDrivers(task);
+    CursorParameters params;
+    params.maxDrivers = veloxThreads;
+    params.planNode = myPlan.planNode();
+    params.queryCtx = queryCtx_;
+    bool noMoreSplits = false;
+
+    auto addSplits = [&noMoreSplits, &filePath, &p0, &numSplits](exec::Task* task) {
+        std::vector<core::PlanNodeId> ids;
+        if (!noMoreSplits) {
+
+            auto hiveSplits = makeHiveConnectorSplits(
+        filePath, numSplits, dwio::common::FileFormat::DWRF);
+
+            for (auto& split : hiveSplits) {
+              task->addSplit(p0, exec::Split(std::move(split)));
+            }
+
+          ids.push_back(p0);
+
+          for (auto id : ids) {
+            task->noMoreSplits(id);
+          }
+        }
+        noMoreSplits = true;
+      };
+
+    auto [cursor, actualResults] = readCursor(params, addSplits);
+    waitForTaskCompletion(cursor->task().get());
+
+    int totalNumData = 0;
+    int totalNumBatch = 0;
+    for (auto batchedData : actualResults) {
+      batchedData = std::move(batchedData);
+      int batchSize = batchedData->size();
+      totalNumBatch += 1;
+      totalNumData += batchSize;
+
+    }
 
     std::chrono::steady_clock::time_point end =
         std::chrono::steady_clock::now();
 
     std::stringstream ss;
 
-    ss << numRows << "," << numSplits << "," << veloxThreads << ",";
+    ss << "numRows:" << numRows << ", numSplits:" << numSplits << ", veloxThreads:" << veloxThreads << ", numBatch:" << totalNumBatch << ", numData:" << totalNumData << std::endl;
 
     std::cout << "Time for Decision Forest Prediction with Input Data (sec): "
               << std::endl;
