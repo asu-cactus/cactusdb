@@ -217,7 +217,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     auto inputIndexVector = maker.flatVector<int32_t>(indexVector);
 
     return maker.rowVector(
-        {"row_id", "x"}, {inputIndexVector, inputArrayVector});
+        {"idx", "v"}, {inputIndexVector, inputArrayVector});
   }
 
   void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
@@ -365,7 +365,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
                       //.values({inputRowVector})
                       .tableScan(asRowType(inputRowVector->type()))
                       .capturePlanNodeId(p0)
-                      .project({"decision_forest_predict(x)"});
+                      .project({"decision_forest_predict(v)"});
     // Get the logical plan                  
     auto planNode = myPlan.planNode();
     // Create ruleManager
