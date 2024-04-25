@@ -232,6 +232,12 @@ class SimpleCostModel : public CostModel {
                         // FIXME dynamically choose the input type to get the right function pointer
                         if (udf == "mat_mul_h") {
                             func = getVectorFunction(udf, {ARRAY(REAL()), ARRAY(REAL())}, {}, config);
+                        } else if (udf == "velox_tree_predict" || udf == "velox_decision_tree_construct" || udf == "velox_decision_tree_predict" || udf  == "decision_forest_predict") {
+                            // FIXME, bug here failed passing custom type
+                            continue;
+                            // func = getVectorFunction(udf, {ARRAY(REAL()), OpaqueType()}, {}, config);
+                        } else if (udf == "gt" || udf == "if") {
+                            continue;
                         } else {
                           func = getVectorFunction(udf, {ARRAY(REAL())}, {}, config);
                         }

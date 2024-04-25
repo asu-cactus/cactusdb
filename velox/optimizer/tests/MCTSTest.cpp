@@ -411,19 +411,114 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
   }
 
-  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(std::vector<std::vector<float>> data, int numSplit=4) {
-    std::vector<std::shared_ptr<TempFilePath>> paths;
+  std::vector<std::vector<float>> loadFeaturesFromCSV(
+      std::string filePath,
+      int numSamples,
+      int numFeature) {
+    int size = numSamples * numFeature;
 
+    std::cout << "Loading tensor of size " << size << " from " << filePath
+              << std::endl;
+
+    std::ifstream file(filePath.c_str());
+
+    std::vector<std::vector<float>> inputArrayVector;
+
+    int index = 0;
+
+    std::string line;
+
+    while (numSamples--) { // Read a line from the file
+
+      std::vector<float> curRow(numFeature);
+
+      std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        //
+        float number = std::stof(numberStr); // Convert the string to float
+
+        if (colIndex < numFeature)
+
+          curRow[colIndex] = number;
+
+        colIndex++;
+      }
+
+      inputArrayVector.push_back(std::move(curRow));
+    }
+
+    file.close();
+
+    return inputArrayVector;
+  }
+
+  void registerDecisionForestFunctions() {
+    std::cout << "To register function for TreePrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "decision_tree_predict",
+        TreePrediction::signatures(),
+        std::make_unique<TreePrediction>(
+            0, "/home/velox/resources/model/fraud_xgboost_10_8/0.txt", 28, false));
+
+    std::cout << "To register type for Tree" << std::endl;
+
+    registerCustomType("tree_type", std::make_unique<TreeTypeFactories>());
+
+    std::cout << "To register function for VeloxTreePrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "velox_decision_tree_predict",
+        VeloxTreePrediction::signatures(),
+        std::make_unique<VeloxTreePrediction>(28));
+
+    std::cout << "To register function for VeloxTreeConstruction" << std::endl;
+
+    exec::registerVectorFunction(
+        "velox_decision_tree_construct",
+        VeloxTreeConstruction::signatures(),
+        std::make_unique<VeloxTreeConstruction>());
+
+    std::cout << "To register function for ForestPrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "decision_forest_predict",
+        TreePrediction::signatures(),
+        std::make_unique<ForestPrediction>(
+            "/home/velox/resources/model/fraud_xgboost_10_8", 28, true));
+  }
+
+  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(std::vector<std::vector<float>> data, int numSplit=4, bool createIndex=false) {
+    std::vector<std::shared_ptr<TempFilePath>> paths;
+    
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
     size_t numSamples = data.size();
     size_t partitionSize = ceil(numSamples / numSplit);
     for (size_t i = 0; i < numSplit; i++) {
       auto startIdx = data.begin() + i * partitionSize;
       auto endIdx = data.begin() + (i+1) * partitionSize;
       endIdx = (endIdx < data.end()) ? endIdx : data.end();
+      size_t numSampleInPartition = (i+1)*partitionSize <= numSamples ? partitionSize : numSamples - i*partitionSize;
 
       std::vector<std::vector<float>> partialData(startIdx, endIdx);
       auto featureArrayVector = maker.arrayVector<float>(partialData, REAL());
-      auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      RowVectorPtr inputRowVector;
+      if (createIndex) {
+        std::vector<int> indexes = randomGenerator.genIntRange(i*partitionSize, i*partitionSize+numSampleInPartition);
+        auto indexFlatVector = maker.flatVector<int>(indexes);
+        inputRowVector = maker.rowVector({"idx", "v"}, {std::move(indexFlatVector), std::move(featureArrayVector)});
+      } else {
+        inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      }
       auto file = TempFilePath::create();
       auto config = std::make_shared<facebook::velox::dwrf::Config>();
       writeToFile(file->path, {inputRowVector}, config);
@@ -724,22 +819,36 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           cataLog,
           isVerticalPartition);
 
-      // Create a plan for FFNN using two dense layers UDFs
-      myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                  .tableScan(inputRowType)
-                  .capturePlanNodeId(p0)
-                  .project({fmt::format(computationStr, "v")});
+      
+    } else if (model == "df") {
+      // TODO: current the data is load froma file not generated
+      numSamples = 56962;
+      featureSize = 28;
+      registerDecisionForestFunctions();
 
-      // Set original plan nodeId and file address of data source
-      cataLog.setIdAddressMap(p0, files);
-      // Set vector name and nodeId of data source
-      cataLog.setVectorIdMap(p0, "v");
-      // Add source to catalog
-      std::shared_ptr<OutputStat> stat =
-      std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
-      Source src = Source(p0, Source::Type::FILE, std::move(stat));
-      cataLog.addSource(std::make_shared<Source>(src));
+      std::string dataFilePath = "/home/velox/resources/data/creditcard_test.csv";
+
+      std::vector<std::vector<float>> inputFeatureVectors = loadFeaturesFromCSV(dataFilePath, numSamples, featureSize);
+      files = splitDataToFiles(inputFeatureVectors, 4 /*numSplit*/, true /*createIndex*/);
+      computationStr = "decision_forest_predict(v)";
+      inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
     }
+
+    // Create a plan for FFNN using two dense layers UDFs
+    myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(inputRowType)
+                .capturePlanNodeId(p0)
+                .project({fmt::format(computationStr, "v")});
+
+    // Set original plan nodeId and file address of data source
+    cataLog.setIdAddressMap(p0, files);
+    // Set vector name and nodeId of data source
+    cataLog.setVectorIdMap(p0, "v");
+    // Add source to catalog
+    std::shared_ptr<OutputStat> stat =
+    std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+    Source src = Source(p0, Source::Type::FILE, std::move(stat));
+    cataLog.addSource(std::make_shared<Source>(src));
    
 
     
@@ -751,6 +860,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Create planState
     PlanState planState(ruleManager);
     // Run rewriten rule
+
 
     // Set up socket
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);

@@ -99,10 +99,10 @@ public:
 									*    exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
 									*    .values({treeRowVector})
 									*    .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
-									*    .planNode(), {"row_id", "x", "tree_id", "tree"})
-									*    .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
-									*    .aggregation({"row_id"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
-									*    .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
+									*    .planNode(), {"idx", "x", "tree_id", "tree"})
+									*    .project({"idx as idx", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
+									*    .aggregation({"idx"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
+									*    .project({"idx as idx", "if (sum > 0.0, 1.0, 0.0)"})
 									*/
 												
 									if (projections.size() == 1) {
@@ -113,6 +113,7 @@ public:
 										core::QueryConfig config({});
 
 										std::shared_ptr<VectorFunction> myUDF = getVectorFunction(callName, {ARRAY(REAL())}, {}, config);
+										int numTrees;
 
 										if (myUDF) {
 									
@@ -126,7 +127,7 @@ public:
 																
 												Forest::vectorizeForestFolder(modelPath, pathVectors);
 
-												int numTrees = pathVectors.size();
+												numTrees = pathVectors.size();
 
 												auto model = maker.flatVector<StringView> (pathVectors.size());
 
@@ -155,16 +156,23 @@ public:
 										if (curNode->sources().size() > 0) {
 
 											planBuilder = planBuilder.setRoot((curNode->sources())[0]);
+											std::cout << "debug, current plan" << planBuilder.planNode()->toString(true,true) << std::endl;
 
 											// We build the plan from this point
+											core::PlanNodeId p1;
 									
 											planBuilder = planBuilder.nestedLoopJoin(exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
 															.values({treeRowVector})
+															.capturePlanNodeId(p1)
 															.project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
-															.planNode(), {"row_id", "x", "tree_id", "tree"})
-															.project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
-															.aggregation({"row_id"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
-															.project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"});
+															.planNode(), {"idx", "v", "tree_id", "tree"})
+															.project({"idx as idx", "tree_id as tree_id", "velox_decision_tree_predict(v, tree) as prediction"})
+															.aggregation({"idx"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
+															.project({"idx as idx", "if (sum > 0.0, 1.0, 0.0)"});
+
+											std::shared_ptr<OutputStat> inputStat = std::make_shared<OutputStat>(OutputStat(numTrees,1));
+											Source inputSource = Source(p1, Source::Type::FILE, std::move(inputStat));
+											cataLog.addSource(std::make_shared<Source>(inputSource));
 
 											transformationApplied = true;
 										}
