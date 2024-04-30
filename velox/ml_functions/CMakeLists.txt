@@ -19,6 +19,8 @@ set(CMAKE_PREFIX_PATH "$CONDA_PREFIX")
 
 find_package(Torch REQUIRED)
 find_package(xgboost REQUIRED)
+find_package(cpr REQUIRED)
+find_package(jsoncpp REQUIRED)
 
 add_executable(ml_functions_test tests/MLFunctionsTest.cpp)
 target_link_libraries(
@@ -34,6 +36,7 @@ target_link_libraries(
   velox_common_base 
   velox_vector_fuzzer
   openblas
+  velox_dwio_parquet_reader
   ${TORCH_LIBRARIES}
 )
 
@@ -67,8 +70,10 @@ target_link_libraries(
   velox_memory
   velox_common_base 
   velox_vector_fuzzer
+  jsoncpp_lib
   openblas
   ${TORCH_LIBRARIES}
+  cpr::cpr
 )
 
 add_executable(two_tower_model_test tests/TwoTowerModelTest.cpp)
@@ -176,6 +181,23 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(ml_kernel_benchmark tests/MLKernelBenchmarkTest.cpp)
+target_link_libraries(
+  ml_kernel_benchmark
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
 # TODO: add or remove this unit test
 # add_executable(parquest_loader tests/TestParquetLoader.cpp)
 # target_link_libraries(
@@ -188,5 +210,3 @@ target_link_libraries(
 #   ${TEST_LINK_LIBS}
 #   ${TORCH_LIBRARIES}
 # )
-
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -march=corei7-avx")

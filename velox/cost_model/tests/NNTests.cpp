@@ -398,11 +398,12 @@ void MLFunctionsTest::ffnn(int input_size, int layer1_size, int layer2_size) {
                   .capturePlanNodeId(p0)
                   .project({fmt::format(compute, "x")}) 
 		              .planNode();
-  
-    std::shared_ptr<Catalog> catalog = std::make_shared<Catalog>(Catalog("test-catalog"));
+
+    CataLog catalog = CataLog("test-catalog");
+    // std::shared_ptr<CataLog> catalog = std::make_shared<CataLog>(CataLog("test-catalog"));
     std::shared_ptr<OutputStat> stat = std::make_shared<OutputStat>(OutputStat(1,2));
     Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
-    catalog->addSource(std::make_shared<Source>(src1));
+    catalog.addSource(std::make_shared<Source>(src1));
     CostModel* cm = new SimpleCostModel(catalog);
     CostEstimator* ce = new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
     CostEstimate cost = ce->estimateCost(plan);
@@ -456,8 +457,7 @@ void MLFunctionsTest::run() {
              .orderBy({"r_name"}, false)
              .planNode();
 
-    std::shared_ptr<Catalog> catalog = std::make_shared<Catalog>(Catalog("test-catalog"));
-   
+    CataLog catalog = CataLog("test-catalog");
     std::shared_ptr<OutputStat> stat = std::make_shared<OutputStat>(OutputStat(1,2));
     std::shared_ptr<OutputStat> stat2 = std::make_shared<OutputStat>(OutputStat(1,2));
     
@@ -465,8 +465,8 @@ void MLFunctionsTest::run() {
     Source src2 = Source(regionScanId, Source::Type::FILE, std::move(stat2));
    
 
-    catalog->addSource(std::make_shared<Source>(src1));
-    catalog->addSource(std::make_shared<Source>(src2));
+    catalog.addSource(std::make_shared<Source>(src1));
+    catalog.addSource(std::make_shared<Source>(src2));
 
 
     CostModel* cm = new SimpleCostModel(catalog);

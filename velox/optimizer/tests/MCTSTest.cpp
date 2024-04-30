@@ -162,7 +162,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
             const std::vector<std::shared_ptr<TempFilePath>> fileAddr =
                 entry.second;
-
             auto hiveSplits = makeHiveConnectorSplits(fileAddr);
 
             for (auto& split : hiveSplits) {
@@ -198,9 +197,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         for (auto batchedData : finalResult) {
           batchedData = std::move(batchedData);
           int batchSize = batchedData->size();
-          if (verbose == 1) {
+          if (verbose == 2) {
             std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
-          } else if (verbose == 2) {
+          } else if (verbose == 3) {
             std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << "\n" << batchedData->toString(0, batchedData->size()) << std::endl;
           }
           dataIdx += 1;
@@ -209,9 +208,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         finalResult = std::move(finalResult);
       }
     }
-
-    std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
-    // std::cout << "DEBUG, REACHED here";
+    if (verbose >= 1) {
+      std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
+    }
     // finalResult = std::move(finalResult);
 
 
@@ -223,6 +222,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<float*> weights;
     std::vector<float*> bias;
     float* featuresFloat;
+    std::vector<std::shared_ptr<TempFilePath>> feature_paths;
   };
 
   /**
@@ -236,7 +236,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
    * @return DataFrame The structure used to denote the generated data.
    */
   DataFrame
-  data_generate(int features, int samples, int first_layer, int second_layer) {
+  data_generate(int features, int samples, int first_layer, int second_layer, int num_split=8) {
     // Example:
     // ( 1000 * 597540 x 597540 * 1024 + 1000*1024) first layer, data x weights
     // + bias. ( 1000 * 1024 x 1024 * 14588 + 1000*14588) second layer, data x
@@ -247,44 +247,46 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     int first_layer_output_size = first_layer;
     int second_layer_output_size = second_layer;
 
-    int input_total_size = input_features_size * num_samples;
+    long input_total_size = input_features_size * num_samples;
 
     int weight_layer1_size = input_features_size * first_layer_output_size;
     int weight_layer2_size = first_layer_output_size * second_layer_output_size;
 
-    int bias_layer1_size = num_samples * first_layer_output_size;
-    int bias_layer2_size = num_samples * second_layer_output_size;
+    int bias_layer1_size = first_layer_output_size;
+    int bias_layer2_size = second_layer_output_size;
     // Seed the random number generator
     std::random_device rd;
     // Initialize the Mersenne Twister engine
     std::mt19937 gen(rd());
     // Define the range
     std::uniform_real_distribution<float> distribution(0.0009, 0.0011);
-
     // Generate input
-    std::vector<std::vector<float>> featureVectors;
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
 
-    for (int i = 0; i < num_samples; i++) {
-      std::vector<float> featureVector;
-
-      for (int j = 0; j < input_features_size; j++) {
-        featureVector.push_back(
-            (i * input_features_size + j) / input_total_size);
-            // featureVector.push_back(1);
+    std::vector<std::shared_ptr<TempFilePath>> feature_paths;
+    size_t partition_size = ceil(num_samples / float(num_split));
+    for (size_t i = 0; i < num_split; i++) {
+      size_t num_samples_in_partition = (i+1)*partition_size <= num_samples ? partition_size : num_samples - i*partition_size;
+      if (num_samples_in_partition == 0) {
+        continue;
       }
-
-      featureVectors.push_back(featureVector);
+      std::vector<int> indexes = randomGenerator.genIntRange(i*partition_size, i*partition_size+num_samples_in_partition);
+      auto indexFlaVector = maker.flatVector<int>(indexes);
+      std::vector<std::vector<float>> partialFeature = randomGenerator.genFloat2dVector(num_samples_in_partition, input_features_size);
+      auto featureArrayVector = maker.arrayVector<float>(std::move(partialFeature), REAL());
+      auto inputRowVector = maker.rowVector({"idx", "v"}, {std::move(indexFlaVector), std::move(featureArrayVector)});
+      auto file = TempFilePath::create();
+      auto config = std::make_shared<facebook::velox::dwrf::Config>();
+      writeToFile(file->path, {std::move(inputRowVector)}, config);
+      feature_paths.push_back(file);
+      inputRowVector.reset();
+      indexFlaVector.reset();
+      indexes.clear();
+      featureArrayVector.reset();
+      partialFeature.clear();
+      partialFeature.shrink_to_fit();
     }
 
-    float* floatArray = new float[num_samples * input_features_size];
-
-    int index = 0;
-
-    for (const auto& row : featureVectors) {
-      for (const float& value : row) {
-        floatArray[index++] = value;
-      }
-    }
 
     // Generate weight
     float* weight_layer1 = new float[weight_layer1_size];
@@ -300,8 +302,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
 
     std::vector<float*> weights;
-    weights.push_back(weight_layer1);
-    weights.push_back(weight_layer2);
+    weights.push_back(std::move(weight_layer1));
+    weights.push_back(std::move(weight_layer2));
 
     // Generate bias
     float* bias_layer1 = new float[bias_layer1_size];
@@ -314,18 +316,15 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     for (int i = 0; i < bias_layer2_size; ++i) {
       bias_layer2[i] = 0.00001;
     }
-
     std::vector<float*> bias;
-    bias.push_back(bias_layer1);
-    bias.push_back(bias_layer2);
-
+    bias.push_back(std::move(bias_layer1));
+    bias.push_back(std::move(bias_layer2));
     // Create DataFrame
     DataFrame data;
-    data.features = featureVectors;
-    data.weights = weights;
-    data.bias = bias;
-    data.featuresFloat = floatArray;
-
+    // data.features = featureVectors;
+    data.weights = std::move(weights);
+    data.bias = std::move(bias);
+    data.feature_paths = std::move(feature_paths);
     return data;
   }
 
@@ -361,7 +360,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "mat_mul0",
         MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(weightsFile_1, input_size1, units1),
+        std::make_unique<MatrixMultiply>(std::move(weightsFile_1), input_size1, units1),
         {},
         true,
         catalog,
@@ -369,8 +368,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Register matrix addition function for the first layer
     optimization::registerVectorFunction(
         "mat_add0",
-        MatrixAddition::signatures(),
-        std::make_unique<MatrixAddition>(biasFile_1, units1),
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(std::move(biasFile_1), units1),
         {},
         true,
         catalog);
@@ -386,7 +385,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "mat_mul1",
         MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(weightsFile_2, input_size2, units2),
+        std::make_unique<MatrixMultiply>(std::move(weightsFile_2), input_size2, units2),
         {},
         true,
         catalog,
@@ -394,8 +393,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Register matrix addition function for the second layer
     optimization::registerVectorFunction(
         "mat_add1",
-        MatrixAddition::signatures(),
-        std::make_unique<MatrixAddition>(biasFile_2, units2),
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(std::move(biasFile_2), units2),
         {},
         true,
         catalog);
@@ -412,6 +411,163 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
   }
 
+  std::vector<std::vector<float>> loadFeaturesFromCSV(
+      std::string filePath,
+      int numSamples,
+      int numFeature) {
+    int size = numSamples * numFeature;
+
+    std::cout << "Loading tensor of size " << size << " from " << filePath
+              << std::endl;
+
+    std::ifstream file(filePath.c_str());
+
+    std::vector<std::vector<float>> inputArrayVector;
+
+    int index = 0;
+
+    std::string line;
+
+    while (numSamples--) { // Read a line from the file
+
+      std::vector<float> curRow(numFeature);
+
+      std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        //
+        float number = std::stof(numberStr); // Convert the string to float
+
+        if (colIndex < numFeature)
+
+          curRow[colIndex] = number;
+
+        colIndex++;
+      }
+
+      inputArrayVector.push_back(std::move(curRow));
+    }
+
+    file.close();
+
+    return inputArrayVector;
+  }
+
+  void registerDecisionForestFunctions() {
+    std::cout << "To register function for TreePrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "decision_tree_predict",
+        TreePrediction::signatures(),
+        std::make_unique<TreePrediction>(
+            0, "/home/velox/resources/model/fraud_xgboost_10_8/0.txt", 28, false));
+
+    std::cout << "To register type for Tree" << std::endl;
+
+    registerCustomType("tree_type", std::make_unique<TreeTypeFactories>());
+
+    std::cout << "To register function for VeloxTreePrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "velox_decision_tree_predict",
+        VeloxTreePrediction::signatures(),
+        std::make_unique<VeloxTreePrediction>(28));
+
+    std::cout << "To register function for VeloxTreeConstruction" << std::endl;
+
+    exec::registerVectorFunction(
+        "velox_decision_tree_construct",
+        VeloxTreeConstruction::signatures(),
+        std::make_unique<VeloxTreeConstruction>());
+
+    std::cout << "To register function for ForestPrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "decision_forest_predict",
+        TreePrediction::signatures(),
+        std::make_unique<ForestPrediction>(
+            "/home/velox/resources/model/fraud_xgboost_10_8", 28, true));
+  }
+
+  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(std::vector<std::vector<float>> data, int numSplit=4, bool createIndex=false) {
+    std::vector<std::shared_ptr<TempFilePath>> paths;
+    
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    size_t numSamples = data.size();
+    size_t partitionSize = ceil(numSamples / numSplit);
+    for (size_t i = 0; i < numSplit; i++) {
+      auto startIdx = data.begin() + i * partitionSize;
+      auto endIdx = data.begin() + (i+1) * partitionSize;
+      endIdx = (endIdx < data.end()) ? endIdx : data.end();
+      size_t numSampleInPartition = (i+1)*partitionSize <= numSamples ? partitionSize : numSamples - i*partitionSize;
+
+      std::vector<std::vector<float>> partialData(startIdx, endIdx);
+      auto featureArrayVector = maker.arrayVector<float>(partialData, REAL());
+      RowVectorPtr inputRowVector;
+      if (createIndex) {
+        std::vector<int> indexes = randomGenerator.genIntRange(i*partitionSize, i*partitionSize+numSampleInPartition);
+        auto indexFlatVector = maker.flatVector<int>(indexes);
+        inputRowVector = maker.rowVector({"idx", "v"}, {std::move(indexFlatVector), std::move(featureArrayVector)});
+      } else {
+        inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      }
+      auto file = TempFilePath::create();
+      auto config = std::make_shared<facebook::velox::dwrf::Config>();
+      writeToFile(file->path, {inputRowVector}, config);
+      paths.push_back(file);
+    }
+
+    return paths;
+  }
+
+  std::string process_mem_usage() {
+    using std::ios_base;
+    using std::ifstream;
+    using std::string;
+
+    double vm_usage = 0.0;
+    double resident_set = 0.0;
+
+    // Read data from /proc/self/stat
+    ifstream stat_stream("/proc/self/stat", ios_base::in);
+    if (!stat_stream) {
+        std::cerr << "Error opening /proc/self/stat" << std::endl;
+        return "";
+    }
+
+    // Extract relevant fields
+    string pid, comm, state, ppid, pgrp, session, tty_nr;
+    string tpgid, flags, minflt, cminflt, majflt, cmajflt;
+    string utime, stime, cutime, cstime, priority, nice;
+    string O, itrealvalue, starttime;
+    unsigned long vsize;
+    long rss;
+
+    stat_stream >> pid >> comm >> state >> ppid >> pgrp >> session >> tty_nr
+                >> tpgid >> flags >> minflt >> cminflt >> majflt >> cmajflt
+                >> utime >> stime >> cutime >> cstime >> priority >> nice
+                >> O >> itrealvalue >> starttime >> vsize >> rss;
+
+    stat_stream.close();
+
+    // Get page size in KB
+    long page_size_kb = sysconf(_SC_PAGE_SIZE) / 1024 / 1024 / 1024;
+
+    // Calculate memory usage
+    vm_usage = vsize / 1024.0 / 1024.0 / 1024.0;
+    resident_set = rss * page_size_kb;
+    std::cout << fmt::format(" vm_usage: {:.2f} , resident_set: {:.2f}", vm_usage, resident_set) << std::endl;
+    return "";
+}
+
 
   /**
    * @brief A test function to test the rewrite rule of
@@ -426,7 +582,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int numSamples,
       int numDriver,
       std::string benchmarkMode,
-      int verbose) {
+      int blockSize,
+      int verbose,
+      bool getCost) {
     // Set data source config.
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
@@ -435,7 +593,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Set splits number
     // Initialize CataLog
     CataLog cataLog;
-    cataLog.setDefaultBlocksSize(256);
+    cataLog.setDefaultBlocksSize(blockSize);
     cataLog.setBlockingThreshold(1);
     // Generate data source
     auto data = data_generate(
@@ -443,21 +601,17 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         num_samples,
         first_layer_output_size,
         second_layer_output_size);
-    // Create arrayVector for data source
-    auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
-    // Create rowVector for data source
-    auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-    // Create file path
-    auto file = TempFilePath::create();
-    // Create file config
-    auto config = std::make_shared<facebook::velox::dwrf::Config>();
-    // Write the data source to a file, with the format defined by the rowVector
-    writeToFile(file->path, {inputRowVector}, config);
+    // Split inputs into many splits and return paths as a std::vector
+    std::vector<std::shared_ptr<TempFilePath>> files = data.feature_paths;
+    RowTypePtr inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
     //  Check the input size against the blocking threshold in cataLog.
     //  If yes, preblock the input vector, store it, and add information in
     //  cataLog. If not, set dataSource in cataLog.
     if (input_features_size > cataLog.getBlockingThreshold()) {
-      // If input size is larger than blocking threshold, preblock and store in
+      // FIXME: temporary disable the following blocking for vertical partition since
+      // we have deallocate the data.features in data_generate function to save 
+      // unnecessary memory usage.
+      /* // If input size is larger than blocking threshold, preblock and store in
       // cataLog
       std::vector<std::vector<float>> valuesBlock =
           optimization::create_input_block(
@@ -467,24 +621,22 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       optimization::FileStructure values = optimization::block_to_files(
           valuesBlock, cataLog.getDefaultBlocksNum(), 0);
       // Set data source blocks in cataLog
-      cataLog.setDataSourceBlocks(values.schema, values.paths);
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
+      cataLog.setDataSourceBlocks(values.schema, values.paths); */
     } else {
       // If input size is not larger than blocking threshold, set dataSource in
       // cataLog
-      cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
+      cataLog.setDataSource(inputRowType, files);
     }
-    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+    // Set data source statistics in cataLog
+    cataLog.setDataSourceStat({num_samples, input_features_size});
+    cataLog.setUDFSchema("value", inputRowType);
     // Build two dense layers UDFs using registerFunction in optimization
     // namespace
     bool isVerticalPartition = true;
     if (benchmarkMode == "mul2joinAggHorizontal") {
       isVerticalPartition = false;
     }
-    std::string compute = registerFunctions(
+    std::string computationStr = registerFunctions(
         first_layer_output_size,
         second_layer_output_size,
         input_features_size,
@@ -495,21 +647,28 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         data.bias[1],
         cataLog,
         isVerticalPartition);
-
     // Initialize planNodeID
     core::PlanNodeId p0;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(asRowType(inputRowVector->type()))
+                      .tableScan(inputRowType)
                       .capturePlanNodeId(p0)
-                      .project({fmt::format(compute, "v")})
+                      .project({fmt::format(computationStr, "v")})
                       .planBuild();
     // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, {file});
+    cataLog.setIdAddressMap(p0, files);
     // Set vector name and nodeId of data source
     cataLog.setVectorIdMap(p0, "v");
+    // Add source to catalog
+    std::shared_ptr<OutputStat> stat =
+    std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+    Source src = Source(p0, Source::Type::FILE, std::move(stat));
+    cataLog.addSource(std::make_shared<Source>(src));
+
+
+
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -561,91 +720,139 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     if (verbose != 0) {
       std::cout << "Executed Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
     }
-    float averageExectuionTime =
-        runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
-    std::cout << averageExectuionTime;
-  }
 
-  void testIntegratedMCTS(int featureSize, int numSamples, int repeatRun) {
-    // Set data source config.
-    // int input_features_size = 800; // 597540
-    int input_features_size = featureSize; // 597540
-    // int num_samples = 1000;
-    int num_samples = numSamples;
-    int first_layer_output_size = 1024;
-    int second_layer_output_size = 14588;
-    CataLog cataLog;
-    cataLog.setDefaultBlocksSize(256);
-    cataLog.setBlockingThreshold(1);
-    // Set splits number
-    // Generate data source
-    auto data = data_generate(
-        input_features_size,
-        num_samples,
-        first_layer_output_size,
-        second_layer_output_size);
-    // Create arrayVector for data source
-    auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
-    // Create rowVector for data source
-    auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
-    // Create file path
-    auto file = TempFilePath::create();
-    // Create file config
-    auto config = std::make_shared<facebook::velox::dwrf::Config>();
-    // Write the data source to a file, with the format defined by the rowVector
-    writeToFile(file->path, {inputRowVector}, config);
+    if (getCost) {
+        // std::shared_ptr<Catalog> catalog =
+        //       std::make_shared<Catalog>(Catalog("db-catalog"));
 
-    if (input_features_size > cataLog.getBlockingThreshold()) {
-      // If input size is larger than blocking threshold, preblock and store in
-      // cataLog
-      std::vector<std::vector<float>> valuesBlock =
-          optimization::create_input_block(
-              input_features_size * num_samples,
-              data.features,
-              cataLog.getDefaultBlocksNum());
-      optimization::FileStructure values = optimization::block_to_files(
-          valuesBlock, cataLog.getDefaultBlocksNum(), 0);
-      // Set data source blocks in cataLog
-      cataLog.setDataSourceBlocks(values.schema, values.paths);
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
-    } else {
-      // If input size is not larger than blocking threshold, set dataSource in
-      // cataLog
-      cataLog.setDataSource(asRowType(inputRowVector->type()), {file});
-      // Set data source statistics in cataLog
-      cataLog.setDataSourceStat({num_samples, input_features_size});
+
+          
+          std::chrono::steady_clock::time_point begin =
+          std::chrono::steady_clock::now();
+
+          CostModel* cm = new SimpleCostModel(cataLog);
+          CostEstimator* ce =
+              new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+
+          planNode = myPlan.planNode();
+          CostEstimate cost = ce->estimateCost(planNode);
+
+          std::chrono::steady_clock::time_point end =
+          std::chrono::steady_clock::now();
+          auto costComputationTime =
+          (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
+               .count()) /
+          1000000.0;
+          std::cout << "[INFO] Current query plan cost: " << cost.cost << ", Computation Time: " << costComputationTime << std::endl;
+          return ;
     }
 
-    cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+    float averageExectuionTime =
+        runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
+    std::cout << averageExectuionTime << std::endl;
+  }
 
-    bool isVerticalPartition = false;
-    std::string compute = registerFunctions(
-        first_layer_output_size,
-        second_layer_output_size,
-        input_features_size,
-        first_layer_output_size,
-        data.weights[0],
-        data.weights[1],
-        data.bias[0],
-        data.bias[1],
-        cataLog,
-        isVerticalPartition);
-
+  void testIntegratedMCTS(std::string model, int featureSize, int numSamples, int repeatRun, int blockSize, int verbose) {
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    RowTypePtr inputRowType;
     // Initialize planNodeID
     core::PlanNodeId p0;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    std::vector<std::shared_ptr<TempFilePath>> files;
+    std::string computationStr;
+
+    if (model == "ffnn") {
+       // Set data source config.
+      int input_features_size = featureSize; // 597540
+      int num_samples = numSamples;
+      int first_layer_output_size = 1024;
+      int second_layer_output_size = 14588;
+      cataLog.setDefaultBlocksSize(blockSize);
+      cataLog.setBlockingThreshold(1);
+      // Set splits number
+      // Generate data source
+      auto data = data_generate(
+          input_features_size,
+          num_samples,
+          first_layer_output_size,
+          second_layer_output_size);
+      // Split inputs into many splits and return paths as a std::vector
+      files = data.feature_paths;
+      inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
+      if (input_features_size > cataLog.getBlockingThreshold()) {
+        // FIXME: temporary disable the following blocking for vertical partition since
+        // we have deallocate the data.features in data_generate function to save 
+        // unnecessary memory usage.
+        /* // If input size is larger than blocking threshold, preblock and store in
+        // cataLog
+        std::vector<std::vector<float>> valuesBlock =
+            optimization::create_input_block(
+                input_features_size * num_samples,
+                data.features,
+                cataLog.getDefaultBlocksNum());
+        optimization::FileStructure values = optimization::block_to_files(
+            valuesBlock, cataLog.getDefaultBlocksNum(), 0);
+        // Set data source blocks in cataLog
+        cataLog.setDataSourceBlocks(values.schema, values.paths); */
+      } else {
+        // If input size is not larger than blocking threshold, set dataSource in
+        // cataLog
+        cataLog.setDataSource(inputRowType, files);
+      }
+
+      // Set data source statistics in cataLog
+      cataLog.setDataSourceStat({num_samples, input_features_size});
+      cataLog.setUDFSchema("value", inputRowType);
+
+      bool isVerticalPartition = false;
+      computationStr = registerFunctions(
+          first_layer_output_size,
+          second_layer_output_size,
+          input_features_size,
+          first_layer_output_size,
+          data.weights[0],
+          data.weights[1],
+          data.bias[0],
+          data.bias[1],
+          cataLog,
+          isVerticalPartition);
+
+      
+    } else if (model == "df") {
+      // TODO: current the data is load froma file not generated
+      numSamples = 56962;
+      featureSize = 28;
+      registerDecisionForestFunctions();
+
+      std::string dataFilePath = "/home/velox/resources/data/creditcard_test.csv";
+
+      std::vector<std::vector<float>> inputFeatureVectors = loadFeaturesFromCSV(dataFilePath, numSamples, featureSize);
+      files = splitDataToFiles(inputFeatureVectors, 4 /*numSplit*/, true /*createIndex*/);
+      computationStr = "decision_forest_predict(v)";
+      inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
+    }
+
     // Create a plan for FFNN using two dense layers UDFs
-    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                 .tableScan(asRowType(inputRowVector->type()))
-                 .capturePlanNodeId(p0)
-                 .project({fmt::format(compute, "v")});
+    myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(inputRowType)
+                .capturePlanNodeId(p0)
+                .project({fmt::format(computationStr, "v")});
 
     // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, {file});
+    cataLog.setIdAddressMap(p0, files);
     // Set vector name and nodeId of data source
     cataLog.setVectorIdMap(p0, "v");
+    // Add source to catalog
+    std::shared_ptr<OutputStat> stat =
+    std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+    Source src = Source(p0, Source::Type::FILE, std::move(stat));
+    cataLog.addSource(std::make_shared<Source>(src));
+   
+
+    
+
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -653,6 +860,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Create planState
     PlanState planState(ruleManager);
     // Run rewriten rule
+
 
     // Set up socket
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -687,10 +895,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // received json message from MCTS
       Json::Value receivedJsonMessage = receiveJsonFromSocket(clientSocket);
       std::string mctsAction = receivedJsonMessage["mctsAction"].asString();
-      std::cout << "===================================" << std::endl;
-      std::cout << "Received message with mcts action: " << mctsAction
+      LOG(INFO) << "===================================" << std::endl;
+      LOG(INFO) << "Received message with mcts action: " << mctsAction
                 << std::endl;
-      std::cout << "JSON Message: " << receivedJsonMessage << std::endl;
+      if (mctsAction == "") {
+        LOG(INFO) << "Un-captured error happened" << std::endl;
+        return;
+      }
+      LOG(INFO) << "JSON Message: " << receivedJsonMessage << std::endl;
       if (mctsAction == "resetPlan") {
         // if it is root node, it needs to start with original plan
         // the p0 will be increased after capturePlanNodeId is called
@@ -698,13 +910,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         // before reset the myPlan
         cataLog.clearIdAddressMap();
         cataLog.clearVectorIdMap();
+        cataLog.clearSourceMap();
         myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                     .tableScan(asRowType(inputRowVector->type()))
+                     .tableScan(inputRowType)
                      .capturePlanNodeId(p0)
-                     .project({fmt::format(compute, "v")});
-        cataLog.setIdAddressMap(p0, {file});
+                     .project({fmt::format(computationStr, "v")});
+        cataLog.setIdAddressMap(p0, files);
         cataLog.setVectorIdMap(p0, "v");
-        cataLog.setUDFSchema("value", asRowType(inputRowVector->type()));
+        cataLog.setUDFSchema("value", inputRowType);
+        std::shared_ptr<OutputStat> stat1 =
+              std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+        Source src1 = Source(p0, Source::Type::FILE, std::move(stat1));
+        cataLog.addSource(std::make_shared<Source>(src1));
         planNode = myPlan.planNode();
         planState.getPossibleActions(planNode, cataLog);
         // send acknowledgement for synchronization 
@@ -713,7 +930,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         jsonMessage["communicateFlag"] = true;
         jsonMessage["mctsAction"] = "recQueryPlan";
-        jsonMessage["queryPlan"] = myPlan.planNode()->toString(true, true);
+        jsonMessage["queryPlan"] =  "\"" + myPlan.planNode()->toString(true, true) + "\"";
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "getActionSpace") {
@@ -721,7 +938,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
         for (const auto& entry : planState.actionsPair) {
-          // std::cout << "[ACTION SBACE] " << entry.first << s't'd
+          // LOG(INFO) << "[ACTION SBACE] " << entry.first << s't'd
           // entry.second << std::endl;
           Json::Value jsonEntry;
           jsonEntry["expression"] = entry.first;
@@ -738,7 +955,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         targetAction.first = receivedJsonMessage["targetString"].asString();
         targetAction.second = receivedJsonMessage["targetAction"].asString();
 
-        std::cout << "[INFO] take action: " << targetAction << std::endl;
+        LOG(INFO) << "[INFO] take action: " << targetAction << std::endl;
         if (targetAction.first != "None") {
           // None action is selected
           planState.takeAction(
@@ -752,39 +969,35 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               cataLog);
           planState.update(myPlan, cataLog);
         }
-        std::cout << "[INFO] current my query plan"
+        LOG(INFO) << "[INFO] current my query plan"
                   << myPlan.planNode()->toString(true, true) << std::endl;
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
-          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
+          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 4, verbose);
           jsonMessage["reward"] = executeTime;
-          std::cout << "[INFO] get Cost(offline): "
+          LOG(INFO) << "[INFO] get Cost(offline): "
                     << " time: " << executeTime << std::endl;
         } else if (receivedJsonMessage["costMode"] == "online") {
-          std::shared_ptr<Catalog> catalog =
-              std::make_shared<Catalog>(Catalog("db-catalog"));
-
-          std::shared_ptr<OutputStat> stat =
-              std::make_shared<OutputStat>(OutputStat(1, 2));
-
-          Source src1 = Source(p0, Source::Type::FILE, std::move(stat));
-
-          catalog->addSource(std::make_shared<Source>(src1));
-
-          CostModel* cm = new SimpleCostModel(catalog);
+          CostModel* cm = new SimpleCostModel(cataLog);
           CostEstimator* ce =
               new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
 
           planNode = myPlan.planNode();
           CostEstimate cost = ce->estimateCost(planNode);
-          jsonMessage["reward"] = cost.cost + 1;
-          std::cout << "[INFO] get Cost(online): " << cost.cost << std::endl;
+          jsonMessage["reward"] = cost.cost;
+          LOG(INFO) << "[INFO] get Cost(online): " << cost.cost << std::endl;
         }
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
 
+      } else if (mctsAction == "runPlan") {
+        auto latency = runPlanWithCataLog(8, 8, myPlan, cataLog, 4, verbose);
+        Json::Value jsonMessage;
+        jsonMessage["latency"] = latency;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "finished") {
         // finished
         // nothing to do
@@ -792,16 +1005,16 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
       optimizationIsFinished =
           receivedJsonMessage["optimizationIsFinished"].asBool();
-      std::cout << "[INFO] reached end of the loop, current opt flag: "
+      LOG(INFO) << "[INFO] reached end of the loop, current opt flag: "
                 << optimizationIsFinished << std::endl;
     };
 
     // Run the rewritten plan
-    std::cout << "[INFO] MCTS finished, run the optimized query plan"
-              << std::endl;
-    std::cout << "[INFO] Optimized query plan"
-              << myPlan.planNode()->toString(true, true) << std::endl;
-    runPlanWithCataLog(8, 8, myPlan, cataLog, 4);
+    // LOG(INFO) << "[INFO] MCTS finished, run the optimized query plan"
+    //           << std::endl;
+    // LOG(INFO) << "[INFO] Optimized query plan"
+    //           << myPlan.planNode()->toString(true, true) << std::endl;
+    
   }
 
  private:
@@ -811,31 +1024,40 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 };
 
 DEFINE_string(mode, "mcts", "Mode: mcts or benchmark");
+DEFINE_string(model, "ffnn", "Model: ffnn or df");
 DEFINE_bool(rewrite, true, "Whether  rewrite");
 DEFINE_int32(num_repeat, 5, "Number of repeat run");
 DEFINE_int32(feature_size, 1000, "FFNN Feature size");
 DEFINE_int32(num_sample, 1000, "Number of samples");
 DEFINE_int32(num_driver, 8, "Number of drivers");
-DEFINE_int32(verbose, 1, "Verbose");
+DEFINE_int32(verbose, 2, "Verbose");
+DEFINE_int32(block_size, 256, "Block Size");
+DEFINE_bool(cost, false, "Whether get cost");
 
 int main(int argc, char** argv) {
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
-  folly::init(&argc, &argv, false);
+
   memory::MemoryManager::initialize({});
+  folly::init(&argc, &argv, false);
+  // gflags::ParseCommandLineFlags(&argc, &argv, true);
   std::string mode = FLAGS_mode;
+  std::string model = FLAGS_model;
+
   bool rewrite = FLAGS_rewrite;
   int repeatRun = FLAGS_num_repeat;
   int featureSize = FLAGS_feature_size;
   int numSample = FLAGS_num_sample;
   int numDriver = FLAGS_num_driver;
   int verbose = FLAGS_verbose;
+  int blockSize = FLAGS_block_size;
+  bool getCost = FLAGS_cost;
   IntegratedMCTSTest demo;
+ 
   // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
   if (mode == "mcts") {
-    demo.testIntegratedMCTS(featureSize, numSample, repeatRun);
+    demo.testIntegratedMCTS(model, featureSize, numSample, repeatRun, blockSize, verbose);
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
-        rewrite, repeatRun, featureSize, numSample, numDriver, mode, verbose);
+        rewrite, repeatRun, featureSize, numSample, numDriver, mode, blockSize, verbose, getCost);
   }
 }

@@ -5,6 +5,12 @@
 
 class RandomGenerator {
  public:
+  
+  RandomGenerator() {
+    gen_ = std::mt19937(0);
+    distR_ = std::uniform_real_distribution<float>(0, 1);
+    distI_ = std::uniform_int_distribution<int>((int)0, (int)10);
+  }
   RandomGenerator(float lb, float ub, int randomSeed = 0) {
     gen_ = std::mt19937(randomSeed);
     distR_ = std::uniform_real_distribution<float>(lb, ub);
@@ -64,9 +70,19 @@ class RandomGenerator {
     std::vector<std::vector<float>> float2dVector;
 
     for (int i = 0; i < numRow; i++) {
-      float2dVector.push_back(genFloat1dVector(numCol));
+      float2dVector.push_back(std::move(genFloat1dVector(numCol)));
     }
     return float2dVector;
+  }
+
+  float* genFloat1dArray(int size) {
+    // Initialize the input1 feature vector
+    float* float1dArray = new float[size];
+
+    for (int i = 0; i < size; i++) {
+      float1dArray[i] = genRandomFloatValue();
+    }
+    return float1dArray;
   }
 
   std::vector<float> genFloat1dVector(int size) {
@@ -76,6 +92,14 @@ class RandomGenerator {
         float1dVector.push_back(genRandomFloatValue());
     }
     return float1dVector;
+  }
+
+  std::vector<int> genIntRange(int low, int high) {
+    std::vector<int> result;
+    for (int i = low; i < high; ++i) {
+        result.push_back(i);
+    }
+    return result;
   }
 
  private:

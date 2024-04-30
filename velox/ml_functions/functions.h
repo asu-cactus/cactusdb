@@ -42,6 +42,10 @@ class MLFunction : public exec::VectorFunction {
             return dims;
         }
 
+        virtual std::string getFuncName() {
+            return "";
+        }
+
         virtual int getNumDims(){
             return dims.size();
         }
@@ -52,9 +56,14 @@ class MLFunction : public exec::VectorFunction {
 
     protected:
         std::vector<int> dims;
-        float getWeightedCost(std::string name, float cost) {
-            float coefficient = UdfCostCoefficient::getInstance().getCoefficient(name);
-            return coefficient * cost; 
+        double getWeightedCost(std::string name, float cost) {
+            std::vector<double> coefficient = UdfCostCoefficient::getInstance().getCoefficient(name);
+            // FIXME
+            return 0;
+            // return coefficient[0] * cost; 
+        }
+        std::vector<double> getCoefficientVector(std::string name) {
+            return UdfCostCoefficient::getInstance().getCoefficient(name);
         }
 
         
@@ -65,7 +74,9 @@ class MatrixMultiply: public MLFunction {
 
 public:
     MatrixMultiply(float* weights, int num_rows, int num_cols) {
-        weights_ = weights; 
+        // weights_ = new float[num_rows * num_cols]; 
+        // std::memcpy(weights_, weights, num_rows * num_cols * sizeof(float));
+        weights_ = weights;
         dims.push_back(num_rows);
         dims.push_back(num_cols);
     }
@@ -137,6 +148,10 @@ public:
         return weights_;
     }
 
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
         return "mat_mul";
     };
@@ -150,8 +165,14 @@ public:
     }
 
     CostEstimate getCost(std::vector<int> inputDims){
-        float cost = getWeightedCost(getName(), inputDims[0] * inputDims[1] * dims[0] * dims[1]);
-        return CostEstimate(cost, dims[0], inputDims[1]);
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
+        int factor1 = inputDims[0];
+        int factor2 = dims[0];
+        int factor3 = dims[1];
+        float cost = coefficientVector[0] * factor1 * factor2 * factor3 
+                    + coefficientVector[1] * factor1 + coefficientVector[2] * factor2 
+                    + coefficientVector[3] * factor3;
+        return CostEstimate(cost, inputDims[0], dims[1]);
     }
 
 
@@ -236,6 +257,10 @@ public:
         return weights_;
     }
 
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
         return "mat_mul_block";
     };
@@ -310,9 +335,24 @@ public:
         return weights_;
     }
 
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
         return "mat_mul_h";
     };
+
+    CostEstimate getCost(std::vector<int> inputDims){
+        std::vector<double> coefficientVector = getCoefficientVector("mat_mul"); 
+        int factor1 = inputDims[0];
+        int factor2 = inputDims[1];
+        int factor3 = dims[2];
+        float cost = coefficientVector[0] * factor1 * factor2 * factor3 
+                    + coefficientVector[1] * factor1 + coefficientVector[2] * factor2 
+                    + coefficientVector[3] * factor3;
+        return CostEstimate(cost, inputDims[0], dims[2]);
+    }
 
 
 private:
@@ -386,10 +426,13 @@ public:
         return weights_;
     }
 
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
         return "mat_mul_block";
     };
-
 
 private:
     float* weights_;
@@ -469,6 +512,10 @@ public:
         return weights_;
     }
 
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
         return "mat_add";
     };
@@ -482,7 +529,9 @@ public:
     }
 
     CostEstimate getCost(std::vector<int> inputDims){
-        float cost = getWeightedCost(getName(),inputDims[0] * inputDims[1] +  dims[0] * dims[1]);
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+
         return CostEstimate(cost , inputDims[0], inputDims[1]);
     }
 
@@ -546,8 +595,12 @@ public:
         return weights_;
     }
 
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
-        return "mat_vector_add";
+        return "mat_add";
     };
 
     std::string getWeightsFile() {
@@ -622,12 +675,17 @@ public:
         return new float[0];
     }
 
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
         return "relu";
     };
 
     CostEstimate getCost(std::vector<int> inputDims){
-        float cost = getWeightedCost(getName(), inputDims[0] * inputDims[1]);
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
         return CostEstimate(cost, inputDims[0], inputDims[1]);
     }
 };
@@ -684,12 +742,17 @@ public:
         return new float[0];
     }
 
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
         return "softmax";
     };
 
     CostEstimate getCost(std::vector<int> inputDims){
-        float cost = getWeightedCost(getName(), inputDims[0] * inputDims[1]);
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
         return CostEstimate(cost, inputDims[0], inputDims[1]);
     }
 };
@@ -770,6 +833,10 @@ public:
     float** getBias() const {
         return bias;
     }
+
+    std::string getFuncName() {
+        return getName();
+    };
 
     static std::string getName() {
         return "torch_dnn";
@@ -866,9 +933,137 @@ public:
         return bias;
     }
 
+     std::string getFuncName() {
+        return getName();
+    };
+
+    static std::string getName() {
+        return "torchnn";
+    };
+
+    CostEstimate getCost(std::vector<int> inputDims){
+        // TODO: need to compute cost based on dims
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
+        uint64_t  factor1 = inputDims[0]*dims[0]*dims[1];
+        uint64_t  factor2 = inputDims[0]*dims[1]*dims[2];
+        uint64_t  factor3 = dims[0]*dims[1];
+        uint64_t  factor4 = dims[1]*dims[2];
+        float cost = coefficientVector[0] * factor1 
+                    + coefficientVector[1] * factor2 + coefficientVector[2] * factor3 
+                    + coefficientVector[3] * factor4 + coefficientVector[4] * inputDims[0]
+                    + coefficientVector[5] * dims[0] + coefficientVector[6] * dims[1]
+                    + coefficientVector[7] * dims[2];
+        // LOG(INFO) << fmt::format("[DEBUG] 4 values: {}, {}, {}, {}",inputDims[0], inputDims[1], dims[0], dims[1]);
+        // LOG(INFO) << fmt::format("[DEBUG] coeff: {}",coefficientVector);
+        // LOG(INFO) << fmt::format("[DEBUG] Cost Computation: {}, {}, {}, {}, {}, {}, {}, {}", 
+        // coefficientVector[0] * factor1, coefficientVector[1] * factor2, coefficientVector[2] * factor3 
+        //             , coefficientVector[3] * factor4,  coefficientVector[4] * inputDims[0]
+        //             , coefficientVector[5] * dims[0], coefficientVector[6] * dims[1]
+        //             , coefficientVector[7] * dims[2]);
+        // LOG(INFO) << fmt::format("[DEBUG] compute debug: {}, {}, {}, {}, {}", inputDims[0], inputDims[0]*dims[1], inputDims[0]*dims[1]*dims[2], factor2, coefficientVector[1] * factor2); 
+
+        return CostEstimate(cost, inputDims[0], dims[2]);
+    }
+
+    
+
 private:
     std::vector<float*> weights;
     std::vector<float*> bias;
+};
+
+class TorchDNNKernel : public MLFunction {
+public:
+    TorchDNNKernel(std::string kernel, float* weights, float* bias, std::vector<int> dimensions) {
+        this->kernel = kernel;
+        this->weights = weights;
+        this->bias = bias;
+        dims = dimensions;
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        std::vector<torch::nn::Linear> dense_layers;
+        std::vector<torch::Tensor> weights_tensors;
+        std::vector<torch::Tensor> bias_tensors;
+        std::vector<torch::nn::ReLU> relus;
+
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        torch::Tensor input = torch::from_blob(input_values, {rows.size(), dims[0]});
+        torch::Tensor output_tensor = input;
+
+        if (kernel == "Dense") {
+            torch::nn::Linear denseLayer = torch::nn::Linear(dims[0], dims[1]);
+            torch::Tensor weightsTensor = torch::from_blob(weights, {dims[0], dims[1]}).t();
+            torch::Tensor biasTensor = torch::from_blob(bias, {dims[1]});
+            denseLayer->weight.set_data(weightsTensor);
+            denseLayer->bias.set_data(biasTensor);
+            
+            output_tensor = denseLayer->forward(output_tensor);
+        } else if (kernel == "Relu") {
+            torch::nn::ReLU reluLayer = torch::nn::ReLU();
+
+            output_tensor = reluLayer->forward(output_tensor);
+        } else if (kernel == "Softmax") {
+            output_tensor = torch::nn::functional::softmax(output_tensor, 1);
+        }
+
+        
+        // output_tensor = torch::nn::functional::softmax(output_tensor, 1);
+        float* data = output_tensor.data_ptr<float>();
+
+        // Prepare results
+        std::vector<std::vector<float>> results;
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
+            results.push_back(result);
+        }
+        
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+    
+    // Getter method for weights
+    const float* getWeights() const {
+        return weights;
+    }
+
+    // Getter method for bias
+    const float* getBias() const {
+        return bias;
+    }
+
+     std::string getFuncName() {
+        return getName();
+    };
+
+    static std::string getName() {
+        return "torchnn_kernel";
+    };
+    
+
+private:
+    float* weights;
+    float* bias;
+    std::string kernel;
 };
 
 class TorchDNN_Multi : public MLFunction {
@@ -1051,6 +1246,10 @@ public:
         return weights_;
     }
 
+    std::string getFuncName() {
+        return "conv2d";
+    };
+
     static std::string getName() {
         return "conv2d";
     };
@@ -1128,10 +1327,13 @@ public:
         return weights_;
     }
 
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
         return "torchconv2d";
     };
-
 
 private:
     float* weights_;
@@ -1245,6 +1447,10 @@ public:
     float* getBias() const {
         return bias_;
     }
+    std::string getFuncName() {
+        return getName();
+    };
+
     static std::string getName() {
         return "torchcnn";
     };
@@ -1305,6 +1511,10 @@ public:
     float* getTensor() const override {
         return weights_;
     }
+
+    std::string getFuncName() {
+        return getName();
+    };
 
     static std::string getName() {
         return "vec_scal_add";
@@ -1388,6 +1598,10 @@ public:
     float* getTensor() const override {
         return new float[0];
     }
+
+    std::string getFuncName() {
+        return getName();
+    };
 
     static std::string getName() {
         return "max_pool";

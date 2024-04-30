@@ -1,3 +1,4 @@
+#pragma once
 #include "velox/cost_model/Stat.h"
 
 class Source {
