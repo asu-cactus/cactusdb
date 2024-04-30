@@ -595,12 +595,21 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     CataLog cataLog;
     cataLog.setDefaultBlocksSize(blockSize);
     cataLog.setBlockingThreshold(1);
+    int numSplit = 8;
+    if (input_features_size == 597540) {
+      if (num_samples == 50000) {
+        numSplit = 16;
+      } else if (num_samples == 100000) {
+        numSplit = 32;
+      }
+    }
     // Generate data source
     auto data = data_generate(
         input_features_size,
         num_samples,
         first_layer_output_size,
-        second_layer_output_size);
+        second_layer_output_size,
+        numSplit);
     // Split inputs into many splits and return paths as a std::vector
     std::vector<std::shared_ptr<TempFilePath>> files = data.feature_paths;
     RowTypePtr inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
