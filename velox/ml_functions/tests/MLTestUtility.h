@@ -3,6 +3,28 @@
 
 // TODO: add namespace
 
+void countRowsAndColumnsFromCSV(const std::string& filename, int& numRows, int& numCols) {
+    std::ifstream file(filename);
+    std::string line;
+
+    numRows = 0;
+    numCols = 0;
+
+    while (std::getline(file, line)) {
+        ++numRows;
+        std::stringstream ss(line);
+        std::string cell;
+        int currentCols = 0;
+        while (std::getline(ss, cell, ',')) {
+            ++currentCols;
+        }
+        if (currentCols > numCols) {
+            numCols = currentCols;
+        }
+    }
+}
+
+
 class RandomGenerator {
  public:
   
