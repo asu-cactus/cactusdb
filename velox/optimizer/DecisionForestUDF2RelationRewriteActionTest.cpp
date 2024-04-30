@@ -335,11 +335,15 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     unregisterCustomType("tree_type");
   }
 
-  void testRewriteDecisionForestUDFPlan(std::string modelPath, std::string dataPath, bool rewrite, int numRows, int numCols) {
+  void testRewriteDecisionForestUDFPlan(std::string modelPath, std::string dataPath, bool rewrite) {
     // register functions and types that are needed for this test
+    int numRows, numCols;
+    countRowsAndColumnsFromCSV(dataPath, numRows, numCols);
+    std::cout << fmt::format("[INFO] Stats. from CSV file: numRows: {}, numCols: {}", numRows, numCols) << std::endl;
     registerFunctions(modelPath, numCols);
 
     // prepare features that are needed for this test
+
 
     auto inputRowVector = loadData(dataPath, numRows, numCols);
 
@@ -397,8 +401,6 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
 DEFINE_string(model_path, "/home/velox/resources/model/fraud_xgboost_10_8", "Path to model");
 DEFINE_string(data_path, "/home/velox/resources/data/creditcard_test.csv", "Path to csv file");
 DEFINE_bool(rewrite, true, "Rewrite or not");
-DEFINE_int32(num_row, 56962,"Number of rows");
-DEFINE_int32(num_col, 28, "Number of columns");
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
@@ -407,8 +409,6 @@ int main(int argc, char** argv) {
   std::string modelPath = FLAGS_model_path;
   std::string dataPath = FLAGS_data_path;
   bool rewrite = FLAGS_rewrite;
-  int numRows = FLAGS_num_row;
-  int numCols = FLAGS_num_col;
 
   DecisionForestUDF2RelationRewriteActionTest demo;
 
@@ -416,6 +416,6 @@ int main(int argc, char** argv) {
 
 
 
-  demo.testRewriteDecisionForestUDFPlan(modelPath, dataPath, rewrite, numRows, numCols);
+  demo.testRewriteDecisionForestUDFPlan(modelPath, dataPath, rewrite);
 
 }
