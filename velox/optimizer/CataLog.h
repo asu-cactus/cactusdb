@@ -16,9 +16,17 @@
 #pragma once
 #include <map> 
 #include <string>
+#include "velox/cost_model/Source.h"
 
 class CataLog {
     public:
+
+        virtual ~CataLog() = default;
+        
+        CataLog() {}
+
+        CataLog(std::string name) : name(name) {}
+
         // Add or update UDF associate information (schema, file address) based on the flag (weights or values)
         void add(const std::string& name, RowTypePtr schema, std::vector<std::shared_ptr<TempFilePath>> filePath, int flag, std::string nameSuffix = "") {
             // TODO: better naming convention for the flag variable
@@ -197,8 +205,31 @@ class CataLog {
             return defaultSplits;
         }
 
+        void addSource(std::shared_ptr<Source> src){
+            sourceMap.insert({src->getName(), src});
+        }
+
+        void removeSource(std::string name){
+            sourceMap.erase(name);
+        }
+
+        std::shared_ptr<Source> getSource(std::string srcName){
+            auto it = sourceMap.find(srcName);
+            if (it != sourceMap.end()) {
+                return it->second;
+            } else {
+                LOG(FATAL) << fmt::format("[ERROR] srcName: {} not exist in sourceMap", srcName);
+                return nullptr; 
+            }
+        }
+
+        void clearSourceMap() {
+            sourceMap.clear();
+        }
+
 
     private:
+        std::string name;
         // Default values
         int defaultBlocksNum = 4;
         int defaultBlocksSize = 256;
@@ -214,6 +245,7 @@ class CataLog {
         std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>> dataSourceBlocksFileAddrMap;
         std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>> UDFFileAddrMap;
         std::map<std::string, RowTypePtr> UDFSchemaMap;
+        std::unordered_map<std::string, std::shared_ptr<Source>> sourceMap;
 
          // Helper function to find schema in a map based on key
         RowTypePtr findSchemaInMap(const std::map<std::string, RowTypePtr>& schemaMap, const std::string& key) {

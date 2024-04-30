@@ -40,6 +40,12 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
  public:
   MultiLayerUDF2TorchNNRewriteAction() {}
 
+  void clearVectors() {
+    dims.clear();
+    weights.clear();
+    bias.clear();
+  }
+
   /**
    * @brief A function to apply a rule for rewriting the logical plan.
    *
@@ -71,6 +77,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
       std::vector<std::string> targets,
       CataLog& cataLog) override {
+    clearVectors();
     bool transformationApplied = false;
     // Iterate over each target in the targets container
     for (auto target : targets) {
@@ -143,9 +150,9 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                       // is the first layer add function
                       for (auto it = myAddFunc.rbegin(); it != myAddFunc.rend();
                            ++it) {
-                        // Dynamically cast to MatrixAddition
+                        // Dynamically cast to MatrixVectorAddition
                         auto myAddUDF =
-                            std::dynamic_pointer_cast<MatrixAddition>(*it);
+                            std::dynamic_pointer_cast<MatrixVectorAddition>(*it);
                         if (myAddUDF) {
                           bias.push_back(myAddUDF->getTensor());
                         }
@@ -164,7 +171,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                       // is the first layer mul function
                       for (auto it = myMulFunc.rbegin(); it != myMulFunc.rend();
                            ++it) {
-                        // Dynamically cast to MatrixAddition
+                        // Dynamically cast to MatrixVectorAddition
                         auto myMulUDF =
                             std::dynamic_pointer_cast<MatrixMultiply>(*it);
                         if (myMulUDF) {
@@ -267,8 +274,8 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
               // Iterating over myAddFunc in reverse, the inner function is the
               // first layer add function
               for (auto it = myAddFunc.rbegin(); it != myAddFunc.rend(); ++it) {
-                // Dynamically cast to MatrixAddition
-                auto myAddUDF = std::dynamic_pointer_cast<MatrixAddition>(*it);
+                // Dynamically cast to MatrixVectorAddition
+                auto myAddUDF = std::dynamic_pointer_cast<MatrixVectorAddition>(*it);
                 if (myAddUDF) {
                   bias.push_back(myAddUDF->getTensor());
                 }
@@ -285,7 +292,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
               // Iterating over myMulFunc in reverse, the inner function is the
               // first layer mul function
               for (auto it = myMulFunc.rbegin(); it != myMulFunc.rend(); ++it) {
-                // Dynamically cast to MatrixAddition
+                // Dynamically cast to MatrixVectorAddition
                 auto myMulUDF = std::dynamic_pointer_cast<MatrixMultiply>(*it);
                 if (myMulUDF) {
                   weights.push_back(myMulUDF->getTensor());

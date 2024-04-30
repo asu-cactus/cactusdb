@@ -229,9 +229,9 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     int weight_layer2_size = first_layer_output_size * second_layer_output_size;
     int weight_layer3_size = second_layer_output_size * third_layer_output_size;
 
-    int bias_layer1_size = num_samples * first_layer_output_size;
-    int bias_layer2_size = num_samples * second_layer_output_size;
-    int bias_layer3_size = num_samples * third_layer_output_size;
+    int bias_layer1_size = first_layer_output_size;
+    int bias_layer2_size = second_layer_output_size;
+    int bias_layer3_size = third_layer_output_size;
     // Seed the random number generator
     std::random_device rd;  
     // Initialize the Mersenne Twister engine

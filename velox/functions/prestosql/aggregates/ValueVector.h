@@ -50,8 +50,8 @@ class ValueVector {
       float* newValues,
       vector_size_t offset,
       vector_size_t size,
-      float newIndexs) {
-    int index = static_cast<int>(newIndexs);
+      float newIndexes) {
+    int index = static_cast<int>(newIndexes);
     float* slicedValues = new float[size];
     std::copy(newValues + offset, newValues + offset + size, slicedValues);
 
@@ -132,11 +132,11 @@ class ValueVector {
   void extractInterValue(FlatVector<float>& values, vector_size_t offset) {
     float* floatArray = new float[size_]();
     for (auto entry : insertedValue) {
-      int indexs = entry.first;
-      auto sizes = insertedSize[indexs];
+      int indexes = entry.first;
+      auto sizes = insertedSize[indexes];
       auto valuesBlock = entry.second;
       for (int i = 0; i < sizes; i++) {
-        floatArray[indexs * block_size + i] += valuesBlock[i];
+        floatArray[indexes * block_size + i] += valuesBlock[i];
       }
     }
 

@@ -115,14 +115,14 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
 
   void TestBody() override {}
 
-  void registerFunctions() {
+  void registerFunctions(std::string modelPath, int numCols) {
     std::cout << "To register function for TreePrediction" << std::endl;
 
     exec::registerVectorFunction(
         "decision_tree_predict",
         TreePrediction::signatures(),
         std::make_unique<TreePrediction>(
-            0, "resources/model/fraud_xgboost_10_8/0.txt", 28, false));
+            0, fmt::format("{}/0.txt", modelPath), numCols, false));
 
     std::cout << "To register type for Tree" << std::endl;
 
@@ -133,7 +133,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     exec::registerVectorFunction(
         "velox_decision_tree_predict",
         VeloxTreePrediction::signatures(),
-        std::make_unique<VeloxTreePrediction>(28));
+        std::make_unique<VeloxTreePrediction>(numCols));
 
     std::cout << "To register function for VeloxTreeConstruction" << std::endl;
 
@@ -148,7 +148,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
         "decision_forest_predict",
         TreePrediction::signatures(),
         std::make_unique<ForestPrediction>(
-            "resources/model/fraud_xgboost_10_8", 28, true));
+            modelPath, numCols, true));
   }
 
   ArrayVectorPtr parseCSVFile(
@@ -217,7 +217,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     auto inputIndexVector = maker.flatVector<int32_t>(indexVector);
 
     return maker.rowVector(
-        {"row_id", "x"}, {inputIndexVector, inputArrayVector});
+        {"idx", "v"}, {inputIndexVector, inputArrayVector});
   }
 
   void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
@@ -260,8 +260,6 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
       PlanBuilder& myPlan,
       core::PlanNodeId p0) {
     // Create hivesplits for file.
-    auto hiveSplits = makeHiveConnectorSplits(
-        filePath, numSplits, dwio::common::FileFormat::DWRF);
     // Initializes executor.
     std::shared_ptr<folly::Executor> executor_{
         std::make_shared<folly::CPUThreadPoolExecutor>(
@@ -273,41 +271,56 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     queryCtx_->testingOverrideConfigUnsafe(
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
-    // Create task for logical plan.
-    auto task = exec::Task::create(
-        "0",
-        myPlan.planFragment(),
-        0,
-        queryCtx_,
-        [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          if (result)
-            std::cout << result->toString() << std::endl;
-          return exec::BlockingReason::kNotBlocked;
-        });
 
-    std::cout << "Hive splits:" << std::endl;
-    // Add hivesplits to the target plan node (data source node).
-    for (auto& split : hiveSplits) {
-      // std::cout << split->toString() << std::endl;
-      task->addSplit(p0, exec::Split(std::move(split)));
-    }
+    int veloxThreads = 8;
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
 
-    int veloxThreads = 8;
-    // Start the task by setting the number of drivers.
-    task->start(veloxThreads);
-    // Add all splits.
-    task->noMoreSplits(p0);
-    // Wait for all drivers to finish.
-    waitForFinishedDrivers(task);
+    CursorParameters params;
+    params.maxDrivers = veloxThreads;
+    params.planNode = myPlan.planNode();
+    params.queryCtx = queryCtx_;
+    bool noMoreSplits = false;
+
+    auto addSplits = [&noMoreSplits, &filePath, &p0, &numSplits](exec::Task* task) {
+        std::vector<core::PlanNodeId> ids;
+        if (!noMoreSplits) {
+
+            auto hiveSplits = makeHiveConnectorSplits(
+        filePath, numSplits, dwio::common::FileFormat::DWRF);
+
+            for (auto& split : hiveSplits) {
+              task->addSplit(p0, exec::Split(std::move(split)));
+            }
+
+          ids.push_back(p0);
+
+          for (auto id : ids) {
+            task->noMoreSplits(id);
+          }
+        }
+        noMoreSplits = true;
+      };
+
+    auto [cursor, actualResults] = readCursor(params, addSplits);
+    waitForTaskCompletion(cursor->task().get());
+
+    int totalNumData = 0;
+    int totalNumBatch = 0;
+    for (auto batchedData : actualResults) {
+      batchedData = std::move(batchedData);
+      int batchSize = batchedData->size();
+      totalNumBatch += 1;
+      totalNumData += batchSize;
+
+    }
 
     std::chrono::steady_clock::time_point end =
         std::chrono::steady_clock::now();
 
     std::stringstream ss;
 
-    ss << numRows << "," << numSplits << "," << veloxThreads << ",";
+    ss << "numRows:" << numRows << ", numSplits:" << numSplits << ", veloxThreads:" << veloxThreads << ", numBatch:" << totalNumBatch << ", numData:" << totalNumData << std::endl;
 
     std::cout << "Time for Decision Forest Prediction with Input Data (sec): "
               << std::endl;
@@ -322,18 +335,13 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     unregisterCustomType("tree_type");
   }
 
-  void testRewriteDecisionForestUDFPlan(bool rewrite) {
+  void testRewriteDecisionForestUDFPlan(std::string modelPath, std::string dataPath, bool rewrite, int numRows, int numCols) {
     // register functions and types that are needed for this test
-    registerFunctions();
+    registerFunctions(modelPath, numCols);
 
     // prepare features that are needed for this test
-    int numRows = 56962;
 
-    int numCols = 28;
-
-    std::string dataFilePath = "resources/data/creditcard_test.csv";
-
-    auto inputRowVector = loadData(dataFilePath, numRows, numCols);
+    auto inputRowVector = loadData(dataPath, numRows, numCols);
 
     // write the features to a file
 
@@ -352,7 +360,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
                       //.values({inputRowVector})
                       .tableScan(asRowType(inputRowVector->type()))
                       .capturePlanNodeId(p0)
-                      .project({"decision_forest_predict(x)"});
+                      .project({"decision_forest_predict(v)"});
     // Get the logical plan                  
     auto planNode = myPlan.planNode();
     // Create ruleManager
@@ -386,43 +394,28 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
   VectorMaker maker{pool_.get()};
 };
 
+DEFINE_string(model_path, "/home/velox/resources/model/fraud_xgboost_10_8", "Path to model");
+DEFINE_string(data_path, "/home/velox/resources/data/creditcard_test.csv", "Path to csv file");
+DEFINE_bool(rewrite, true, "Rewrite or not");
+DEFINE_int32(num_row, 56962,"Number of rows");
+DEFINE_int32(num_col, 28, "Number of columns");
+
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   memory::MemoryManager::initialize({});
 
+  std::string modelPath = FLAGS_model_path;
+  std::string dataPath = FLAGS_data_path;
+  bool rewrite = FLAGS_rewrite;
+  int numRows = FLAGS_num_row;
+  int numCols = FLAGS_num_col;
+
   DecisionForestUDF2RelationRewriteActionTest demo;
 
-  bool rewrite = true;
+  std::cout << fmt::format("Model: {}, Data: {}, Rewrite: {}", modelPath, dataPath, rewrite) << std::endl;
 
-  if (argc > 1) {
-    if (strcmp(argv[1], "N") == 0) {
-      rewrite = false;
-    }
-  }
 
-  if (rewrite) {
-    std::cout
-        << "================= Run UDF-Centric Decision Forest w/ Rewriting ==================="
-        << std::endl
-        << std::endl;
 
-    demo.testRewriteDecisionForestUDFPlan(true);
+  demo.testRewriteDecisionForestUDFPlan(modelPath, dataPath, rewrite, numRows, numCols);
 
-  } else {
-    std::cout
-        << "================= Run UDF-Centric Decision Forest w/o Rewriting ==================="
-        << std::endl
-        << std::endl;
-
-    demo.testRewriteDecisionForestUDFPlan(false);
-  }
-
-  std::cout
-      << "--" << std::endl
-      << "[Usage] " << std::endl
-      << "./_build/release/velox/optimizer/rewrite_test Y  //run decision forest model with rewriting"
-      << std::endl
-      << "./_build/release/velox/optimizer/rewrite_test N  //run decision forest model with rewriting"
-      << std::endl
-      << "By default: Y is used" << std::endl;
 }

@@ -1,3 +1,4 @@
+#pragma once
 #include <iostream>
 #include <unordered_map>
 
@@ -14,7 +15,14 @@ private:
     }
 
     void loadCoefficients() { 
-        std::ifstream inputFile("../../../../resources/data/udf_coefficient.txt");
+        const char* homePath = std::getenv("HOME");
+        std::string udfCoefficientPath = "";
+        if (homePath) {
+            udfCoefficientPath = std::string(homePath) + "/velox/resources/data/udf_coefficient_aws.txt";
+        } else {
+            udfCoefficientPath = "/home/velox/resources/data/udf_coefficient_aws.txt";
+        }
+        std::ifstream inputFile(udfCoefficientPath);
 
         if (!inputFile.is_open()) {
             std::cerr << "Error opening the file." << std::endl;
@@ -35,35 +43,37 @@ private:
                 value.erase(0, value.find_first_not_of(" \t\n\r\f\v"));
                 value.erase(value.find_last_not_of(" \t\n\r\f\v") + 1);
 
-                coefficientMap[key] = std::stof(value);
+                coefficientMap[key].push_back(std::stod(value));
             } else {
                 std::cerr << "Invalid line format: " << line << std::endl;
             }
         }
 
         inputFile.close();
-
-        for (const auto& entry : coefficientMap) {
-            std::cout << "Key: " << entry.first << ", Value: " << entry.second << std::endl;
-        }
+        // LOG(INFO) << "[UDFCostCoefficient] Loaded coefficient map" << std::endl;
+        // for (const auto& entry : coefficientMap) {
+        //     LOG(INFO) << "Key: " << entry.first << ", Value: " << entry.second << std::endl;
+        // }
 
     }
 
     static UdfCostCoefficient instance;
 
-    std::unordered_map<std::string, float> coefficientMap;
+    std::unordered_map<std::string, std::vector<double>> coefficientMap;
 
 public:
     static UdfCostCoefficient& getInstance() {
         return instance;
     }
 
-    float getCoefficient(const std::string& udf) {
+    std::vector<double> getCoefficient(const std::string& udf) {
+        LOG(INFO) << "[INFO] UdfCostCoefficient, retrieved coefficient for: " << udf << std::endl;
         if (coefficientMap.find(udf) != coefficientMap.end()) {
             return coefficientMap[udf];
         } else {
-            return -1;
-            throw std::runtime_error("UDF " + udf +  " not found");
+            // TODO: should failed or return a default value
+            LOG(ERROR) << "UDF " + udf +  " not found";
+            return {1};
         }
     }
 };

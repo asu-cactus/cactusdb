@@ -41,15 +41,27 @@ RUN apt-get install -y libxsimd-dev
 RUN apt-get install -y curl
 RUN apt-get install -y zip
 RUN apt-get install -y default-jre 
+RUN apt-get install -y kmod
+RUN apt-get install -y nlohmann-json3-dev
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
+RUN apt-get install -y openjdk-11-jdk
+RUN apt install -y openssh-server openssh-client
+
 RUN ln -s /usr/bin/python3 /usr/bin/python
 # install github cli (optional)
-# RUN type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-# RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-#     && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-#     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-#     && sudo apt update \
-#     && sudo apt install gh -y
+RUN type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && sudo apt update \
+    && sudo apt install gh -y
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+# TODO: add support of CUDA, still some issues there
+# RUN wget https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
+# RUN chmod +x ./cuda_11.8.0_520.61.05_linux.run && ./cuda_11.8.0_520.61.05_linux.run --silent
+# # install cudnn
+# RUN apt-get install -y libnccl3-dev
+
 
 
 # set-up eigen
@@ -74,10 +86,18 @@ RUN wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-wit
 RUN unzip libtorch-cxx11-abi-shared-with-deps-2.0.1+cpu.zip
 ENV Torch_DIR=/home/libtorch
 # set up evadb
+WORKDIR /home
 RUN git clone https://github.com/lixi-zhou/evadb.git
 WORKDIR /home/evadb
 RUN git checkout array
 RUN pip install ./[ray]
+
+# install cpr
+WORKDIR /home
+RUN git clone https://github.com/libcpr/cpr.git \
+    && cd cpr && mkdir build && cd build \
+    && cmake ..  \
+    && make install 
 
 # set up duckdb
 WORKDIR /home
@@ -106,6 +126,33 @@ ENV SPARK_HOME=/home/spark-3.5.0-bin-hadoop3
 ENV PATH=$PATH:$SPARK_HOME/bin
 RUN pip install pyspark
 
+# set up hadoop
+# refered setup: https://medium.com/@festusmorumbasi/installing-hadoop-on-ubuntu-20-04-4610b6e0391e
+WORKDIR /home 
+# generate ssh key for hadoop
+RUN ssh-keygen -t rsa -b 4096 -f /root/.ssh/id_rsa -N ""
+RUN cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
+RUN echo "PasswordAuthentication no" >> /etc/ssh/sshd_config
+RUN echo "PermitRootLogin without-password" >> /etc/ssh/sshd_config
+RUN echo "service ssh start" >> /etc/bash.bashrc
+RUN wget https://dlcdn.apache.org/hadoop/common/hadoop-3.4.0/hadoop-3.4.0.tar.gz
+RUN tar -xvzf hadoop-3.4.0.tar.gz
+RUN echo "export HADOOP_HOME=/home/hadoop-3.4.0" >> /etc/bash.bashrc
+RUN echo "export PATH=\$PATH:\$HADOOP_HOME/bin" >> /etc/bash.bashrc
+RUN echo "export PATH=\$PATH:\$HADOOP_HOME/sbin" >> /etc/bash.bashrc
+RUN echo "export HDFS_NAMENODE_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export HDFS_DATANODE_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export HDFS_SECONDARYNAMENODE_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export YARN_RESOURCEMANAGER_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export YARN_NODEMANAGER_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN mkdir /home/hadoopdata
+COPY hadoop_conf/core-site.xml /home/hadoop-3.4.0/etc/hadoop/core-site.xml
+COPY hadoop_conf/hdfs-site.xml /home/hadoop-3.4.0/etc/hadoop/hdfs-site.xml
+COPY hadoop_conf/mapred-site.xml /home/hadoop-3.4.0/etc/hadoop/mapred-site.xml
+COPY hadoop_conf/yarn-site.xml /home/hadoop-3.4.0/etc/hadoop/yarn-site.xml
+RUN /home/hadoop-3.4.0/bin/hdfs namenode -format
+
 # set up velox
 WORKDIR /home
 RUN git clone https://github.com/facebookincubator/velox.git
@@ -119,11 +166,11 @@ RUN git remote set-url --push upstream no_push
 ENV NUM_THREADS=16
 
 # download data
-RUN mkdir data
-WORKDIR /home/velox/data
-RUN gdown 1iCmXYbCMaSyT5dH5pYQ275-pPjuEPf3D
-RUN unzip two_tower_data.zip
-WORKDIR /home/velox
+# RUN mkdir data
+# WORKDIR /home/velox/data
+# RUN gdown 1iCmXYbCMaSyT5dH5pYQ275-pPjuEPf3D
+# RUN unzip two_tower_data.zip
+# WORKDIR /home/velox
 
 # set-up vscode
 WORKDIR /home

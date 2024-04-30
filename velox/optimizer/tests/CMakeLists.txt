@@ -1,5 +1,7 @@
 add_executable(mcts_test MCTSTest.cpp)
 
+add_definitions(-DC10_USE_GLOG)
+
 target_link_libraries(
     mcts_test
     velox_aggregates

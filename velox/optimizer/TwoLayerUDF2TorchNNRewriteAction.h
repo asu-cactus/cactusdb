@@ -41,6 +41,10 @@ public:
 
     TwoLayerUDF2TorchNNRewriteAction () {}
 
+	void clearVectors() {
+		dims.clear();
+  	}
+
 	/**
 	 * @brief A function to apply a rule for rewriting the logical plan.
 	 * 
@@ -63,6 +67,7 @@ public:
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
 		   std::vector<std::string> targets,
 		   CataLog& cataLog) override {
+			clearVectors();
 			bool transformationApplied = false;
 			// Iterate over each target in the targets container
 			for (auto target : targets) {

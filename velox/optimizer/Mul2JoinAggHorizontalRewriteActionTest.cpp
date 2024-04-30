@@ -406,8 +406,8 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   */
   void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 100;//597540
-    int num_samples = 10;
+    int input_features_size = 597540;//597540
+    int num_samples = 1000;
     // int input_features_size = featureSize;
     // int num_samples = sampleSize;
     int first_layer_output_size = 1024;

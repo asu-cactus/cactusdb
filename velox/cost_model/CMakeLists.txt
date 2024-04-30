@@ -36,5 +36,3 @@ target_link_libraries(
   openblas
   ${TORCH_LIBRARIES}
 )
-
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -march=corei7-avx")
