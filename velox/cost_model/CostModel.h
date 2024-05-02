@@ -1,7 +1,6 @@
 #pragma once
 #include<vector>
 #include "velox/cost_model/Source.h"
-#include "velox/cost_model/Catalog.h"
 #include "velox/optimizer/CataLog.h"
 #include "velox/cost_model/UdfCostCoefficient.h"
 
