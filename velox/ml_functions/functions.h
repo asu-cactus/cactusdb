@@ -944,10 +944,11 @@ public:
     CostEstimate getCost(std::vector<int> inputDims){
         // TODO: need to compute cost based on dims
         std::vector<double> coefficientVector = getCoefficientVector(getName()); 
-        uint64_t  factor1 = inputDims[0]*dims[0]*dims[1];
-        uint64_t  factor2 = inputDims[0]*dims[1]*dims[2];
-        uint64_t  factor3 = dims[0]*dims[1];
-        uint64_t  factor4 = dims[1]*dims[2];
+        uint64_t  factor1 = inputDims[0]*static_cast<uint64_t>(dims[0])*dims[1];
+        uint64_t  factor2 = inputDims[0]*static_cast<uint64_t>(dims[1])*dims[2];
+        uint64_t  factor3 = static_cast<uint64_t>(dims[0])*dims[1];
+        uint64_t  factor4 = static_cast<uint64_t>(dims[1])*dims[2];
+
         float cost = coefficientVector[0] * factor1 
                     + coefficientVector[1] * factor2 + coefficientVector[2] * factor3 
                     + coefficientVector[3] * factor4 + coefficientVector[4] * inputDims[0]

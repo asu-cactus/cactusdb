@@ -19,9 +19,9 @@ def run_cpp_program(path, params):
 
 if __name__ == "__main__":
     # list_feature_size = [1,10,100,1000,10000, 100000]
-    list_feature_size = [1024]
+    list_feature_size = [50000]
     # list_sample_size = [100000, 1000000, 2000000,3000000]
-    list_sample_size = [100,1000,10000,100000]
+    list_sample_size = [100]
     # list_sample_size = [100000]
     list_output_size = [1024]
 

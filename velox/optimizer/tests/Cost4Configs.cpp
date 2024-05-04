@@ -511,8 +511,8 @@ void saveFloatArray(const char* filename, float* array, long size) {
     // Set data source config.
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
-    int first_layer_output_size = outputSize;
-    int second_layer_output_size = 14588;
+    int first_layer_output_size = featureSize;
+    int second_layer_output_size = outputSize;
     int third_layer_output_size = 4096;
     int fourth_layer_output_size = 2048;
     int fith_layer_output_size = 1024;
