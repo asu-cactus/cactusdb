@@ -153,6 +153,58 @@ create_blocks(int row, int col, float* values, int block_size) {
     return blocks;
 }
 
+FileStructure create_blocks_to_files(int row, int col, int block_size) {
+  optimization::MyFileTest myFile;
+  optimization::FileStructure myFileStructure;
+  std::vector<std::shared_ptr<TempFilePath>> paths;
+  auto pool_ = memory::MemoryManager::getInstance()->addLeafPool();
+  VectorMaker maker{pool_.get()};
+  RowVectorPtr input;
+
+
+  int num_blocks = (col + block_size - 1) / block_size; // Calculate the number of blocks needed
+
+  int parts = num_blocks;
+  int flag = 0;
+  auto indexs = create_block_index(parts, flag);
+
+  int current_col = 0; // Current column index in the values array
+    for (int i = 0; i < num_blocks; ++i) {
+        int current_block_size = (i == num_blocks - 1) ? col - current_col : block_size; // Adjust block size for the last block
+
+        // Create a new block of size row x current_block_size
+        std::vector<float> block(row * current_block_size);
+
+        // Fill the block with values
+        for (size_t r = 0; r < row; ++r) {
+            for (int c = 0; c < current_block_size; ++c) {
+                
+                block[r * current_block_size + c] = 0.000001;
+            }
+        }
+        input = maker.rowVector(
+          {"w", "w_row", "w_col"},
+          {maker.arrayVector<float>({block}, REAL()),
+           maker.flatVector({indexs[0][i]}),
+           maker.flatVector({indexs[1][i]})});
+
+        auto file = TempFilePath::create();
+      // Store blocks to file
+        myFile.writeToFile(file->path, {input});
+      // Store file object to paths
+        paths.push_back(file);
+       // Store the block in the vector of blocks
+        current_col += current_block_size; // Move to the next column
+
+    }
+
+    myFileStructure.paths = paths;
+    // Store schema
+    myFileStructure.schema = asRowType(input->type());
+    return myFileStructure;
+
+}
+
 FileStructure save_blocks_to_files(
     std::vector<std::vector<float>> valuesArray) {
   optimization::MyFileTest myFile;

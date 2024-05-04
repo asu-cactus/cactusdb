@@ -178,6 +178,28 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_definitions(-DEIGEN_USE_BLAS)
+find_package(OpenMP)
+add_executable(cost4Configs_test tests/Cost4Configs.cpp)
+target_compile_options(cost4Configs_test PRIVATE ${OpenMP_CXX_FLAGS})
+target_link_libraries(
+  cost4Configs_test
+  PRIVATE ${OpenMP_CXX_FLAGS}
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  openblas
+  ${TORCH_LIBRARIES}
+)
+
 if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)
 endif()

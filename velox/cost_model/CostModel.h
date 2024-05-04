@@ -75,9 +75,28 @@ class SimpleCostModel : public CostModel {
             }
 
         }
+
+        std::string extractWordUntilFirstNumber(const std::string& input) {
+            std::string result;
+
+            // Iterate through each character in the input string
+            for (char c : input) {
+                // Check if the character is a digit
+                if (std::isdigit(c)) {
+                    // If a digit is encountered, break the loop
+                    break;
+                } else {
+                    // If the character is not a digit, append it to the result string
+                    result += c;
+                }
+            }
+            // std::cout <<"string:" << result << std::endl;
+            return result;
+        }
     
     private:
-
+        std::unordered_set<std::string> eigenSet = {"mat_mul", "mat_add", "relu", "softmax"};
+        std::unordered_set<std::string> torchSet = {"torchdnn"};
         // Leaf Node is usually a data source
         // Returned CostEstimate object will store the cardinality of the data source
         CostEstimate handleLeafNode(std::shared_ptr<const core::PlanNode>& node){
@@ -160,6 +179,8 @@ class SimpleCostModel : public CostModel {
                         projectionCostEstimate.cost += partialCostEstimate.cost ;
                         projectionCostEstimate.outputRows = (partialCostEstimate.outputRows > projectionCostEstimate.outputRows) ? partialCostEstimate.outputRows : projectionCostEstimate.outputRows;
                         projectionCostEstimate.outputCols = (partialCostEstimate.outputCols > projectionCostEstimate.outputCols) ? partialCostEstimate.outputCols : projectionCostEstimate.outputCols;
+                        projectionCostEstimate.eigenCost += partialCostEstimate.eigenCost;
+                        projectionCostEstimate.torchCost += partialCostEstimate.torchCost;
                     }
 
 
@@ -241,7 +262,7 @@ class SimpleCostModel : public CostModel {
                         } else {
                           func = getVectorFunction(udf, {ARRAY(REAL())}, {}, config);
                         }
-                        
+
                         std::shared_ptr<MLFunction> mlFunc = std::dynamic_pointer_cast<MLFunction>(func);
                         CostEstimate curCost = mlFunc->getCost({finalEstimate.outputRows, finalEstimate.outputCols});
                         finalEstimate.cost += curCost.cost;
@@ -249,6 +270,16 @@ class SimpleCostModel : public CostModel {
                         finalEstimate.outputCols = curCost.outputCols;
                         LOG(INFO) << fmt::format("[INFO] CostModel - getUDFCost: {}, cost: {}, accumulated cost: {}", mlFunc->getFuncName(), curCost.cost, finalEstimate.cost) << std:: endl;
                         LOG(INFO) << fmt::format("\t\t outputRows: {}, outputCols: {}", finalEstimate.outputRows, finalEstimate.outputCols) << std::endl;
+                        // std::cout << "udf name:" << udf << "," << "cost:" << curCost.cost << "." << std::endl;
+                        if (eigenSet.find(extractWordUntilFirstNumber(udf)) != eigenSet.end()) {
+                            finalEstimate.eigenCost += curCost.cost;
+                            // std::cout <<"final eigen:" << finalEstimate.eigenCost << std::endl;
+                        }
+                        else if (torchSet.find(extractWordUntilFirstNumber(udf)) != torchSet.end()) {
+                            finalEstimate.torchCost += curCost.cost;
+                            // std::cout <<"final torch:" << finalEstimate.torchCost << std::endl;
+                        }
+                        else {}                                       
                     }    
                 }
             });

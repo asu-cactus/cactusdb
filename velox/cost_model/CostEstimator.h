@@ -47,11 +47,15 @@ class SimpleCostEstimator : public CostEstimator {
 
             // hashjoin
             float srcCost = 0.0; // the current node
+            float srcEigenCost = 0.0;
+            float srcTorchCost = 0.0;
             for (auto source : plan->sources()) {
                 LOG(INFO) << fmt::format("[INFO] Current iterated plan source: {}", source->name()) << std::endl;
                 CostEstimate estimate =  estimateCost(source);
                 
                 srcCost += estimate.cost;
+                srcEigenCost += estimate.eigenCost;
+                srcTorchCost += estimate.torchCost;
                 LOG(INFO) << fmt::format("[INFO] Finished estimateCost for source: {} of node: {}, outputRows: {}, outputCols: {}, cost: {}, accumulated cost: {}", source->name(), plan->name(), estimate.outputRows, estimate.outputCols, estimate.cost, srcCost) << std::endl;
                 std::shared_ptr<OutputStat> stat = std::make_shared<OutputStat>(OutputStat(estimate.outputRows , estimate.outputCols));
                 // inputs to the current node
@@ -62,6 +66,8 @@ class SimpleCostEstimator : public CostEstimator {
             CostEstimate estimate = costModel->getCost(plan, sources);
             // total cost so far
             estimate.cost += srcCost;
+            estimate.eigenCost += srcEigenCost;
+            estimate.torchCost += srcTorchCost;
             LOG(INFO) << fmt::format("[INFO] SimpleCostEstimator estimateCost Finished. Node: {} estimate.cost: {}", plan->name(), estimate.cost) << std::endl;
             return estimate;
     }
