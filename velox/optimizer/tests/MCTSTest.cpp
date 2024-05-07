@@ -31,6 +31,9 @@
 #include "velox/type/Type.h"
 #include "velox/vector/fuzzer/VectorFuzzer.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
+#include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
+#include "velox/functions/prestosql/registration/RegistrationFunctions.h"
+#include "velox/exec/PartitionFunction.h"
 
 // Custom headers
 #include <json/json.h>
@@ -66,7 +69,7 @@ void sendJsonBySocket(Json::Value jsonMessage, int clientSocket) {
 }
 
 void sendAcknowledgment(int clientSocket) {
-  const  char* ack_message = "ACK";
+  const char* ack_message = "ACK";
   send(clientSocket, ack_message, strlen(ack_message), 0);
 }
 
@@ -81,11 +84,21 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
+    Type::registerSerDe();
+    common::Filter::registerSerDe();
+    connector::hive::HiveTableHandle::registerSerDe();
+    connector::hive::LocationHandle::registerSerDe();
+    connector::hive::HiveColumnHandle::registerSerDe();
+    connector::hive::HiveInsertTableHandle::registerSerDe();
+    registerPartitionFunctionSerDe();
+    core::PlanNode::registerSerDe();
+    core::ITypedExpr::registerSerDe();
     // Register hiveconnector for file splits.
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
+            ->newConnector(
+                kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
   }
 
@@ -138,11 +151,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           std::make_shared<core::QueryCtx>(executor_.get())};
       // Set queryCtx config.
       queryCtx_->testingOverrideConfigUnsafe(
-          {
-            {core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
+          {{core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
            {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
            {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
-
 
       // Add hivesplits to the target plan node (data source node).
       std::chrono::steady_clock::time_point begin =
@@ -189,7 +200,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                .count()) /
           1000000.0;
       totalElapsedTime += elapsedTime;
-      
+
       if (i == repeatRun - 1) {
         finalResult = actualResults;
         dataIdx = 0;
@@ -198,9 +209,19 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           batchedData = std::move(batchedData);
           int batchSize = batchedData->size();
           if (verbose == 2) {
-            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << std::endl;
+            std::cout << fmt::format(
+                             "[INFO] Batched Data: {}, Batch Size:{} \n",
+                             dataIdx,
+                             batchSize)
+                      << batchedData->toString() << std::endl;
           } else if (verbose == 3) {
-            std::cout << fmt::format("[INFO] Batched Data: {}, Batch Size:{} \n", dataIdx, batchSize) << batchedData->toString() << "\n" << batchedData->toString(0, batchedData->size()) << std::endl;
+            std::cout << fmt::format(
+                             "[INFO] Batched Data: {}, Batch Size:{} \n",
+                             dataIdx,
+                             batchSize)
+                      << batchedData->toString() << "\n"
+                      << batchedData->toString(0, batchedData->size())
+                      << std::endl;
           }
           dataIdx += 1;
           totalDataNum += batchSize;
@@ -209,10 +230,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       }
     }
     if (verbose >= 1) {
-      std::cout << fmt::format("[INFO] Total # of Batch: {}, Total # of Data: {}", dataIdx, totalDataNum) << std::endl;
+      std::cout << fmt::format(
+                       "[INFO] Total # of Batch: {}, Total # of Data: {}",
+                       dataIdx,
+                       totalDataNum)
+                << std::endl;
     }
     // finalResult = std::move(finalResult);
-
 
     return totalElapsedTime / repeatRun;
   }
@@ -235,8 +259,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
    *
    * @return DataFrame The structure used to denote the generated data.
    */
-  DataFrame
-  data_generate(int features, int samples, int first_layer, int second_layer, int num_split=8) {
+  DataFrame data_generate(
+      int features,
+      int samples,
+      int first_layer,
+      int second_layer,
+      int num_split = 8) {
     // Example:
     // ( 1000 * 597540 x 597540 * 1024 + 1000*1024) first layer, data x weights
     // + bias. ( 1000 * 1024 x 1024 * 14588 + 1000*14588) second layer, data x
@@ -266,15 +294,23 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::shared_ptr<TempFilePath>> feature_paths;
     size_t partition_size = ceil(num_samples / float(num_split));
     for (size_t i = 0; i < num_split; i++) {
-      size_t num_samples_in_partition = (i+1)*partition_size <= num_samples ? partition_size : num_samples - i*partition_size;
+      size_t num_samples_in_partition = (i + 1) * partition_size <= num_samples
+          ? partition_size
+          : num_samples - i * partition_size;
       if (num_samples_in_partition == 0) {
         continue;
       }
-      std::vector<int> indexes = randomGenerator.genIntRange(i*partition_size, i*partition_size+num_samples_in_partition);
+      std::vector<int> indexes = randomGenerator.genIntRange(
+          i * partition_size, i * partition_size + num_samples_in_partition);
       auto indexFlaVector = maker.flatVector<int>(indexes);
-      std::vector<std::vector<float>> partialFeature = randomGenerator.genFloat2dVector(num_samples_in_partition, input_features_size);
-      auto featureArrayVector = maker.arrayVector<float>(std::move(partialFeature), REAL());
-      auto inputRowVector = maker.rowVector({"idx", "v"}, {std::move(indexFlaVector), std::move(featureArrayVector)});
+      std::vector<std::vector<float>> partialFeature =
+          randomGenerator.genFloat2dVector(
+              num_samples_in_partition, input_features_size);
+      auto featureArrayVector =
+          maker.arrayVector<float>(std::move(partialFeature), REAL());
+      auto inputRowVector = maker.rowVector(
+          {"idx", "v"},
+          {std::move(indexFlaVector), std::move(featureArrayVector)});
       auto file = TempFilePath::create();
       auto config = std::make_shared<facebook::velox::dwrf::Config>();
       writeToFile(file->path, {std::move(inputRowVector)}, config);
@@ -286,7 +322,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       partialFeature.clear();
       partialFeature.shrink_to_fit();
     }
-
 
     // Generate weight
     float* weight_layer1 = new float[weight_layer1_size];
@@ -360,7 +395,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "mat_mul0",
         MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(std::move(weightsFile_1), input_size1, units1),
+        std::make_unique<MatrixMultiply>(
+            std::move(weightsFile_1), input_size1, units1),
         {},
         true,
         catalog,
@@ -385,7 +421,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "mat_mul1",
         MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(std::move(weightsFile_2), input_size2, units2),
+        std::make_unique<MatrixMultiply>(
+            std::move(weightsFile_2), input_size2, units2),
         {},
         true,
         catalog,
@@ -408,13 +445,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
     // Compose and return the vector function expression
     // return "mat_mul0({})";
-    return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({}))))))";
+    return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({})))))) as v";
   }
 
-  std::vector<std::vector<float>> loadFeaturesFromCSV(
-      std::string filePath,
-      int numSamples,
-      int numFeature) {
+  std::vector<std::vector<float>>
+  loadFeaturesFromCSV(std::string filePath, int numSamples, int numFeature) {
     int size = numSamples * numFeature;
 
     std::cout << "Loading tensor of size " << size << " from " << filePath
@@ -468,7 +503,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         "decision_tree_predict",
         TreePrediction::signatures(),
         std::make_unique<TreePrediction>(
-            0, "/home/velox/resources/model/fraud_xgboost_10_8/0.txt", 28, false));
+            0,
+            "/home/velox/resources/model/fraud_xgboost_10_8/0.txt",
+            28,
+            false));
 
     std::cout << "To register type for Tree" << std::endl;
 
@@ -497,25 +535,33 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             "/home/velox/resources/model/fraud_xgboost_10_8", 28, true));
   }
 
-  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(std::vector<std::vector<float>> data, int numSplit=4, bool createIndex=false) {
+  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(
+      std::vector<std::vector<float>> data,
+      int numSplit = 4,
+      bool createIndex = false) {
     std::vector<std::shared_ptr<TempFilePath>> paths;
-    
+
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
     size_t numSamples = data.size();
     size_t partitionSize = ceil(numSamples / numSplit);
     for (size_t i = 0; i < numSplit; i++) {
       auto startIdx = data.begin() + i * partitionSize;
-      auto endIdx = data.begin() + (i+1) * partitionSize;
+      auto endIdx = data.begin() + (i + 1) * partitionSize;
       endIdx = (endIdx < data.end()) ? endIdx : data.end();
-      size_t numSampleInPartition = (i+1)*partitionSize <= numSamples ? partitionSize : numSamples - i*partitionSize;
+      size_t numSampleInPartition = (i + 1) * partitionSize <= numSamples
+          ? partitionSize
+          : numSamples - i * partitionSize;
 
       std::vector<std::vector<float>> partialData(startIdx, endIdx);
       auto featureArrayVector = maker.arrayVector<float>(partialData, REAL());
       RowVectorPtr inputRowVector;
       if (createIndex) {
-        std::vector<int> indexes = randomGenerator.genIntRange(i*partitionSize, i*partitionSize+numSampleInPartition);
+        std::vector<int> indexes = randomGenerator.genIntRange(
+            i * partitionSize, i * partitionSize + numSampleInPartition);
         auto indexFlatVector = maker.flatVector<int>(indexes);
-        inputRowVector = maker.rowVector({"idx", "v"}, {std::move(indexFlatVector), std::move(featureArrayVector)});
+        inputRowVector = maker.rowVector(
+            {"idx", "v"},
+            {std::move(indexFlatVector), std::move(featureArrayVector)});
       } else {
         inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
       }
@@ -529,8 +575,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   }
 
   std::string process_mem_usage() {
-    using std::ios_base;
     using std::ifstream;
+    using std::ios_base;
     using std::string;
 
     double vm_usage = 0.0;
@@ -539,8 +585,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Read data from /proc/self/stat
     ifstream stat_stream("/proc/self/stat", ios_base::in);
     if (!stat_stream) {
-        std::cerr << "Error opening /proc/self/stat" << std::endl;
-        return "";
+      std::cerr << "Error opening /proc/self/stat" << std::endl;
+      return "";
     }
 
     // Extract relevant fields
@@ -551,10 +597,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     unsigned long vsize;
     long rss;
 
-    stat_stream >> pid >> comm >> state >> ppid >> pgrp >> session >> tty_nr
-                >> tpgid >> flags >> minflt >> cminflt >> majflt >> cmajflt
-                >> utime >> stime >> cutime >> cstime >> priority >> nice
-                >> O >> itrealvalue >> starttime >> vsize >> rss;
+    stat_stream >> pid >> comm >> state >> ppid >> pgrp >> session >> tty_nr >>
+        tpgid >> flags >> minflt >> cminflt >> majflt >> cmajflt >> utime >>
+        stime >> cutime >> cstime >> priority >> nice >> O >> itrealvalue >>
+        starttime >> vsize >> rss;
 
     stat_stream.close();
 
@@ -564,10 +610,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Calculate memory usage
     vm_usage = vsize / 1024.0 / 1024.0 / 1024.0;
     resident_set = rss * page_size_kb;
-    std::cout << fmt::format(" vm_usage: {:.2f} , resident_set: {:.2f}", vm_usage, resident_set) << std::endl;
+    std::cout << fmt::format(
+                     " vm_usage: {:.2f} , resident_set: {:.2f}",
+                     vm_usage,
+                     resident_set)
+              << std::endl;
     return "";
-}
-
+  }
 
   /**
    * @brief A test function to test the rewrite rule of
@@ -617,10 +666,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     //  If yes, preblock the input vector, store it, and add information in
     //  cataLog. If not, set dataSource in cataLog.
     if (input_features_size > cataLog.getBlockingThreshold()) {
-      // FIXME: temporary disable the following blocking for vertical partition since
-      // we have deallocate the data.features in data_generate function to save 
-      // unnecessary memory usage.
-      /* // If input size is larger than blocking threshold, preblock and store in
+      // FIXME: temporary disable the following blocking for vertical partition
+      // since we have deallocate the data.features in data_generate function to
+      // save unnecessary memory usage.
+      /* // If input size is larger than blocking threshold, preblock and store
+      in
       // cataLog
       std::vector<std::vector<float>> valuesBlock =
           optimization::create_input_block(
@@ -642,7 +692,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Build two dense layers UDFs using registerFunction in optimization
     // namespace
     bool isVerticalPartition = true;
-    if (benchmarkMode == "mul2joinAggHorizontal") {
+    if (benchmarkMode.find("mul2joinAggHorizontal") != std::string::npos) {
       isVerticalPartition = false;
     }
     std::string computationStr = registerFunctions(
@@ -664,51 +714,75 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                       .tableScan(inputRowType)
                       .capturePlanNodeId(p0)
-                      .project({fmt::format(computationStr, "v")})
-                      .planBuild();
+                      .project({fmt::format(computationStr, "v"), "v as v1"})
+                      .project({"v", "v1"})
+                      ;
+
+    std::cout << "computationStr: " << fmt::format(computationStr, "v") << std::endl;
+    std::cout << "query plan:" << myPlan.planNode()->toString(true, true) << std::endl;
+    // auto myPlan0 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+    //                   .tableScan(inputRowType)
+    //                   .capturePlanNodeId(p0)
+    //                   .project({fmt::format(computationStr, "v")});
+    // auto myPlan = myPlan0.project({"v", "v"});
+
     // Set original plan nodeId and file address of data source
     cataLog.setIdAddressMap(p0, files);
     // Set vector name and nodeId of data source
     cataLog.setVectorIdMap(p0, "v");
     // Add source to catalog
     std::shared_ptr<OutputStat> stat =
-    std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+        std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
     Source src = Source(p0, Source::Type::FILE, std::move(stat));
     cataLog.addSource(std::make_shared<Source>(src));
 
-
-
     // Get the logical plan
     auto planNode = myPlan.planNode();
+    // auto planNode = myPlan.planNodeModifiable();
     // Create ruleManager
     RuleManager ruleManager;
-    ruleManager.rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
+    ruleManager.rules.emplace(
+        "TwoLayerUDF2TorchNNRewriteAction",
+        std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
     // std::cout<<"rule size" << ruleManager.rules.size() << std::endl;
     // auto it = ruleManager.rules.find("TwoLayerUDF2TorchNNRewriteAction");
     // ruleManager.rules.erase(it);
     // std::cout<<"rule size" << ruleManager.rules.size() << std::endl;
     // Create planState
     PlanState planState(ruleManager);
+
+    
+
     // Run rewriten rule
     if (rewrite) {
       // Get possible actions for this plan
       planState.getPossibleActions(planNode, cataLog);
+
+      if (verbose != 0) {
+        std::cout << "[INFO] All possible actions:" << std::endl;
+        for (auto entry : planState.actionsPair) {
+          std::cout << entry.first << ": " << entry.second << std::endl;
+        }
+      }
+
       std::pair<std::string, std::string> testAction;
       if (benchmarkMode == "mul2joinAgg") {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
       } else if (benchmarkMode == "udf2torchNN") {
-        testAction = std::make_pair("softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0(ROW[\"v\"]))))))", "MultiLayerUDF2TorchNNRewriteAction");
+        testAction = std::make_pair(
+            "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0(ROW[\"v\"]))))))",
+            "MultiLayerUDF2TorchNNRewriteAction");
       } else if (benchmarkMode == "mul2joinAggHorizontal") {
-        testAction = std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
+        testAction =
+            std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
+      } else if (benchmarkMode == "mul2joinAggHorizontal1") {
+        testAction =
+            std::make_pair("mat_mul1", "Mul2JoinAggHorizontalRewriteAction");
       } else {
-         throw std::runtime_error(fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
+        throw std::runtime_error(
+            fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
       }
-
       if (verbose != 0) {
-        std::cout << "[INFO] All possible actions:" << std::endl;
-        for (auto entry: planState.actionsPair) {
-          std::cout << entry.first << ": " << entry.second << std::endl;
-        }
         std::cout << "Taken action: " << testAction << std::endl;
       }
       // Take one rewritten action
@@ -727,41 +801,47 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     // Run the rewritten plan
     if (verbose != 0) {
-      std::cout << "Executed Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
+      std::cout << "Executed Query Plan: \n"
+                << myPlan.planNode()->toString(true, true) << std::endl;
     }
 
     if (getCost) {
-        // std::shared_ptr<Catalog> catalog =
-        //       std::make_shared<Catalog>(Catalog("db-catalog"));
+      // std::shared_ptr<Catalog> catalog =
+      //       std::make_shared<Catalog>(Catalog("db-catalog"));
 
-
-          
-          std::chrono::steady_clock::time_point begin =
+      std::chrono::steady_clock::time_point begin =
           std::chrono::steady_clock::now();
 
-          CostModel* cm = new SimpleCostModel(cataLog);
-          CostEstimator* ce =
-              new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+      CostModel* cm = new SimpleCostModel(cataLog);
+      CostEstimator* ce =
+          new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
 
-          planNode = myPlan.planNode();
-          CostEstimate cost = ce->estimateCost(planNode);
+      planNode = myPlan.planNode();
+      CostEstimate cost = ce->estimateCost(planNode);
 
-          std::chrono::steady_clock::time_point end =
+      std::chrono::steady_clock::time_point end =
           std::chrono::steady_clock::now();
-          auto costComputationTime =
+      auto costComputationTime =
           (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
                .count()) /
           1000000.0;
-          std::cout << "[INFO] Current query plan cost: " << cost.cost << ", Computation Time: " << costComputationTime << std::endl;
-          return ;
+      std::cout << "[INFO] Current query plan cost: " << cost.cost
+                << ", Computation Time: " << costComputationTime << std::endl;
+      return;
     }
 
-    float averageExectuionTime =
-        runPlanWithCataLog(numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
+    float averageExectuionTime = runPlanWithCataLog(
+        numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
     std::cout << averageExectuionTime << std::endl;
   }
 
-  void testIntegratedMCTS(std::string model, int featureSize, int numSamples, int repeatRun, int blockSize, int verbose) {
+  void testIntegratedMCTS(
+      std::string model,
+      int featureSize,
+      int numSamples,
+      int repeatRun,
+      int blockSize,
+      int verbose) {
     PlanBuilder myPlan;
     CataLog cataLog;
     RowTypePtr inputRowType;
@@ -773,7 +853,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::string computationStr;
 
     if (model == "ffnn") {
-       // Set data source config.
+      // Set data source config.
       int input_features_size = featureSize; // 597540
       int num_samples = numSamples;
       int first_layer_output_size = 1024;
@@ -791,10 +871,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       files = data.feature_paths;
       inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
       if (input_features_size > cataLog.getBlockingThreshold()) {
-        // FIXME: temporary disable the following blocking for vertical partition since
-        // we have deallocate the data.features in data_generate function to save 
-        // unnecessary memory usage.
-        /* // If input size is larger than blocking threshold, preblock and store in
+        // FIXME: temporary disable the following blocking for vertical
+        // partition since we have deallocate the data.features in data_generate
+        // function to save unnecessary memory usage.
+        /* // If input size is larger than blocking threshold, preblock and
+        store in
         // cataLog
         std::vector<std::vector<float>> valuesBlock =
             optimization::create_input_block(
@@ -806,8 +887,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         // Set data source blocks in cataLog
         cataLog.setDataSourceBlocks(values.schema, values.paths); */
       } else {
-        // If input size is not larger than blocking threshold, set dataSource in
-        // cataLog
+        // If input size is not larger than blocking threshold, set dataSource
+        // in cataLog
         cataLog.setDataSource(inputRowType, files);
       }
 
@@ -828,26 +909,28 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           cataLog,
           isVerticalPartition);
 
-      
     } else if (model == "df") {
       // TODO: current the data is load froma file not generated
       numSamples = 56962;
       featureSize = 28;
       registerDecisionForestFunctions();
 
-      std::string dataFilePath = "/home/velox/resources/data/creditcard_test.csv";
+      std::string dataFilePath =
+          "/home/velox/resources/data/creditcard_test.csv";
 
-      std::vector<std::vector<float>> inputFeatureVectors = loadFeaturesFromCSV(dataFilePath, numSamples, featureSize);
-      files = splitDataToFiles(inputFeatureVectors, 4 /*numSplit*/, true /*createIndex*/);
-      computationStr = "decision_forest_predict(v)";
+      std::vector<std::vector<float>> inputFeatureVectors =
+          loadFeaturesFromCSV(dataFilePath, numSamples, featureSize);
+      files = splitDataToFiles(
+          inputFeatureVectors, 4 /*numSplit*/, true /*createIndex*/);
+      computationStr = "decision_forest_predict({}) as v";
       inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
     }
 
     // Create a plan for FFNN using two dense layers UDFs
     myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                .tableScan(inputRowType)
-                .capturePlanNodeId(p0)
-                .project({fmt::format(computationStr, "v")});
+                 .tableScan(inputRowType)
+                 .capturePlanNodeId(p0)
+                 .project({fmt::format(computationStr, "v")});
 
     // Set original plan nodeId and file address of data source
     cataLog.setIdAddressMap(p0, files);
@@ -855,12 +938,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     cataLog.setVectorIdMap(p0, "v");
     // Add source to catalog
     std::shared_ptr<OutputStat> stat =
-    std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+        std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
     Source src = Source(p0, Source::Type::FILE, std::move(stat));
     cataLog.addSource(std::make_shared<Source>(src));
-   
-
-    
 
     // Get the logical plan
     auto planNode = myPlan.planNode();
@@ -869,7 +949,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Create planState
     PlanState planState(ruleManager);
     // Run rewriten rule
-
 
     // Set up socket
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -928,18 +1007,19 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         cataLog.setVectorIdMap(p0, "v");
         cataLog.setUDFSchema("value", inputRowType);
         std::shared_ptr<OutputStat> stat1 =
-              std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
+            std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
         Source src1 = Source(p0, Source::Type::FILE, std::move(stat1));
         cataLog.addSource(std::make_shared<Source>(src1));
         planNode = myPlan.planNode();
         planState.getPossibleActions(planNode, cataLog);
-        // send acknowledgement for synchronization 
+        // send acknowledgement for synchronization
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getQueryPlan") {
         Json::Value jsonMessage;
         jsonMessage["communicateFlag"] = true;
         jsonMessage["mctsAction"] = "recQueryPlan";
-        jsonMessage["queryPlan"] =  "\"" + myPlan.planNode()->toString(true, true) + "\"";
+        jsonMessage["queryPlan"] =
+            "\"" + myPlan.planNode()->toString(true, true) + "\"";
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "getActionSpace") {
@@ -984,7 +1064,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
-          float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 4, verbose);
+          float executeTime =
+              runPlanWithCataLog(8, 8, myPlan, cataLog, 4, verbose);
           jsonMessage["reward"] = executeTime;
           LOG(INFO) << "[INFO] get Cost(offline): "
                     << " time: " << executeTime << std::endl;
@@ -1023,11 +1104,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     //           << std::endl;
     // LOG(INFO) << "[INFO] Optimized query plan"
     //           << myPlan.planNode()->toString(true, true) << std::endl;
-    
   }
 
  private:
-  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
+  std::shared_ptr<memory::MemoryPool> pool_{
+      memory::MemoryManager::getInstance()->addLeafPool()};
 
   VectorMaker maker{pool_.get()};
 };
@@ -1044,7 +1125,6 @@ DEFINE_int32(block_size, 256, "Block Size");
 DEFINE_bool(cost, false, "Whether get cost");
 
 int main(int argc, char** argv) {
-
   memory::MemoryManager::initialize({});
   folly::init(&argc, &argv, false);
   // gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -1060,13 +1140,23 @@ int main(int argc, char** argv) {
   int blockSize = FLAGS_block_size;
   bool getCost = FLAGS_cost;
   IntegratedMCTSTest demo;
- 
-  // available single benchmark mode: mul2joinAgg, udf2torchNN, mul2joinAggHorizontal
+
+  // available single benchmark mode: mul2joinAgg, udf2torchNN,
+  // mul2joinAggHorizontal
   if (mode == "mcts") {
-    demo.testIntegratedMCTS(model, featureSize, numSample, repeatRun, blockSize, verbose);
+    demo.testIntegratedMCTS(
+        model, featureSize, numSample, repeatRun, blockSize, verbose);
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
-        rewrite, repeatRun, featureSize, numSample, numDriver, mode, blockSize, verbose, getCost);
+        rewrite,
+        repeatRun,
+        featureSize,
+        numSample,
+        numDriver,
+        mode,
+        blockSize,
+        verbose,
+        getCost);
   }
 }

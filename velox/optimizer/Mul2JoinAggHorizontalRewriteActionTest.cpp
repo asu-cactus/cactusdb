@@ -47,6 +47,9 @@
 #include "velox/exec/FilterProject.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
+#include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
+#include "velox/functions/prestosql/registration/RegistrationFunctions.h"
+#include "velox/exec/PartitionFunction.h"
 
 // Custom headers
 #include "RewriteAction.h"
@@ -70,6 +73,12 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
 
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
+    Type::registerSerDe();
+    connector::hive::HiveTableHandle::registerSerDe();
+    connector::hive::HiveColumnHandle::registerSerDe();
+    registerPartitionFunctionSerDe();
+    core::PlanNode::registerSerDe();
+    core::ITypedExpr::registerSerDe();
     // Register hiveconnector for file splits.
     auto hiveConnector =
         connector::getConnectorFactory(
@@ -406,7 +415,7 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
   */
   void testMul2JoinAggPlan(bool rewrite) {
     // Set data source config.
-    int input_features_size = 597540;//597540
+    int input_features_size = 1024;//597540
     int num_samples = 1000;
     // int input_features_size = featureSize;
     // int num_samples = sampleSize;
@@ -425,11 +434,15 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
     auto featureArrayVector = maker.arrayVector<float>(data.features, REAL());
     // Create rowVector for data source
     // auto inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    std::vector<int> indexes = randomGenerator.genIntRange(0, num_samples);
+    auto indexFlaVector = maker.flatVector<int>(indexes);
     
 
     auto inputRowVector = maker.rowVector(
-          {"v"},
-          {featureArrayVector});
+          {"v", "idx"},
+          {featureArrayVector, indexFlaVector});
     // Create file path
     auto file = TempFilePath::create();
     // Create file config

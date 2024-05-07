@@ -14,8 +14,10 @@
 
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 #set(CMAKE_PREFIX_PATH "$HOME/libtorch; $CONDA_PREFIX")
-set(CMAKE_PREFIX_PATH "$HOME/libtorch")
+set(CMAKE_PREFIX_PATH "$HOME/libtorch/share/cmake/Torch")
 set(CMAKE_PREFIX_PATH "$CONDA_PREFIX")
+# include_directories(SYSTEM ${TORCH_INCLUDE_DIRS})
+# set(TORCH_LIBRARIES "$HOME/libtorch")
 
 find_package(Torch REQUIRED)
 find_package(xgboost REQUIRED)
@@ -178,6 +180,31 @@ target_link_libraries(
   velox_common_base
   velox_vector_fuzzer
   velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(serialize_test tests/SerializeTest.cpp)
+target_link_libraries(
+  serialize_test
+  velox_aggregates
+  velox_type
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  velox_serialization
+  velox_hive_connector
+  velox_file
+  velox_core
+  velox_connector
+  velox_time
+  velox_codegen
+  velox_test_util
+  velox_arrow_bridge
+  velox_common_compression
   ${TORCH_LIBRARIES}
 )
 

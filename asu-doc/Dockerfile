@@ -95,7 +95,8 @@ RUN pip install ./[ray]
 # install cpr
 WORKDIR /home
 RUN git clone https://github.com/libcpr/cpr.git \
-    && cd cpr && mkdir build && cd build \
+    && cd cpr && git checkout 481c0476319e04b16ccc20f2b732706fc0fa787c \
+    && mkdir build && cd build \
     && cmake ..  \
     && make install 
 
