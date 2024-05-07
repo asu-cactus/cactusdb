@@ -25,6 +25,7 @@
 #include "velox/core/ITypedExpr.h"
 #include "velox/core/PlanNode.h"
 #include "velox/ml_functions/NNBuilder.h"
+#include "velox/optimizer/Helper.h"
 
 // using namespace ml;
 using namespace facebook::velox;
@@ -79,13 +80,14 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
       CataLog& cataLog) override {
     clearVectors();
     bool transformationApplied = false;
+    std::set<std::string> finalProjectExprSets;
     // Iterate over each target in the targets container
     for (auto target : targets) {
       // Start from the current node
       if (curNode) {
         // Get the name of node
         std::string_view nodeName = curNode->name();
-        // We frist search project node
+        // We first search project node
         if (nodeName == "Project") {
           // Cast node as project node
           if (auto myProjectNode =
@@ -93,134 +95,186 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
             // Get projections in project node
             const std::vector<TypedExprPtr>& projections =
                 myProjectNode->projections();
-            // Search each expression in projections
-            for (auto expression : projections) {
+            // Get the names of projections
+            const std::vector<std::string>& projectionsNames =
+                myProjectNode->names();
+            int numProjections = projections.size();
+            // Check if the number of projections is equal to the number of
+            // projection names
+            assert(numProjections == projectionsNames.size());
+            // Flag indicates whether the target UDF is found
+            bool findRewriteTarget = false;
+            // Iterate each projection
+            for (int exprIdx = 0; exprIdx < numProjections; exprIdx++) {
+              auto expression = projections[exprIdx];
               // Get the string of expression
-              exprStr = expression->toString();
-              // Tree serach in one expression until leaf expression (size == 0)
-              while (expression->inputs().size() > 0) {
-                // String match the target UDF name
-                if (exprStr == target) {
-                  // Cast this matched expression to CallTypedExpr, which is
-                  // used to get the pointer for the UDF functions
-                  if (auto call =
-                          std::dynamic_pointer_cast<const core::CallTypedExpr>(
-                              expression)) {
-                    // We only consider one projection expression in the project
-                    // node.
-                    if (projections.size() == 1) {
-                      core::QueryConfig config({});
-                      // Stored the names for mat_add and mat_mul
-                      std::vector<std::string> mat_add_occurrences;
-                      std::vector<std::string> mat_mul_occurrences;
+              std::string exprStr = expression->toString();
 
-                      std::regex pattern_add(R"(mat_add\d+)");
-                      std::regex pattern_mul(R"(mat_mul\d+)");
+              // Check if target exist in the expression
+              if (exprStr == target) {
+                // Here, the rewrite action focus on rewriting the whole expression 
+                // into a torch-NN. //TODO While there is one uncovered case that we partially
+                // rewrite the UDF into torch-NN format. It needs the support from 
+                // check function. 
 
-                      auto words_begin_add = std::sregex_iterator(
-                          target.begin(), target.end(), pattern_add);
-                      auto words_end_add = std::sregex_iterator();
-                      for (std::sregex_iterator i = words_begin_add;
-                           i != words_end_add;
-                           ++i) {
-                        std::smatch match = *i;
-                        mat_add_occurrences.push_back(match.str());
-                      }
+                targetExprStr = exprStr;
+                // Cast this matched expression to CallTypedExpr, which is
+                // used to get the pointer for the UDF functions
+                // We only consider one projection expression in the project
+                // node.
+                core::QueryConfig config({});
+                // Stored the names for mat_add and mat_mul
+                std::vector<std::string> mat_add_occurrences;
+                std::vector<std::string> mat_mul_occurrences;
 
-                      auto words_begin_mul = std::sregex_iterator(
-                          target.begin(), target.end(), pattern_mul);
-                      auto words_end_mul = std::sregex_iterator();
-                      for (std::sregex_iterator i = words_begin_mul;
-                           i != words_end_mul;
-                           ++i) {
-                        std::smatch match = *i;
-                        mat_mul_occurrences.push_back(match.str());
-                      }
-                      // Search the pointer for registed add function
-                      std::vector<std::shared_ptr<VectorFunction>> myAddFunc;
-                      for (std::string mat_add_name : mat_add_occurrences) {
-                        std::shared_ptr<VectorFunction> myAdd =
-                            getVectorFunction(
-                                mat_add_name, {ARRAY(REAL())}, {}, config);
-                        if (myAdd) {
-                          myAddFunc.push_back(myAdd);
-                        }
-                      }
-                      // Iterating over myAddFunc in reverse, the inner function
-                      // is the first layer add function
-                      for (auto it = myAddFunc.rbegin(); it != myAddFunc.rend();
-                           ++it) {
-                        // Dynamically cast to MatrixVectorAddition
-                        auto myAddUDF =
-                            std::dynamic_pointer_cast<MatrixVectorAddition>(*it);
-                        if (myAddUDF) {
-                          bias.push_back(myAddUDF->getTensor());
-                        }
-                      }
-                      // Search the pointer for registed mul function
-                      std::vector<std::shared_ptr<VectorFunction>> myMulFunc;
-                      for (std::string mat_mul_name : mat_mul_occurrences) {
-                        std::shared_ptr<VectorFunction> myMul =
-                            getVectorFunction(
-                                mat_mul_name, {ARRAY(REAL())}, {}, config);
-                        if (myMul) {
-                          myMulFunc.push_back(myMul);
-                        }
-                      }
-                      // Iterating over myMulFunc in reverse, the inner function
-                      // is the first layer mul function
-                      for (auto it = myMulFunc.rbegin(); it != myMulFunc.rend();
-                           ++it) {
-                        // Dynamically cast to MatrixVectorAddition
-                        auto myMulUDF =
-                            std::dynamic_pointer_cast<MatrixMultiply>(*it);
-                        if (myMulUDF) {
-                          weights.push_back(myMulUDF->getTensor());
-                          if (dims.empty()) {
-                            // We extract two parameters from the first layer,
-                            // and we only need one parameter for later layer
-                            dims.push_back(myMulUDF->getDims()[0]);
-                            dims.push_back(myMulUDF->getDims()[1]);
-                          } else {
-                            dims.push_back(myMulUDF->getDims()[1]);
-                          }
-                        }
-                      }
-                      // Register torchdnn_multi
-                      registerVectorFunction(
-                          "torchDNN",
-                          TorchDNN::signatures(),
-                          std::make_unique<TorchDNN>(
-                              weights, bias, dims));
-                      // TODO:catalog process
+                std::regex pattern_add(R"(mat_add\d+)");
+                std::regex pattern_mul(R"(mat_mul\d+)");
 
-                      if (curNode->sources().size() > 0) {
-                        // Here, we focus on the inner case. For example:
-                        // project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))})
-                        // ---> project({torchnnx(v)}) The format for inner case
-                        // is project(twolayer())
-                        // TODO: Medium case - project(func1(twolayer(func2())))
-                        // TODO: Outer case -
-                        // project({twolayer(func1(func2()))}) Plan Builder
-                        // start from the previous node.
-                        planBuilder =
-                            planBuilder.setRoot(curNode->sources()[0]);
-                        // Regular expression match
-                        std::regex pattern(R"(softmax\d+\(.*\)\))");
-                        // Replace the expression
-                        exprStr =
-                            std::regex_replace(exprStr, pattern, "torchDNN(v)");
-                        // Plan Builder add the new node.
-                        planBuilder = planBuilder.project({exprStr});
+                auto words_begin_add = std::sregex_iterator(
+                    target.begin(), target.end(), pattern_add);
+                auto words_end_add = std::sregex_iterator();
+                for (std::sregex_iterator i = words_begin_add;
+                     i != words_end_add;
+                     ++i) {
+                  std::smatch match = *i;
+                  mat_add_occurrences.push_back(match.str());
+                }
 
-                        transformationApplied = true;
-                      }
+                auto words_begin_mul = std::sregex_iterator(
+                    target.begin(), target.end(), pattern_mul);
+                auto words_end_mul = std::sregex_iterator();
+                for (std::sregex_iterator i = words_begin_mul;
+                     i != words_end_mul;
+                     ++i) {
+                  std::smatch match = *i;
+                  mat_mul_occurrences.push_back(match.str());
+                }
+                // Search the pointer for registed add function
+                std::vector<std::shared_ptr<VectorFunction>> myAddFunc;
+                for (std::string mat_add_name : mat_add_occurrences) {
+                  std::shared_ptr<VectorFunction> myAdd = getVectorFunction(
+                      mat_add_name, {ARRAY(REAL())}, {}, config);
+                  if (myAdd) {
+                    myAddFunc.push_back(myAdd);
+                  }
+                }
+                // Iterating over myAddFunc in reverse, the inner function
+                // is the first layer add function
+                for (auto it = myAddFunc.rbegin(); it != myAddFunc.rend();
+                     ++it) {
+                  // Dynamically cast to MatrixVectorAddition
+                  auto myAddUDF =
+                      std::dynamic_pointer_cast<MatrixVectorAddition>(*it);
+                  if (myAddUDF) {
+                    bias.push_back(myAddUDF->getTensor());
+                  }
+                }
+                // Search the pointer for registed mul function
+                std::vector<std::shared_ptr<VectorFunction>> myMulFunc;
+                for (std::string mat_mul_name : mat_mul_occurrences) {
+                  std::shared_ptr<VectorFunction> myMul = getVectorFunction(
+                      mat_mul_name, {ARRAY(REAL())}, {}, config);
+                  if (myMul) {
+                    myMulFunc.push_back(myMul);
+                  }
+                }
+                // Iterating over myMulFunc in reverse, the inner function
+                // is the first layer mul function
+                for (auto it = myMulFunc.rbegin(); it != myMulFunc.rend();
+                     ++it) {
+                  // Dynamically cast to MatrixVectorAddition
+                  auto myMulUDF =
+                      std::dynamic_pointer_cast<MatrixMultiply>(*it);
+                  if (myMulUDF) {
+                    weights.push_back(myMulUDF->getTensor());
+                    if (dims.empty()) {
+                      // We extract two parameters from the first layer,
+                      // and we only need one parameter for later layer
+                      dims.push_back(myMulUDF->getDims()[0]);
+                      dims.push_back(myMulUDF->getDims()[1]);
+                    } else {
+                      dims.push_back(myMulUDF->getDims()[1]);
                     }
                   }
                 }
-                // Search the lower level expression in the same plan node
-                expression = expression->inputs()[0];
+                // Register torchdnn_multi
+                registerVectorFunction(
+                    "torchDNN",
+                    TorchDNN::signatures(),
+                    std::make_unique<TorchDNN>(weights, bias, dims));
+
+                // Capture the data src
+                std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+                std::smatch matches;
+                // Object to capture the matched data source
+                std::string matchedDataSrc;
+                std::string targetExprName = projectionsNames[exprIdx];
+                // Search out the matched data source and store in matches
+                if (std::regex_search(
+                        targetExprStr, matches, patternToMatchRawSource)) {
+                  matchedDataSrc = matches[1].str();
+                } else {
+                  LOG(ERROR) << "Uncaptured data source" << std::endl;
+                }
+                std::regex pattern(R"(softmax\d+\(.*\)\))");
+                // Replace the expression
+                targetExprStr = std::regex_replace(
+                    targetExprStr,
+                    pattern,
+                    fmt::format("torchDNN({})", matchedDataSrc));
+
+                finalProjectExprSets.insert(
+                    targetExprStr + " AS " + targetExprName);
+                std::cout << fmt::format("exprStr: {}", targetExprStr)
+                          << std::endl;
+
+                findRewriteTarget = true;
+              } else {
+                // Parse the non-target expressions
+                std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+                std::smatch matches;
+                if (std::regex_search(
+                        exprStr, matches, patternToMatchRawSource)) {
+                  auto matchedDataSrc = matches[1].str();
+                  auto rewriteExpr = std::regex_replace(
+                      exprStr, patternToMatchRawSource, matchedDataSrc);
+
+                  finalProjectExprSets.insert(
+                      rewriteExpr + " AS " + projectionsNames[exprIdx]);
+                } else {
+                  LOG(ERROR)
+                      << "Error: undefined-edge case detected: " << exprStr
+                      << std::endl;
+                }
               }
+            }
+
+            if ((curNode->sources().size()) > 0 && findRewriteTarget) {
+              // get the source node of the current node
+              auto srcNode = curNode->sources()[0];
+              auto rewritePlan =
+                  exec::test::PlanBuilder(planNodeIdGenerator, pool_.get());
+              rewritePlan = rewritePlan.setRoot(srcNode);
+
+              std::vector<std::string> finalProjectExprs(
+                  finalProjectExprSets.begin(), finalProjectExprSets.end());
+              rewritePlan = rewritePlan.project(finalProjectExprs);
+              if (prevNode == nullptr) {
+                planBuilder.setRoot(rewritePlan.planNode());
+              } else {
+                // use seralization and deserialization to replace the source
+                // node
+                auto serializedPlan = planBuilder.planNode()->serialize();
+                auto serializedNewSource = rewritePlan.planNode()->serialize();
+                auto srcNodeIdToBeReplaced = curNode->id();
+                replaceSourceWithIdInSerializedPlan(
+                    serializedPlan, serializedNewSource, srcNodeIdToBeReplaced);
+                auto deserlizedUpdatedPlanNode =
+                    ISerializable::deserialize<core::PlanNode>(
+                        serializedPlan, pool_.get());
+                planBuilder.setRoot(deserlizedUpdatedPlanNode);
+              }
+              transformationApplied = true;
             }
           }
         }
@@ -231,9 +285,9 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
 
           const TypedExprPtr& filterExpr = myFilterNode->filter();
 
-          exprStr = filterExpr->toString();
+          targetExprStr = filterExpr->toString();
 
-          if (exprStr == target) {
+          if (targetExprStr == target) {
             if (auto call =
                     std::dynamic_pointer_cast<const core::CallTypedExpr>(
                         filterExpr)) {
@@ -275,7 +329,8 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
               // first layer add function
               for (auto it = myAddFunc.rbegin(); it != myAddFunc.rend(); ++it) {
                 // Dynamically cast to MatrixVectorAddition
-                auto myAddUDF = std::dynamic_pointer_cast<MatrixVectorAddition>(*it);
+                auto myAddUDF =
+                    std::dynamic_pointer_cast<MatrixVectorAddition>(*it);
                 if (myAddUDF) {
                   bias.push_back(myAddUDF->getTensor());
                 }
@@ -326,9 +381,10 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                 // Regular expression match
                 std::regex pattern(R"(softmax\d+\(.*\)\))");
                 // Replace the expression
-                exprStr = std::regex_replace(exprStr, pattern, "torchDNN(v)");
+                targetExprStr =
+                    std::regex_replace(targetExprStr, pattern, "torchDNN(v)");
                 // Plan Builder add the new node.
-                planBuilder = planBuilder.project({exprStr});
+                planBuilder = planBuilder.project({targetExprStr});
 
                 transformationApplied = true;
               }
@@ -345,9 +401,10 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
 
               std::regex pattern(R"(softmax\d+\(.*\)\))");
 
-              exprStr = std::regex_replace(exprStr, pattern, "torchDNN(v)");
+              targetExprStr =
+                  std::regex_replace(targetExprStr, pattern, "torchDNN(v)");
 
-              planBuilder = planBuilder.project({exprStr});
+              planBuilder = planBuilder.project({targetExprStr});
 
               transformationApplied = true;
             }
@@ -485,9 +542,9 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
 
  private:
   std::vector<int> dims;
-  std::string exprStr;
+  std::string targetExprStr;
   std::vector<float*> weights;
   std::vector<float*> bias;
 };
 
-} 
+} // namespace optimization
