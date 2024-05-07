@@ -1,0 +1,47 @@
+digraph {
+    graph [ rankdir=TB ]
+
+    0 [ label="f6<-1.6475755" ]
+    0 -> 1 [label="yes" color="#FF0000"]
+    0 -> 2 [label="no, missing" color="#0000FF"]
+
+    1 [ label="f27<0.419616967" ]
+    1 -> 3 [label="yes" color="#FF0000"]
+    1 -> 4 [label="no, missing" color="#0000FF"]
+
+    3 [ label="leaf=0.0168748517" ]
+
+    4 [ label="leaf=-0.00516391452" ]
+
+    2 [ label="f0<-1.43323123" ]
+    2 -> 5 [label="yes" color="#FF0000"]
+    2 -> 6 [label="no, missing" color="#0000FF"]
+
+    5 [ label="leaf=-0.0178106818" ]
+
+    6 [ label="f1<0.0565181188" ]
+    6 -> 7 [label="yes" color="#FF0000"]
+    6 -> 8 [label="no, missing" color="#0000FF"]
+
+    7 [ label="f4<-0.282543898" ]
+    7 -> 9 [label="yes" color="#FF0000"]
+    7 -> 10 [label="no, missing" color="#0000FF"]
+
+    9 [ label="leaf=-0.000466507365" ]
+
+    10 [ label="leaf=0.0172647368" ]
+
+    8 [ label="f7<-0.212496892" ]
+    8 -> 11 [label="yes" color="#FF0000"]
+    8 -> 12 [label="no, missing" color="#0000FF"]
+
+    11 [ label="leaf=-0.0172251575" ]
+
+    12 [ label="f16<0.720073402" ]
+    12 -> 13 [label="yes" color="#FF0000"]
+    12 -> 14 [label="no, missing" color="#0000FF"]
+
+    13 [ label="leaf=0.0143764615" ]
+
+    14 [ label="leaf=-0.00840115082" ]
+}

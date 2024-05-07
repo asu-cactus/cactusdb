@@ -76,11 +76,11 @@ class DecisionForestTest : public HiveConnectorTestBase {
 
   void registerFunctions();
 
-  void run();
+  void run( bool whetherToReorderJoin);
   void testingTreePredictSmall();
   void testingForestPredictSmall();
   void testingForestPredictCrossproductSmall();
-  void testingForestPredictCrossproductLarge();
+  void testingForestPredictCrossproductLarge( bool whetherToReorderJoin );
 
   ArrayVectorPtr parseCSVFile(VectorMaker & maker, std::string filePath, int numRows, int numCols);
 
@@ -148,7 +148,7 @@ void DecisionForestTest::registerFunctions() {
   exec::registerVectorFunction(
       "decision_forest_predict",
       TreePrediction::signatures(),
-      std::make_unique<ForestPrediction>("resources/model/fraud_xgboost_10_8", 28, true));
+      std::make_unique<ForestPrediction>("resources/model/fraud_xgboost_1600_8", 28, true));
 
 }
 
@@ -265,7 +265,7 @@ void DecisionForestTest::testingForestPredictCrossproductSmall() {
 
   std::vector<std::string> pathVectors;
 
-  string forestFolderPath = "resources/model/fraud_xgboost_10_8";
+  string forestFolderPath = "resources/model/fraud_xgboost_1600_8";
   
   Forest::vectorizeForestFolder(forestFolderPath, pathVectors);
 
@@ -377,7 +377,7 @@ ArrayVectorPtr DecisionForestTest::parseCSVFile(VectorMaker & maker, std::string
 
 } 
 
-void DecisionForestTest::testingForestPredictCrossproductLarge() {
+void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReorderJoin) {
   
   registerFunctions();
 
@@ -400,35 +400,9 @@ void DecisionForestTest::testingForestPredictCrossproductLarge() {
 
   auto inputRowVector = maker.rowVector({"row_id", "x"}, {inputIndexVector, inputArrayVector});
 
-  auto config = std::make_shared<facebook::velox::dwrf::Config>();
-
-  // affects the number of splits
-  // number of bites in each stripe (collection of rows)
-  // strip size should be <= split size (total_size / total splits)
-  // to have the desired number of splits
-  uint64_t kSizeKB = 1024UL;
-  
-  int numSplits = 8;
-
-  // used for indexing. 
-  // 2k rows will be processed in every call
-  // but doesn't effect number of splits
-  // if stripe size is a large value
-  uint32_t rows = numRows/numSplits+1;
-
-  config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 779 * kSizeKB);
-
-  config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
-
-  auto file = TempFilePath::create();
-
-  writeToFile(file->path, {inputRowVector}, config);
-
-  auto hiveSplits =  makeHiveConnectorSplits(file->path, numSplits, dwio::common::FileFormat::DWRF);
-
   std::vector<std::string> pathVectors;
 
-  string forestFolderPath = "resources/model/fraud_xgboost_10_8";
+  string forestFolderPath = "resources/model/fraud_xgboost_1600_8";
 
   Forest::vectorizeForestFolder(forestFolderPath, pathVectors);
 
@@ -452,11 +426,68 @@ void DecisionForestTest::testingForestPredictCrossproductLarge() {
 
   auto treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
 
+  auto dataConfig = std::make_shared<facebook::velox::dwrf::Config>();
+
+  // affects the number of splits
+  // number of bites in each stripe (collection of rows)
+  // strip size should be <= split size (total_size / total splits)
+  // to have the desired number of splits
+  uint64_t kDataSizeKB = 512UL;
+
+  int numDataSplits = 16;
+
+  // used for indexing.
+  // 2k rows will be processed in every call
+  // but doesn't effect number of splits
+  // if stripe size is a large value
+  uint32_t numDataRows = numRows/numDataSplits+1;
+
+  dataConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 799 * kDataSizeKB);
+
+  dataConfig->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, numDataRows);
+
+  auto dataFile = TempFilePath::create();
+
+  writeToFile(dataFile->path, {inputRowVector}, dataConfig);
+
+  auto dataHiveSplits =  makeHiveConnectorSplits(dataFile->path, numDataSplits, dwio::common::FileFormat::DWRF);
+
+  auto treeConfig = std::make_shared<facebook::velox::dwrf::Config>();
+
+  // affects the number of splits
+  // number of bites in each stripe (collection of rows)
+  // strip size should be <= split size (total_size / total splits)
+  // to have the desired number of splits
+  uint64_t kTreeSizeKB = 1UL;
+  
+  int numTreeSplits = 16;
+
+  // used for indexing. 
+  // 2k rows will be processed in every call
+  // but doesn't effect number of splits
+  // if stripe size is a large value
+  uint32_t numTreeRows = numTrees/numTreeSplits+1;
+
+  treeConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 1 * kTreeSizeKB);
+
+  treeConfig->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, numTreeRows);
+
+  auto treeFile = TempFilePath::create();
+
+  writeToFile(treeFile->path, {treeRowVector}, treeConfig);
+
+  auto treeHiveSplits =  makeHiveConnectorSplits(treeFile->path, numTreeSplits, dwio::common::FileFormat::DWRF);
+
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
 
   core::PlanNodeId p0;
 
-  auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+  core::PlanNodeId p1;
+
+  core::PlanFragment myPlan;
+
+  if (!whetherToReorderJoin) {
+       myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                   .tableScan(asRowType(inputRowVector->type()))
                   .capturePlanNodeId(p0)
                   .nestedLoopJoin(
@@ -472,11 +503,29 @@ void DecisionForestTest::testingForestPredictCrossproductLarge() {
                                 false)
                    .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
                    .planFragment();
+  } else {
+      myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                  .tableScan(asRowType(treeRowVector->type()))
+		  .capturePlanNodeId(p1)
+                  .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
+                  .nestedLoopJoin(
+                      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                          .tableScan(asRowType(inputRowVector->type()))
+                          .capturePlanNodeId(p0)
+                          .planNode(), {"row_id", "x", "tree_id", "tree"})
+                   .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
+                   .aggregation({"row_id"},
+                                {"sum(prediction) as sum"},
+                                {},
+                                core::AggregationNode::Step::kPartial,
+                                false)
+                   .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
+                   .planFragment();
+  }
 
   // print statistics of a plan
-
   queryCtx_->testingOverrideConfigUnsafe(
-      {{core::QueryConfig::kPreferredOutputBatchBytes, "100000000"}, 
+      {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"}, 
       {core::QueryConfig::kMaxOutputBatchRows, "100000"}});
 
   auto task = exec::Task::create("0", myPlan , 0, queryCtx_,
@@ -486,19 +535,32 @@ void DecisionForestTest::testingForestPredictCrossproductLarge() {
           return exec::BlockingReason::kNotBlocked;
   });
 
+ std::cout << "Data Hive splits:" << std::endl;
+ for(auto& split : dataHiveSplits) {
+      // std::cout << split->toString() << std::endl;
+      task->addSplit(p0, exec::Split(std::move(split)));
+ }
 
-  std::cout << "Hive splits:" << std::endl;
-  for(auto& split : hiveSplits) {
-   // std::cout << split->toString() << std::endl;
-    task->addSplit(p0, exec::Split(std::move(split)));
+ if (whetherToReorderJoin) {
+      std::cout << "Tree Hive splits:" << std::endl;
+      for(auto& split : treeHiveSplits) {
+          task->addSplit(p1, exec::Split(std::move(split)));
+      }
   }
+
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
 
   int veloxThreads = 8;
   
   task->start(veloxThreads);
   
+
   task->noMoreSplits(p0);
+
+  if (whetherToReorderJoin) {
+  
+      task->noMoreSplits(p1);
+  }
 
   // Start task with 2 as maximum drivers and wait for execution to finish
   waitForFinishedDrivers(task);
@@ -507,25 +569,27 @@ void DecisionForestTest::testingForestPredictCrossproductLarge() {
   
   std::stringstream ss;
   
-  ss << numRows << "," << numSplits << "," << veloxThreads << ",";
+  ss << numDataRows << "," << numDataSplits << "," << numTreeRows << "," << numTreeSplits << "," << veloxThreads << ",";
   
   std::cout << "Time for Decision Forest Prediction with Input Data (sec): " << std::endl;
   
-  std::cout << ss.str() << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::cout << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+
+  std::cout << ss.str() << std::endl;
 
   unregisterCustomType("tree_type");
 
 }
 
-void DecisionForestTest::run() {
+void DecisionForestTest::run(bool whetherToReorderJoin) {
 
-  string forestFolderPath = "resources/model/fraud_xgboost_10_8";
+  string forestFolderPath = "resources/model/fraud_xgboost_1600_8";
 
   DIR * dir = opendir(forestFolderPath.c_str());
 
   if (!dir) {
 
-      std::cout << "Please check whether folder exists in resources/model/fraud_xgboost_10_8 under the velox root directory.\n"
+      std::cout << "Please check whether folder exists in resources/model/fraud_xgboost_1600_8 under the velox root directory.\n"
               << "Also, you need to execute the test from the velox root directory like the following:\n"
               << "cd velox\n"
               << "./_build/release/velox/ml_functions/decision_forest_prediction_test\n"
@@ -539,12 +603,22 @@ void DecisionForestTest::run() {
   //testingTreePredictSmall();
   //testingForestPredictSmall();
   //testingForestPredictCrossproductSmall();
-  testingForestPredictCrossproductLarge();
+  testingForestPredictCrossproductLarge(whetherToReorderJoin);
 }
+
+
+DEFINE_bool(reorder, true, "Whether to reorder join");
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   memory::MemoryManager::initialize({});
+
+  bool reorder = FLAGS_reorder;
+
   DecisionForestTest demo;
-  demo.run();
+
+  std::cout << fmt::format("Reorder: {}", reorder) << std::endl;
+
+  demo.run(reorder);
+
 }
