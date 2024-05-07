@@ -1,0 +1,23 @@
+digraph {
+    graph [ rankdir=TB ]
+
+    0 [ label="f3<2.19541335" ]
+    0 -> 1 [label="yes" color="#FF0000"]
+    0 -> 2 [label="no, missing" color="#0000FF"]
+
+    1 [ label="f0<-0.346224755" ]
+    1 -> 3 [label="yes" color="#FF0000"]
+    1 -> 4 [label="no, missing" color="#0000FF"]
+
+    3 [ label="leaf=0.00255249511" ]
+
+    4 [ label="leaf=-0.00771324476" ]
+
+    2 [ label="f21<-0.219948962" ]
+    2 -> 5 [label="yes" color="#FF0000"]
+    2 -> 6 [label="no, missing" color="#0000FF"]
+
+    5 [ label="leaf=-0.00253003021" ]
+
+    6 [ label="leaf=0.00754303113" ]
+}
