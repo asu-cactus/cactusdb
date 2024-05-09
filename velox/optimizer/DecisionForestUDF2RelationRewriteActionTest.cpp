@@ -254,11 +254,9 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
    * @param p0 The planNodeID for the plan node that needs to add file splits.
   */
   void runDecisionForestPlan(
-      std::string filePath,
-      int numRows,
-      int numSplits,
+      int numThreads,
       PlanBuilder& myPlan,
-      core::PlanNodeId p0) {
+      CataLog &cataLog) {
     // Create hivesplits for file.
     // Initializes executor.
     std::shared_ptr<folly::Executor> executor_{
@@ -272,35 +270,35 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
          {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
 
-    int veloxThreads = 8;
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
 
     CursorParameters params;
-    params.maxDrivers = veloxThreads;
+    params.maxDrivers = numThreads;
     params.planNode = myPlan.planNode();
     params.queryCtx = queryCtx_;
     bool noMoreSplits = false;
 
-    auto addSplits = [&noMoreSplits, &filePath, &p0, &numSplits](exec::Task* task) {
-        std::vector<core::PlanNodeId> ids;
+    auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
+      auto idFileAddrMap = cataLog.getIdAddressMap();
+      std::vector<core::PlanNodeId> ids;
         if (!noMoreSplits) {
-
-            auto hiveSplits = makeHiveConnectorSplits(
-        filePath, numSplits, dwio::common::FileFormat::DWRF);
-
+          for (const auto& entry : idFileAddrMap) {
+            core::PlanNodeId key = entry.first;
+            const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+            auto hiveSplits = makeHiveConnectorSplits(fileAddr);
             for (auto& split : hiveSplits) {
-              task->addSplit(p0, exec::Split(std::move(split)));
+              task->addSplit(key, exec::Split(std::move(split)));
             }
-
-          ids.push_back(p0);
-
-          for (auto id : ids) {
-            task->noMoreSplits(id);
+            ids.push_back(key);
           }
+
+        for (auto id: ids){
+          task->noMoreSplits(id);
         }
-        noMoreSplits = true;
-      };
+      }
+      noMoreSplits = true;
+    };
 
     auto [cursor, actualResults] = readCursor(params, addSplits);
     waitForTaskCompletion(cursor->task().get());
@@ -320,7 +318,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
 
     std::stringstream ss;
 
-    ss << "numRows:" << numRows << ", numSplits:" << numSplits << ", veloxThreads:" << veloxThreads << ", numBatch:" << totalNumBatch << ", numData:" << totalNumData << std::endl;
+    ss << "numThreads:" << numThreads << ", numBatch:" << totalNumBatch << ", numData:" << totalNumData << std::endl;
 
     std::cout << "Time for Decision Forest Prediction with Input Data (sec): "
               << std::endl;
@@ -359,19 +357,21 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     core::PlanNodeId p0;
 
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-
+    CataLog cataLog;
     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                       //.values({inputRowVector})
                       .tableScan(asRowType(inputRowVector->type()))
                       .capturePlanNodeId(p0)
                       .project({"decision_forest_predict(v)"});
+    cataLog.setIdAddressMap(p0, {file});
+    cataLog.setVectorIdMap(p0, "v");
     // Get the logical plan                  
     auto planNode = myPlan.planNode();
     // Create ruleManager
     RuleManager ruleManager;
     // Create planState
     PlanState planState(ruleManager);
-    CataLog cataLog;
+    
     if (rewrite) {
       // Get possible actions for this plan
       planState.getPossibleActions(planNode, cataLog);
@@ -389,7 +389,7 @@ class DecisionForestUDF2RelationRewriteActionTest : public HiveConnectorTestBase
     }
     std::cout << "Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
     // Run the rewritten plan
-    runDecisionForestPlan(file->path, numRows, numSplits, myPlan, p0);
+    runDecisionForestPlan(8 /*numThreads*/, myPlan, cataLog);
   }
 
  private:
