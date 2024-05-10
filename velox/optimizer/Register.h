@@ -64,7 +64,7 @@ void updateCataLog(const std::string& name, std::shared_ptr<VectorFunction> shar
                     // in horizontal partition approach: inputs are partitioned horizontally 
                     // by using Velox's batches, while weights are partitioned vertically
                     weightBlocks = create_blocks(dims[0], dims[1], std::move(weights), blocksSize);
-                    weightsFileStructure = save_blocks_to_files(std::move(weightBlocks));
+                    weightsFileStructure = save_blocks_to_files(std::move(weightBlocks), name);
                     nameSuffix = "_vertical";
                     weightBlocks.clear();
                     weightBlocks.shrink_to_fit();
