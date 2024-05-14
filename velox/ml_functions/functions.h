@@ -4,6 +4,7 @@
 #include <Eigen/Dense>
 #include <cblas.h>
 #include <chrono>
+#include <torch/torch.h>
 #include "velox/exec/Task.h"
 #include "velox/cost_model/CostEstimate.h"
 #include "velox/cost_model/UdfCostCoefficient.h"
