@@ -281,14 +281,12 @@ public:
 
         auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
             auto idFileAddrMap = cataLog.getIdAddressMap();
-            std::cout << "idFileAddrMap size:" << idFileAddrMap.size() << std::endl;
             std::vector<core::PlanNodeId> ids;
             if (!noMoreSplits) {
                 for (const auto& entry : idFileAddrMap) {
                     core::PlanNodeId key = entry.first;
                     const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
                     auto hiveSplits = makeHiveConnectorSplits(fileAddr);
-                    std::cout << "In HiveSplits" << std::endl;
                     for (auto& split : hiveSplits) {
                         task->addSplit(key, exec::Split(std::move(split)));
                     }
@@ -355,60 +353,60 @@ public:
 
         writeToVeloxFile(inputRowVector, numRows, numSplits, dataFile->path);
 
-        std::vector<std::string> pathVectors;
+        //std::vector<std::string> pathVectors;
 
-        Forest::vectorizeForestFolder(modelPath, pathVectors);
+        //Forest::vectorizeForestFolder(modelPath, pathVectors);
 
-        int numTrees = pathVectors.size();
+        //int numTrees = pathVectors.size();
 
-        auto model = makeFlatVector<StringView> (pathVectors.size());
+        //auto model = makeFlatVector<StringView> (pathVectors.size());
 
-        for (int i = 0; i < numTrees; i++) {
+        //for (int i = 0; i < numTrees; i++) {
 
-            model->set(i, StringView(pathVectors[i].c_str()));
+        //    model->set(i, StringView(pathVectors[i].c_str()));
 
-        }
+        //}
 
-        auto treeIndexVector = maker.flatVector<int16_t>(numTrees);
+        //auto treeIndexVector = maker.flatVector<int16_t>(numTrees);
 
-        for (int i = 0; i < numTrees; i++) {
+        //for (int i = 0; i < numTrees; i++) {
 
-            treeIndexVector->set(i, i);
+        //    treeIndexVector->set(i, i);
 
-        }
+        //}
 
-        auto treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
+        //auto treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
 
 
-        auto treeFile = TempFilePath::create();
+        //auto treeFile = TempFilePath::create();
 
-        auto treeConfig = std::make_shared<facebook::velox::dwrf::Config>();
+        //auto treeConfig = std::make_shared<facebook::velox::dwrf::Config>();
 
-        // affects the number of splits
-        // number of bites in each stripe (collection of rows)
-        // strip size should be <= split size (total_size / total splits)
-        // to have the desired number of splits
-        uint64_t kTreeSizeKB = 1UL;
-        
-        int numTreeSplits = 8;
+        //// affects the number of splits
+        //// number of bites in each stripe (collection of rows)
+        //// strip size should be <= split size (total_size / total splits)
+        //// to have the desired number of splits
+        //uint64_t kTreeSizeKB = 1UL;
+        //
+        //int numTreeSplits = 8;
 
-        // used for indexing. 
-        // 2k rows will be processed in every call
-        // but doesn't effect number of splits
-        // if stripe size is a large value
-        uint32_t numTreeRows = numTrees/numTreeSplits+1;
+        //// used for indexing. 
+        //// 2k rows will be processed in every call
+        //// but doesn't effect number of splits
+        //// if stripe size is a large value
+        //uint32_t numTreeRows = numTrees/numTreeSplits+1;
 
-        treeConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 1 * kTreeSizeKB);
+        //treeConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 1 * kTreeSizeKB);
 
-        treeConfig->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, numTreeRows);
+        //treeConfig->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, numTreeRows);
 
-        writeToFile(treeFile->path, {treeRowVector}, treeConfig);
+        //writeToFile(treeFile->path, {treeRowVector}, treeConfig);
         
         //writeToVeloxFile(treeRowVector, numTrees, numSplits, treeFile->path);
 
         // create a plan for decision forest using UDF-centric style
         core::PlanNodeId p0;
-        core::PlanNodeId p1;
+        //core::PlanNodeId p1;
 
         auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
         CataLog cataLog;
@@ -419,8 +417,8 @@ public:
             .project({"decision_forest_predict(v)"});
         cataLog.setIdAddressMap(p0, {dataFile});
         cataLog.setVectorIdMap(p0, "v");
-        cataLog.setIdAddressMap(p1, {treeFile});
-        cataLog.setVectorIdMap(p1, "tree_path");
+        //cataLog.setIdAddressMap(p1, {treeFile});
+        //cataLog.setVectorIdMap(p1, "tree_path");
         // Get the logical plan                  
         auto planNode = myPlan.planNode();
         // Create ruleManager
