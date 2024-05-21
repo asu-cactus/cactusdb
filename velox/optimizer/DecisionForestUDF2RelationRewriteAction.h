@@ -23,6 +23,8 @@
 #include "velox/common/file/FileSystems.h"
 #include "velox/core/PlanNode.h"
 #include "velox/core/Expressions.h"
+#include "velox/dwio/dwrf/writer/Writer.h"
+#include "velox/exec/tests/utils/HiveConnectorTestBase.h" 
 #include "velox/ml_functions/DecisionTree.h"
 #include "velox/ml_functions/DecisionForest.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
@@ -116,6 +118,7 @@ public:
 										int numTrees;
 
 										if (myUDF) {
+                                            std::cout << "In MyUDF" << std::endl;
 									
 											std::shared_ptr<ForestPrediction> myDecisionForestUDF = dynamic_pointer_cast<ForestPrediction>(myUDF);
 
@@ -155,11 +158,49 @@ public:
 									//
 										if (curNode->sources().size() > 0) {
 
+                                            
+                                            auto treeFile = TempFilePath::create();
+
+                                            auto treeConfig = std::make_shared<facebook::velox::dwrf::Config>();
+
+                                            // affects the number of splits
+                                            // number of bites in each stripe (collection of rows)
+                                            // strip size should be <= split size (total_size / total splits)
+                                            // to have the desired number of splits
+                                            uint64_t kTreeSizeKB = 1UL;
+                                            
+                                            int numTreeSplits = 8;
+
+                                            // used for indexing. 
+                                            // 2k rows will be processed in every call
+                                            // but doesn't effect number of splits
+                                            // if stripe size is a large value
+                                            uint32_t numTreeRows = numTrees/numTreeSplits+1;
+
+                                            treeConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 1 * kTreeSizeKB);
+
+                                            treeConfig->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, numTreeRows);
+
+
+                                            facebook::velox::dwrf::WriterOptions options;
+                                            options.config = treeConfig;
+                                            options.schema = treeRowVector->type();
+                                            auto localWriteFile = std::make_unique<LocalWriteFile>(treeFile->path, true, false);
+                                            auto sink = std::make_unique<dwio::common::WriteFileSink>(
+                                                std::move(localWriteFile), treeFile->path);
+                                            auto rootPool_ = memory::memoryManager()->addRootPool("E2EFilterTestBase");
+                                            auto childPool = rootPool_->addAggregateChild("HiveConnectorTestBase.Writer");
+                                            options.memoryPool = childPool.get();
+                                            facebook::velox::dwrf::Writer writer{std::move(sink), options};
+                                            writer.write(treeRowVector);
+                                            writer.close();
+
+
+
 											planBuilder = planBuilder.setRoot((curNode->sources())[0]);
 											std::cout << "debug, current plan" << planBuilder.planNode()->toString(true,true) << std::endl;
 
 											// We build the plan from this point
-											core::PlanNodeId p0;
 											core::PlanNodeId p1;
 									
 											planBuilder = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())                                                                                                                                                       
@@ -167,7 +208,6 @@ public:
                                                             .capturePlanNodeId(p1)                                                                                                                                                                                        
                                                             .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})                                                                                                                          
                                                             .nestedLoopJoin(planBuilder                                                                                                                                                                                   
-                                                            .capturePlanNodeId(p0)
                                                             .planNode(), {"idx", "v", "tree_id", "tree"})                                                                                                                                                                 
                                                             .project({"idx as idx", "tree_id as tree_id", "velox_decision_tree_predict(v, tree) as prediction"})                                                                                                          
                                                             .aggregation({"idx"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)                                                                                                            
@@ -184,6 +224,8 @@ public:
 											std::shared_ptr<OutputStat> inputStat = std::make_shared<OutputStat>(OutputStat(numTrees,1));
 											Source inputSource = Source(p1, Source::Type::FILE, std::move(inputStat));
 											cataLog.addSource(std::make_shared<Source>(inputSource));
+                                            cataLog.setIdAddressMap(p1, {treeFile});
+                                            cataLog.setVectorIdMap(p1, "tree_path");
 
 											transformationApplied = true;
 										}
