@@ -31,6 +31,7 @@
 #include "velox/parse/TypeResolver.h"
 #include "velox/ml_functions/VeloxDecisionTree.h"
 #include "velox/core/ITypedExpr.h"
+#include "velox/optimizer/Helper.h"
 #include <regex>
 
 using namespace ml;
@@ -116,6 +117,7 @@ public:
 
 										std::shared_ptr<VectorFunction> myUDF = getVectorFunction(callName, {ARRAY(REAL())}, {}, config);
 										int numTrees;
+										std::vector<std::shared_ptr<TempFilePath>> treePaths;
 
 										if (myUDF) {
                                             std::cout << "In MyUDF" << std::endl;
@@ -131,6 +133,33 @@ public:
 												Forest::vectorizeForestFolder(modelPath, pathVectors);
 
 												numTrees = pathVectors.size();
+
+												int numTreeSplits = 8;
+												uint32_t numTreeRowsPerSplit = ceil(numTrees / numTreeSplits);
+												uint32_t treeIndex = 0;
+												optimization::MyFileTest myFile;
+												for (size_t i = 0; i < numTreeSplits; i++) {
+													auto startIdx = treeIndex;
+													auto endIdx = treeIndex + (i + 1) * numTreeRowsPerSplit;
+													endIdx = (endIdx < numTrees) ? endIdx : numTrees;
+													size_t numDataInPartition = endIdx - startIdx;
+
+													auto model = maker.flatVector<StringView> (numDataInPartition);
+													auto treeIndexVector = maker.flatVector<int16_t>(numDataInPartition);
+													for (int j = 0; j < numDataInPartition; j++) {
+														model->set(j, StringView(pathVectors[treeIndex].c_str()));
+														treeIndexVector->set(j, treeIndex);
+														treeIndex += 1;
+													}
+
+													treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
+
+													auto file = TempFilePath::create();
+													auto config = std::make_shared<facebook::velox::dwrf::Config>();
+													myFile.writeToFile(file->path, {treeRowVector}, config);
+													treePaths.push_back(file);
+												}
+												assert(treeIndex == numTrees);
 
 												auto model = maker.flatVector<StringView> (pathVectors.size());
 
@@ -158,45 +187,6 @@ public:
 									//
 										if (curNode->sources().size() > 0) {
 
-                                            
-                                            auto treeFile = TempFilePath::create();
-
-                                            auto treeConfig = std::make_shared<facebook::velox::dwrf::Config>();
-
-                                            // affects the number of splits
-                                            // number of bites in each stripe (collection of rows)
-                                            // strip size should be <= split size (total_size / total splits)
-                                            // to have the desired number of splits
-                                            uint64_t kTreeSizeKB = 1UL;
-                                            
-                                            int numTreeSplits = 8;
-
-                                            // used for indexing. 
-                                            // 2k rows will be processed in every call
-                                            // but doesn't effect number of splits
-                                            // if stripe size is a large value
-                                            uint32_t numTreeRows = numTrees/numTreeSplits+1;
-
-                                            treeConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 1 * kTreeSizeKB);
-
-                                            treeConfig->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, numTreeRows);
-
-
-                                            facebook::velox::dwrf::WriterOptions options;
-                                            options.config = treeConfig;
-                                            options.schema = treeRowVector->type();
-                                            auto localWriteFile = std::make_unique<LocalWriteFile>(treeFile->path, true, false);
-                                            auto sink = std::make_unique<dwio::common::WriteFileSink>(
-                                                std::move(localWriteFile), treeFile->path);
-                                            auto rootPool_ = memory::memoryManager()->addRootPool("E2EFilterTestBase");
-                                            auto childPool = rootPool_->addAggregateChild("HiveConnectorTestBase.Writer");
-                                            options.memoryPool = childPool.get();
-                                            facebook::velox::dwrf::Writer writer{std::move(sink), options};
-                                            writer.write(treeRowVector);
-                                            writer.close();
-
-
-
 											planBuilder = planBuilder.setRoot((curNode->sources())[0]);
 											std::cout << "debug, current plan" << planBuilder.planNode()->toString(true,true) << std::endl;
 
@@ -207,8 +197,8 @@ public:
                                                             .tableScan(asRowType(treeRowVector->type()))
                                                             .capturePlanNodeId(p1)                                                                                                                                                                                        
                                                             .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})                                                                                                                          
-                                                            .nestedLoopJoin(planBuilder                                                                                                                                                                                   
-                                                            .planNode(), {"idx", "v", "tree_id", "tree"})                                                                                                                                                                 
+                                                            .nestedLoopJoin(planBuilder.planNode(), 
+																															{"idx", "v", "tree_id", "tree"})                                                                                                                                                                 
                                                             .project({"idx as idx", "tree_id as tree_id", "velox_decision_tree_predict(v, tree) as prediction"})                                                                                                          
                                                             .aggregation({"idx"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)                                                                                                            
                                                             .project({"idx as idx", "if (sum > 0.0, 1.0, 0.0)"});       
@@ -224,8 +214,7 @@ public:
 											std::shared_ptr<OutputStat> inputStat = std::make_shared<OutputStat>(OutputStat(numTrees,1));
 											Source inputSource = Source(p1, Source::Type::FILE, std::move(inputStat));
 											cataLog.addSource(std::make_shared<Source>(inputSource));
-                                            cataLog.setIdAddressMap(p1, {treeFile});
-                                            cataLog.setVectorIdMap(p1, "tree_path");
+											cataLog.setIdAddressMap(p1, treePaths);
 
 											transformationApplied = true;
 										}
