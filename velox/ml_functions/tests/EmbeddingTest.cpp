@@ -14,6 +14,7 @@
 #include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/Encoder.h"
 #include "velox/ml_functions/HuggingFaceServerless.h"
+#include "velox/ml_functions/HuggingFaceTokenizer.h"
 #include "velox/ml_functions/PositionEncoding.h"
 #include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
@@ -57,6 +58,7 @@ class EmbeddingTest : public HiveConnectorTestBase {
   void testSequencePooling();
   void testEmbedding_MatMul();
   void testHuggingFace();
+  void testHuggingFaceTokenizer();
 
   void TestBody() override {}
 
@@ -669,6 +671,44 @@ void EmbeddingTest::testHuggingFace() {
             << results1->toString(0, results1->size()) << std::endl;
 };
 
+void EmbeddingTest::testHuggingFaceTokenizer() {
+  std::cout << "[INFO] Test of HuggingFace Tokenizer." << std::endl;
+  std::vector<std::string> sentences{};
+  // Add positive sentences
+  sentences.push_back("I really like the new design of your website!");
+  sentences.push_back("Hulu has a great UI.");
+  sentences.push_back(
+      "The final episode was surprising with a fantastic twist at the end.");
+  sentences.push_back("I'm not sure if I like the new design.");
+  sentences.push_back("Disliking horror movies is not uncommon.");
+  sentences.push_back("Sometimes I find the show interesting.");
+  sentences.push_back("The new design is awful!");
+  sentences.push_back("I dislike horror movies.");
+  sentences.push_back("Having to wait two months for the next series to come out is frustrating.");
+  auto sentenceFlatVector = maker.flatVector<std::string>(sentences);
+  auto inputRowVector = maker.rowVector({"in1"}, {sentenceFlatVector});
+
+  // Print input
+  std::cout << "[INFO] input: \n"
+            << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
+
+  exec::registerVectorFunction(
+      "hf_tokenizer",
+      HuggingFaceTokenizer::signatures(),
+      std::make_unique<HuggingFaceTokenizer>("/home/velox/resources/model/tokenizer/roberta.json"));
+
+  auto myPlan = exec::test::PlanBuilder(pool_.get())
+                    .values({inputRowVector})
+                    .project({"in1", "hf_tokenizer(in1)"})
+                    .planNode();
+
+  auto results =
+      exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
+
+  std::cout << "[INFO] Tokenized results: \n\n\n"
+            << results->toString(0, results->size()) << std::endl;
+};
+
 // Test Embedding Layer
 void EmbeddingTest::testSequencePooling() {
   std::cout << "[INFO] Test of SequencePooling." << std::endl;
@@ -860,5 +900,6 @@ int main(int argc, char** argv) {
   // demo.testSequencePooling();
   // demo.testDotProduct();
   // demo.testPositionEncoding();
-  demo.testHuggingFace();
+  // demo.testHuggingFace();
+  demo.testHuggingFaceTokenizer();
 }
