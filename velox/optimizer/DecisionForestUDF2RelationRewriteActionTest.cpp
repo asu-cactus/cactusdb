@@ -151,9 +151,7 @@ public:
                                                                         modelPath, numCols, true));
     }
 
-    ArrayVectorPtr parseCSVFile(
-                                VectorMaker& maker,
-                                std::string filePath,
+     std::vector<std::vector<float>> parseCSVFile(std::string filePath,
                                 int numRows,
                                 int numCols) {
         int size = numRows * numCols;
@@ -199,49 +197,49 @@ public:
 
         file.close();
 
-        ArrayVectorPtr tensor = maker.arrayVector<float>(inputArrayVector);
-
-        return tensor;
+        return inputArrayVector;
     }
 
-    RowVectorPtr loadData(std::string& path, int numRows, int numCols) {
-        ArrayVectorPtr inputArrayVector =
-            parseCSVFile(maker, path, numRows, numCols);
+    std::vector<std::shared_ptr<TempFilePath>> loadData(std::string& path, int numRows, int numCols, int numSplits = 8) {
+        std::vector<std::vector<float>> inputData =
+            parseCSVFile(path, numRows, numCols);
 
-        std::vector<int32_t> indexVector;
+        RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+        std::vector<std::shared_ptr<TempFilePath>> paths;
+        
+        // split input data into multiple partitions
+        size_t partitionSize = ceil(numRows / float(numSplits));
+        size_t countProcessedRows = 0;
+        for (size_t i = 0; i < numSplits; i++) {
+            auto startIdx = inputData.begin() + i * partitionSize;
+            auto endIdx = inputData.begin() + (i + 1) * partitionSize;
+            endIdx = (endIdx < inputData.end()) ? endIdx : inputData.end();
+            size_t numSampleInPartition = (i + 1) * partitionSize <= numRows
+                ? partitionSize
+                : numRows - i * partitionSize;
 
-        for (int i = 0; i < numRows; i++) {
-            indexVector.push_back(i);
+            std::vector<std::vector<float>> partialData(startIdx, endIdx);
+            auto featureArrayVector = maker.arrayVector<float>(partialData, REAL());
+            std::vector<int> indexes = randomGenerator.genIntRange(
+                i * partitionSize, i * partitionSize + numSampleInPartition);
+            auto indexFlatVector = maker.flatVector<int>(indexes);
+            RowVectorPtr inputRowVector = maker.rowVector(
+                {"idx", "v"},
+                {std::move(indexFlatVector), std::move(featureArrayVector)});
+            auto file = TempFilePath::create();
+            auto config = std::make_shared<facebook::velox::dwrf::Config>();
+            writeToFile(file->path, {inputRowVector}, config);
+            paths.push_back(file);
+            countProcessedRows += numSampleInPartition;
         }
-
-        auto inputIndexVector = maker.flatVector<int32_t>(indexVector);
-
-        return maker.rowVector(
-                               {"idx", "v"}, {inputIndexVector, inputArrayVector});
+        assert(countProcessedRows == numRows);
+        return paths;
     }
 
     void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
         while (!task->isFinished()) {
             usleep(1000); // 0.01 second.
         }
-    }
-
-    void writeToVeloxFile(
-                          RowVectorPtr rowVectors,
-                          int numRows,
-                          int numSplits,
-                          std::string filePath) {
-        auto config = std::make_shared<facebook::velox::dwrf::Config>();
-
-        uint64_t kSizeKB = 1024UL;
-
-        uint32_t rows = numRows / numSplits + 1;
-
-        config->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 779 * kSizeKB);
-
-        config->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, rows);
-
-        writeToFile(filePath, {rowVectors}, config);
     }
 
     /**
@@ -333,7 +331,7 @@ public:
         unregisterCustomType("tree_type");
     }
 
-    void testRewriteDecisionForestUDFPlan(std::string modelPath, std::string dataPath, bool rewrite) {
+    void testRewriteDecisionForestUDFPlan(std::string modelPath, std::string dataPath, bool rewrite, int numSplits) {
         // register functions and types that are needed for this test
         int numRows, numCols;
         countRowsAndColumnsFromCSV(dataPath, numRows, numCols);
@@ -341,84 +339,21 @@ public:
         registerFunctions(modelPath, numCols);
 
         // prepare features that are needed for this test
-
-
-        auto inputRowVector = loadData(dataPath, numRows, numCols);
-
-        // write the features to a file
-
-        int numSplits = 8;
-
-        auto dataFile = TempFilePath::create();
-
-        writeToVeloxFile(inputRowVector, numRows, numSplits, dataFile->path);
-
-        //std::vector<std::string> pathVectors;
-
-        //Forest::vectorizeForestFolder(modelPath, pathVectors);
-
-        //int numTrees = pathVectors.size();
-
-        //auto model = makeFlatVector<StringView> (pathVectors.size());
-
-        //for (int i = 0; i < numTrees; i++) {
-
-        //    model->set(i, StringView(pathVectors[i].c_str()));
-
-        //}
-
-        //auto treeIndexVector = maker.flatVector<int16_t>(numTrees);
-
-        //for (int i = 0; i < numTrees; i++) {
-
-        //    treeIndexVector->set(i, i);
-
-        //}
-
-        //auto treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
-
-
-        //auto treeFile = TempFilePath::create();
-
-        //auto treeConfig = std::make_shared<facebook::velox::dwrf::Config>();
-
-        //// affects the number of splits
-        //// number of bites in each stripe (collection of rows)
-        //// strip size should be <= split size (total_size / total splits)
-        //// to have the desired number of splits
-        //uint64_t kTreeSizeKB = 1UL;
-        //
-        //int numTreeSplits = 8;
-
-        //// used for indexing. 
-        //// 2k rows will be processed in every call
-        //// but doesn't effect number of splits
-        //// if stripe size is a large value
-        //uint32_t numTreeRows = numTrees/numTreeSplits+1;
-
-        //treeConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 1 * kTreeSizeKB);
-
-        //treeConfig->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, numTreeRows);
-
-        //writeToFile(treeFile->path, {treeRowVector}, treeConfig);
-        
-        //writeToVeloxFile(treeRowVector, numTrees, numSplits, treeFile->path);
+        // inputs are split and paths are returned
+        auto inputPaths = loadData(dataPath, numRows, numCols, numSplits);
+        RowTypePtr inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
 
         // create a plan for decision forest using UDF-centric style
         core::PlanNodeId p0;
-        //core::PlanNodeId p1;
 
         auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
         CataLog cataLog;
         auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-            //.values({inputRowVector})
-            .tableScan(asRowType(inputRowVector->type()))
+            .tableScan(inputRowType)
             .capturePlanNodeId(p0)
             .project({"decision_forest_predict(v)"});
-        cataLog.setIdAddressMap(p0, {dataFile});
+        cataLog.setIdAddressMap(p0, inputPaths);
         cataLog.setVectorIdMap(p0, "v");
-        //cataLog.setIdAddressMap(p1, {treeFile});
-        //cataLog.setVectorIdMap(p1, "tree_path");
         // Get the logical plan                  
         auto planNode = myPlan.planNode();
         // Create ruleManager
@@ -455,6 +390,7 @@ private:
 DEFINE_string(model_path, "/home/velox/resources/model/fraud_xgboost_10_8", "Path to model");
 DEFINE_string(data_path, "/home/velox/resources/data/creditcard_test.csv", "Path to csv file");
 DEFINE_bool(rewrite, true, "Rewrite or not");
+DEFINE_int32(num_split, 1, "Number of splits for input");
 
 int main(int argc, char** argv) {
     folly::init(&argc, &argv, false);
@@ -463,13 +399,12 @@ int main(int argc, char** argv) {
     std::string modelPath = FLAGS_model_path;
     std::string dataPath = FLAGS_data_path;
     bool rewrite = FLAGS_rewrite;
+    int numSplits = FLAGS_num_split;
 
     DecisionForestUDF2RelationRewriteActionTest demo;
 
     std::cout << fmt::format("Model: {}, Data: {}, Rewrite: {}", modelPath, dataPath, rewrite) << std::endl;
 
-
-
-    demo.testRewriteDecisionForestUDFPlan(modelPath, dataPath, rewrite);
+    demo.testRewriteDecisionForestUDFPlan(modelPath, dataPath, rewrite, numSplits);
 
 }
