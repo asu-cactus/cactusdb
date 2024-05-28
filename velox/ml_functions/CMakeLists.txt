@@ -120,7 +120,7 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
-add_executable(two_tower_model_pipeline_test tests/TowTowerModelPipelineTest.cpp)
+add_executable(two_tower_model_pipeline_test tests/TwoTowerModelPipelineTest.cpp)
 target_link_libraries(
   two_tower_model_pipeline_test
   velox_aggregates
