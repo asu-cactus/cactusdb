@@ -44,7 +44,7 @@ using namespace facebook::velox::core;
 
 namespace optimization {
 
-class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
+class DecisionForestUDF2RelationRewriteAction : public RewriteAction1 {
 
 public:
 
@@ -71,7 +71,8 @@ public:
 	       std::shared_ptr<memory::MemoryPool> pool_,
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
 		   std::vector<std::string> targets,
-		   CataLog &cataLog) override {
+		   CataLog &cataLog,
+           int numTreeSplits) override {
 			bool transformationApplied = false;
 			for (auto target : targets) {
 
@@ -134,7 +135,7 @@ public:
 
 												numTrees = pathVectors.size();
 
-												int numTreeSplits = 8;
+												//int numTreeSplits = 8;
 												uint32_t numTreeRowsPerSplit = ceil(numTrees / numTreeSplits);
 												uint32_t treeIndex = 0;
 												optimization::MyFileTest myFile;
@@ -161,23 +162,6 @@ public:
 												}
 												assert(treeIndex == numTrees);
 
-												auto model = maker.flatVector<StringView> (pathVectors.size());
-
-												for (int i = 0; i < numTrees; i++) {
-
-													model->set(i, StringView(pathVectors[i].c_str()));
-
-												}
-
-												auto treeIndexVector = maker.flatVector<int16_t>(numTrees);
-
-												for (int i = 0; i < numTrees; i++) {
-
-													treeIndexVector->set(i, i);
-
-												}
-
-												treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
 										
 											}
 									
@@ -255,7 +239,7 @@ public:
 
             		for (auto source : sources)       		 
             
-	         			transformationApplied |= apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
+	         			transformationApplied |= apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog, numTreeSplits);
 	
 				}
 			}

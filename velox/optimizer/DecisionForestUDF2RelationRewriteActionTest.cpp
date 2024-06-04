@@ -254,7 +254,8 @@ public:
     void runDecisionForestPlan(
                                int numThreads,
                                PlanBuilder& myPlan,
-                               CataLog &cataLog) {
+                               CataLog &cataLog,
+                               int batchRows) {
         // Create hivesplits for file.
         // Initializes executor.
         std::shared_ptr<folly::Executor> executor_{
@@ -265,8 +266,8 @@ public:
             std::make_shared<core::QueryCtx>(executor_.get())};
         // Set queryCtx config.
         queryCtx_->testingOverrideConfigUnsafe(
-                                               {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"},
-                                               {core::QueryConfig::kMaxOutputBatchRows, "10000"}});
+                                               {{core::QueryConfig::kPreferredOutputBatchBytes, "100000"},
+                                               {core::QueryConfig::kMaxOutputBatchRows, std::to_string(batchRows)}});
 
         std::chrono::steady_clock::time_point begin =
             std::chrono::steady_clock::now();
@@ -331,7 +332,7 @@ public:
         unregisterCustomType("tree_type");
     }
 
-    void testRewriteDecisionForestUDFPlan(std::string modelPath, std::string dataPath, bool rewrite, int numSplits) {
+    void testRewriteDecisionForestUDFPlan(std::string modelPath, std::string dataPath, bool rewrite, int numSplits, int numTreeSplit, int batchRows) {
         // register functions and types that are needed for this test
         int numRows, numCols;
         countRowsAndColumnsFromCSV(dataPath, numRows, numCols);
@@ -357,9 +358,9 @@ public:
         // Get the logical plan                  
         auto planNode = myPlan.planNode();
         // Create ruleManager
-        RuleManager ruleManager;
+        RuleManager1 ruleManager;
         // Create planState
-        PlanState planState(ruleManager);
+        PlanState1 planState(ruleManager);
 
         if (rewrite) {
             // Get possible actions for this plan
@@ -372,13 +373,13 @@ public:
             auto it = planState.actionsPair.begin();
             std::pair<std::string, std::string> testAction("decision_forest_predict", "DecisionForestUDF2RelationRewriteAction");
             // Take one rewritten action
-            planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
+            planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog, numTreeSplit);
             // Update the planState (getPossibleAction after apply one action)
             planState.update(myPlan, cataLog);
         }
         std::cout << "Query Plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
         // Run the rewritten plan
-        runDecisionForestPlan(8 /*numThreads*/, myPlan, cataLog);
+        runDecisionForestPlan(8 /*numThreads*/, myPlan, cataLog, batchRows);
     }
 
 private:
@@ -391,6 +392,8 @@ DEFINE_string(model_path, "/home/velox/resources/model/fraud_xgboost_10_8", "Pat
 DEFINE_string(data_path, "/home/velox/resources/data/creditcard_test.csv", "Path to csv file");
 DEFINE_bool(rewrite, true, "Rewrite or not");
 DEFINE_int32(num_split, 1, "Number of splits for input");
+DEFINE_int32(numTreeSplit, 8, "Number of splits for tree");
+DEFINE_int32(batchRows, 10000, "Number of rows in a batch");
 
 int main(int argc, char** argv) {
     folly::init(&argc, &argv, false);
@@ -400,11 +403,13 @@ int main(int argc, char** argv) {
     std::string dataPath = FLAGS_data_path;
     bool rewrite = FLAGS_rewrite;
     int numSplits = FLAGS_num_split;
+    int numTreeSplit = FLAGS_numTreeSplit;
+    int batchRows = FLAGS_batchRows;
 
     DecisionForestUDF2RelationRewriteActionTest demo;
 
     std::cout << fmt::format("Model: {}, Data: {}, Rewrite: {}", modelPath, dataPath, rewrite) << std::endl;
 
-    demo.testRewriteDecisionForestUDFPlan(modelPath, dataPath, rewrite, numSplits);
+    demo.testRewriteDecisionForestUDFPlan(modelPath, dataPath, rewrite, numSplits, numTreeSplit, batchRows);
 
 }
