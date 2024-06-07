@@ -78,15 +78,15 @@ class DecisionForestTest : public HiveConnectorTestBase {
 
   ~DecisionForestTest() {}
 
-  void registerFunctions(std::string modelFilePath="resources/model/fraud_xgboost_1600_8");
+  void registerFunctions(std::string modelFilePath="resources/model/fraud_xgboost_1600_8", int numCols = 28);
 
-  void run( int option, int numDataSplits, int numTreeSplits, int numTreeRows, int dataBatchSize, std::string dataFilePath, std::string modelFilePath );
+  void run( int option, int numDataSplits, int numTreeSplits, int numTreeRows, int dataBatchSize, int numRows, int numCols, std::string dataFilePath, std::string modelFilePath );
   void testingTreePredictSmall();
   void testingForestPredictSmall();
-  void testingForestPredictLarge(int numDataSplits, int dataBatchSize, std::string dataFilePath, std::string modelFilePath);
+  void testingForestPredictLarge(int numDataSplits, int dataBatchSize, int numRows, int numCols, std::string dataFilePath, std::string modelFilePath);
   void testingForestPredictCrossproductSmall();
   void testingForestPredictCrossproductLarge( bool whetherToReorderJoin, int numDataSplits, int numTreeSplits, 
-                                              uint32_t numTreeRows, int dataBatchSize, std::string dataFilePath, std::string modelFilePath );
+                                              uint32_t numTreeRows, int dataBatchSize, int numRows, int numCols, std::string dataFilePath, std::string modelFilePath );
 
   ArrayVectorPtr parseCSVFile(VectorMaker & maker, std::string filePath, int numRows, int numCols);
 
@@ -123,7 +123,7 @@ class DecisionForestTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
 };
 
-void DecisionForestTest::registerFunctions(std::string modelFilePath) {
+void DecisionForestTest::registerFunctions(std::string modelFilePath, int numCols) {
 
   std::cout <<"To register function for TreePrediction" << std::endl;
 
@@ -143,7 +143,7 @@ void DecisionForestTest::registerFunctions(std::string modelFilePath) {
   exec::registerVectorFunction(
       "velox_decision_tree_predict",
       VeloxTreePrediction::signatures(),
-      std::make_unique<VeloxTreePrediction>(28));
+      std::make_unique<VeloxTreePrediction>(numCols));
 
   std::cout << "To register function for VeloxTreeConstruction" << std::endl;
 
@@ -157,7 +157,7 @@ void DecisionForestTest::registerFunctions(std::string modelFilePath) {
   exec::registerVectorFunction(
       "decision_forest_predict",
       TreePrediction::signatures(),
-      std::make_unique<ForestPrediction>(modelFilePath, 28, true));
+      std::make_unique<ForestPrediction>(modelFilePath, numCols, true));
 
 }
 
@@ -190,8 +190,8 @@ void DecisionForestTest::testingTreePredictSmall() {
   auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::cout << "Time for Decision Tree Prediction with Small Data (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
-  std::cout << "Results:" << results->toString() << std::endl;
-  std::cout << results->toString(0, results->size()) << std::endl;
+  //std::cout << "Results:" << results->toString() << std::endl;
+  //std::cout << results->toString(0, results->size()) << std::endl;
 }
 
 void DecisionForestTest::testingForestPredictSmall() {
@@ -227,13 +227,13 @@ void DecisionForestTest::testingForestPredictSmall() {
   std::cout << results->toString(0, results->size()) << std::endl;
 }
 
-void DecisionForestTest::testingForestPredictLarge(int numDataSplits, int dataBatchSize, std::string dataFilePath, std::string modelFilePath) {
+void DecisionForestTest::testingForestPredictLarge(int numDataSplits, int dataBatchSize, int numRows, int numCols, std::string dataFilePath, std::string modelFilePath) {
 
-     registerFunctions(modelFilePath);
+     registerFunctions(modelFilePath, numCols);
    
      //int numRows = 10;
-     int numRows = 56962;
-     int numCols = 28;
+     //int numRows = 56962;
+     //int numCols = 28;
      
      //std::string dataFilePath = "resources/data/creditcard_test.csv";
      //std::string dataFilePath = "/data/decision-forest-benchmark-paper/datasets/test10.csv";
@@ -453,11 +453,11 @@ ArrayVectorPtr DecisionForestTest::parseCSVFile(VectorMaker & maker, std::string
 						    //
             float number = std::stof(numberStr);    // Convert the string to float
 
-	    if (colIndex < numCols)					    
+	        if (colIndex < numCols)					    
 
                 curRow[colIndex] = number;
 
-	            colIndex ++;
+	        colIndex ++;
 
         }
 
@@ -515,14 +515,14 @@ RowVectorPtr DecisionForestTest::writeDataToFile(std::string csvFilePath, int nu
 
 
 void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReorderJoin, int numDataSplits, int numTreeSplits, 
-                                                               uint32_t numTreeRows, int dataBatchSize, std::string dataFilePath, 
+                                                               uint32_t numTreeRows, int dataBatchSize, int numRows, int numCols, std::string dataFilePath, 
                                                                std::string forestFolderPath) {
   
-  registerFunctions();
+  registerFunctions(forestFolderPath, numCols);
 
   //int numRows = 10;
-  int numRows = 56962;
-  int numCols = 28;
+  //int numRows = 56962;
+  //int numCols = 28;
 
   //std::string dataFilePath = "resources/data/creditcard_test.csv";
   //std::string dataFilePath = "/data/decision-forest-benchmark-paper/datasets/test10.csv";
@@ -706,17 +706,17 @@ void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReo
 
 }
 
-void DecisionForestTest::run(int option, int numDataSplits, int numTreeSplits, int numTreeRows, int dataBatchSize, std::string dataFilePath, std::string modelFilePath) {
+void DecisionForestTest::run(int option, int numDataSplits, int numTreeSplits, int numTreeRows, int dataBatchSize, int numRows, int numCols, std::string dataFilePath, std::string modelFilePath) {
 
   std::cout << "Option is " << option << std::endl;
 
   if (option == 1)
 
-      testingForestPredictCrossproductLarge(true, numDataSplits, numTreeSplits, numTreeRows, dataBatchSize, dataFilePath, modelFilePath);
+      testingForestPredictCrossproductLarge(true, numDataSplits, numTreeSplits, numTreeRows, dataBatchSize, numRows, numCols, dataFilePath, modelFilePath);
 
   else if (option == 2)
 
-      testingForestPredictLarge(numDataSplits, dataBatchSize, dataFilePath, modelFilePath);
+      testingForestPredictLarge(numDataSplits, dataBatchSize, numRows, numCols, dataFilePath, modelFilePath);
 
   else
 
@@ -729,6 +729,8 @@ DEFINE_int32(numDataSplits, 16, "number of data splits");
 DEFINE_int32(numTreeSplits, 16, "number of tree splits");
 DEFINE_int32(numTreeRows, 100, "batch size for processing trees");
 DEFINE_int32(dataBatchSize, 100, "batch size for processing input samples");
+DEFINE_int32(numRows, 10, "number of tuples in the dataset to be predicted");
+DEFINE_int32(numCols, 10, "number of columns in the dataset to be predicted");
 DEFINE_string(dataFilePath, "resources/data/creditcard_test.csv", "path to input dataset to be predicted");
 DEFINE_string(modelFilePath, "resources/model/fraud_xgboost_1600_8", "path to the model used for prediction");
 
@@ -743,15 +745,17 @@ int main(int argc, char** argv) {
   int numTreeSplits = FLAGS_numTreeSplits;
   int numTreeRows = FLAGS_numTreeRows;
   int dataBatchSize = FLAGS_dataBatchSize;
+  int numRows = FLAGS_numRows;
+  int numCols = FLAGS_numCols;
   std::string dataFilePath = FLAGS_dataFilePath;
   std::string modelFilePath = FLAGS_modelFilePath;
 
   DecisionForestTest demo;
 
-  std::cout << fmt::format("Option: {}, numDataSplits: {}, numTreeSplits: {}, numTreeRows: {}, dataBatchSize: {}, dataFilePath: {}, modelFilePath: {}", 
-                           option, numDataSplits, numTreeSplits, numTreeRows, dataBatchSize, dataFilePath, modelFilePath) 
+  std::cout << fmt::format("Option: {}, numDataSplits: {}, numTreeSplits: {}, numTreeRows: {}, dataBatchSize: {}, numRows: {}, numCols: {}, dataFilePath: {}, modelFilePath: {}", 
+                           option, numDataSplits, numTreeSplits, numTreeRows, numRows, numCols, dataBatchSize, dataFilePath, modelFilePath) 
       << std::endl;
 
-  demo.run(option, numDataSplits, numTreeSplits, numTreeRows, dataBatchSize, dataFilePath, modelFilePath);
+  demo.run(option, numDataSplits, numTreeSplits, numTreeRows, dataBatchSize, numRows, numCols, dataFilePath, modelFilePath);
 
 }
