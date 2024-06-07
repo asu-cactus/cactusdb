@@ -23,12 +23,15 @@
 #include "velox/common/file/FileSystems.h"
 #include "velox/core/PlanNode.h"
 #include "velox/core/Expressions.h"
+#include "velox/dwio/dwrf/writer/Writer.h"
+#include "velox/exec/tests/utils/HiveConnectorTestBase.h" 
 #include "velox/ml_functions/DecisionTree.h"
 #include "velox/ml_functions/DecisionForest.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
 #include "velox/ml_functions/VeloxDecisionTree.h"
 #include "velox/core/ITypedExpr.h"
+#include "velox/optimizer/Helper.h"
 #include <regex>
 
 using namespace ml;
@@ -41,7 +44,7 @@ using namespace facebook::velox::core;
 
 namespace optimization {
 
-class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
+class DecisionForestUDF2RelationRewriteAction : public RewriteAction1 {
 
 public:
 
@@ -68,7 +71,8 @@ public:
 	       std::shared_ptr<memory::MemoryPool> pool_,
 	       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
 		   std::vector<std::string> targets,
-		   CataLog &cataLog) override {
+		   CataLog &cataLog,
+           int numTreeSplits) override {
 			bool transformationApplied = false;
 			for (auto target : targets) {
 
@@ -114,8 +118,10 @@ public:
 
 										std::shared_ptr<VectorFunction> myUDF = getVectorFunction(callName, {ARRAY(REAL())}, {}, config);
 										int numTrees;
+										std::vector<std::shared_ptr<TempFilePath>> treePaths;
 
 										if (myUDF) {
+                                            std::cout << "In MyUDF" << std::endl;
 									
 											std::shared_ptr<ForestPrediction> myDecisionForestUDF = dynamic_pointer_cast<ForestPrediction>(myUDF);
 
@@ -129,23 +135,33 @@ public:
 
 												numTrees = pathVectors.size();
 
-												auto model = maker.flatVector<StringView> (pathVectors.size());
+												//int numTreeSplits = 8;
+												uint32_t numTreeRowsPerSplit = ceil(numTrees / numTreeSplits);
+												uint32_t treeIndex = 0;
+												optimization::MyFileTest myFile;
+												for (size_t i = 0; i < numTreeSplits; i++) {
+													auto startIdx = treeIndex;
+													auto endIdx = treeIndex + (i + 1) * numTreeRowsPerSplit;
+													endIdx = (endIdx < numTrees) ? endIdx : numTrees;
+													size_t numDataInPartition = endIdx - startIdx;
 
-												for (int i = 0; i < numTrees; i++) {
+													auto model = maker.flatVector<StringView> (numDataInPartition);
+													auto treeIndexVector = maker.flatVector<int16_t>(numDataInPartition);
+													for (int j = 0; j < numDataInPartition; j++) {
+														model->set(j, StringView(pathVectors[treeIndex].c_str()));
+														treeIndexVector->set(j, treeIndex);
+														treeIndex += 1;
+													}
 
-													model->set(i, StringView(pathVectors[i].c_str()));
+													treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
 
+													auto file = TempFilePath::create();
+													auto config = std::make_shared<facebook::velox::dwrf::Config>();
+													myFile.writeToFile(file->path, {treeRowVector}, config);
+													treePaths.push_back(file);
 												}
+												assert(treeIndex == numTrees);
 
-												auto treeIndexVector = maker.flatVector<int16_t>(numTrees);
-
-												for (int i = 0; i < numTrees; i++) {
-
-													treeIndexVector->set(i, i);
-
-												}
-
-												treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
 										
 											}
 									
@@ -161,18 +177,28 @@ public:
 											// We build the plan from this point
 											core::PlanNodeId p1;
 									
-											planBuilder = planBuilder.nestedLoopJoin(exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-															.values({treeRowVector})
-															.capturePlanNodeId(p1)
-															.project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
-															.planNode(), {"idx", "v", "tree_id", "tree"})
-															.project({"idx as idx", "tree_id as tree_id", "velox_decision_tree_predict(v, tree) as prediction"})
-															.aggregation({"idx"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
-															.project({"idx as idx", "if (sum > 0.0, 1.0, 0.0)"});
+											planBuilder = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())                                                                                                                                                       
+                                                            .tableScan(asRowType(treeRowVector->type()))
+                                                            .capturePlanNodeId(p1)                                                                                                                                                                                        
+                                                            .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})                                                                                                                          
+                                                            .nestedLoopJoin(planBuilder.planNode(), 
+																															{"idx", "v", "tree_id", "tree"})                                                                                                                                                                 
+                                                            .project({"idx as idx", "tree_id as tree_id", "velox_decision_tree_predict(v, tree) as prediction"})                                                                                                          
+                                                            .aggregation({"idx"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)                                                                                                            
+                                                            .project({"idx as idx", "if (sum > 0.0, 1.0, 0.0)"});       
+   // 										planBuilder = planBuilder.nestedLoopJoin(exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+   // 														.tableScan(asRowType(tree){treeRowVector})
+   // 														.capturePlanNodeId(p1)
+   // 														.project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
+   // 														.planNode(), {"idx", "v", "tree_id", "tree"})
+   // 														.project({"idx as idx", "tree_id as tree_id", "velox_decision_tree_predict(v, tree) as prediction"})
+   // 														.aggregation({"idx"}, {"sum(prediction) as sum"},{}, core::AggregationNode::Step::kPartial, false)
+   // 														.project({"idx as idx", "if (sum > 0.0, 1.0, 0.0)"});
 
 											std::shared_ptr<OutputStat> inputStat = std::make_shared<OutputStat>(OutputStat(numTrees,1));
 											Source inputSource = Source(p1, Source::Type::FILE, std::move(inputStat));
 											cataLog.addSource(std::make_shared<Source>(inputSource));
+											cataLog.setIdAddressMap(p1, treePaths);
 
 											transformationApplied = true;
 										}
@@ -213,7 +239,7 @@ public:
 
             		for (auto source : sources)       		 
             
-	         			transformationApplied |= apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog);
+	         			transformationApplied |= apply(source, curNode, maker, planBuilder, pool_, planNodeIdGenerator, targets, cataLog, numTreeSplits);
 	
 				}
 			}

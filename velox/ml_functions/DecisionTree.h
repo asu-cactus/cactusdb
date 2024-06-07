@@ -263,6 +263,7 @@ class Tree {
           : tree[curIndex].rightChild;
     }
     float result = (float)(tree[curIndex].leafValue);
+    //std::cout << curBase << ":" << this->treeId << "=" << result << std::endl;
     return result;
   }
 
@@ -387,4 +388,4 @@ class TreePrediction : public MLFunction {
   bool hasMissing;
 };
 
-} // namespace ml
+} // namespace 
