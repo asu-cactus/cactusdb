@@ -13,8 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <boost/interprocess/detail/os_file_functions.hpp>
 #include <folly/init/Init.h>
+#include <pstl/pstl_config.h>
 #include <torch/torch.h>
+#include <cwchar>
 #include <random>
 #include <fcntl.h>
 #include <unistd.h>
@@ -25,6 +28,7 @@
 #include <string>
 #include <cstdlib>
 #include <cstring>
+#include <type_traits>
 #include "velox/common/file/FileSystems.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/parquet/RegisterParquetReader.h"
@@ -74,15 +78,20 @@ class DecisionForestTest : public HiveConnectorTestBase {
 
   ~DecisionForestTest() {}
 
-  void registerFunctions();
+  void registerFunctions(std::string modelFilePath="resources/model/fraud_xgboost_1600_8");
 
-  void run( bool whetherToReorderJoin);
+  void run( int option, int numDataSplits, int numTreeSplits, int numTreeRows, int dataBatchSize, std::string dataFilePath, std::string modelFilePath );
   void testingTreePredictSmall();
   void testingForestPredictSmall();
+  void testingForestPredictLarge(int numDataSplits, int dataBatchSize, std::string dataFilePath, std::string modelFilePath);
   void testingForestPredictCrossproductSmall();
-  void testingForestPredictCrossproductLarge( bool whetherToReorderJoin );
+  void testingForestPredictCrossproductLarge( bool whetherToReorderJoin, int numDataSplits, int numTreeSplits, 
+                                              uint32_t numTreeRows, int dataBatchSize, std::string dataFilePath, std::string modelFilePath );
 
   ArrayVectorPtr parseCSVFile(VectorMaker & maker, std::string filePath, int numRows, int numCols);
+
+  RowVectorPtr writeDataToFile(std::string csvFilePath, int numRows, int numCols, int numDataSplits, 
+                               std::string outPath, int dataBatchSize);
 
   void SetUp() override {
     // TODO: not used for now
@@ -114,7 +123,7 @@ class DecisionForestTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
 };
 
-void DecisionForestTest::registerFunctions() {
+void DecisionForestTest::registerFunctions(std::string modelFilePath) {
 
   std::cout <<"To register function for TreePrediction" << std::endl;
 
@@ -148,7 +157,7 @@ void DecisionForestTest::registerFunctions() {
   exec::registerVectorFunction(
       "decision_forest_predict",
       TreePrediction::signatures(),
-      std::make_unique<ForestPrediction>("resources/model/fraud_xgboost_1600_8", 28, true));
+      std::make_unique<ForestPrediction>(modelFilePath, 28, true));
 
 }
 
@@ -217,6 +226,85 @@ void DecisionForestTest::testingForestPredictSmall() {
   std::cout << "Results:" << results->toString() << std::endl;
   std::cout << results->toString(0, results->size()) << std::endl;
 }
+
+void DecisionForestTest::testingForestPredictLarge(int numDataSplits, int dataBatchSize, std::string dataFilePath, std::string modelFilePath) {
+
+     registerFunctions(modelFilePath);
+   
+     //int numRows = 10;
+     int numRows = 56962;
+     int numCols = 28;
+     
+     //std::string dataFilePath = "resources/data/creditcard_test.csv";
+     //std::string dataFilePath = "/data/decision-forest-benchmark-paper/datasets/test10.csv";
+
+     auto dataFile = TempFilePath::create();                                                                      
+                      
+     std::string path = dataFile->path;
+
+     RowVectorPtr inputRowVector = writeDataToFile(dataFilePath, numRows, numCols, numDataSplits, path, dataBatchSize);
+
+     auto dataHiveSplits =  makeHiveConnectorSplits(path, numDataSplits, dwio::common::FileFormat::DWRF);
+
+     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+ 
+     core::PlanNodeId p0;
+
+     auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                     .tableScan(asRowType(inputRowVector->type()))
+                     .capturePlanNodeId(p0)
+                     .project({"decision_forest_predict(x)"})
+                     .planFragment();
+
+     // print statistics of a plan
+     queryCtx_->testingOverrideConfigUnsafe(
+         {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"}, 
+         {core::QueryConfig::kMaxOutputBatchRows, "100000"}});
+   
+     auto task = exec::Task::create("0", myPlan , 0, queryCtx_,
+           [](RowVectorPtr result, ContinueFuture* /*unused*/) {
+           if(result) {
+                 //std::cout << result->toString() << std::endl;
+                 //std::cout << result->toString(0, result->size()) << std::endl;
+           }      
+           return exec::BlockingReason::kNotBlocked;
+    });
+   
+    std::cout << "Data Hive splits:" << std::endl;
+    for(auto& split : dataHiveSplits) {
+         std::cout << split->toString() << std::endl;
+         task->addSplit(p0, exec::Split(std::move(split)));
+    }
+   
+ 
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+ 
+    int veloxThreads = 8;
+
+    task->start(veloxThreads);
+     
+ 
+    task->noMoreSplits(p0);
+   
+ 
+    // Start task with 2 as maximum drivers and wait for execution to finish
+    waitForFinishedDrivers(task);
+   
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+   
+    std::stringstream ss;
+
+    ss << numRows << "," << numDataSplits << "," << veloxThreads << ",";
+   
+    std::cout << "Time for Decision Forest Prediction with Input Data (sec): " << std::endl;
+
+    std::cout << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+ 
+    std::cout << ss.str() << std::endl;
+ 
+}
+
+
 
 
 void DecisionForestTest::testingForestPredictCrossproductSmall() {
@@ -335,6 +423,13 @@ ArrayVectorPtr DecisionForestTest::parseCSVFile(VectorMaker & maker, std::string
 
     std::ifstream file(filePath.c_str());
 
+    if (file.fail()) {
+
+        std::cerr << "Data File:" << filePath << " => Read Error" << std::endl;
+        exit(1);
+
+    }
+
     std::vector<std::vector<float>> inputArrayVector;
 
     
@@ -352,7 +447,7 @@ ArrayVectorPtr DecisionForestTest::parseCSVFile(VectorMaker & maker, std::string
 
         std::string numberStr;
 
-	int colIndex = 0;
+	    int colIndex = 0;
 
         while (std::getline(iss, numberStr, ',')) { // Read each number separated by comma
 						    //
@@ -362,11 +457,11 @@ ArrayVectorPtr DecisionForestTest::parseCSVFile(VectorMaker & maker, std::string
 
                 curRow[colIndex] = number;
 
-	    colIndex ++;
+	            colIndex ++;
 
         }
 
-	inputArrayVector.push_back(curRow);
+	    inputArrayVector.push_back(curRow);
     }
 
     file.close();
@@ -375,34 +470,66 @@ ArrayVectorPtr DecisionForestTest::parseCSVFile(VectorMaker & maker, std::string
     
     return tensor;
 
-} 
+}
 
-void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReorderJoin) {
+RowVectorPtr DecisionForestTest::writeDataToFile(std::string csvFilePath, int numRows, int numCols, 
+                                                 int numDataSplits, std::string outPath, int dataBatchSize) {
+
+    ArrayVectorPtr inputArrayVector = parseCSVFile(maker, csvFilePath, numRows, numCols);
+  
+    std::vector<int32_t> indexVector;
+  
+    for (int i = 0; i < numRows; i++) {
+  
+       indexVector.push_back(i);
+  
+    }
+  
+    auto inputIndexVector = maker.flatVector<int32_t>(indexVector);
+  
+    auto inputRowVector = maker.rowVector({"row_id", "x"}, {inputIndexVector, inputArrayVector});
+
+    auto dataConfig = std::make_shared<facebook::velox::dwrf::Config>();
+  
+    // affects the number of splits
+    // number of bites in each stripe (collection of rows)
+    // strip size should be <= split size (total_size / total splits)
+    // to have the desired number of splits
+    uint64_t kDataSizeKB = 512UL;
+
+    uint32_t numDataRows = dataBatchSize;
+  
+    dataConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 799 * kDataSizeKB);
+  
+    dataConfig->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, numDataRows);
+  
+    // auto dataFile = TempFilePath::create();
+
+    // outPath = dataFile->path;
+
+    writeToFile(outPath, {inputRowVector}, dataConfig);
+
+    return inputRowVector;
+
+}
+
+
+void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReorderJoin, int numDataSplits, int numTreeSplits, 
+                                                               uint32_t numTreeRows, int dataBatchSize, std::string dataFilePath, 
+                                                               std::string forestFolderPath) {
   
   registerFunctions();
 
+  //int numRows = 10;
   int numRows = 56962;
   int numCols = 28;
 
-  std::string dataFilePath = "resources/data/creditcard_test.csv";
-
-  ArrayVectorPtr inputArrayVector = parseCSVFile(maker, dataFilePath, numRows, numCols);
-
-  std::vector<int32_t> indexVector;
-
-  for (int i = 0; i < numRows; i++) {
-
-     indexVector.push_back(i);
-
-  }
-
-  auto inputIndexVector = maker.flatVector<int32_t>(indexVector);
-
-  auto inputRowVector = maker.rowVector({"row_id", "x"}, {inputIndexVector, inputArrayVector});
+  //std::string dataFilePath = "resources/data/creditcard_test.csv";
+  //std::string dataFilePath = "/data/decision-forest-benchmark-paper/datasets/test10.csv";
 
   std::vector<std::string> pathVectors;
 
-  string forestFolderPath = "resources/model/fraud_xgboost_1600_8";
+  //string forestFolderPath = "resources/model/fraud_xgboost_1600_8";
 
   Forest::vectorizeForestFolder(forestFolderPath, pathVectors);
 
@@ -426,31 +553,14 @@ void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReo
 
   auto treeRowVector = maker.rowVector({"tree_id", "tree_path"}, {treeIndexVector, model});
 
-  auto dataConfig = std::make_shared<facebook::velox::dwrf::Config>();
-
-  // affects the number of splits
-  // number of bites in each stripe (collection of rows)
-  // strip size should be <= split size (total_size / total splits)
-  // to have the desired number of splits
-  uint64_t kDataSizeKB = 512UL;
-
-  int numDataSplits = 16;
-
-  // used for indexing.
-  // 2k rows will be processed in every call
-  // but doesn't effect number of splits
-  // if stripe size is a large value
-  uint32_t numDataRows = numRows/numDataSplits+1;
-
-  dataConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 799 * kDataSizeKB);
-
-  dataConfig->set(facebook::velox::dwrf::Config::ROW_INDEX_STRIDE, numDataRows);
 
   auto dataFile = TempFilePath::create();
+       
+  std::string path = dataFile->path;
 
-  writeToFile(dataFile->path, {inputRowVector}, dataConfig);
+  auto inputRowVector = writeDataToFile(dataFilePath, numRows, numCols, numDataSplits, path, dataBatchSize);
 
-  auto dataHiveSplits =  makeHiveConnectorSplits(dataFile->path, numDataSplits, dwio::common::FileFormat::DWRF);
+  auto dataHiveSplits =  makeHiveConnectorSplits(path, numDataSplits, dwio::common::FileFormat::DWRF);
 
   auto treeConfig = std::make_shared<facebook::velox::dwrf::Config>();
 
@@ -460,13 +570,11 @@ void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReo
   // to have the desired number of splits
   uint64_t kTreeSizeKB = 1UL;
   
-  int numTreeSplits = 16;
-
   // used for indexing. 
   // 2k rows will be processed in every call
   // but doesn't effect number of splits
   // if stripe size is a large value
-  uint32_t numTreeRows = numTrees/numTreeSplits+1;
+  //uint32_t numTreeRows = 100;
 
   treeConfig->set(facebook::velox::dwrf::Config::STRIPE_SIZE, 1 * kTreeSizeKB);
 
@@ -496,54 +604,71 @@ void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReo
                           .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
                           .planNode(), {"row_id", "x", "tree_id", "tree"})
                    .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
-                   .aggregation({"row_id"},
-                                {"sum(prediction) as sum"},
-                                {},
-                                core::AggregationNode::Step::kPartial,
-                                false)
+                   .singleAggregation({"row_id"},
+                                {"sum(prediction) as sum"})
                    .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
                    .planFragment();
   } else {
-      myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                  .tableScan(asRowType(treeRowVector->type()))
-		  .capturePlanNodeId(p1)
-                  .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
-                  .nestedLoopJoin(
-                      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                          .tableScan(asRowType(inputRowVector->type()))
-                          .capturePlanNodeId(p0)
-                          .planNode(), {"row_id", "x", "tree_id", "tree"})
-                   .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
-                   .aggregation({"row_id"},
-                                {"sum(prediction) as sum"},
-                                {},
-                                core::AggregationNode::Step::kPartial,
-                                false)
-                   .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
-                   .planFragment();
+      //myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+        //          .tableScan(asRowType(treeRowVector->type()))
+		  //        .capturePlanNodeId(p1)
+            //      .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
+              //    .nestedLoopJoin(
+                //      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                  //        .tableScan(asRowType(inputRowVector->type()))
+                    //      .capturePlanNodeId(p0)
+                      //    .planNode(), {"row_id", "x", "tree_id", "tree"})
+               //    .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
+                 //  .partialAggregation({"row_id"},
+                   //           {"sum(prediction) as weight"})
+                 //  .localPartition({"row_id"})
+                 //  .singleAggregation({"row_id"},
+                   //              {"sum(weight) as sum"})
+                 //  .project({"row_id as row_id", "if (sum > 0.0, 1.0, 0.0)"})
+                 //  .planFragment();
+                 //
+     myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(asRowType(treeRowVector->type()))
+                .capturePlanNodeId (p1)
+                .project({"tree_id as tree_id", "velox_decision_tree_construct(tree_path) as tree"})
+                .nestedLoopJoin(
+                      exec::test::PlanBuilder(planNodeIdGenerator, pool_.get()) 
+                      .tableScan(asRowType(inputRowVector->type()))
+                      .capturePlanNodeId(p0)
+                      .planNode(), {"row_id", "x", "tree_id", "tree"}
+                               )
+                .project({"row_id as row_id", "tree_id as tree_id", "velox_decision_tree_predict(x, tree) as prediction"})
+                .partialAggregation({"row_id"}, {"sum(prediction) as weight"})
+                .localPartition({"row_id"})
+                .finalAggregation()
+                .project({"row_id as row_id", "if (weight > 0.0, 1.0, 0.0)"})
+                .planFragment();
   }
 
   // print statistics of a plan
   queryCtx_->testingOverrideConfigUnsafe(
-      {{core::QueryConfig::kPreferredOutputBatchBytes, "1000000"}, 
-      {core::QueryConfig::kMaxOutputBatchRows, "100000"}});
+      {{core::QueryConfig::kPreferredOutputBatchBytes, "10000000"}, 
+      {core::QueryConfig::kMaxOutputBatchRows, "1000000"}});
 
   auto task = exec::Task::create("0", myPlan , 0, queryCtx_,
         [](RowVectorPtr result, ContinueFuture* /*unused*/) {
-          if(result)
-               std::cout << result->toString() << std::endl;
+          if(result) {
+               //std::cout << result->toString() << std::endl;
+               //std::cout << result->toString(0, result->size()) << std::endl;
+          }
           return exec::BlockingReason::kNotBlocked;
   });
 
  std::cout << "Data Hive splits:" << std::endl;
  for(auto& split : dataHiveSplits) {
-      // std::cout << split->toString() << std::endl;
+      std::cout << split->toString() << std::endl;
       task->addSplit(p0, exec::Split(std::move(split)));
  }
 
  if (whetherToReorderJoin) {
       std::cout << "Tree Hive splits:" << std::endl;
       for(auto& split : treeHiveSplits) {
+          std::cout << split->toString() << std::endl;
           task->addSplit(p1, exec::Split(std::move(split)));
       }
   }
@@ -569,7 +694,7 @@ void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReo
   
   std::stringstream ss;
   
-  ss << numDataRows << "," << numDataSplits << "," << numTreeRows << "," << numTreeSplits << "," << veloxThreads << ",";
+  ss << numRows << "," << numDataSplits << "," << numTreeRows << "," << numTreeSplits << "," << veloxThreads << ",";
   
   std::cout << "Time for Decision Forest Prediction with Input Data (sec): " << std::endl;
   
@@ -581,44 +706,52 @@ void DecisionForestTest::testingForestPredictCrossproductLarge(bool whetherToReo
 
 }
 
-void DecisionForestTest::run(bool whetherToReorderJoin) {
+void DecisionForestTest::run(int option, int numDataSplits, int numTreeSplits, int numTreeRows, int dataBatchSize, std::string dataFilePath, std::string modelFilePath) {
 
-  string forestFolderPath = "resources/model/fraud_xgboost_1600_8";
+  std::cout << "Option is " << option << std::endl;
 
-  DIR * dir = opendir(forestFolderPath.c_str());
+  if (option == 1)
 
-  if (!dir) {
+      testingForestPredictCrossproductLarge(true, numDataSplits, numTreeSplits, numTreeRows, dataBatchSize, dataFilePath, modelFilePath);
 
-      std::cout << "Please check whether folder exists in resources/model/fraud_xgboost_1600_8 under the velox root directory.\n"
-              << "Also, you need to execute the test from the velox root directory like the following:\n"
-              << "cd velox\n"
-              << "./_build/release/velox/ml_functions/decision_forest_prediction_test\n"
-              << std::endl;
-      
-      exit(1);
+  else if (option == 2)
 
-  }
-  closedir(dir);
-   
-  //testingTreePredictSmall();
-  //testingForestPredictSmall();
-  //testingForestPredictCrossproductSmall();
-  testingForestPredictCrossproductLarge(whetherToReorderJoin);
+      testingForestPredictLarge(numDataSplits, dataBatchSize, dataFilePath, modelFilePath);
+
+  else
+
+      std::cout << "2 for UDF-centric (without rewriting) and 1 for Relation-centric (with rewriting)" << std::endl;
 }
 
 
-DEFINE_bool(reorder, true, "Whether to reorder join");
+DEFINE_int32(rewriteOrNot, 2, "1 for UDF-centric without rewriting and 2 for Relation-centric with rewriting");
+DEFINE_int32(numDataSplits, 16, "number of data splits");
+DEFINE_int32(numTreeSplits, 16, "number of tree splits");
+DEFINE_int32(numTreeRows, 100, "batch size for processing trees");
+DEFINE_int32(dataBatchSize, 100, "batch size for processing input samples");
+DEFINE_string(dataFilePath, "resources/data/creditcard_test.csv", "path to input dataset to be predicted");
+DEFINE_string(modelFilePath, "resources/model/fraud_xgboost_1600_8", "path to the model used for prediction");
 
 int main(int argc, char** argv) {
+
   folly::init(&argc, &argv, false);
+
   memory::MemoryManager::initialize({});
 
-  bool reorder = FLAGS_reorder;
+  int option = FLAGS_rewriteOrNot;
+  int numDataSplits = FLAGS_numDataSplits;
+  int numTreeSplits = FLAGS_numTreeSplits;
+  int numTreeRows = FLAGS_numTreeRows;
+  int dataBatchSize = FLAGS_dataBatchSize;
+  std::string dataFilePath = FLAGS_dataFilePath;
+  std::string modelFilePath = FLAGS_modelFilePath;
 
   DecisionForestTest demo;
 
-  std::cout << fmt::format("Reorder: {}", reorder) << std::endl;
+  std::cout << fmt::format("Option: {}, numDataSplits: {}, numTreeSplits: {}, numTreeRows: {}, dataBatchSize: {}, dataFilePath: {}, modelFilePath: {}", 
+                           option, numDataSplits, numTreeSplits, numTreeRows, dataBatchSize, dataFilePath, modelFilePath) 
+      << std::endl;
 
-  demo.run(reorder);
+  demo.run(option, numDataSplits, numTreeSplits, numTreeRows, dataBatchSize, dataFilePath, modelFilePath);
 
 }
