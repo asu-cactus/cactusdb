@@ -190,6 +190,23 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(duckdb_optimizer_test tests/DuckDBOptimizerTest.cpp)
+target_link_libraries(
+  duckdb_optimizer_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
 add_executable(array_array_unnest_test tests/ArrayofArrayUnnestTest.cpp)
 target_link_libraries(
   array_array_unnest_test
