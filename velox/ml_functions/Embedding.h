@@ -18,7 +18,10 @@ using namespace facebook::velox::memory;
 class Embedding : public MLFunction {
  public:
   Embedding(float* weights, int numEmbeddings, int embeddingDims) {
-    weights_ = weights;
+    // Create a deep copy of the weights
+    weights_ = new float[numEmbeddings * embeddingDims]; 
+    std::memcpy(weights_, weights, numEmbeddings * embeddingDims * sizeof(float));
+    // weights_ = std::move(weights);
     dims.push_back(numEmbeddings);
     dims.push_back(embeddingDims);
   }
@@ -36,13 +39,16 @@ class Embedding : public MLFunction {
       exec::EvalCtx& context,
       VectorPtr& output) const override {
       BaseVector::ensureWritable(rows, type, context.pool(), output);
-      auto indicesVector = args[0]->as<ArrayVector>()->elements();
+
+      BaseVector* input = args[0].get();
+      exec::LocalDecodedVector inputHolder(context, *input, rows);
+      auto decodedInputArray = inputHolder.get();
+      auto arrayVector = decodedInputArray->base()->as<ArrayVector>();
+      auto indicesVector = arrayVector->elements();
       int* indicesValues = indicesVector->values()->asMutable<int>();
+
       int numInputs = rows.size();
 
-      auto indicesRowVector = args[0];
-
-      auto arrayVector = args[0]->as<ArrayVector>();
 
       // You can also use sizeof(*arrayVector->rawSizes()) to compute the size of
       // a single entry in BufferPtr
