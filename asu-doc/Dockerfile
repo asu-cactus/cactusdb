@@ -96,7 +96,7 @@ RUN pip install ./[ray]
 WORKDIR /home
 RUN git clone https://github.com/libcpr/cpr.git \
     && cd cpr && mkdir build && cd build \
-    && cmake .. && cmake --build . --parallel \
+    && cmake .. -DCPR_USE_SYSTEM_CURL=ON && cmake --build . --parallel \
     && make install 
 
 # set up duckdb
