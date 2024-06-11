@@ -19,8 +19,13 @@ using namespace facebook::velox::memory;
 class BatchNorm1D : public MLFunction {
  public:
   BatchNorm1D(float* weights, float* bias, int numDims, float eps = 1e-05) {
-    weights_ = weights;
-    bias_ = bias;
+    // Create a deep copy of the weights
+    weights_ = new float[numDims];
+    bias_ = new float[numDims];
+    std::memcpy(weights_, weights, numDims * sizeof(float));
+    std::memcpy(bias_, bias, numDims * sizeof(float));
+    // weights_ = weights;
+    // bias_ = bias;
     eps_ = eps;
     dims.push_back(numDims);
   }
