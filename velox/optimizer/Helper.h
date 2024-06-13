@@ -16,6 +16,8 @@
 #pragma once
 #include <iostream>
 #include <vector>
+#include "velox/common/base/Fs.h"
+#include "velox/common/file/FileSystems.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
 
@@ -156,7 +158,8 @@ create_blocks(int row, int col, float* values, int block_size) {
 }
 
 FileStructure save_blocks_to_files(
-    std::vector<std::vector<float>> valuesArray, std::string name) {
+    std::vector<std::vector<float>> valuesArray,
+    std::string name) {
   optimization::MyFileTest myFile;
   optimization::FileStructure myFileStructure;
   std::vector<std::shared_ptr<TempFilePath>> paths;
@@ -170,7 +173,7 @@ FileStructure save_blocks_to_files(
   // Use maker to create rowVector for "w", "w_row", and "w_col"
   for (int i = 0; i < parts; i++) {
     input = maker.rowVector(
-        {name+"_wb", "w_row", "w_col"},
+        {name + "_wb", "w_row", "w_col"},
         {maker.arrayVector<float>({valuesArray[i]}, REAL()),
          maker.flatVector({indexs[0][i]}),
          maker.flatVector({indexs[1][i]})});
@@ -248,7 +251,7 @@ void replaceSourceWithIdInSerializedPlan(
     folly::dynamic& serializedPlan,
     folly::dynamic& serializedNewSource,
     std::string nodeId) {
-  if (serializedPlan["sources"].isNull()){
+  if (serializedPlan["sources"].isNull()) {
     return;
   }
   for (auto& source : serializedPlan["sources"]) {
@@ -256,45 +259,66 @@ void replaceSourceWithIdInSerializedPlan(
       source = serializedNewSource;
       return;
     } else {
-      optimization::replaceSourceWithIdInSerializedPlan(source, serializedNewSource, nodeId);
+      optimization::replaceSourceWithIdInSerializedPlan(
+          source, serializedNewSource, nodeId);
     }
   }
 }
 
-std::string extractExprWithinTarget(const std::string& source, const std::string& target) {
-    size_t pos = source.find(target);
-    if (pos == std::string::npos) {
-        return ""; // Target function not found in source
-    }
+std::string extractExprWithinTarget(
+    const std::string& source,
+    const std::string& target) {
+  size_t pos = source.find(target);
+  if (pos == std::string::npos) {
+    return ""; // Target function not found in source
+  }
 
-    int count = 0;
-    size_t start_pos = source.find('(', pos);
-    for (size_t i = start_pos + 1; i < source.size(); ++i) {
-        if (source[i] == '(') {
-            ++count;
-        } else if (source[i] == ')') {
-            if (count == 0) {
-                return source.substr(start_pos + 1, i - start_pos - 1);
-            } else {
-                --count;
-            }
-        }
+  int count = 0;
+  size_t start_pos = source.find('(', pos);
+  for (size_t i = start_pos + 1; i < source.size(); ++i) {
+    if (source[i] == '(') {
+      ++count;
+    } else if (source[i] == ')') {
+      if (count == 0) {
+        return source.substr(start_pos + 1, i - start_pos - 1);
+      } else {
+        --count;
+      }
     }
-    return ""; // Matching ')' not found
+  }
+  return ""; // Matching ')' not found
 }
 
 std::string escapeRegex(const std::string& str) {
-    std::string escapedStr;
-    for (char c : str) {
-        if (c == '\\' || c == '[' || c == ']' || c == '(' || c == ')' || c == '{' || c == '}' ||
-            c == '+' || c == '*' || c == '?' || c == '.' || c == '^' || c == '$' || c == '|') {
-            escapedStr += '\\'; // Add escape character
-        }
-        escapedStr += c;
+  std::string escapedStr;
+  for (char c : str) {
+    if (c == '\\' || c == '[' || c == ']' || c == '(' || c == ')' || c == '{' ||
+        c == '}' || c == '+' || c == '*' || c == '?' || c == '.' || c == '^' ||
+        c == '$' || c == '|') {
+      escapedStr += '\\'; // Add escape character
     }
-    return escapedStr;
+    escapedStr += c;
+  }
+  return escapedStr;
 }
 
-
+// Iterate over all files in a directory and return their paths
+std::vector<std::string> getFilePathsFromDir(
+    const std::string& dirPath) {
+  std::vector<std::string> filePaths;
+  for (auto const& dirEntry :
+       fs::directory_iterator(dirPath)) {
+    if (!dirEntry.is_regular_file()) {
+      continue;
+    }
+    // Ignore hidden files.
+    if (dirEntry.path().filename().c_str()[0] == '.') {
+      continue;
+    }
+    // auto dataFile = CustomTempFilePath::create(dirEntry.path());
+    filePaths.push_back(dirEntry.path());
+  }
+  return filePaths;
+}
 
 } // namespace optimization

@@ -176,6 +176,34 @@ HiveConnectorTestBase::makeHiveConnectorSplits(
   return splits;
 }
 
+std::vector<std::shared_ptr<connector::ConnectorSplit>>
+HiveConnectorTestBase::makeHiveConnectorSplits(
+    const std::vector<std::shared_ptr<TempFilePath>>& filePaths,
+    dwio::common::FileFormat format) {
+  std::vector<std::shared_ptr<connector::ConnectorSplit>> splits;
+  for (auto filePath : filePaths) {
+     auto split = HiveConnectorSplitBuilder(filePath->path)
+                     .fileFormat(format)
+                     .build();
+    splits.push_back(split);
+  }
+  return splits;
+}
+
+std::vector<std::shared_ptr<connector::ConnectorSplit>>
+HiveConnectorTestBase::makeHiveConnectorSplits(
+    const std::vector<std::string>& filePaths,
+    dwio::common::FileFormat format) {
+  std::vector<std::shared_ptr<connector::ConnectorSplit>> splits;
+  for (auto filePath : filePaths) {
+     auto split = HiveConnectorSplitBuilder(filePath)
+                     .fileFormat(format)
+                     .build();
+    splits.push_back(split);
+  }
+  return splits;
+}
+
 std::shared_ptr<connector::ConnectorSplit>
 HiveConnectorTestBase::makeHiveConnectorSplit(
     const std::string& filePath,
