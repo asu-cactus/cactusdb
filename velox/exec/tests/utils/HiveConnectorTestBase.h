@@ -67,6 +67,14 @@ class HiveConnectorTestBase : public OperatorTestBase {
   static std::vector<std::shared_ptr<connector::ConnectorSplit>>
   makeHiveConnectorSplits(
       const std::vector<std::shared_ptr<TempFilePath>>& filePaths);
+  static std::vector<std::shared_ptr<connector::ConnectorSplit>>
+  makeHiveConnectorSplits(
+      const std::vector<std::shared_ptr<TempFilePath>>& filePaths,
+      dwio::common::FileFormat format);
+  static std::vector<std::shared_ptr<connector::ConnectorSplit>>
+  makeHiveConnectorSplits(
+    const std::vector<std::string>& filePaths,
+    dwio::common::FileFormat format);
 
   static std::shared_ptr<connector::ConnectorSplit> makeHiveConnectorSplit(
       const std::string& filePath,
