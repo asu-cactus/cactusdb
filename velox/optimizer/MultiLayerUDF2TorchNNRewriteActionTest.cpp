@@ -152,9 +152,10 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
 
       core::PlanNodeId key = entry.first;
 
-      const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+      const std::vector<std::string> fileAddr = entry.second;
+      auto fileFormat = cataLog.getIdFileFormat(key);
 
-      auto hiveSplits = makeHiveConnectorSplits(fileAddr);
+      auto hiveSplits = makeHiveConnectorSplits(fileAddr, fileFormat);
 
       for (auto& split : hiveSplits) {
 
