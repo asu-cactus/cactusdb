@@ -128,11 +128,28 @@ class CataLog {
         }
 
         // Set file address map for a given PlanNodeId
-        void setIdAddressMap(core::PlanNodeId p, std::vector<std::shared_ptr<TempFilePath>> filePath) {
+        void setIdAddressMap(core::PlanNodeId p, std::vector<std::string> filePath) {
             idFileAddrMap[p] = filePath;
         }
 
-       std::vector<std::shared_ptr<TempFilePath>> getFileAddress(core::PlanNodeId p) {
+        // Set file address map for a given PlanNodeId
+        void setIdAddressMap(core::PlanNodeId p, std::vector<std::string> filePath, dwio::common::FileFormat format) {
+            idFileAddrMap[p] = filePath;
+            idFileFormatMap[p] = format;
+        }
+
+        // Deprecating warning: in the future development, it is expected to pass path as std::vector<std::string>
+        void setIdAddressMap(core::PlanNodeId p, std::vector<std::shared_ptr<TempFilePath>> filePath) {
+            std::vector<std::string> filePathStr;
+            for (auto& path : filePath) {
+                filePathStr.push_back(path->path);
+            }
+            idFileAddrMap[p] = filePathStr;
+            idFileFormatMap[p] = dwio::common::FileFormat::DWRF;
+        }
+       
+       // Get file address map for a given PlanNodeId
+       std::vector<std::string> getFileAddress(core::PlanNodeId p) {
         return idFileAddrMap[p];
        }
 
@@ -147,8 +164,28 @@ class CataLog {
         }
 
         // Get the entire file address map for PlanNodeId
-        std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> getIdAddressMap() {
+        std::map<core::PlanNodeId, std::vector<std::string>> getIdAddressMap() {
             return idFileAddrMap;
+        }
+
+        // Get the map of PlanNodeId to FileFormat
+        std::map<core::PlanNodeId, dwio::common::FileFormat> getIdFileFormatMap() {
+            return idFileFormatMap;
+        }
+
+        // Set file address map for a given PlanNodeId
+        void setIdFileFormat(core::PlanNodeId p, dwio::common::FileFormat format) {
+            idFileFormatMap[p] = format;
+        }
+
+        // Get file format for a given PlanNodeId
+        dwio::common::FileFormat getIdFileFormat(core::PlanNodeId p) {
+            auto it = idFileFormatMap.find(p);
+            if (it != idFileFormatMap.end()) {
+                return it->second;
+            } else {
+                return dwio::common::FileFormat::DWRF;
+            }
         }
 
         // Set mapping from vector values to PlanNodeId
@@ -237,7 +274,8 @@ class CataLog {
         int defaultSplits = 392;
         // Maps for storing data
         std::map<std::string, std::vector<int>> dataSourceStatMap;
-        std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> idFileAddrMap;
+        std::map<core::PlanNodeId, std::vector<std::string>> idFileAddrMap;
+        std::map<core::PlanNodeId, dwio::common::FileFormat> idFileFormatMap;
         std::map<std::string, core::PlanNodeId> vectorIdMap;
         std::map<std::string, RowTypePtr> dataSourceSchemaMap;
         std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>> dataSourceFileAddrMap;
