@@ -56,7 +56,6 @@ class BatchNorm1D : public MLFunction {
     Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
         result(numInput, dims[0]);
 
-
     for (int i = 0; i < dims[0]; i++) {
       Eigen::VectorXf colData = inputMatrix.col(i);
       float colMean = colData.mean();
@@ -104,6 +103,11 @@ class BatchNorm1D : public MLFunction {
 
   void setWeights(float* weights) {
     weights_ = weights;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:
