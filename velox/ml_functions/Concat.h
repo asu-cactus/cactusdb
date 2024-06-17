@@ -13,7 +13,7 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
-class Concat : public exec::VectorFunction {
+class Concat : public MLFunction {
  public:
   Concat(int input1Dims, int input2Dims) {
     input1Dims_ = input1Dims;
@@ -73,8 +73,19 @@ class Concat : public exec::VectorFunction {
                 .returnType("array(REAL)")
                 .build()};
   }
+
   static std::string getName() {
     return "concat";
+  }
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:

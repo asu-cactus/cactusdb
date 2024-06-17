@@ -1,13 +1,13 @@
 #pragma once
 #include <fmt/format.h>
+#include <tokenizers_cpp.h>
 #include <iostream>
 #include "functions.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/vector/tests/utils/VectorTestBase.h"
 #include "velox/ml_functions/UtilFunction.h"
-#include <tokenizers_cpp.h>
+#include "velox/vector/tests/utils/VectorTestBase.h"
 
 using tokenizers::Tokenizer;
 using namespace facebook::velox;
@@ -15,8 +15,7 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
-
-class HuggingFaceTokenizer : public exec::VectorFunction {
+class HuggingFaceTokenizer : public MLFunction {
  public:
   HuggingFaceTokenizer(std::string pathToTokenizer) {
     pathToTokenizer_ = pathToTokenizer;
@@ -58,6 +57,16 @@ class HuggingFaceTokenizer : public exec::VectorFunction {
   static std::string getName() {
     return "hf_tokenizer";
   };
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
 
  private:
   std::string pathToTokenizer_;

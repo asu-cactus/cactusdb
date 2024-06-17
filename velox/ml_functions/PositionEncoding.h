@@ -13,7 +13,7 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
-class PositionEncoding : public exec::VectorFunction {
+class PositionEncoding : public MLFunction {
  public:
   PositionEncoding(int inputDims) {
     inputDims_ = inputDims;
@@ -36,7 +36,6 @@ class PositionEncoding : public exec::VectorFunction {
     auto baseInputArray =
         decodedInputArray->base()->as<ArrayVector>()->elements();
 
-
     float* inputValues = baseInputArray->values()->asMutable<float>();
 
     auto numInput = rows.size();
@@ -48,21 +47,20 @@ class PositionEncoding : public exec::VectorFunction {
     std::vector<std::vector<float>> results;
 
     if (inputDims_ % 2 != 0) {
-      throw std::runtime_error(fmt::format("Position Encoding Dims has to be a even number, current value is: {}", inputDims_));
+      throw std::runtime_error(fmt::format(
+          "Position Encoding Dims has to be a even number, current value is: {}",
+          inputDims_));
     }
     for (int i = 0; i < numInput; i++) {
       for (int j = 0; j < inputDims_ / 2; j++) {
         float angle = i / std::pow(10000.0, 2.0 * j / inputDims_);
-        int dataShift = i*inputDims_ + j*2;
+        int dataShift = i * inputDims_ + j * 2;
         inputValues[dataShift] += std::sin(angle);
         inputValues[dataShift + 1] += std::cos(angle);
       }
-      std::vector<float> row(
-                m.row(i).data(),
-                m.row(i).data() + m.cols());
+      std::vector<float> row(m.row(i).data(), m.row(i).data() + m.cols());
       results.push_back(row);
     }
-
 
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(results, REAL());
@@ -74,8 +72,19 @@ class PositionEncoding : public exec::VectorFunction {
                 .returnType("array(REAL)")
                 .build()};
   }
+
   static std::string getName() {
     return "position_encoding";
+  }
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:

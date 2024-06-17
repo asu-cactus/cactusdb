@@ -15,7 +15,7 @@ using namespace facebook::velox::memory;
 // Implementation of embedding layer where the embedding is stored as a 2-D
 // array: numEmbedding*embeddingDims, lookup takes a int vector as indices
 
-class IntEncoder : public exec::VectorFunction {
+class IntEncoder : public MLFunction {
  public:
   IntEncoder(std::unordered_map<int, int> mapping) {
     mapping_ = mapping;
@@ -57,11 +57,21 @@ class IntEncoder : public exec::VectorFunction {
     return "encoder";
   };
 
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims){
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
+
  private:
   std::unordered_map<int, int> mapping_;
 };
 
-class StringEncoder : public exec::VectorFunction {
+class StringEncoder : public MLFunction {
  public:
   StringEncoder(std::unordered_map<std::string, int> mapping) {
     mapping_ = mapping;
@@ -99,12 +109,22 @@ class StringEncoder : public exec::VectorFunction {
   static std::string getName() {
     return "encoder_string";
   };
+  
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims){
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
 
  private:
   std::unordered_map<std::string, int> mapping_;
 };
 
-class StringVariadicEncoder : public exec::VectorFunction {
+class StringVariadicEncoder : public MLFunction {
  public:
   StringVariadicEncoder(std::unordered_map<std::string, int> mapping) {
     mapping_ = mapping;
@@ -153,11 +173,21 @@ class StringVariadicEncoder : public exec::VectorFunction {
     return "encoder_string_variadic";
   };
 
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims){
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
+
  private:
   std::unordered_map<std::string, int> mapping_;
 };
 
-class MultiHotNormalizedEncoder : public exec::VectorFunction {
+class MultiHotNormalizedEncoder : public MLFunction {
  public:
   MultiHotNormalizedEncoder(int size) {
     size_ = size;
@@ -207,6 +237,16 @@ class MultiHotNormalizedEncoder : public exec::VectorFunction {
   static std::string getName() {
     return "multi_hot_norm_encoder";
   };
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims){
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
 
  private:
   int size_;

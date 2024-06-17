@@ -52,7 +52,7 @@ class MLFunction : public exec::VectorFunction {
         }
 
         virtual CostEstimate getCost(std::vector<int> inputDims){
-            return CostEstimate(1,1,1);
+            return CostEstimate(0, inputDims[0], inputDims[1]);
         }
 
     protected:
