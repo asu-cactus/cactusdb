@@ -62,7 +62,7 @@ class IntEncoder : public MLFunction {
     return nullptr;
   }
 
-  CostEstimate getCost(std::vector<int> inputDims){
+  CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -109,13 +109,13 @@ class StringEncoder : public MLFunction {
   static std::string getName() {
     return "encoder_string";
   };
-  
+
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
-  CostEstimate getCost(std::vector<int> inputDims){
+  CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -178,7 +178,7 @@ class StringVariadicEncoder : public MLFunction {
     return nullptr;
   }
 
-  CostEstimate getCost(std::vector<int> inputDims){
+  CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -199,32 +199,30 @@ class MultiHotNormalizedEncoder : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-      BaseVector::ensureWritable(rows, type, context.pool(), output);
+    auto indicesRowVector = args[0];
+    auto arrayVector = indicesRowVector->as<ArrayVector>();
 
-      auto indicesRowVector = args[0];
-      auto arrayVector = indicesRowVector->as<ArrayVector>();
+    auto indicesVector = arrayVector->elements();
+    int* indicesValues = indicesVector->values()->asMutable<int>();
+    int numInputs = rows.size();
 
-      auto indicesVector = arrayVector->elements();
-      int* indicesValues = indicesVector->values()->asMutable<int>();
-      int numInputs = rows.size();
+    std::vector<std::vector<float>> encoding(
+        numInputs, std::vector<float>(size_, 0));
 
-    
-      
-      std::vector<std::vector<float>> encoding(numInputs, std::vector<float>(size_, 0));
-
-      for (int i = 0; i < numInputs; i++) {
-        int numSubIndices = arrayVector->sizeAt(i);
-        int indicesOffset = arrayVector->offsetAt(i);
-        float value = 1.0 / numSubIndices;
-        for (int j = 0; j < numSubIndices; j++) {
-          int embedIndex = indicesValues[indicesOffset + j];
-          encoding[i][embedIndex] = value;
-        }
+    for (int i = 0; i < numInputs; i++) {
+      int numSubIndices = arrayVector->sizeAt(i);
+      int indicesOffset = arrayVector->offsetAt(i);
+      float value = 1.0 / numSubIndices;
+      for (int j = 0; j < numSubIndices; j++) {
+        int embedIndex = indicesValues[indicesOffset + j];
+        encoding[i][embedIndex] = value;
       }
+    }
 
-      VectorMaker maker{context.pool()};
-      output = maker.arrayVector<float>(encoding, REAL());
+    VectorMaker maker{context.pool()};
+    output = maker.arrayVector<float>(encoding, REAL());
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -243,7 +241,7 @@ class MultiHotNormalizedEncoder : public MLFunction {
     return nullptr;
   }
 
-  CostEstimate getCost(std::vector<int> inputDims){
+  CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }

@@ -70,7 +70,7 @@ class NNBuilder {
         std::make_unique<MatrixVectorAddition>(bias, units)
     );  
 
-    if(ac == RELU){
+    if(ac == Activation::RELU){
       act_name = Relu::getName() + std::to_string(function_count++);
       exec::registerVectorFunction(
         act_name,
@@ -110,7 +110,7 @@ class NNBuilder {
         std::make_unique<MatrixAddition>(biasFile_, units)
     );  
 
-    if(ac == RELU){
+    if(ac == Activation::RELU){
       act_name = Relu::getName() + std::to_string(function_count++);
       exec::registerVectorFunction(
         act_name,
@@ -152,14 +152,14 @@ class NNBuilder {
         std::make_unique<VectorScalarAddition>(bias, num_filters)
     );
 
-    if(ac == RELU){
+    if(ac == Activation::RELU){
       act_name = Relu::getName() + std::to_string(function_count++);
       exec::registerVectorFunction(
         act_name,
         Relu::signatures(),
         std::make_unique<Relu>()
      );
-    } else if (ac == SOFTMAX){
+    } else if (ac == Activation::SOFTMAX){
       act_name = Softmax::getName() + std::to_string(function_count++);
       exec::registerVectorFunction(
         act_name,
