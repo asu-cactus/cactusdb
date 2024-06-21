@@ -858,6 +858,7 @@ public:
         float** bias;
 };
 
+// This class is deprecating and current code will be refactored to TorchDNNV2. 
 class TorchDNN : public MLFunction {
 public:
     TorchDNN(std::vector<float*> weights, std::vector<float*> bias, std::vector<int> dimensions) {
@@ -976,6 +977,118 @@ public:
 private:
     std::vector<float*> weights;
     std::vector<float*> bias;
+};
+
+namespace velox::dl {
+  enum class KernelType {
+    MatMul,
+    MatAdd,
+    ReLU,
+    Softmax,
+    BatchNorm
+      };
+}; // namespace velox::dl::kernel
+
+
+class TorchDNNV2 : public MLFunction {
+public:
+    TorchDNNV2(std::vector<velox::dl::KernelType> kernelTypes, std::vector<float*> weights, std::vector<int> dimensions) {
+        this->weights = weights;
+        // dims.size() = weights.size() + 1, dims[0] is the input dimension
+        dims = dimensions;
+        kernelTypes_ = kernelTypes;
+        int numLayers = kernelTypes.size();
+        int weightIdx = 0;
+        model_ = torch::nn::Sequential();
+        for (int i = 0; i < numLayers; ++i) {
+          if (kernelTypes[i] == velox::dl::KernelType::MatMul && kernelTypes[i+1] == velox::dl::KernelType::MatAdd) {
+            auto denseLayer = torch::nn::Linear(dims[i], dims[i+1]);
+            denseLayer->weight.set_data(torch::from_blob(weights[weightIdx++], {dims[i], dims[i+1]}).t());
+            denseLayer->bias.set_data(torch::from_blob(weights[weightIdx++], {dims[i+1]}));
+            model_->push_back(denseLayer);
+          } else if (kernelTypes[i] == velox::dl::KernelType::BatchNorm) {
+            auto batchNormLayer = torch::nn::BatchNorm1d(dims[i]);
+            batchNormLayer->weight.set_data(torch::from_blob(weights[weightIdx++], {dims[i+1]}));
+            batchNormLayer->bias.set_data(torch::from_blob(weights[weightIdx++], {dims[i+1]}));
+            model_->push_back(batchNormLayer);
+          } else if (kernelTypes[i] == velox::dl::KernelType::ReLU) {
+            model_->push_back(torch::nn::ReLU());
+          } else if (kernelTypes[i] == velox::dl::KernelType::Softmax) {
+            model_->push_back(torch::nn::Softmax(1));
+          }
+        }
+
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+     
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        torch::Tensor input = torch::from_blob(input_values, {rows.size(), dims[0]});
+        torch::Tensor output_tensor = input;
+
+        output_tensor = const_cast<torch::nn::Sequential&>(model_)->forward(output_tensor);
+        float* data = output_tensor.data_ptr<float>();
+
+        // Prepare results
+        std::vector<std::vector<float>> results;
+        for (int i = 0; i < rows.size(); ++i) {
+            std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
+            results.push_back(result);
+        }
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(results, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+    
+    // Getter method for weights
+    const std::vector<float*>& getWeights() const {
+        return weights;
+    }
+
+    // Getter method for bias
+    const std::vector<float*>& getBias() const {
+        return bias;
+    }
+
+     std::string getFuncName() {
+        return getName();
+    };
+
+    static std::string getName() {
+        return "complexTorchNN";
+    };
+
+    CostEstimate getCost(std::vector<int> inputDims){
+        // TODO: need to compute cost based on dims
+        return CostEstimate(0, inputDims[0], inputDims[1]);
+    }
+
+    
+
+private:
+    std::vector<float*> weights;
+    std::vector<float*> bias;
+    std::vector<velox::dl::KernelType> kernelTypes_;
+    // std::vector<torch::nn::AnyModule> layers_;
+
+    torch::nn::Sequential model_;
 };
 
 class TorchDNNKernel : public MLFunction {
