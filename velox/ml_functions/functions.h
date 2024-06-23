@@ -987,6 +987,17 @@ namespace velox::dl {
     Softmax,
     BatchNorm
       };
+
+  std::ostream& operator<<(std::ostream& os, KernelType kernelType) {
+    switch (kernelType) {
+        case KernelType::MatMul:   return os << "MatMul";
+        case KernelType::MatAdd:   return os << "MatAdd";
+        case KernelType::ReLU:     return os << "ReLU";
+        case KernelType::Softmax:  return os << "Softmax";
+        case KernelType::BatchNorm:return os << "BatchNorm";
+        default:                   return os << "Unknown";
+    }
+}
 }; // namespace velox::dl::kernel
 
 

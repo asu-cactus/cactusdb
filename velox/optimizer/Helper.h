@@ -289,6 +289,7 @@ std::string extractExprWithinTarget(
   return ""; // Matching ')' not found
 }
 
+// Function to escape special characters in a regex string
 std::string escapeRegex(const std::string& str) {
   std::string escapedStr;
   for (char c : str) {
@@ -303,11 +304,9 @@ std::string escapeRegex(const std::string& str) {
 }
 
 // Iterate over all files in a directory and return their paths
-std::vector<std::string> getFilePathsFromDir(
-    const std::string& dirPath) {
+std::vector<std::string> getFilePathsFromDir(const std::string& dirPath) {
   std::vector<std::string> filePaths;
-  for (auto const& dirEntry :
-       fs::directory_iterator(dirPath)) {
+  for (auto const& dirEntry : fs::directory_iterator(dirPath)) {
     if (!dirEntry.is_regular_file()) {
       continue;
     }
@@ -319,6 +318,50 @@ std::vector<std::string> getFilePathsFromDir(
     filePaths.push_back(dirEntry.path());
   }
   return filePaths;
+}
+
+// Function to trim spaces from both front and end of a string
+std::string trim(const std::string& str) {
+  const char* whitespace = " \t\n\r";
+  const size_t first = str.find_first_not_of(whitespace);
+  if (first == std::string::npos)
+    return "";
+  const size_t last = str.find_last_not_of(whitespace);
+  return str.substr(first, (last - first + 1));
+}
+
+// Recursive function to parse the nested DL expressions
+// The parsed order is from the outermost expression to the innermost expression
+// Example: exp1(exp2(exp3(exp4(input))))
+// Return: parsedSingleExpr: {"exp1", "exp2", "exp3", "exp4"}
+//         matchedExpr: {"exp1(exp2(exp3(exp4(input))))",
+//         "exp2(exp3(exp4(input)))", "exp3(exp4(input))", "exp4(input)"}
+void parseDLExpressions(
+    const std::string& input,
+    std::vector<std::string>& parsedSingleExpr,
+    std::vector<std::string>& matchedExpr) {
+  size_t openParen = input.find('(');
+  if (openParen == std::string::npos) {
+    return;
+  }
+
+  size_t closeParen = input.rfind(')');
+  if (closeParen == std::string::npos) {
+    return;
+  }
+
+  // Extract the function name
+  std::string funcName = input.substr(0, openParen);
+  funcName = trim(funcName);
+  parsedSingleExpr.push_back(funcName);
+  matchedExpr.push_back(trim(input));
+
+  // Extract the argument within the parentheses
+  std::string inner = input.substr(openParen + 1, closeParen - openParen - 1);
+  inner = trim(inner);
+
+  // Recursively parse the inner expression
+  parseDLExpressions(inner, parsedSingleExpr, matchedExpr);
 }
 
 } // namespace optimization

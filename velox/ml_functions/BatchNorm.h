@@ -93,6 +93,14 @@ class BatchNorm1D : public MLFunction {
     return weights_;
   }
 
+  float* getWeight() {
+    return weights_;
+  }
+
+  float* getBias() {
+    return bias_;
+  }
+
   static std::string getName() {
     return "batch_norm_1d";
   };

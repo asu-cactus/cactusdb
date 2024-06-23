@@ -18,6 +18,7 @@
 #include <torch/torch.h>
 #include "velox/exec/Task.h"
 #include "velox/ml_functions/functions.h"
+#include "velox/ml_functions/BatchNorm.h"
 #include <fmt/format.h>
 
 
