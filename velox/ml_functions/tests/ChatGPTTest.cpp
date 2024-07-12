@@ -132,9 +132,9 @@ void ChatGPTTest::simpleTest() {
 
 void ChatGPTTest::LLMWithoutOptimization() {
   std::vector<std::string> userDataPaths =
-      getFilePathsFromDir("/home/velox_fix/data/movie_recommendation/user");
+      getFilePathsFromDir("/home/velox/data/movie_recommendation/user");
   std::vector<std::string> movieDataPaths =
-      getFilePathsFromDir("/home/velox_fix/data/movie_recommendation/movie");
+      getFilePathsFromDir("/home/velox/data/movie_recommendation/movie");
 
   // auto userDataRowType =
   //     ROW({"UserID",  "Action",          "Adventure", "Animation", "Comedy",
@@ -281,9 +281,9 @@ void ChatGPTTest::LLMWithoutOptimization() {
 
 void ChatGPTTest::LLMWithOptimization() {
   std::vector<std::string> userDataPaths =
-      getFilePathsFromDir("/home/velox_fix/data/movie_recommendation/user");
+      getFilePathsFromDir("/home/velox/data/movie_recommendation/user");
   std::vector<std::string> movieDataPaths =
-      getFilePathsFromDir("/home/velox_fix/data/movie_recommendation/movie");
+      getFilePathsFromDir("/home/velox/data/movie_recommendation/movie");
 
   // auto userDataRowType =
   //     ROW({"UserID",  "Action",          "Adventure", "Animation", "Comedy",
@@ -427,6 +427,7 @@ void ChatGPTTest::LLMWithOptimization() {
 
 /*
 Please use export OPENAI_API_KEY=********  to set-up your openai key before running the test
+and modify the corresponding data path
 */
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
