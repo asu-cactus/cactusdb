@@ -72,13 +72,35 @@ set_target_properties(tokenizer_cpp PROPERTIES IMPORTED_LOCATION /home/velox/thi
 set_target_properties(tokenizer_c PROPERTIES IMPORTED_LOCATION /home/velox/third_party/tokenizers-cpp/example/build/tokenizers/libtokenizers_c.a)
 
 
-add_executable(standalone_hf_tokenizer_test tests/StandaloneHFTokenizerTest.cpp)
-target_link_libraries(standalone_hf_tokenizer_test 
-# FIXME:  for some reason tokenizer cpp needs to be placed before tokenizer c, 
-# needs fix to automatically compile it from 3rd library
-tokenizer_cpp
-tokenizer_c 
-)
+# TODO: temporary disable it until we can fix the build of dependency
+# add_executable(standalone_hf_tokenizer_test tests/StandaloneHFTokenizerTest.cpp)
+# target_link_libraries(standalone_hf_tokenizer_test 
+# # FIXME:  for some reason tokenizer cpp needs to be placed before tokenizer c, 
+# # needs fix to automatically compile it from 3rd library
+# tokenizer_cpp
+# tokenizer_c 
+# )
+
+# add_executable(hftokenizer_Test tests/HFTokenizerTest.cpp)
+# target_link_libraries(
+#   hftokenizer_Test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base 
+#   velox_vector_fuzzer
+#   jsoncpp_lib
+#   openblas
+#   ${TORCH_LIBRARIES}
+#   cpr::cpr
+#   tokenizer_cpp
+#   tokenizer_c
+# )
 
 
 add_executable(embedding_test tests/EmbeddingTest.cpp)
@@ -98,8 +120,6 @@ target_link_libraries(
   openblas
   ${TORCH_LIBRARIES}
   cpr::cpr
-  tokenizer_cpp
-  tokenizer_c
 )
 
 add_executable(two_tower_model_test tests/TwoTowerModelTest.cpp)
@@ -264,6 +284,26 @@ target_link_libraries(
   velox_vector_fuzzer
   velox_dwio_parquet_reader
   ${TORCH_LIBRARIES}
+)
+
+add_executable(chatgpt_test tests/ChatGPTTest.cpp)
+target_link_libraries(
+  chatgpt_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  jsoncpp_lib
+  openblas
+  ${TORCH_LIBRARIES}
+  cpr::cpr
 )
 
 # TODO: add or remove this unit test
