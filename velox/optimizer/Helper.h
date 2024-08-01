@@ -173,7 +173,7 @@ FileStructure save_blocks_to_files(
   // Use maker to create rowVector for "w", "w_row", and "w_col"
   for (int i = 0; i < parts; i++) {
     input = maker.rowVector(
-        {name + "_wb", "w_row", "w_col"},
+        {name + "_wb", name + "_wb_row", name + "_wb_col"},
         {maker.arrayVector<float>({valuesArray[i]}, REAL()),
          maker.flatVector({indexs[0][i]}),
          maker.flatVector({indexs[1][i]})});
@@ -362,6 +362,28 @@ void parseDLExpressions(
 
   // Recursively parse the inner expression
   parseDLExpressions(inner, parsedSingleExpr, matchedExpr);
+}
+
+// Function to split a string based on a delimiter
+std::vector<std::string> splitString(const std::string& str, char delimiter) {
+  std::vector<std::string> tokens;
+  std::stringstream ss(str);
+  std::string token;
+
+  while (std::getline(ss, token, delimiter)) {
+    tokens.push_back(token);
+  }
+
+  return tokens;
+}
+
+// Function to check if a string contains a substring but is not equal to it
+bool containsStrButNotEqual(const std::string& str, const std::string& subStr) {
+  // Check if the substring is found within the string
+  size_t found = str.find(subStr);
+
+  // Ensure that the substring is found and the two strings are not equal
+  return (found != std::string::npos) && (str != subStr);
 }
 
 } // namespace optimization

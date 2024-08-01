@@ -89,10 +89,15 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
     // multiple projections in the same node, these expressions will be stored
     // in the finalProjectExprSets. And their sources are stored in the other
     // exprSets.
-    std::set<std::string> nestedLoopProjectExprSets = {"idx", "w_row", "w_col"};
-    std::set<std::string> preComputeExprSets = {"idx", "w_row", "w_col"};
-    std::set<std::string> mulProjectExprSets = {"idx", "w_col"};
+    std::set<std::string> nestedLoopProjectExprSets;
+    std::set<std::string> preComputeExprSets;
+    std::set<std::string> mulProjectExprSets;
+    // key and agg exprs for block-based MatMul aggregation
+    std::set<std::string> matMulAggKeySets;
+    std::set<std::string> matMulAggExprSets;
     std::set<std::string> finalProjectExprSets;
+    // matched data source of the targeting MatMul
+    std::string rewriteMatMulSrc;
 
     // Iterate over each target in the targets container
     for (auto target : targets) {
@@ -129,7 +134,9 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
               // std::cout << "[DEBUG] exprStr: " << exprStr << std::endl;
 
               // Check if target exist in the expression
-              if (exprStr.find(target) != std::string::npos) {
+              // filter out block weight
+              if (exprStr.find(target) != std::string::npos &&
+                  exprStr.find(target + "_wb") == std::string::npos) {
                 // std::cout << "[debug] found matched str: " << exprStr << ","
                 // << target << std::endl;
 
@@ -151,12 +158,14 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                     // Get information (defaultBlocksnumber, number of samples)
                     // from cataLog
                     int blocks = cataLog.getDefaultBlocksNum();
-                    int samples = cataLog.getDataSourceStat("values")[0];
                     int blockSize = cataLog.getDefaultBlocksSize();
 
                     // Register matrix blocks multiply function
+                    // the registered block-based mat_mul will be renamed as
+                    // target_h
+                    std::string blockMatMulName = fmt::format("{}_h", target);
                     registerVectorFunction(
-                        "mat_mul_h",
+                        blockMatMulName,
                         MatrixMultiply_h::signatures(),
                         std::make_unique<MatrixMultiply_h>(
                             dims[0], dims[1], cataLog.getDefaultBlocksSize()));
@@ -176,23 +185,41 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                             matches,
                             patternToMatchRawSource)) {
                       matchedDataSrc = matches[1].str();
+                      rewriteMatMulSrc = matchedDataSrc;
                     } else {
                       LOG(ERROR) << "Uncaptured data source" << std::endl;
                     }
 
+                    // the name of blocked weights follow the formatting:
+                    // target_wb target_wb_row is the row id of the weight block
+                    // target_wb_col is the column id of the weight block
                     std::string weightBlockName = target + "_wb";
+                    nestedLoopProjectExprSets.insert(target + "_wb_row");
+                    nestedLoopProjectExprSets.insert(target + "_wb_col");
+                    preComputeExprSets.insert(target + "_wb_row");
+                    preComputeExprSets.insert(target + "_wb_col");
+                    mulProjectExprSets.insert(target + "_wb_col");
+
                     nestedLoopProjectExprSets.insert(matchedDataSrc);
                     nestedLoopProjectExprSets.insert(weightBlockName);
-                    preComputeExprSets.insert(matchedDataSrc);
                     preComputeExprSets.insert(weightBlockName);
+                    // name the intermediate aggregation results from the data
+                    // source name for example, the data_source name is
+                    // user_features, the intermediate name will be
+                    // user_features_partial_agg1
+                    std::string parsedDataSrc =
+                        splitString(matchedDataSrc, '_')[0];
+                    std::string intermediateAggregationName = fmt::format(
+                        "{}_partial_agg{}",
+                        parsedDataSrc,
+                        rewriteMatMulCounter++);
                     mulProjectExprSets.insert(fmt::format(
-                        "mat_mul_h({}, {}) AS {}",
+                        "{}({}, {}) AS {}",
+                        blockMatMulName,
                         matchedDataSrc,
                         weightBlockName,
-                        "t"));
+                        intermediateAggregationName));
 
-                    // std::cout << "debug, captured exprs within target: " <<
-                    // exprsWithinTarget << std::endl; Check if the
                     // exprsWithinTarget starts with ROW, if so, there is no
                     // other UDFs before the target UDF
                     if (exprsWithinTarget.rfind("ROW", 0) != 0) {
@@ -204,16 +231,31 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                               matchedDataSrc);
                       preComputeExprSets.insert(
                           exprsWithinTargetWithRewriteSrc + " AS " +
-                          targetExprName);
+                          matchedDataSrc);
                       // set the flag to true
                       hasPrecomputeProject = true;
                     }
+
+                    // Add UDF associate information (UDF with input values) to
+                    // cataLog std::string nameSuffix = "_vertical";
+                    // cataLog.add(target,
+                    // cataLog.getDataSourceBlocksSchema("values"),
+                    // cataLog.getDataSourceBlocksFileAddr("values"), 0,
+                    // "_vertical"); Add the parsed expression to
+
+                    // finalProjectExprSets
+                    std::string matMulAggExpr = fmt::format(
+                        "array_cat({}, {}) AS {}",
+                        intermediateAggregationName,
+                        target + "_wb_col",
+                        intermediateAggregationName);
+                    matMulAggExprSets.insert(matMulAggExpr);
 
                     // Regular expression match
                     // extract the following computation after target rewrite
                     // UDF
                     std::string escapedRegex =
-                        escapeRegex(target + +"(" + exprsWithinTarget + ")");
+                        escapeRegex(target + "(" + exprsWithinTarget + ")");
                     std::regex patternOfRewriteFinalExpr(escapedRegex);
                     // std::cout << fmt::format("[DEBUG] targetExprStr: {},
                     // patternOfRewriteFinalExpr: {}, targetExprName: {}",
@@ -222,15 +264,8 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                     targetExprStr = std::regex_replace(
                         targetExprStr,
                         patternOfRewriteFinalExpr,
-                        matchedDataSrc);
+                        intermediateAggregationName);
 
-                    // Add UDF associate information (UDF with input values) to
-                    // cataLog std::string nameSuffix = "_vertical";
-                    // cataLog.add(target,
-                    // cataLog.getDataSourceBlocksSchema("values"),
-                    // cataLog.getDataSourceBlocksFileAddr("values"), 0,
-                    // "_vertical"); Add the parsed expression to
-                    // finalProjectExprSets
                     finalProjectExprSets.insert(
                         targetExprStr + " AS " + targetExprName);
                     findRewriteTarget = true;
@@ -246,23 +281,15 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                   auto matchedDataSrc = matches[1].str();
                   auto rewriteExpr = std::regex_replace(
                       exprStr, patternToMatchRawSource, matchedDataSrc);
-                  // std::cout << fmt::format("[debug] matchedDataSrc: {},
-                  // rewriteExpr: {}", matchedDataSrc, rewriteExpr) <<
-                  // std::endl; Store the data source in the exprSets and the
+                  // Store the data source in the exprSets and the
                   // computation in the finalProjectExprSets
                   preComputeExprSets.insert(matchedDataSrc);
                   nestedLoopProjectExprSets.insert(matchedDataSrc);
                   mulProjectExprSets.insert(matchedDataSrc);
+                  matMulAggKeySets.insert(matchedDataSrc);
                   finalProjectExprSets.insert(
                       rewriteExpr + " AS " + projectionsNames[exprIdx]);
-                  // std::cout << fmt::format("[After rewrite projection]: \n
-                  // nestedLoopProjectExprSets: |{}|, \n mulProjectExprSets:
-                  // |{}|, \n finalProjectExprSets: |{}|",
-                  // nestedLoopProjectExprSets, mulProjectExprSets,
-                  // finalProjectExprSets) << std::endl; std::regex
-                  // pattern(target + R"(\([^)]+\))"); targetExprStr =
-                  // std::regex_replace(targetExprStr, pattern, "v"); std::cout
-                  // << match_str << std::endl;
+
                 } else {
                   LOG(ERROR)
                       << "Error: undefined-edge case detected: " << exprStr
@@ -273,8 +300,6 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
             }
             if ((curNode->sources().size()) > 0 && findRewriteTarget) {
               // Get schema of values and weights from cataLog
-              // valueSchema = cataLog.getUDFSchema(target+"_values");
-              valueSchema = cataLog.getUDFSchema("value");
               weightSchema = cataLog.getUDFSchema(target + "_weights_vertical");
 
               // Build new plan
@@ -285,6 +310,42 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
               // to place the partitioned weight matrix on the left side to
               // enhance the performance of the nested loop join due to reduced
               // iteration overhead.
+
+              // do an inference to obtain the id column of the src
+              // we assume the id column follows the naming convention that
+              // the source name overlaps with the id column name and id
+              // is included in the column name as well.
+              std::string srcName = splitString(rewriteMatMulSrc, '_')[0];
+              std::string matMulAggKey;
+              for (std::string colName : nestedLoopProjectExprSets) {
+                if (containsStrButNotEqual(colName, srcName) &&
+                    containsStrButNotEqual(colName, "id")) {
+                  matMulAggKey = colName;
+                  break;
+                }
+              }
+              if (matMulAggKey.empty()) {
+                matMulAggKey = "idx";
+                LOG(INFO)
+                    << "[WARN] inference of MatMul agg key failed, use default value: idx"
+                    << std::endl;
+              }
+
+              matMulAggKeySets.insert(matMulAggKey);
+              preComputeExprSets.insert(matMulAggKey);
+              nestedLoopProjectExprSets.insert(matMulAggKey);
+              mulProjectExprSets.insert(matMulAggKey);
+              // std::cout << "[DEBUG] matMulAggKey: " << matMulAggKey <<
+              // std::endl; std::cout << "[DEBUG] srcName: " << srcName <<
+              // std::endl; std::cout << "[DEBUG] nestedLoopProjectExprsSets: "
+              // << nestedLoopProjectExprSets << std::endl; std::cout <<
+              // "[DEBUG] preComputeExprsSets: " << preComputeExprSets <<
+              // std::endl; std::cout << "[DEBUG] mulProjectExprSets: " <<
+              // mulProjectExprSets << std::endl; std::cout << "[DEBUG]
+              // matMulAggKeySets: " << matMulAggKeySets << std::endl; std::cout
+              // << "[DEBUG] matMulAggExprSets: " << matMulAggExprSets <<
+              // std::endl; std::cout << "[DEBUG] finalProjectExprsSets: " <<
+              // finalProjectExprSets << std::endl;
 
               // get the source node of the current node
               auto srcNode = curNode->sources()[0];
@@ -301,6 +362,10 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                   nestedLoopProjectExprSets.end());
               std::vector<std::string> mulProjectExprs(
                   mulProjectExprSets.begin(), mulProjectExprSets.end());
+              std::vector<std::string> matMulAggKeys(
+                  matMulAggKeySets.begin(), matMulAggKeySets.end());
+              std::vector<std::string> matMulAggExprs(
+                  matMulAggExprSets.begin(), matMulAggExprSets.end());
               std::vector<std::string> finalProjectExprs(
                   finalProjectExprSets.begin(), finalProjectExprSets.end());
               LOG(INFO)
@@ -323,33 +388,24 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
               if (hasPrecomputeProject) {
                 rewritePlan.project(preComputeExprs);
               }
+
               // Add the rewrite nodes of mat_mul
               rewritePlan
                   .project(mulProjectExprs)
                   // .localPartition({"idx"})
                   // .singleAggregation({"idx"}, {"array_cat(t, w_col) AS v"})
-                  .partialAggregation({"idx"}, {"array_cat(t, w_col) AS v"})
-                  .localPartition({"idx"})
+                  .partialAggregation(matMulAggKeys, matMulAggExprs)
+                  .localPartition(matMulAggKeys)
                   .intermediateAggregation()
                   .finalAggregation()
                   .project(finalProjectExprs);
-              // Delete old nodeId-fileAddress map
-              // auto valueFileAddr =
-              // cataLog.getFileAddress(cataLog.getVectorIdMap("v")); auto
-              // oldPlanNodeIdToDelete = cataLog.getVectorIdMap("v");
-              // cataLog.deleteIdAddressMap(oldPlanNodeIdToDelete);
-              // Insert new nodeId-fileAddress maps
-              // cataLog.setIdAddressMap(p1, valueFileAddr);
               cataLog.setIdAddressMap(
                   p2, cataLog.getUDFFileAddr(target + "_weights_vertical"));
-
-              int numSamples = cataLog.getDataSourceStat("values")[0];
-              int numFeatures = dims[0];
               int blockSize = cataLog.getDefaultBlocksSize();
               int numBlocks = ceil(dims[1] / blockSize);
-              std::shared_ptr<OutputStat> inputStat =
-                  std::make_shared<OutputStat>(
-                      OutputStat(numSamples, numFeatures));
+              // std::shared_ptr<OutputStat> inputStat =
+              //     std::make_shared<OutputStat>(
+              //         OutputStat(numSamples, numFeatures));
               // Source inputSource = Source(p1, Source::Type::FILE,
               // std::move(inputStat));
               // cataLog.addSource(std::make_shared<Source>(inputSource));
@@ -364,8 +420,6 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
               LOG(INFO)
                   << "[Rewrite] mul2joinAggHorizontal rewrite updated catalog: "
                   << std::endl;
-              // LOG(INFO) << fmt::format("\t\t p1: {}, {}, {}", p1,
-              // numSamples,numFeatures) << std::endl;
               LOG(INFO) << fmt::format(
                                "\t\t p2: {}, {}, {}", p2, numBlocks, blockSize)
                         << std::endl;
@@ -422,7 +476,6 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                   // Get information (defaultBlocksnumber, number of samples)
                   // from cataLog
                   int blocks = cataLog.getDefaultBlocksNum();
-                  int samples = cataLog.getDataSourceStat("values")[0];
                   int blockSize = cataLog.getDefaultBlocksSize();
 
                   // Register matrix blocks multiply function
@@ -556,16 +609,21 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
         for (const auto& expression : projections) {
           std::string expr = expression->toString();
           // Regular expression match
-          std::regex pattern(R"(mat_mul\d+)");
+          // match mat_mul and filter out the _wb (weight block) and _h
+          // (block-based mat_mul) case
+          std::regex pattern(R"(mat_mul\d+\()");
           auto wordsBegin =
               std::sregex_iterator(expr.begin(), expr.end(), pattern);
           auto wordsEnd = std::sregex_iterator();
           // Retrieve the possible UDF name applicable for this rule, and check
           // if there existed block files, stored in targetAction.
           for (auto it = wordsBegin; it != wordsEnd; ++it) {
+            // remove the last character ')'
+            std::string functionName =
+                it->str().substr(0, it->str().size() - 1);
             if (cataLog.checkExistsUDFFileAddr(
-                    it->str() + "_weights_vertical")) {
-              targetActions.push_back(it->str());
+                    functionName + "_weights_vertical")) {
+              targetActions.push_back(functionName);
             }
           }
         }
@@ -626,6 +684,7 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
   float* weights;
   RowTypePtr valueSchema;
   RowTypePtr weightSchema;
+  static inline int rewriteMatMulCounter = 0;
 };
 
 } // namespace optimization
