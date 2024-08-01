@@ -1028,6 +1028,9 @@ public:
             model_->push_back(torch::nn::Softmax(1));
           }
         }
+      // enable evaluation mode, this is required for inference, otherwise some module could 
+      // failed, like dropout, batchnorm, etc.
+      model_->eval();
 
     }
 

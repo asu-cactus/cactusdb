@@ -109,7 +109,6 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
               auto expression = projections[exprIdx];
               // Get the string of expression
               std::string exprStr = expression->toString();
-
               // Check if target exist in the expression
               if (exprStr.find(target) != std::string::npos) {
                 // There is one limitation here: the current rewrite can only
@@ -137,7 +136,6 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                 std::vector<velox::dl::KernelType> kernelTypes;
                 std::vector<float*> weights;
                 std::vector<int> dims;
-
                 // process each expression from the innermost DL kernel
                 for (int i = 0; i < parsedSingleExprs.size(); i++) {
                   // double check it is supported DL kernel
@@ -155,7 +153,9 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                     udfDims = myDLFunc->getDims();
                     kernelTypes.push_back(velox::dl::KernelType::MatMul);
                   } else if (
-                      dlKernelName.find("mat_add") != std::string::npos) {
+                      dlKernelName.find("mat_add") != std::string::npos ||
+                      dlKernelName.find("mat_vector_add") !=
+                          std::string::npos) {
                     auto myDL = getVectorFunction(
                         dlKernelName, {ARRAY(REAL())}, {}, config);
                     assert(myDL);
@@ -183,7 +183,6 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                     assert(myDLFunc);
                     weights.push_back(myDLFunc->getWeight());
                     weights.push_back(myDLFunc->getBias());
-                    std::cout << "debug reached here \n";
                     udfDims = myDLFunc->getDims();
                     kernelTypes.push_back(velox::dl::KernelType::BatchNorm);
                   } else if (
@@ -193,6 +192,10 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                     // cannot be the innermost UDF.
                     udfDims = {dims.back()};
                     kernelTypes.push_back(velox::dl::KernelType::Softmax);
+                  } else {
+                    std::cout
+                        << "ERROR, Unsupported DL kernel: " << dlKernelName
+                        << std::endl;
                   }
 
                   // Size of dimension should equal to size of DLs + 1, since
@@ -462,7 +465,9 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
 
   bool isSupportedDLKernel(std::string dlKernelName) {
     for (auto supportedDLKernel : supportedDLKernels) {
-      if (dlKernelName.find(supportedDLKernel) != std::string::npos) {
+      // Does not support block-based mat_mul
+      if (dlKernelName.find(supportedDLKernel) != std::string::npos &&
+          dlKernelName.find("_h") == std::string::npos) {
         return true;
       }
     }
@@ -517,7 +522,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
       // Search each expressions
       for (const auto& expression : expressions) {
         std::string expr = expression->toString();
-        std::cout << "expr: " << expr << std::endl;
+        // std::cout << "expr: " << expr << std::endl;
         std::vector<std::string> parsedSingleExprs;
         std::vector<std::string> matchedExprs;
         parseDLExpressions(expr, parsedSingleExprs, matchedExprs);
@@ -526,7 +531,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
         std::reverse(matchedExprs.begin(), matchedExprs.end());
         std::string targetExprStr;
         for (int i = 0; i < parsedSingleExprs.size(); i++) {
-          if (isSupportedDLKernel(matchedExprs[i])) {
+          if (isSupportedDLKernel(parsedSingleExprs[i])) {
             targetExprStr = matchedExprs[i];
           }
         }
