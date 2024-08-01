@@ -96,9 +96,6 @@ class MCTSTreeNode:
         action_space = dict()
         for action_pair in received_action_space:
             target_expression = action_pair["expression"]
-            # FIXME: temporary does not support rewrite on mat_mul1
-            if 'mat_mul1' == target_expression:
-                continue
             list_actions = action_pair["action"]
             for action in list_actions:
                 action_space[(target_expression, action)] = False
@@ -157,7 +154,7 @@ class MCTS:
         self.root_node = root_node
         self.timer.tic()
         if self.verbose >= 1:
-                print("[INFO] ==========Start MCTS Training==========")
+            print("[INFO] ==========Start MCTS Training==========")
         for iter_idx in tqdm(range(self.max_iteration_num)):
             if self.verbose >= 1:
                 print("[INFO] search iteration idx: ", iter_idx)
@@ -201,7 +198,7 @@ class MCTS:
         self.root_node = root_node
         self.timer.tic()
         if self.verbose >= 1:
-                print("[INFO] ==========Start MCTS Search==========")
+            print("[INFO] ==========Start MCTS Search==========")
         node = self.root_node
         # each new iteration needs to reset the query plan from root node
         send_message = dict()
@@ -216,18 +213,20 @@ class MCTS:
                 # exist search if exceeds the maximum search time
                 print("[INFO] maximum search time reached out")
                 break
+            # return if no children
+            if len(node.children) == 0:
+                break
             node.check_and_update_is_fully_expanded()
             node = self.select(node, use_factor=False)
 
         # get reward via simulation after reaching the terminal state
         t_elapsed_time = self.timer.toc()
         latency = self.run_plan()
-        
+
         print("[INFO] MCTS search time: {} ms".format(t_elapsed_time))
         print("[INFO] MCTS search finished, query execution time: {} s".format(latency))
         current_query_plan = self.get_current_query_plan()
         print("[INFO] Searched query plan: {}".format(current_query_plan))
-        
 
     def select(self, node: MCTSTreeNode, use_factor=True) -> MCTSTreeNode:
         """Select best node based on UCT
@@ -269,7 +268,9 @@ class MCTS:
         selected_expression, selected_action = random.choice(unexplorered_action)
         new_state = node.state.copy()
         new_state[selected_expression] = selected_action
-        matched_keys = [key for key in node.action_space.keys() if key[0] == selected_expression]
+        matched_keys = [
+            key for key in node.action_space.keys() if key[0] == selected_expression
+        ]
         for target_expression, action in matched_keys:
             node.action_space[(target_expression, action)] = True
         # set as terminal node if the selected expression is None
@@ -292,7 +293,7 @@ class MCTS:
             client_socket=self.client_socket,
             is_terminal=is_terminal,
             from_action=(selected_expression, selected_action),
-            verbose=self.verbose
+            verbose=self.verbose,
         )
         node.children.append(new_node)
 
@@ -305,7 +306,7 @@ class MCTS:
         send_message["optimizationIsFinished"] = False
         send_message_by_socket(send_message, self.client_socket, self.verbose)
         received_message = receive_message_by_socket(self.client_socket, self.verbose)
-        latency = received_message['latency']
+        latency = received_message["latency"]
         return latency
 
     def simulate(self, node: MCTSTreeNode) -> float:
@@ -325,7 +326,7 @@ class MCTS:
             is_terminal = True if selected_expression == "None" else None
             if self.verbose >= 2:
                 print(
-                    "[INFO] SIMULATION, selected action: {}".format(
+                    "[INFO] performed SIMULATION, selected action: {}".format(
                         (selected_expression, selected_action)
                     )
                 )
@@ -344,7 +345,7 @@ class MCTS:
                 from_action=(selected_expression, selected_action),
                 is_temp_node=True,
                 verbose=self.verbose,
-                is_terminal=is_terminal
+                is_terminal=is_terminal,
             )
 
             simulation_count += 1
@@ -377,15 +378,17 @@ class MCTS:
                     )
                 )
             node = node.parent
-    
+
     def get_current_query_plan(self):
         send_message = dict()
         send_message["mctsAction"] = "getQueryPlan"
         send_message["optimizationIsFinished"] = False
         send_message_by_socket(send_message, self.client_socket, self.verbose)
-        received_message = receive_message_by_socket(self.client_socket, verbose=self.verbose, buffsize=1024*1024)
-        current_query_plan = received_message['queryPlan']
-        
+        received_message = receive_message_by_socket(
+            self.client_socket, verbose=self.verbose, buffsize=1024 * 1024
+        )
+        current_query_plan = received_message["queryPlan"]
+
         return current_query_plan
 
 
@@ -397,7 +400,7 @@ def send_message_by_socket(message, client_socket, verbose=0):
         print("[DEBUG] Sent message: ", message)
 
 
-def receive_message_by_socket(client_socket, verbose=0, buffsize=1024):
+def receive_message_by_socket(client_socket, verbose=0, buffsize=10240):
     received_message_str = client_socket.recv(buffsize).decode("utf-8")
     json_message = json.loads(received_message_str)
     if verbose >= 3:
@@ -416,7 +419,9 @@ if __name__ == "__main__":
     client_socket, client_address = server_socket.accept()
 
     print(f"Connected to C++ client: {client_address}")
-    VERBOSE = 2 # 0: no output, 1: simplified output, 2: detailed output, 3: every output
+    VERBOSE = (
+        2  # 0: no output, 1: simplified output, 2: detailed output, 3: every output
+    )
     # os.environ["mcts_debug"] = "True"
     optimization_is_finished = False
     while not optimization_is_finished:
@@ -428,19 +433,21 @@ if __name__ == "__main__":
         if mctsAction == "start":
             initQueryPlan = received_json_message["queryPlan"]
             rootNode = MCTSTreeNode(
-                state={"queryPlan": initQueryPlan}, client_socket=client_socket, verbose=VERBOSE
+                state={"queryPlan": initQueryPlan},
+                client_socket=client_socket,
+                verbose=VERBOSE,
             )
             mcts = MCTS(
                 client_socket=client_socket,
                 max_iteration_num=6,
                 max_sim_iteration_num=3,
-                reward_mode="online", 
-                # reward_mode="offline",
-                max_iteration_time = 1000 * 3600,
-                verbose = VERBOSE
+                # reward_mode="online",
+                reward_mode="offline",
+                max_iteration_time=1000 * 3600,
+                verbose=VERBOSE,
             )
             mcts.train(rootNode)
-            print("[DEBUG] num_visit: " , rootNode.num_visit)
+            print("[DEBUG] num_visit: ", rootNode.num_visit)
             mcts.search(rootNode)
             optimization_is_finished = True
             send_message = {"optimizationIsFinished": True, "mctsAction": "finished"}

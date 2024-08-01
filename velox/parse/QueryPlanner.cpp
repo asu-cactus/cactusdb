@@ -577,4 +577,20 @@ PlanNodePtr DuckDbQueryPlanner::plan(const std::string& sql) {
   return toVeloxPlan(*plan, pool_, queryContext);
 }
 
+PlanNodePtr DuckDbQueryPlanner::planWithOptimization(const std::string& sql) {
+  // Experimental function call try to enable DuckDB's optimizer.
+  // However it is not working as expected.
+  conn_.Query("PRAGMA enable_optimizer");
+
+  auto plan = conn_.ExtractPlan(sql);
+
+  QueryContext queryContext{tables_};
+  return toVeloxPlan(*plan, pool_, queryContext);
+}
+
+::duckdb::Connection DuckDbQueryPlanner::getConn() {
+  return conn_;
+}
+  
+
 } // namespace facebook::velox::core

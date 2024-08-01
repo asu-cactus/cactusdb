@@ -57,6 +57,7 @@ class EmbeddingTest : public HiveConnectorTestBase {
   void testSequencePooling();
   void testEmbedding_MatMul();
   void testHuggingFace();
+  void testHuggingFaceTokenizer();
 
   void TestBody() override {}
 

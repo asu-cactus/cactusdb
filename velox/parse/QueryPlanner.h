@@ -44,7 +44,9 @@ class DuckDbQueryPlanner {
       const TypePtr& returnType);
 
   PlanNodePtr plan(const std::string& sql);
-
+  PlanNodePtr planWithOptimization(const std::string& sql);
+  ::duckdb::Connection getConn();
+  
  private:
   ::duckdb::DuckDB db_;
   ::duckdb::Connection conn_{db_};
