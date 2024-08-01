@@ -15,7 +15,7 @@ using namespace facebook::velox::memory;
 // Implementation of embedding layer where the embedding is stored as a 2-D
 // array: numEmbedding*embeddingDims, lookup takes a int vector as indices
 
-class IntEncoder : public exec::VectorFunction {
+class IntEncoder : public MLFunction {
  public:
   IntEncoder(std::unordered_map<int, int> mapping) {
     mapping_ = mapping;
@@ -57,11 +57,21 @@ class IntEncoder : public exec::VectorFunction {
     return "encoder";
   };
 
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
+
  private:
   std::unordered_map<int, int> mapping_;
 };
 
-class StringEncoder : public exec::VectorFunction {
+class StringEncoder : public MLFunction {
  public:
   StringEncoder(std::unordered_map<std::string, int> mapping) {
     mapping_ = mapping;
@@ -100,11 +110,21 @@ class StringEncoder : public exec::VectorFunction {
     return "encoder_string";
   };
 
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
+
  private:
   std::unordered_map<std::string, int> mapping_;
 };
 
-class StringVariadicEncoder : public exec::VectorFunction {
+class StringVariadicEncoder : public MLFunction {
  public:
   StringVariadicEncoder(std::unordered_map<std::string, int> mapping) {
     mapping_ = mapping;
@@ -153,11 +173,21 @@ class StringVariadicEncoder : public exec::VectorFunction {
     return "encoder_string_variadic";
   };
 
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
+
  private:
   std::unordered_map<std::string, int> mapping_;
 };
 
-class MultiHotNormalizedEncoder : public exec::VectorFunction {
+class MultiHotNormalizedEncoder : public MLFunction {
  public:
   MultiHotNormalizedEncoder(int size) {
     size_ = size;
@@ -169,32 +199,30 @@ class MultiHotNormalizedEncoder : public exec::VectorFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-      BaseVector::ensureWritable(rows, type, context.pool(), output);
+    auto indicesRowVector = args[0];
+    auto arrayVector = indicesRowVector->as<ArrayVector>();
 
-      auto indicesRowVector = args[0];
-      auto arrayVector = indicesRowVector->as<ArrayVector>();
+    auto indicesVector = arrayVector->elements();
+    int* indicesValues = indicesVector->values()->asMutable<int>();
+    int numInputs = rows.size();
 
-      auto indicesVector = arrayVector->elements();
-      int* indicesValues = indicesVector->values()->asMutable<int>();
-      int numInputs = rows.size();
+    std::vector<std::vector<float>> encoding(
+        numInputs, std::vector<float>(size_, 0));
 
-    
-      
-      std::vector<std::vector<float>> encoding(numInputs, std::vector<float>(size_, 0));
-
-      for (int i = 0; i < numInputs; i++) {
-        int numSubIndices = arrayVector->sizeAt(i);
-        int indicesOffset = arrayVector->offsetAt(i);
-        float value = 1.0 / numSubIndices;
-        for (int j = 0; j < numSubIndices; j++) {
-          int embedIndex = indicesValues[indicesOffset + j];
-          encoding[i][embedIndex] = value;
-        }
+    for (int i = 0; i < numInputs; i++) {
+      int numSubIndices = arrayVector->sizeAt(i);
+      int indicesOffset = arrayVector->offsetAt(i);
+      float value = 1.0 / numSubIndices;
+      for (int j = 0; j < numSubIndices; j++) {
+        int embedIndex = indicesValues[indicesOffset + j];
+        encoding[i][embedIndex] = value;
       }
+    }
 
-      VectorMaker maker{context.pool()};
-      output = maker.arrayVector<float>(encoding, REAL());
+    VectorMaker maker{context.pool()};
+    output = maker.arrayVector<float>(encoding, REAL());
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -207,6 +235,16 @@ class MultiHotNormalizedEncoder : public exec::VectorFunction {
   static std::string getName() {
     return "multi_hot_norm_encoder";
   };
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
 
  private:
   int size_;

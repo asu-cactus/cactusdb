@@ -19,8 +19,13 @@ using namespace facebook::velox::memory;
 class BatchNorm1D : public MLFunction {
  public:
   BatchNorm1D(float* weights, float* bias, int numDims, float eps = 1e-05) {
-    weights_ = weights;
-    bias_ = bias;
+    // Create a deep copy of the weights
+    weights_ = new float[numDims];
+    bias_ = new float[numDims];
+    std::memcpy(weights_, weights, numDims * sizeof(float));
+    std::memcpy(bias_, bias, numDims * sizeof(float));
+    // weights_ = weights;
+    // bias_ = bias;
     eps_ = eps;
     dims.push_back(numDims);
   }
@@ -50,7 +55,6 @@ class BatchNorm1D : public MLFunction {
         inputMatrix(inputValues, numInput, dims[0]);
     Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
         result(numInput, dims[0]);
-
 
     for (int i = 0; i < dims[0]; i++) {
       Eigen::VectorXf colData = inputMatrix.col(i);
@@ -89,6 +93,14 @@ class BatchNorm1D : public MLFunction {
     return weights_;
   }
 
+  float* getWeight() {
+    return weights_;
+  }
+
+  float* getBias() {
+    return bias_;
+  }
+
   static std::string getName() {
     return "batch_norm_1d";
   };
@@ -99,6 +111,11 @@ class BatchNorm1D : public MLFunction {
 
   void setWeights(float* weights) {
     weights_ = weights;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:

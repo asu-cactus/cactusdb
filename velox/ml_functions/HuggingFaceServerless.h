@@ -28,7 +28,7 @@ enum HuggingFaceTaskType {
   TEXT_FEATURE_EXTRACTION
 };
 
-class HuggingFaceServerless : public exec::VectorFunction {
+class HuggingFaceServerless : public MLFunction {
  public:
   HuggingFaceServerless(std::string apiURL, HuggingFaceTaskType taskType) {
     apiURL_ = apiURL;
@@ -58,8 +58,8 @@ class HuggingFaceServerless : public exec::VectorFunction {
 
     // Limit of number of inputs can be sent to serverless API at once
     // HuggingFace itself suggest maximum number is 10K, sometime the API
-    // itself is busy and cannot work. Try reduce the limit or deploy a dedicated
-    // endpoint
+    // itself is busy and cannot work. Try reduce the limit or deploy a
+    // dedicated endpoint
     const int HF_SERVERLESS_INPUT_LIMIT = 5000;
 
     // HuggingFace inputs are formatted as follows:
@@ -110,7 +110,8 @@ class HuggingFaceServerless : public exec::VectorFunction {
                 taskType_ == HuggingFaceTaskType::TEXT_FEATURE_EXTRACTION) {
               auto returnedEmbedding = innerVector[0];
               int processedEmbeddingCount = 0;
-              // FIXME sometimes it returns unfixed number of embeeding, need further investigation
+              // FIXME sometimes it returns unfixed number of embeeding, need
+              // further investigation
               for (const auto& value : returnedEmbedding) {
                 std::vector<float> embeddingVector;
                 for (const auto& val : value) {
@@ -155,6 +156,16 @@ class HuggingFaceServerless : public exec::VectorFunction {
   }
   static std::string getName() {
     return "huggingface";
+  }
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:

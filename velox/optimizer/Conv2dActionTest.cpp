@@ -148,9 +148,10 @@ class Conv2dActionTest : public HiveConnectorTestBase {
 
       core::PlanNodeId key = entry.first;
 
-      const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+      const std::vector<std::string> fileAddr = entry.second;
+      auto fileFormat = cataLog.getIdFileFormat(key);
       std::cout << "path size:"<< fileAddr.size() << std::endl;
-      auto hiveSplits = makeHiveConnectorSplits(fileAddr);
+      auto hiveSplits = makeHiveConnectorSplits(fileAddr, fileFormat);
       std::cout << "hive size:"<< hiveSplits.size() << std::endl;
       for (auto& split : hiveSplits) {
 
@@ -240,10 +241,10 @@ class Conv2dActionTest : public HiveConnectorTestBase {
 
       core::PlanNodeId key = entry.first;
 
-      const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+      const std::vector<std::string> fileAddr = entry.second;
 
       // auto hiveSplits = makeHiveConnectorSplits(fileAddr[0], numSplits, dwio::common::FileFormat::DWRF);
-      auto hiveSplits =  makeHiveConnectorSplits(fileAddr[0]->path, cataLog.getDefaultSplits(), dwio::common::FileFormat::DWRF);
+      auto hiveSplits =  makeHiveConnectorSplits(fileAddr[0], cataLog.getDefaultSplits(), dwio::common::FileFormat::DWRF);
       std::cout << "hive size:"<< hiveSplits.size() << std::endl;
       for (auto& split : hiveSplits) {
         std::cout << split->toString() << std::endl;

@@ -14,254 +14,357 @@
  * limitations under the License.
  */
 #pragma once
-#include <map> 
+#include <map>
 #include <string>
 #include "velox/cost_model/Source.h"
 
 class CataLog {
-    public:
+ public:
+  virtual ~CataLog() = default;
 
-        virtual ~CataLog() = default;
-        
-        CataLog() {}
+  CataLog() {}
 
-        CataLog(std::string name) : name(name) {}
+  CataLog(std::string name) : name(name) {}
 
-        // Add or update UDF associate information (schema, file address) based on the flag (weights or values)
-        void add(const std::string& name, RowTypePtr schema, std::vector<std::shared_ptr<TempFilePath>> filePath, int flag, std::string nameSuffix = "") {
-            // TODO: better naming convention for the flag variable
-            if (flag == 1) {
-                std::string key = name + "_weights" + nameSuffix;
+  // Add or update UDF associate information (schema, file address) based on the
+  // flag (weights or values)
+  void add(
+      const std::string& name,
+      RowTypePtr schema,
+      std::vector<std::shared_ptr<TempFilePath>> filePath,
+      int flag,
+      std::string nameSuffix = "") {
+    // TODO: better naming convention for the flag variable
+    if (flag == 1) {
+      std::string key = name + "_weights" + nameSuffix;
 
-                auto fileAddrIt = UDFFileAddrMap.find(key);
-                auto schemaIt = UDFSchemaMap.find(key);
+      auto fileAddrIt = UDFFileAddrMap.find(key);
+      auto schemaIt = UDFSchemaMap.find(key);
 
-                if (fileAddrIt != UDFFileAddrMap.end() && schemaIt != UDFSchemaMap.end()) {
-                    // Key exists, update values
-                    fileAddrIt->second = filePath;
-                    schemaIt->second = schema;
-                } else {
-                    // Key doesn't exist, create new entry
-                    UDFFileAddrMap[key] = filePath;
-                    UDFSchemaMap[key] = schema;
-                }
-            }
-            else if (flag == 0) {
-                std::string key = name + "_values" + nameSuffix;
+      if (fileAddrIt != UDFFileAddrMap.end() &&
+          schemaIt != UDFSchemaMap.end()) {
+        // Key exists, update values
+        fileAddrIt->second = filePath;
+        schemaIt->second = schema;
+      } else {
+        // Key doesn't exist, create new entry
+        UDFFileAddrMap[key] = filePath;
+        UDFSchemaMap[key] = schema;
+      }
+    } else if (flag == 0) {
+      std::string key = name + "_values" + nameSuffix;
 
-                auto fileAddrIt = UDFFileAddrMap.find(key);
-                auto schemaIt = UDFSchemaMap.find(key);
+      auto fileAddrIt = UDFFileAddrMap.find(key);
+      auto schemaIt = UDFSchemaMap.find(key);
 
-                if (fileAddrIt != UDFFileAddrMap.end() && schemaIt != UDFSchemaMap.end()) {
-                    // Key exists, update values
-                    fileAddrIt->second = filePath;
-                    schemaIt->second = schema;
-                } else {
-                    // Key doesn't exist, create new entry
-                    UDFFileAddrMap[key] = filePath;
-                    UDFSchemaMap[key] = schema;
-                }
-            }
-        }
+      if (fileAddrIt != UDFFileAddrMap.end() &&
+          schemaIt != UDFSchemaMap.end()) {
+        // Key exists, update values
+        fileAddrIt->second = filePath;
+        schemaIt->second = schema;
+      } else {
+        // Key doesn't exist, create new entry
+        UDFFileAddrMap[key] = filePath;
+        UDFSchemaMap[key] = schema;
+      }
+    }
+  }
 
-        // Set schema and file address for data source blocks
-        void setDataSourceBlocks(RowTypePtr schema, std::vector<std::shared_ptr<TempFilePath>> filePath) {
-            dataSourceBlocksSchemaMap["values"] = schema;
-            dataSourceBlocksFileAddrMap["values"] = filePath;
-        }
+  // Set schema and file address for data source blocks
+  void setDataSourceBlocks(
+      RowTypePtr schema,
+      std::vector<std::shared_ptr<TempFilePath>> filePath) {
+    dataSourceBlocksSchemaMap["values"] = schema;
+    dataSourceBlocksFileAddrMap["values"] = filePath;
+  }
 
-        // Get data source blocks schema based on key
-        RowTypePtr getDataSourceBlocksSchema(std::string key) {
-            return findSchemaInMap(dataSourceBlocksSchemaMap, key);
-        }
+  // Get data source blocks schema based on key
+  RowTypePtr getDataSourceBlocksSchema(std::string key) {
+    return findSchemaInMap(dataSourceBlocksSchemaMap, key);
+  }
 
-        // Get data source blocks file address based on key
-        std::vector<std::shared_ptr<TempFilePath>> getDataSourceBlocksFileAddr(std::string key) {
-            return findFileAddrInMap(dataSourceBlocksFileAddrMap, key);
-        }
+  // Get data source blocks file address based on key
+  std::vector<std::shared_ptr<TempFilePath>> getDataSourceBlocksFileAddr(
+      std::string key) {
+    return findFileAddrInMap(dataSourceBlocksFileAddrMap, key);
+  }
 
-        void setUDFSchema(std::string key, RowTypePtr schema) {
-            UDFSchemaMap[key] = schema;
-        }
+  void setUDFSchema(std::string key, RowTypePtr schema) {
+    UDFSchemaMap[key] = schema;
+  }
 
-        // Get UDF schema based on key
-        RowTypePtr getUDFSchema(std::string key) {
-            RowTypePtr result = findSchemaInMap(UDFSchemaMap, key);
-            if (result == 0) {
-                throw std::runtime_error(fmt::format("Key: {} was not found in UDFSchemaMap.", key));
-            }         
-            return result;
-        }
+  // Get UDF schema based on key
+  RowTypePtr getUDFSchema(std::string key) {
+    RowTypePtr result = findSchemaInMap(UDFSchemaMap, key);
+    if (result == 0) {
+      throw std::runtime_error(
+          fmt::format("Key: {} was not found in UDFSchemaMap.", key));
+    }
+    return result;
+  }
 
-        // Get UDF file address based on key
-        std::vector<std::shared_ptr<TempFilePath>> getUDFFileAddr(std::string key) {
-            std::vector<std::shared_ptr<TempFilePath>> result =  findFileAddrInMap(UDFFileAddrMap, key);
-            if (result.size() == 0) {
-                throw std::runtime_error(fmt::format("Key: {} was not found in UDFFileAddrMap.", key));
-            }
-            return result;
-        }
+  // Get UDF file address based on key
+  std::vector<std::shared_ptr<TempFilePath>> getUDFFileAddr(std::string key) {
+    std::vector<std::shared_ptr<TempFilePath>> result =
+        findFileAddrInMap(UDFFileAddrMap, key);
+    if (result.size() == 0) {
+      throw std::runtime_error(
+          fmt::format("Key: {} was not found in UDFFileAddrMap.", key));
+    }
+    return result;
+  }
 
-        // Check if UDF file address exists for the given key
-        bool checkExistsUDFFileAddr(const std::string& key) {
-            return UDFFileAddrMap.find(key) != UDFFileAddrMap.end();
-        }
+  // Check if UDF file address exists for the given key
+  bool checkExistsUDFFileAddr(const std::string& key) {
+    return UDFFileAddrMap.find(key) != UDFFileAddrMap.end();
+  }
 
-        // Set schema and file address for data source
-        void setDataSource(RowTypePtr schema, std::vector<std::shared_ptr<TempFilePath>> filePath) {
-            dataSourceSchemaMap["values"] = schema;
-            dataSourceFileAddrMap["values"] = filePath;
-        }
+  // Set schema and file address for data source
+  void setDataSource(
+      RowTypePtr schema,
+      std::vector<std::shared_ptr<TempFilePath>> filePath) {
+    dataSourceSchemaMap["values"] = schema;
+    dataSourceFileAddrMap["values"] = filePath;
+  }
 
-        // Set data source statistics based on key
-        void setDataSourceStat(std::vector<int> dims) {
-            dataSourceStatMap["values"] = dims;
-        }
+  // Set data source statistics based on key
+  void setDataSourceStat(std::vector<int> dims) {
+    dataSourceStatMap["values"] = dims;
+  }
 
-        // Get data source statistics based on key
-        std::vector<int> getDataSourceStat(std::string key) {
-            std::vector<int> result = findStatInMap(dataSourceStatMap, key);
-            if (result.size() == 0) {
-                throw std::runtime_error(fmt::format("Key: {} was not found in dataSourceStatMap.", key));
-            }
-            return result;
-        }
+  // Get data source statistics based on key
+  std::vector<int> getDataSourceStat(std::string key) {
+    std::vector<int> result = findStatInMap(dataSourceStatMap, key);
+    if (result.size() == 0) {
+      throw std::runtime_error(
+          fmt::format("Key: {} was not found in dataSourceStatMap.", key));
+    }
+    return result;
+  }
 
-        // Set file address map for a given PlanNodeId
-        void setIdAddressMap(core::PlanNodeId p, std::vector<std::shared_ptr<TempFilePath>> filePath) {
-            idFileAddrMap[p] = filePath;
-        }
+  // Set file address map for a given PlanNodeId
+  void setIdAddressMap(core::PlanNodeId p, std::vector<std::string> filePath) {
+    idFileAddrMap[p] = filePath;
+  }
 
-       std::vector<std::shared_ptr<TempFilePath>> getFileAddress(core::PlanNodeId p) {
-        return idFileAddrMap[p];
-       }
+  // Set file address map for a given PlanNodeId
+  void setIdAddressMap(
+      core::PlanNodeId p,
+      std::vector<std::string> filePath,
+      dwio::common::FileFormat format) {
+    idFileAddrMap[p] = filePath;
+    idFileFormatMap[p] = format;
+  }
 
-        // Delete file address map entry for a given PlanNodeId
-        void deleteIdAddressMap(core::PlanNodeId p) {
-            idFileAddrMap.erase(p);
-        }
-        
-        // Clear file address map entry for a given PlanNodeId
-        void clearIdAddressMap() {
-            idFileAddrMap.clear();
-        }
+  // Deprecating warning: in the future development, it is expected to pass path
+  // as std::vector<std::string>
+  void setIdAddressMap(
+      core::PlanNodeId p,
+      std::vector<std::shared_ptr<TempFilePath>> filePath) {
+    std::vector<std::string> filePathStr;
+    for (auto& path : filePath) {
+      filePathStr.push_back(path->path);
+    }
+    idFileAddrMap[p] = filePathStr;
+    idFileFormatMap[p] = dwio::common::FileFormat::DWRF;
+  }
 
-        // Get the entire file address map for PlanNodeId
-        std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> getIdAddressMap() {
-            return idFileAddrMap;
-        }
+  // Get file address map for a given PlanNodeId
+  std::vector<std::string> getFileAddress(core::PlanNodeId p) {
+    return idFileAddrMap[p];
+  }
 
-        // Set mapping from vector values to PlanNodeId
-        void setVectorIdMap(core::PlanNodeId p, std::string values) {
-            vectorIdMap[values] = p;
-        }
+  // Delete file address map entry for a given PlanNodeId
+  void deleteIdAddressMap(core::PlanNodeId p) {
+    idFileAddrMap.erase(p);
+  }
 
-        // Delete mapping from vector values to PlanNodeId
-        void deleteVectorIdMap(std::string values) {
-            vectorIdMap.erase(values);
-        }
+  // Clear file address map entry for a given PlanNodeId
+  void clearIdAddressMap() {
+    idFileAddrMap.clear();
+  }
 
-        // Clear mapping from vector values to PlanNodeId
-        void clearVectorIdMap() {
-            vectorIdMap.clear();
-        }
+  // Get the entire file address map for PlanNodeId
+  std::map<core::PlanNodeId, std::vector<std::string>> getIdAddressMap() {
+    return idFileAddrMap;
+  }
 
-        // Get PlanNodeId based on vector values
-        core::PlanNodeId getVectorIdMap(const std::string& values) {
-            auto it = vectorIdMap.find(values);
-            return (it != vectorIdMap.end()) ? it->second : core::PlanNodeId();  // Return default PlanNodeId
-        }
+  // Set the schema for a given PlanNodeId
+  void setFileSchema(core::PlanNodeId p, RowTypePtr schema) {
+    fileSchemaMap[p] = schema;
+  }
+  
+  // Get the schema for a given PlanNodeId
+  RowTypePtr getFileSchema(core::PlanNodeId p) {
+    auto it = fileSchemaMap.find(p);
+    if (it != fileSchemaMap.end()) {
+      return it->second;
+    } else {
+      return nullptr;
+    }
+  }
+  
+  // Get the map of PlanNodeId to schema
+  std::map<core::PlanNodeId, RowTypePtr> getFileSchemaMap() {
+    return fileSchemaMap;
+  }
 
-        // Set blocking threshold
-        void setBlockingThreshold(int newThreshold){
-            blockingThreshold = newThreshold;
-        }
+  // Clear file schema map
+  void clearFileSchemaMap() {
+    fileSchemaMap.clear();
+  }
 
-        // Get blocking threshold
-        int getBlockingThreshold (){
-            return blockingThreshold;
-        }
+  // Get the map of PlanNodeId to FileFormat
+  std::map<core::PlanNodeId, dwio::common::FileFormat> getIdFileFormatMap() {
+    return idFileFormatMap;
+  }
 
-        // Set default number of blocks
-        void setDefaultBlocksNum(int newBlocksNum) {
-            defaultBlocksNum = newBlocksNum;
-        }
+  // Set file address map for a given PlanNodeId
+  void setIdFileFormat(core::PlanNodeId p, dwio::common::FileFormat format) {
+    idFileFormatMap[p] = format;
+  }
 
-        // Get default number of blocks
-        int getDefaultBlocksNum () {
-            return defaultBlocksNum;
-        }
+  // Get file format for a given PlanNodeId
+  dwio::common::FileFormat getIdFileFormat(core::PlanNodeId p) {
+    auto it = idFileFormatMap.find(p);
+    if (it != idFileFormatMap.end()) {
+      return it->second;
+    } else {
+      return dwio::common::FileFormat::DWRF;
+    }
+  }
 
-        void setDefaultBlocksSize(int newBlocksSize) {
-            defaultBlocksSize = newBlocksSize;
-        }
+  // Set mapping from vector values to PlanNodeId
+  void setVectorIdMap(core::PlanNodeId p, std::string values) {
+    vectorIdMap[values] = p;
+  }
 
-        // Get default number of blocks
-        int getDefaultBlocksSize () {
-            return defaultBlocksSize;
-        }
+  // Delete mapping from vector values to PlanNodeId
+  void deleteVectorIdMap(std::string values) {
+    vectorIdMap.erase(values);
+  }
 
-        int getDefaultSplits (){
-            return defaultSplits;
-        }
+  // Clear mapping from vector values to PlanNodeId
+  void clearVectorIdMap() {
+    vectorIdMap.clear();
+  }
 
-        void addSource(std::shared_ptr<Source> src){
-            sourceMap.insert({src->getName(), src});
-        }
+  // Get PlanNodeId based on vector values
+  core::PlanNodeId getVectorIdMap(const std::string& values) {
+    auto it = vectorIdMap.find(values);
+    return (it != vectorIdMap.end())
+        ? it->second
+        : core::PlanNodeId(); // Return default PlanNodeId
+  }
 
-        void removeSource(std::string name){
-            sourceMap.erase(name);
-        }
+  // Set blocking threshold
+  void setBlockingThreshold(int newThreshold) {
+    blockingThreshold = newThreshold;
+  }
 
-        std::shared_ptr<Source> getSource(std::string srcName){
-            auto it = sourceMap.find(srcName);
-            if (it != sourceMap.end()) {
-                return it->second;
-            } else {
-                LOG(FATAL) << fmt::format("[ERROR] srcName: {} not exist in sourceMap", srcName);
-                return nullptr; 
-            }
-        }
+  // Get blocking threshold
+  int getBlockingThreshold() {
+    return blockingThreshold;
+  }
 
-        void clearSourceMap() {
-            sourceMap.clear();
-        }
+  // Set default number of blocks
+  void setDefaultBlocksNum(int newBlocksNum) {
+    defaultBlocksNum = newBlocksNum;
+  }
 
+  // Get default number of blocks
+  int getDefaultBlocksNum() {
+    return defaultBlocksNum;
+  }
 
-    private:
-        std::string name;
-        // Default values
-        int defaultBlocksNum = 4;
-        int defaultBlocksSize = 256;
-        int blockingThreshold = 1;
-        int defaultSplits = 392;
-        // Maps for storing data
-        std::map<std::string, std::vector<int>> dataSourceStatMap;
-        std::map<core::PlanNodeId, std::vector<std::shared_ptr<TempFilePath>>> idFileAddrMap;
-        std::map<std::string, core::PlanNodeId> vectorIdMap;
-        std::map<std::string, RowTypePtr> dataSourceSchemaMap;
-        std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>> dataSourceFileAddrMap;
-        std::map<std::string, RowTypePtr> dataSourceBlocksSchemaMap;
-        std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>> dataSourceBlocksFileAddrMap;
-        std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>> UDFFileAddrMap;
-        std::map<std::string, RowTypePtr> UDFSchemaMap;
-        std::unordered_map<std::string, std::shared_ptr<Source>> sourceMap;
+  void setDefaultBlocksSize(int newBlocksSize) {
+    defaultBlocksSize = newBlocksSize;
+  }
 
-         // Helper function to find schema in a map based on key
-        RowTypePtr findSchemaInMap(const std::map<std::string, RowTypePtr>& schemaMap, const std::string& key) {
-            auto schemaIt = schemaMap.find(key);
-            return (schemaIt != schemaMap.end()) ? schemaIt->second : nullptr;  // Return null shared pointer
-        }
+  // Get default number of blocks
+  int getDefaultBlocksSize() {
+    return defaultBlocksSize;
+  }
 
-        // Helper function to find file address in a map based on key
-        std::vector<std::shared_ptr<TempFilePath>> findFileAddrInMap(const std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>>& fileAddrMap, const std::string& key) {
-            auto addrIt = fileAddrMap.find(key);
-            return (addrIt != fileAddrMap.end()) ? addrIt->second : std::vector<std::shared_ptr<TempFilePath>>();  // Return empty vector
-        }
+  int getDefaultSplits() {
+    return defaultSplits;
+  }
 
-        // Helper function to find statistics in a map based on key
-        std::vector<int> findStatInMap(const std::map<std::string, std::vector<int>>& statMap, const std::string& key) {
-            auto statIt = statMap.find(key);
-            return (statIt != statMap.end()) ? statIt->second : std::vector<int>();  // Return empty vector
-        }
+  void addSource(std::shared_ptr<Source> src) {
+    sourceMap.insert({src->getName(), src});
+  }
+
+  void removeSource(std::string name) {
+    sourceMap.erase(name);
+  }
+
+  std::shared_ptr<Source> getSource(std::string srcName) {
+    auto it = sourceMap.find(srcName);
+    if (it != sourceMap.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] srcName: {} not exist in sourceMap", srcName);
+      return nullptr;
+    }
+  }
+
+  void clearSourceMap() {
+    sourceMap.clear();
+  }
+
+ private:
+  std::string name;
+  // Default values
+  int defaultBlocksNum = 4;
+  int defaultBlocksSize = 256;
+  int blockingThreshold = 1;
+  int defaultSplits = 392;
+  // Maps for storing data
+  std::map<std::string, std::vector<int>> dataSourceStatMap;
+  std::map<core::PlanNodeId, std::vector<std::string>> idFileAddrMap;
+  std::map<core::PlanNodeId, dwio::common::FileFormat> idFileFormatMap;
+  std::map<std::string, core::PlanNodeId> vectorIdMap;
+  std::map<std::string, RowTypePtr> dataSourceSchemaMap;
+  std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>>
+      dataSourceFileAddrMap;
+  std::map<std::string, RowTypePtr> dataSourceBlocksSchemaMap;
+  std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>>
+      dataSourceBlocksFileAddrMap;
+  std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>>
+      UDFFileAddrMap;
+  std::map<std::string, RowTypePtr> UDFSchemaMap;
+  std::map<core::PlanNodeId, RowTypePtr> fileSchemaMap;
+  std::unordered_map<std::string, std::shared_ptr<Source>> sourceMap;
+
+  // Helper function to find schema in a map based on key
+  RowTypePtr findSchemaInMap(
+      const std::map<std::string, RowTypePtr>& schemaMap,
+      const std::string& key) {
+    auto schemaIt = schemaMap.find(key);
+    return (schemaIt != schemaMap.end())
+        ? schemaIt->second
+        : nullptr; // Return null shared pointer
+  }
+
+  // Helper function to find file address in a map based on key
+  std::vector<std::shared_ptr<TempFilePath>> findFileAddrInMap(
+      const std::map<std::string, std::vector<std::shared_ptr<TempFilePath>>>&
+          fileAddrMap,
+      const std::string& key) {
+    auto addrIt = fileAddrMap.find(key);
+    return (addrIt != fileAddrMap.end())
+        ? addrIt->second
+        : std::vector<std::shared_ptr<TempFilePath>>(); // Return empty vector
+  }
+
+  // Helper function to find statistics in a map based on key
+  std::vector<int> findStatInMap(
+      const std::map<std::string, std::vector<int>>& statMap,
+      const std::string& key) {
+    auto statIt = statMap.find(key);
+    return (statIt != statMap.end())
+        ? statIt->second
+        : std::vector<int>(); // Return empty vector
+  }
 };
