@@ -39,6 +39,8 @@ class TempFilePath {
 
   TempFilePath(const TempFilePath&) = delete;
   TempFilePath& operator=(const TempFilePath&) = delete;
+  // Add a new constructor to taken a path as argument.
+  TempFilePath(std::string pathStr) : path(pathStr) {}
 
   void append(std::string data) {
     std::ofstream file(path, std::ios_base::app);
@@ -61,6 +63,21 @@ class TempFilePath {
       throw std::logic_error("Cannot open temp file");
     }
     return path;
+  }
+};
+
+// This class should be used with caution, since it will delete the path file
+// when the object is destroyed.
+class CustomTempFilePath : public TempFilePath {
+ public:
+  CustomTempFilePath(std::string pathStr) : TempFilePath(pathStr) {}
+
+  static std::shared_ptr<TempFilePath> create(std::string pathStr) {
+    struct SharedCustomTempFilePath : public CustomTempFilePath {
+      SharedCustomTempFilePath(std::string pathStr)
+          : CustomTempFilePath(pathStr) {}
+    };
+    return std::make_shared<CustomTempFilePath>(pathStr);
   }
 };
 

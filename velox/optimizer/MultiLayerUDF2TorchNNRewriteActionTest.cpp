@@ -47,6 +47,9 @@
 #include "velox/exec/FilterProject.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
+#include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
+#include "velox/functions/prestosql/registration/RegistrationFunctions.h"
+#include "velox/exec/PartitionFunction.h"
 
 // Custom headers
 #include "RewriteAction.h"
@@ -71,6 +74,15 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
 
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
+    Type::registerSerDe();
+    // common::Filter::registerSerDe();
+    // connector::hive::LocationHandle::registerSerDe();
+    // connector::hive::HiveInsertTableHandle::registerSerDe();
+    connector::hive::HiveTableHandle::registerSerDe();
+    connector::hive::HiveColumnHandle::registerSerDe();
+    registerPartitionFunctionSerDe();
+    core::PlanNode::registerSerDe();
+    core::ITypedExpr::registerSerDe();
     // Register hiveconnector for file splits.
     auto hiveConnector =
         connector::getConnectorFactory(
@@ -140,9 +152,10 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
 
       core::PlanNodeId key = entry.first;
 
-      const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+      const std::vector<std::string> fileAddr = entry.second;
+      auto fileFormat = cataLog.getIdFileFormat(key);
 
-      auto hiveSplits = makeHiveConnectorSplits(fileAddr);
+      auto hiveSplits = makeHiveConnectorSplits(fileAddr, fileFormat);
 
       for (auto& split : hiveSplits) {
 

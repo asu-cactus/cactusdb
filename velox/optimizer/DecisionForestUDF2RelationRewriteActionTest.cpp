@@ -284,10 +284,18 @@ public:
             if (!noMoreSplits) {
                 for (const auto& entry : idFileAddrMap) {
                     core::PlanNodeId key = entry.first;
-                    const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
-                    auto hiveSplits = makeHiveConnectorSplits(fileAddr);
+                    const std::vector<std::string> fileAddr = entry.second;
+                    // const std::vector<std::shared_ptr<TempFilePath>> fileAddr = entry.second;
+                    auto fileFormat = cataLog.getIdFileFormat(key);
+                    for (const auto& addr : fileAddr) {
+                      if (!fs::exists(addr)) {
+                        LOG(ERROR) << "[ERROR] File not exists: " << addr << " planNode key: "<<  key << " format: " << fileFormat << std::endl;
+                        return;
+                      }
+                    }
+                    auto hiveSplits = makeHiveConnectorSplits(fileAddr, fileFormat);
                     for (auto& split : hiveSplits) {
-                        task->addSplit(key, exec::Split(std::move(split)));
+                      task->addSplit(key, exec::Split(std::move(split)));
                     }
                     ids.push_back(key);
                 }
@@ -332,7 +340,7 @@ public:
         unregisterCustomType("tree_type");
     }
 
-    void testRewriteDecisionForestUDFPlan(std::string modelPath, std::string dataPath, bool rewrite, int numSplits, int numTreeSplit, int batchRows) {
+    void testRewriteDecisionForestUDFPlan(std::string modelPath, std::string dataPath, bool rewrite, int numSplits, int numTreeSplit /*Not-used yet*/, int batchRows) {
         // register functions and types that are needed for this test
         int numRows, numCols;
         countRowsAndColumnsFromCSV(dataPath, numRows, numCols);
@@ -358,14 +366,15 @@ public:
         // Get the logical plan                  
         auto planNode = myPlan.planNode();
         // Create ruleManager
-        RuleManager1 ruleManager;
+        RuleManager ruleManager;
         // Create planState
-        PlanState1 planState(ruleManager);
+        PlanState planState(ruleManager);
 
         if (rewrite) {
             // Get possible actions for this plan
             planState.getPossibleActions(planNode, cataLog);
             // Print possible actions
+            std::cout << "Available Actions: " << std::endl;
             for (const auto& entry : planState.actionsPair) {
                 std::cout << entry.first << ": " << entry.second << std::endl;
             }
@@ -373,7 +382,7 @@ public:
             auto it = planState.actionsPair.begin();
             std::pair<std::string, std::string> testAction("decision_forest_predict", "DecisionForestUDF2RelationRewriteAction");
             // Take one rewritten action
-            planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog, numTreeSplit);
+            planState.takeAction(planNode, nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction}, cataLog);
             // Update the planState (getPossibleAction after apply one action)
             planState.update(myPlan, cataLog);
         }
