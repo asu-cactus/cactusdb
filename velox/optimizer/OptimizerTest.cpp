@@ -944,7 +944,6 @@ public:
               int send_result = htonl(result);
               send(clientSocket, &send_result, sizeof(send_result), 0);
               action_strings.clear();
-              possiblePlanBuilder.reSetPlan();
           }
 
           if (json_data["end"].asString() == "T") {

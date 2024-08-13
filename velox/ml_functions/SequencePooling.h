@@ -15,7 +15,7 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
-class SequencePooling : public exec::VectorFunction {
+class SequencePooling : public MLFunction {
  public:
   SequencePooling(std::string mode, int embeddingDims) {
     transform(mode.begin(), mode.end(), mode.begin(), ::toupper);
@@ -118,6 +118,16 @@ class SequencePooling : public exec::VectorFunction {
   // void setWeights(float* weights) {
   //   weights_ = weights;
   // }
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims){
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
 
  private:
   std::string mode_;

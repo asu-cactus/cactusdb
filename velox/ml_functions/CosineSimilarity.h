@@ -15,7 +15,7 @@ using namespace facebook::velox::memory;
 // Implementation of embedding layer where the embedding is stored as a 2-D
 // array: numEmbedding*embeddingDims, lookup takes a int vector as indices
 
-class CosineSimilarity : public exec::VectorFunction {
+class CosineSimilarity : public MLFunction {
  public:
   CosineSimilarity(int dim) {
     dims.push_back(dim);
@@ -94,6 +94,16 @@ class CosineSimilarity : public exec::VectorFunction {
   // void setWeights(float* weights) {
   //   weights_ = weights;
   // }
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
 
  private:
   std::vector<int> dims;

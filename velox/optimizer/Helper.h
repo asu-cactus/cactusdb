@@ -16,6 +16,8 @@
 #pragma once
 #include <iostream>
 #include <vector>
+#include "velox/common/base/Fs.h"
+#include "velox/common/file/FileSystems.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
 
@@ -94,10 +96,8 @@ std::vector<std::vector<float>> create_input_block(
   int cols_per_block = block_size / values.size();
   // std::cout
   //     << fmt::format(
-  //            "Total Size: {}, block size: {}, value size: cols per block: {}",
-  //            total_size,
-  //            block_size,
-  //            cols_per_block)
+  //            "Total Size: {}, block size: {}, value size: cols per block:
+  //            {}", total_size, block_size, cols_per_block)
   //     << std::endl;
   for (int i = 0; i < block_numbers; i++) {
     std::vector<float> valuesArraySingleBlock;
@@ -130,59 +130,64 @@ create_weight_block(int total_size, float* values, int block_numbers) {
 
 std::vector<std::vector<float>>
 create_blocks(int row, int col, float* values, int block_size) {
-  int num_blocks = (col + block_size - 1) / block_size; // Calculate the number of blocks needed
-  std::vector<std::vector<float>> blocks(num_blocks); // Initialize vector of blocks
+  int num_blocks = (col + block_size - 1) /
+      block_size; // Calculate the number of blocks needed
+  std::vector<std::vector<float>> blocks(
+      num_blocks); // Initialize vector of blocks
   int current_col = 0; // Current column index in the values array
-    for (int i = 0; i < num_blocks; ++i) {
-        int current_block_size = (i == num_blocks - 1) ? col - current_col : block_size; // Adjust block size for the last block
+  for (int i = 0; i < num_blocks; ++i) {
+    int current_block_size = (i == num_blocks - 1)
+        ? col - current_col
+        : block_size; // Adjust block size for the last block
 
-        // Create a new block of size row x current_block_size
-        std::vector<float> block(row * current_block_size);
+    // Create a new block of size row x current_block_size
+    std::vector<float> block(row * current_block_size);
 
-        // Fill the block with values
-        for (int r = 0; r < row; ++r) {
-            for (int c = 0; c < current_block_size; ++c) {
-                block[r * current_block_size + c] = values[r * col + current_col + c];
-            }
-        }
-
-        blocks[i] = std::move(block); // Store the block in the vector of blocks
-        current_col += current_block_size; // Move to the next column
+    // Fill the block with values
+    for (int r = 0; r < row; ++r) {
+      for (int c = 0; c < current_block_size; ++c) {
+        block[r * current_block_size + c] = values[r * col + current_col + c];
+      }
     }
 
-    return blocks;
+    blocks[i] = std::move(block); // Store the block in the vector of blocks
+    current_col += current_block_size; // Move to the next column
+  }
+
+  return blocks;
 }
 
 FileStructure save_blocks_to_files(
-    std::vector<std::vector<float>> valuesArray) {
+    std::vector<std::vector<float>> valuesArray,
+    std::string name) {
   optimization::MyFileTest myFile;
   optimization::FileStructure myFileStructure;
   std::vector<std::shared_ptr<TempFilePath>> paths;
   auto pool_ = memory::MemoryManager::getInstance()->addLeafPool();
   VectorMaker maker{pool_.get()};
   RowVectorPtr input;
-    // Create indexs for blocks
-    int parts = valuesArray.size();
-    int flag = 0;
-    auto indexs = create_block_index(parts, flag);
-    // Use maker to create rowVector for "w", "w_row", and "w_col"
-    for (int i = 0; i < parts; i++) {
-      input = maker.rowVector(
-          {"w", "w_row", "w_col"},
-          {maker.arrayVector<float>({valuesArray[i]}, REAL()),
-           maker.flatVector({indexs[0][i]}),
-           maker.flatVector({indexs[1][i]})});
+  // Create indexs for blocks
+  int parts = valuesArray.size();
+  int flag = 0;
+  auto indexs = create_block_index(parts, flag);
+  // Use maker to create rowVector for "w", "w_row", and "w_col"
+  for (int i = 0; i < parts; i++) {
+    input = maker.rowVector(
+        {name + "_wb", name + "_wb_row", name + "_wb_col"},
+        {maker.arrayVector<float>({valuesArray[i]}, REAL()),
+         maker.flatVector({indexs[0][i]}),
+         maker.flatVector({indexs[1][i]})});
 
-      auto file = TempFilePath::create();
-      // Store blocks to file
-      myFile.writeToFile(file->path, {input});
-      // Store file object to paths
-      paths.push_back(file);
-    }
-    myFileStructure.paths = paths;
-    // Store schema
-    myFileStructure.schema = asRowType(input->type());
-    return myFileStructure;
+    auto file = TempFilePath::create();
+    // Store blocks to file
+    myFile.writeToFile(file->path, {input});
+    // Store file object to paths
+    paths.push_back(file);
+  }
+  myFileStructure.paths = paths;
+  // Store schema
+  myFileStructure.schema = asRowType(input->type());
+  return myFileStructure;
 }
 
 // Function to convert block data to files and return FileStructure
@@ -240,6 +245,145 @@ FileStructure block_to_files(
     myFileStructure.schema = asRowType(input->type());
     return myFileStructure;
   }
+}
+
+void replaceSourceWithIdInSerializedPlan(
+    folly::dynamic& serializedPlan,
+    folly::dynamic& serializedNewSource,
+    std::string nodeId) {
+  if (serializedPlan["sources"].isNull()) {
+    return;
+  }
+  for (auto& source : serializedPlan["sources"]) {
+    if (source["id"].asString() == nodeId) {
+      source = serializedNewSource;
+      return;
+    } else {
+      optimization::replaceSourceWithIdInSerializedPlan(
+          source, serializedNewSource, nodeId);
+    }
+  }
+}
+
+std::string extractExprWithinTarget(
+    const std::string& source,
+    const std::string& target) {
+  size_t pos = source.find(target);
+  if (pos == std::string::npos) {
+    return ""; // Target function not found in source
+  }
+
+  int count = 0;
+  size_t start_pos = source.find('(', pos);
+  for (size_t i = start_pos + 1; i < source.size(); ++i) {
+    if (source[i] == '(') {
+      ++count;
+    } else if (source[i] == ')') {
+      if (count == 0) {
+        return source.substr(start_pos + 1, i - start_pos - 1);
+      } else {
+        --count;
+      }
+    }
+  }
+  return ""; // Matching ')' not found
+}
+
+// Function to escape special characters in a regex string
+std::string escapeRegex(const std::string& str) {
+  std::string escapedStr;
+  for (char c : str) {
+    if (c == '\\' || c == '[' || c == ']' || c == '(' || c == ')' || c == '{' ||
+        c == '}' || c == '+' || c == '*' || c == '?' || c == '.' || c == '^' ||
+        c == '$' || c == '|') {
+      escapedStr += '\\'; // Add escape character
+    }
+    escapedStr += c;
+  }
+  return escapedStr;
+}
+
+// Iterate over all files in a directory and return their paths
+std::vector<std::string> getFilePathsFromDir(const std::string& dirPath) {
+  std::vector<std::string> filePaths;
+  for (auto const& dirEntry : fs::directory_iterator(dirPath)) {
+    if (!dirEntry.is_regular_file()) {
+      continue;
+    }
+    // Ignore hidden files.
+    if (dirEntry.path().filename().c_str()[0] == '.') {
+      continue;
+    }
+    // auto dataFile = CustomTempFilePath::create(dirEntry.path());
+    filePaths.push_back(dirEntry.path());
+  }
+  return filePaths;
+}
+
+// Function to trim spaces from both front and end of a string
+std::string trim(const std::string& str) {
+  const char* whitespace = " \t\n\r";
+  const size_t first = str.find_first_not_of(whitespace);
+  if (first == std::string::npos)
+    return "";
+  const size_t last = str.find_last_not_of(whitespace);
+  return str.substr(first, (last - first + 1));
+}
+
+// Recursive function to parse the nested DL expressions
+// The parsed order is from the outermost expression to the innermost expression
+// Example: exp1(exp2(exp3(exp4(input))))
+// Return: parsedSingleExpr: {"exp1", "exp2", "exp3", "exp4"}
+//         matchedExpr: {"exp1(exp2(exp3(exp4(input))))",
+//         "exp2(exp3(exp4(input)))", "exp3(exp4(input))", "exp4(input)"}
+void parseDLExpressions(
+    const std::string& input,
+    std::vector<std::string>& parsedSingleExpr,
+    std::vector<std::string>& matchedExpr) {
+  size_t openParen = input.find('(');
+  if (openParen == std::string::npos) {
+    return;
+  }
+
+  size_t closeParen = input.rfind(')');
+  if (closeParen == std::string::npos) {
+    return;
+  }
+
+  // Extract the function name
+  std::string funcName = input.substr(0, openParen);
+  funcName = trim(funcName);
+  parsedSingleExpr.push_back(funcName);
+  matchedExpr.push_back(trim(input));
+
+  // Extract the argument within the parentheses
+  std::string inner = input.substr(openParen + 1, closeParen - openParen - 1);
+  inner = trim(inner);
+
+  // Recursively parse the inner expression
+  parseDLExpressions(inner, parsedSingleExpr, matchedExpr);
+}
+
+// Function to split a string based on a delimiter
+std::vector<std::string> splitString(const std::string& str, char delimiter) {
+  std::vector<std::string> tokens;
+  std::stringstream ss(str);
+  std::string token;
+
+  while (std::getline(ss, token, delimiter)) {
+    tokens.push_back(token);
+  }
+
+  return tokens;
+}
+
+// Function to check if a string contains a substring but is not equal to it
+bool containsStrButNotEqual(const std::string& str, const std::string& subStr) {
+  // Check if the substring is found within the string
+  size_t found = str.find(subStr);
+
+  // Ensure that the substring is found and the two strings are not equal
+  return (found != std::string::npos) && (str != subStr);
 }
 
 } // namespace optimization

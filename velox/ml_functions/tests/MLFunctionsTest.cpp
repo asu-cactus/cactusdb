@@ -47,6 +47,7 @@
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 #include "velox/common/memory/MemoryArbitrator.h"
 #include "velox/vector/fuzzer/VectorFuzzer.h"
+#include "velox/ml_functions/tests/MLTestUtility.h"
 
 
 
@@ -133,6 +134,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   void test_land_cover_conv3();
 
   void test_mnist_oom_weights();
+  void test_complex_torchnn();
 
   std::unique_ptr<MemoryManager> memoryManager_;
   
@@ -1795,6 +1797,53 @@ void MLFunctionsTest::test_land_cover_conv3() {
   std::cout << "Total time (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
 }
 
+void MLFunctionsTest::test_complex_torchnn() {
+  std::cout << "Test of Complex TorchNN" << std::endl;
+  int batchSize = 500;
+  int featureSize = 1024;
+  int layer1Size = 1024;
+  int layer2Size = 3;
+
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+  VectorMaker maker{pool_.get()};
+  std::vector<std::vector<float>> inputValue =
+      randomGenerator.genFloat2dVector(batchSize, featureSize);
+  auto inputValueVector = maker.arrayVector<float>(inputValue, REAL());
+
+  float* w1Weight = randomGenerator.genFloat1dArray(featureSize*layer1Size);
+  float* w1Bias = randomGenerator.genFloat1dArray(layer1Size);
+  float* w2Weight = randomGenerator.genFloat1dArray(layer1Size*layer2Size);
+  float* w2Bias = randomGenerator.genFloat1dArray(layer2Size);
+
+  std::vector<velox::dl::KernelType> kernelTypes = 
+      {velox::dl::KernelType::MatMul, 
+      velox::dl::KernelType::MatAdd, 
+      velox::dl::KernelType::ReLU, 
+      velox::dl::KernelType::MatMul, 
+      velox::dl::KernelType::MatAdd, 
+      velox::dl::KernelType::Softmax};
+
+  std::vector<float*> weights = {w1Weight, w1Bias, w2Weight, w2Bias};
+  std::vector<int> dims = {featureSize, layer1Size, layer1Size, layer1Size,
+  layer2Size, layer2Size, layer2Size};
+
+  exec::registerVectorFunction(
+    "complex_torchNN",
+    TorchDNNV2::signatures(),
+    std::make_unique<TorchDNNV2>(kernelTypes, weights, dims)
+    );
+
+  auto inputRowVector = maker.rowVector({"x"}, {inputValueVector});
+
+  auto myPlan = exec::test::PlanBuilder(pool_.get())
+                      .values({inputRowVector})
+                      .project({"complex_torchNN(x)"});
+  auto results = exec::test::AssertQueryBuilder(myPlan.planNode()).copyResults(pool_.get());
+
+  std::cout << "Results: \n" << results->toString(0, results->size()) << std::endl;
+
+}
+
 void MLFunctionsTest::run(int numDriver, int memoryPoolSizeMB, int spillMemThresholdMB, bool enableSpill, int repeatRun) {
   //  test_mat_mul();
   //  test_mat_add();
@@ -1809,11 +1858,12 @@ void MLFunctionsTest::run(int numDriver, int memoryPoolSizeMB, int spillMemThres
   //  test_conv2d();
   //  test_deep_bench_conv1();
   //  test_land_cover_conv3();
-   test_spill(numDriver, memoryPoolSizeMB, spillMemThresholdMB, enableSpill, repeatRun);
+  //  test_spill(numDriver, memoryPoolSizeMB, spillMemThresholdMB, enableSpill, repeatRun);
   //  mytest();
   //  test_mnist_multithreading();
   //  test_mnist_oom_weights();
   // test_torch_dense_layer();
+  test_complex_torchnn();
 
 }
 

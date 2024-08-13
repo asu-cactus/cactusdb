@@ -34,39 +34,6 @@ using namespace optimization;
 
 namespace optimization {
 
-class RuleManager1 {
-public:
-    RuleManager1() {
-        // Initialize the rules
-        rules.emplace("DecisionForestUDF2RelationRewriteAction", std::make_shared<optimization::DecisionForestUDF2RelationRewriteAction>());
-
-
-        // Add more rules if needed
-    }
-    /**
-     * @brief A function to obtain the pointer for a rule given its name.
-     * 
-     * @param ruleName A string for the rule name.
-     * 
-     * @return A pointer to the rule.
-    */
-    std::shared_ptr<optimization::RewriteAction1> pickRule(const std::string& ruleName) {
-        // Search for the rule by name
-        auto it = rules.find(ruleName);
-
-        if (it != rules.end()) {
-
-            return it->second;
-            
-        }
-
-        // Rule not found, handle the case (throw an exception, return a default rule, etc.)
-        // For now, just return nullptr
-        return nullptr;
-    }
-
-    std::map<std::string, std::shared_ptr<optimization::RewriteAction1>> rules;
-};
 class RuleManager {
 public:
     RuleManager() {
@@ -77,7 +44,7 @@ public:
 
         // rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
 
-        //rules.emplace("DecisionForestUDF2RelationRewriteAction", std::make_shared<optimization::DecisionForestUDF2RelationRewriteAction>());
+        rules.emplace("DecisionForestUDF2RelationRewriteAction", std::make_shared<optimization::DecisionForestUDF2RelationRewriteAction>());
 
         rules.emplace("Mul2JoinAggRewriteAction", std::make_shared<optimization::Mul2JoinAggRewriteAction>());
 
