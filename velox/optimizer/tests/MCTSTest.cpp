@@ -38,6 +38,7 @@
 #include "velox/ml_functions/Encoder.h"
 #include "velox/ml_functions/NNBuilder.h"
 #include "velox/ml_functions/SequencePooling.h"
+#include "velox/ml_functions/ChatGPT.h"
 #include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/Expressions.h"
@@ -137,6 +138,30 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
   }
 
+  int cacheQueryPlan(PlanBuilder& planBuilder) {
+    int queryPlanCacheId = queryPlanCacheId_++;
+    auto serializedPlan = planBuilder.planNode()->serialize();
+    // queryPlanCaches_[queryPlanCacheId] = serializedPlan;
+
+    return queryPlanCacheId;
+  }
+
+  void resetQueryPlanFromCache(
+      PlanBuilder& planBuilder,
+      int queryPlanCacheId) {
+    auto it = queryPlanCaches_.find(queryPlanCacheId);
+    if (it != queryPlanCaches_.end()) {
+      auto serializedPlan = it->second;
+      auto deserlizedUpdatedPlanNode =
+                    ISerializable::deserialize<core::PlanNode>(
+                        serializedPlan, pool_.get());
+      planBuilder.setRoot(deserlizedUpdatedPlanNode);
+    } else {
+      throw std::runtime_error(
+          fmt::format("[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+    }
+  }
+
   // Function from ParquetTestBase.h
   std::unique_ptr<dwio::common::FileSink> createSink(
       const std::string& filePath) {
@@ -161,6 +186,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return std::make_unique<facebook::velox::parquet::Writer>(
         std::move(sink), options, rowType);
   }
+
   std::vector<std::string> generateTwoTowerQueryData(
       int numSample,
       int maxUserId,
@@ -1293,7 +1319,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       bool isVerticalPartition) {
     // Register matrix multiplication function for the first layer
     optimization::registerVectorFunction(
-        "mat_mul0",
+        "mat_mul0_0",
         MatrixMultiply::signatures(),
         std::make_unique<MatrixMultiply>(
             std::move(weightsFile_1), input_size1, units1),
@@ -1303,7 +1329,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         isVerticalPartition);
     // Register matrix addition function for the first layer
     optimization::registerVectorFunction(
-        "mat_add0",
+        "mat_add0_0",
         MatrixVectorAddition::signatures(),
         std::make_unique<MatrixVectorAddition>(std::move(biasFile_1), units1),
         {},
@@ -1311,7 +1337,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
     // Register ReLU activation function for the first layer
     optimization::registerVectorFunction(
-        "relu0",
+        "relu",
         Relu::signatures(),
         std::make_unique<Relu>(),
         {},
@@ -1319,7 +1345,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
     // Register matrix multiplication function for the second layer
     optimization::registerVectorFunction(
-        "mat_mul1",
+        "mat_mul0_1",
         MatrixMultiply::signatures(),
         std::make_unique<MatrixMultiply>(
             std::move(weightsFile_2), input_size2, units2),
@@ -1329,7 +1355,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         isVerticalPartition);
     // Register matrix addition function for the second layer
     optimization::registerVectorFunction(
-        "mat_add1",
+        "mat_add0_1",
         MatrixVectorAddition::signatures(),
         std::make_unique<MatrixVectorAddition>(std::move(biasFile_2), units2),
         {},
@@ -1337,7 +1363,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
     // Register softmax activation function for the second layer
     optimization::registerVectorFunction(
-        "softmax0",
+        "softmax",
         Softmax::signatures(),
         std::make_unique<Softmax>(),
         {},
@@ -1345,7 +1371,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
     // Compose and return the vector function expression
     // return "mat_mul0({})";
-    return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({})))))) as v";
+    return "softmax(mat_add0_1(mat_mul0_1(relu(mat_add0_0(mat_mul0_0({})))))) as v";
   }
 
   std::vector<std::vector<float>>
@@ -2144,6 +2170,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           }
           jsonMessage["actionSpace"].append(jsonEntry);
         }
+        // cache current state
+        int queryPlanCacheId = cacheQueryPlan(myPlan);
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "takeAction") {
@@ -2167,6 +2196,16 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         }
         LOG(INFO) << "[INFO] current my query plan"
                   << myPlan.planNode()->toString(true, true) << std::endl;
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "cacheState") {
+        int queryPlanCacheId = cacheQueryPlan(myPlan);
+        Json::Value jsonMessage;
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "resetState") {
+        int queryPlanCacheId = receivedJsonMessage["queryPlanCacheId"].asInt();
+        resetQueryPlanFromCache(myPlan, queryPlanCacheId);
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;
@@ -2221,6 +2260,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   std::shared_ptr<TempDirectoryPath> tempDirPath_;
 
   VectorMaker maker{pool_.get()};
+  static inline int queryPlanCacheId_ = 0;
+  std::map<int, folly::dynamic> queryPlanCaches_;
 };
 
 DEFINE_string(mode, "mcts", "Mode: mcts or benchmark");
