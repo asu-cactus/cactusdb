@@ -15,6 +15,7 @@
  */
 #pragma once
 #include <iostream>
+#include <regex>
 #include <vector>
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
@@ -386,4 +387,40 @@ bool containsStrButNotEqual(const std::string& str, const std::string& subStr) {
   return (found != std::string::npos) && (str != subStr);
 }
 
+std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
+  std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+  std::smatch matches;
+  // Object to capture the matched data source
+  std::vector<std::string> matchedDataSources;
+  // Start position for the search
+  std::string::const_iterator searchStart(expr.cbegin());
+
+  // Search out the matched data source and store in matches
+  while (std::regex_search(
+      searchStart, expr.cend(), matches, patternToMatchRawSource)) {
+    // The captured group is in matches[1]
+    matchedDataSources.push_back(matches[1].str());
+    // Update the search start position
+    searchStart = matches.suffix().first;
+  }
+  
+  return matchedDataSources;
+}
+
+std::shared_ptr<const core::PlanNode> findPlanNodeById(
+    const std::shared_ptr<const core::PlanNode>& planNode,
+    const std::string& nodeId) {
+  if (planNode->id() == nodeId) {
+    return planNode;
+  }
+
+  for (const auto& child : planNode->sources()) {
+    auto found = findPlanNodeById(child, nodeId);
+    if (found) {
+      return found;
+    }
+  }
+
+  return nullptr;
+}
 } // namespace optimization

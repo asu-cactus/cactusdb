@@ -191,7 +191,7 @@ void ChatGPTTest::LLMWithoutOptimization() {
                           .planNode(),
                           {"user_id", "movie_id", "user_description", "movie_description"}
                           )
-                    .project({"user_id", "movie_id", "CONCAT(movie_id, user_description) AS user_description", "CONCAT(user_id, movie_description) AS movie_description"})
+                    .project({"user_id", "movie_id", "CONCAT(user_id, user_description) AS user_description", "CONCAT(movie_id, movie_description) AS movie_description"})
                     .project({
                       "user_id", "movie_id", 
                     "chatgpt_server(user_description, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description",
