@@ -40,9 +40,9 @@ def write_orc(df, batch_size, dir_path):
         end = min(start + batch_size, len(df))
         df[start:end].to_parquet(path)
 
-NUM_USER_DATA = 40
-NUM_MOVIE_DATA = 200
-NUM_SPLIT = 4
+NUM_USER_DATA = 1
+NUM_MOVIE_DATA = 2
+NUM_SPLIT = 1
 
 remove_all_in_directory('movie_recommendation/movie')
 df1 = pd.read_csv('mr_movie_metadata.csv')
@@ -55,6 +55,11 @@ df2 = pd.read_csv('mr_user_genre_ratings.csv')
 df2 = change_df_dtypes(df2).iloc[:NUM_USER_DATA]
 batch_size = math.ceil(len(df2) / NUM_SPLIT)
 write_orc(df2, batch_size, 'movie_recommendation/user')
+
+# write num_user and num_movie to a file 
+with open('llm_mr_statistics.txt', 'w') as f:
+    f.write(f'{NUM_USER_DATA}\n')
+    f.write(f'{NUM_MOVIE_DATA}\n')
 
 # remove_all_in_directory('movielens/user')
 # df3 = pq.read_table('movielens_user_s_8192.parquet').to_pandas()

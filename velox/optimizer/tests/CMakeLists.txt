@@ -17,4 +17,5 @@ target_link_libraries(
     velox_dwio_parquet_reader
     jsoncpp_lib
     ${TORCH_LIBRARIES}
+    cpr::cpr
 )
