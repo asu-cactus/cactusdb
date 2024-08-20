@@ -30,6 +30,7 @@
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/ml_functions/BatchNorm.h"
+#include "velox/ml_functions/ChatGPT.h"
 #include "velox/ml_functions/ComplexLayer.h"
 #include "velox/ml_functions/Concat.h"
 #include "velox/ml_functions/CosineSimilarity.h"
@@ -38,7 +39,6 @@
 #include "velox/ml_functions/Encoder.h"
 #include "velox/ml_functions/NNBuilder.h"
 #include "velox/ml_functions/SequencePooling.h"
-#include "velox/ml_functions/ChatGPT.h"
 #include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/Expressions.h"
@@ -146,19 +146,17 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return queryPlanCacheId;
   }
 
-  void resetQueryPlanFromCache(
-      PlanBuilder& planBuilder,
-      int queryPlanCacheId) {
+  void resetQueryPlanFromCache(PlanBuilder& planBuilder, int queryPlanCacheId) {
     auto it = queryPlanCaches_.find(queryPlanCacheId);
     if (it != queryPlanCaches_.end()) {
       auto serializedPlan = it->second;
       auto deserlizedUpdatedPlanNode =
-                    ISerializable::deserialize<core::PlanNode>(
-                        serializedPlan, pool_.get());
+          ISerializable::deserialize<core::PlanNode>(
+              serializedPlan, pool_.get());
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
-      throw std::runtime_error(
-          fmt::format("[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
     }
   }
 
@@ -1770,7 +1768,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       CataLog& cataLog,
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
     PlanBuilder myPlan;
-    if (model != "two-tower") {
+    if (model == "ffnn" || model == "df") {
       auto inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
       core::PlanNodeId p0;
       myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
@@ -1783,7 +1781,84 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       Source src = Source(p0, Source::Type::FILE, std::move(stat));
       cataLog.addSource(std::make_shared<Source>(src));
       cataLog.setFileSchema(p0, inputRowType);
-    } else {
+    } else if (model == "llm") {
+      std::vector<std::string> userDataPaths =
+          getFilePathsFromDir("/home/velox/data/movie_recommendation/user");
+      std::vector<std::string> movieDataPaths =
+          getFilePathsFromDir("/home/velox/data/movie_recommendation/movie");
+      auto userDataRowType =
+          ROW({"user_id", "description"}, {INTEGER(), VARCHAR()});
+      auto movieDataRowType =
+          ROW({"id", "description"}, {INTEGER(), VARCHAR()});
+
+      std::ifstream llmStatistics("/home/velox/data/llm_mr_statistics.txt");
+      if (!llmStatistics) {
+        throw std::runtime_error(
+            "Unable to open file: /home/velox/data/llm_mr_statistics.txt");
+      }
+      // TODO: need more smart way to do this
+      std::string line1, line2;
+      int numUser, numMovies;
+      std::getline(llmStatistics, line1);
+      std::getline(llmStatistics, line2);
+      numUser = std::stoi(line1);
+      numMovies = std::stoi(line2);
+
+      core::PlanNodeId readUserDataPlanNodeId;
+      core::PlanNodeId readMoviewDataPlanNodeId;
+
+      myPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(userDataRowType, {}, "")
+              .capturePlanNodeId(readUserDataPlanNodeId)
+              .project(
+                  {"CAST(user_id AS VARCHAR) as user_id",
+                   "description AS user_description"})
+              .nestedLoopJoin(
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(movieDataRowType, {}, "")
+                      .capturePlanNodeId(readMoviewDataPlanNodeId)
+                      .project(
+                          {"CAST(id AS VARCHAR) AS movie_id",
+                           "description AS movie_description"})
+                      .planNode(),
+                  {"user_id",
+                   "movie_id",
+                   "user_description",
+                   "movie_description"})
+              .project(
+                  {"user_id",
+                   "movie_id",
+                   "CONCAT(user_id, user_description) AS user_description_processed",
+                   "CONCAT(movie_id, movie_description) AS movie_description_processed"})
+              .project(
+                  {"user_id",
+                   "movie_id",
+                   "chatgpt_server1(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
+                   "chatgpt_server2(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
+              .project(
+                  {"user_id",
+                   "movie_id",
+                   "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.')"});
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId,
+          userDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readMoviewDataPlanNodeId,
+          movieDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      std::shared_ptr<OutputStat> userStat =
+          std::make_shared<OutputStat>(OutputStat(numUser, 2));
+      std::shared_ptr<OutputStat> movieStat =
+          std::make_shared<OutputStat>(OutputStat(numMovies, 2));
+      Source userSrc =
+          Source(readUserDataPlanNodeId, Source::Type::FILE, userStat);
+      Source movieSrc =
+          Source(readMoviewDataPlanNodeId, Source::Type::FILE, movieStat);
+      cataLog.addSource(std::make_shared<Source>(userSrc));
+      cataLog.addSource(std::make_shared<Source>(movieSrc));
+    } else if (model == "two-tower") {
       core::PlanNodeId readQueryDataPlanNodeId;
       core::PlanNodeId readUserDataPlanNodeId;
       core::PlanNodeId readRatingDataPlanNodeId1;
@@ -1987,6 +2062,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       cataLog.setFileSchema(readRatingDataPlanNodeId1, ratingDataRowType);
       cataLog.setFileSchema(readRatingDataPlanNodeId1, ratingDataRowType);
       cataLog.setFileSchema(readQueryDataPlanNodeId, queryDataRowType);
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
 
     return myPlan;
@@ -2057,6 +2134,19 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       inputFilePaths = generateTwoTowerQueryData(numSamples, 6040, 3706, 1);
       featureSize = 2;
       std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
+    } else if (model == "llm") {
+      exec::registerVectorFunction(
+          "chatgpt_server1",
+          ChatGPT::signatures(),
+          std::make_unique<ChatGPT>());
+      exec::registerVectorFunction(
+          "chatgpt_server2",
+          ChatGPT::signatures(),
+          std::make_unique<ChatGPT>());
+      exec::registerVectorFunction(
+          "chatgpt_recommender",
+          ChatGPTRecommender::signatures(),
+          std::make_unique<ChatGPTRecommender>());
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -2073,12 +2163,111 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     // Get the logical plan
     auto planNode = myPlan.planNode();
+
     // Create ruleManager
     RuleManager ruleManager;
     // Create planState
     PlanState planState(ruleManager);
 
     planState.getPossibleActions(planNode, cataLog);
+
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : planState.actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+    }
+
+    std::pair<std::string, std::string> testAction = std::make_pair("concat(ROW[\"user_id\"],ROW[\"user_description\"])", "MLDecompositionPushdownRewriteAction");
+
+    planState.takeAction(
+              planNode,
+              nullptr,
+              maker,
+              myPlan,
+              pool_,
+              planNodeIdGenerator,
+              {testAction},
+              cataLog);
+
+    planState.update(myPlan, cataLog);
+    
+    planNode = myPlan.planNode();
+
+    planState.getPossibleActions(planNode, cataLog);
+
+    // std::cout << "[INFO] All possible actions:" << std::endl;
+    // for (auto entry : planState.actionsPair) {
+    //   std::cout << entry.first << ": " << entry.second << std::endl;
+    // }
+
+    testAction = std::make_pair("concat(ROW[\"movie_id\"],ROW[\"movie_description\"])", "MLDecompositionPushdownRewriteAction");
+
+    planState.takeAction(
+              planNode,
+              nullptr,
+              maker,
+              myPlan,
+              pool_,
+              planNodeIdGenerator,
+              {testAction},
+              cataLog);
+
+    planState.update(myPlan, cataLog);
+    
+    planNode = myPlan.planNode();
+
+    planState.getPossibleActions(planNode, cataLog);
+
+    
+    testAction = std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please summarize the users description. The following are the average ratings given by users to movies in each genre.\")", "MLDecompositionPushdownRewriteAction");
+
+    planState.takeAction(
+              planNode,
+              nullptr,
+              maker,
+              myPlan,
+              pool_,
+              planNodeIdGenerator,
+              {testAction},
+              cataLog);
+
+    planState.update(myPlan, cataLog);
+    planNode = myPlan.planNode();
+
+    testAction = std::make_pair("chatgpt_server2(ROW[\"movie_description_processed\"],\"Please summarize the movies description. The following are the detailed information of the movie.\")", "MLDecompositionPushdownRewriteAction");
+
+    planState.takeAction(
+              planNode,
+              nullptr,
+              maker,
+              myPlan,
+              pool_,
+              planNodeIdGenerator,
+              {testAction},
+              cataLog);
+
+    planState.update(myPlan, cataLog);
+    
+    planNode = myPlan.planNode();
+
+    planState.getPossibleActions(planNode, cataLog);
+
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : planState.actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+    }
+
+
+    std::cout << "[DEBUG] final executed plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
+
+    float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 2, verbose);
+    
+    std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+    // auto serializedPlan = myPlan.planNode()->serialize();
+
+    // std::cout << "[DEBUG] serialized plan: \n" << serializedPlan <<
+    // std::endl;
+
+    return;
 
     // Set up socket
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -2265,7 +2454,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 };
 
 DEFINE_string(mode, "mcts", "Mode: mcts or benchmark");
-DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower");
+DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower, llm");
 DEFINE_bool(rewrite, true, "Whether  rewrite");
 DEFINE_int32(num_repeat, 5, "Number of repeat run");
 DEFINE_int32(feature_size, 1000, "FFNN Feature size");

@@ -227,6 +227,25 @@ def load_ffnn_data_to_postgres(
     print("[INFO] load FFNN data to HDFS success!")
 
 
+def load_llm_recommendation_data_to_postgres(num_user_data, num_movie_data):
+    conn_string = utils.get_postgres_connection_config()
+    db = create_engine(conn_string)
+    conn = db.connect()
+
+    movie_data = pd.read_csv('../../data/mr_movie_metadata.csv')
+    movie_data = utils.change_df_dtypes(movie_data).iloc[:num_movie_data]
+
+    user_data = pd.read_csv('../../data/mr_user_genre_ratings.csv')
+    user_data = utils.change_df_dtypes(user_data).iloc[:num_user_data]
+
+    user_data.to_sql("llm_recommend_user", db, index=False, if_exists="replace")
+    movie_data.to_sql("llm_recommend_movie", db, index=False, if_exists="replace")
+
+    # data = utils.convert_df_int64_to_int32(data)
+
+    print("[INFO] load llm recommendation data to postgres success!")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Argument parser")
 

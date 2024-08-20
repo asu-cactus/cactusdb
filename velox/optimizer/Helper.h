@@ -304,6 +304,15 @@ std::string escapeRegex(const std::string& str) {
   return escapedStr;
 }
 
+std::string replaceDoubleQuotes(std::string str) {
+    for (char& ch : str) {
+        if (ch == '"') {
+            ch = '\'';
+        }
+    }
+    return str;
+}
+
 // Iterate over all files in a directory and return their paths
 std::vector<std::string> getFilePathsFromDir(const std::string& dirPath) {
   std::vector<std::string> filePaths;
@@ -403,7 +412,6 @@ std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
     // Update the search start position
     searchStart = matches.suffix().first;
   }
-  
   return matchedDataSources;
 }
 
@@ -422,5 +430,68 @@ std::shared_ptr<const core::PlanNode> findPlanNodeById(
   }
 
   return nullptr;
+}
+
+std::vector<std::string> findNodeIdsBetweenIds(
+    const std::shared_ptr<const core::PlanNode>& planNode,
+    std::string sourceNodeId,
+    std::string targetNodeId,
+    std::vector<std::string>& nodeIds) {
+  auto planNodeId = planNode->id();
+  if (planNodeId != sourceNodeId && planNodeId != targetNodeId) {
+    nodeIds.push_back(planNodeId);
+  }
+  if (planNodeId == sourceNodeId) {
+    return nodeIds;
+  }
+
+  for (const auto& child : planNode->sources()) {
+    auto childNodeIds =
+        findNodeIdsBetweenIds(child, sourceNodeId, targetNodeId, nodeIds);
+    if (!childNodeIds.empty()) {
+      return childNodeIds;
+    }
+  }
+  if (nodeIds.size() > 0) {
+    nodeIds.pop_back();
+  }
+
+  return {};
+}
+
+void addProjectionFiledInSerializedPlan(
+    folly::dynamic& serializedPlan,
+    folly::dynamic& filedToBeAdded,
+    std::vector<std::string> nodeIds) {
+  if (serializedPlan["sources"].isNull()) {
+    return;
+  }
+
+  std::string currentNodeId = serializedPlan["id"].asString();
+  std::string currentNodeName = serializedPlan["name"].asString();
+  // Use std::find to search for the string in the vector
+  auto it = std::find(nodeIds.begin(), nodeIds.end(), currentNodeId);
+  if (it != nodeIds.end()) {
+    if (currentNodeName.find("Project") != std::string::npos) {
+      // Add the filed to the ProjectNode
+      serializedPlan["projections"].push_back(filedToBeAdded);
+      serializedPlan["names"].push_back(filedToBeAdded["fieldName"]);
+    } else if (currentNodeName.find("Join") != std::string::npos) {
+      // Add the filed to the FilterNode
+      // serializedPlan["filter"] = filedToBeAdded;
+      serializedPlan["outputType"]["cTypes"].push_back(filedToBeAdded["type"]);
+      serializedPlan["outputType"]["names"].push_back(
+          filedToBeAdded["fieldName"]);
+    } else {
+      throw std::runtime_error("Unsupported node type: " + currentNodeName);
+    }
+  }
+
+  for (auto& source : serializedPlan["sources"]) {
+    optimization::addProjectionFiledInSerializedPlan(
+        source, filedToBeAdded, nodeIds);
+  }
+
+  return;
 }
 } // namespace optimization

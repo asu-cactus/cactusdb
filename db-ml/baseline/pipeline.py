@@ -7,6 +7,7 @@ import tensorflow as tf
 import torch
 from torch.utils.data import DataLoader
 import utils
+import load_data_to_db
 from abc import ABC, abstractmethod
 from models.preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
 from models.dssm import DSSM_Torch, DSSM_TF, get_var_feature, get_test_var_feature
@@ -17,27 +18,27 @@ from pyspark.sql.functions import col, pandas_udf
 from pyspark.sql.types import ArrayType, FloatType, StringType
 
 
-
 def get_batch_sizes(num_samples, batch_size):
     """
     Returns a list of batch sizes that fit the given number of samples.
-    
+
     Args:
         num_samples (int): The total number of samples.
         batch_size (int): The desired batch size.
-        
+
     Returns:
         list: A list of batch sizes that fit the number of samples.
     """
     batch_sizes = []
     remaining_samples = num_samples
-    
+
     while remaining_samples > 0:
         current_batch_size = min(remaining_samples, batch_size)
         batch_sizes.append(current_batch_size)
         remaining_samples -= current_batch_size
-    
+
     return batch_sizes
+
 
 class Pipeline(object):
     """A convenient class to measure the running time of a program"""
@@ -48,7 +49,7 @@ class Pipeline(object):
         self.num_sample = num_sample
         self.meta = dict()
         self.list_batches = [num_sample]
-        if hasattr(self, 'batch_size'):
+        if hasattr(self, "batch_size"):
             self.list_batches = get_batch_sizes(self.num_sample, self.batch_size)
         print("[INFO] Batches: ", self.list_batches)
 
@@ -107,7 +108,6 @@ class Pipeline(object):
 
             t_end_end += timer_end_end.toc()
             self.clean_up(data)
-
 
         t_data_loading /= self.num_loop
         t_data_processing /= self.num_loop
@@ -238,7 +238,9 @@ class TwoTowerModelPipelinePyTorch(Pipeline):
         query_df.to_sql(
             "movielens_q_temp", self.postgres_conn, index=False, if_exists="replace"
         )
-        data = utils.fetch_data_from_postgres_via_psycopg2(sql_movielens_integrated_result)
+        data = utils.fetch_data_from_postgres_via_psycopg2(
+            sql_movielens_integrated_result
+        )
         return data
 
     def data_processing_impl(self, data):
@@ -352,7 +354,9 @@ class TwoTowerModelPipelineTF(Pipeline):
         query_df.to_sql(
             "movielens_q_temp", self.postgres_conn, index=False, if_exists="replace"
         )
-        data = utils.fetch_data_from_postgres_via_psycopg2(sql_movielens_integrated_result)
+        data = utils.fetch_data_from_postgres_via_psycopg2(
+            sql_movielens_integrated_result
+        )
         return data
 
     def data_processing_impl(self, data):
@@ -451,7 +455,7 @@ class FFNNPipelineEvaDB(Pipeline):
 
         for _ in tqdm(range(self.num_loop)):
             return_data = []
-            timer_end_end.tic() 
+            timer_end_end.tic()
             for batch_size in self.list_batches:
                 data = None
                 timer_data_loading.tic()
@@ -480,7 +484,7 @@ class FFNNPipelineEvaDB(Pipeline):
                 t_model_inference += result_df["t_model_inference"].values[-1]
                 return_data.append(result_df["label"])
 
-            t_end_end += timer_end_end.toc() 
+            t_end_end += timer_end_end.toc()
         t_data_processing /= self.num_loop
         t_model_inference /= self.num_loop
         t_data_loading = t_end_end - t_data_processing - t_model_inference
@@ -500,6 +504,7 @@ class FFNNPipelineEvaDB(Pipeline):
         )
         return result_df
 
+
 class TwoTowerModelPipelineEvaDB(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
         self.cursor = evadb.connect().cursor()
@@ -517,7 +522,7 @@ class TwoTowerModelPipelineEvaDB(Pipeline):
             };
         """
         ).df()
-        # create user_rating_view 
+        # create user_rating_view
         self.cursor.query(
             """
             USE postgres_data {
@@ -735,7 +740,7 @@ class FFNNPipelinePyTorch(Pipeline):
 
     def model_inference_impl(self, data):
         self.model.eval()
-        result  = self.model(data)
+        result = self.model(data)
         # batch_size = 1024*10*5
         # dataloader = DataLoader(data, batch_size=batch_size)
         # result = None
@@ -836,9 +841,10 @@ class FFNNPipelineSparkSQL(Pipeline):
         # print(result_df.show())
         return result_df
 
+
 @pandas_udf(ArrayType(FloatType()))
 def predict_batch_udf_hadoop(features: pd.Series) -> pd.Series:
-    features = np.stack(features.str.strip('{}').str.split(',')).astype(np.float32)
+    features = np.stack(features.str.strip("{}").str.split(",")).astype(np.float32)
     features = torch.Tensor(features)
     list_hidden_layer_sizes = np.load("evadb_ffnn_reg.npy")
     model = ffnn.FFNNPyTorch(list_hidden_layer_sizes)
@@ -847,6 +853,7 @@ def predict_batch_udf_hadoop(features: pd.Series) -> pd.Series:
     result = result.detach().numpy()
     result = [result[i, :] for i in range(result.shape[0])]
     return pd.Series(result)
+
 
 class FFNNPipelineSparkSQLHadoop(Pipeline):
     def __init__(
@@ -879,8 +886,12 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
         spark_df = self.spark.createDataFrame(query_df)
         spark_df.createOrReplaceTempView("ffnn_q_temp")
 
-        feature_hdfs_path = "hdfs://localhost:9900/user/velox/data/{}".format(self.ffnn_table_name)
-        spark_feature_data = self.spark.read.csv(feature_hdfs_path, header=True, inferSchema=True)
+        feature_hdfs_path = "hdfs://localhost:9900/user/velox/data/{}".format(
+            self.ffnn_table_name
+        )
+        spark_feature_data = self.spark.read.csv(
+            feature_hdfs_path, header=True, inferSchema=True
+        )
         spark_feature_data.createOrReplaceTempView(self.ffnn_table_name)
 
         join_query = """
@@ -902,7 +913,9 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
         return data
 
     def model_inference_impl(self, data):
-        result_df = data.select(predict_batch_udf_hadoop(col("val")).alias("prediction"))
+        result_df = data.select(
+            predict_batch_udf_hadoop(col("val")).alias("prediction")
+        )
         # result_df.count()
         # result_df.cache().count()
         # result_df.rdd.count()
@@ -910,3 +923,51 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
         # print("count:", result_df.count())
         # print(result_df.show())
         return result_df
+
+
+class LLMRecommendationPipelinePython(Pipeline):
+    def __init__(
+        self,
+        num_user=5,
+        num_movie=10,
+        num_loop=10,
+    ):
+
+        super(LLMRecommendationPipelinePython, self).__init__(
+            "llm-recommendation_python",
+            num_sample=num_user * num_movie,
+            num_loop=num_loop,
+        )
+        self.num_user = 5
+        self.num_movie = 10
+        load_data_to_db.load_llm_recommendation_data_to_postgres(
+            self.num_user, self.num_movie
+        )
+        self.postgres_conn = utils.get_postgres_connection_config()
+
+        self.prompt1 = "Please summarize the users description. The following are the average ratings given by users to movies in each genre."
+        self.prompt2 = "Please summarize the movies description. The following are the detailed information of the movie."
+        self.prompt3 = "Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason."
+
+        self.openAI_client = utils.get_openAI_client()
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        join_query = """
+            select user_id, llm_u.description as user_description, id as movie_id, llm_m.description as movie_description from llm_recommend_user llm_u cross join llm_recommend_movie  llm_m limit {}
+        """.format(batch_size)
+        joined_df = utils.fetch_data_from_postgres_via_connectorx(join_query)
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        
+        data.loc[:, "user_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt1 + x['user_description']), axis=1)
+        data.loc[:, "movie_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt2 + x['movie_description']), axis=1)
+        data.loc[:, "result"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, "Summarized user statistics data (preference): " + x['user_description_summarized'] +". \n Summarized user movie metadata:  " + x['movie_description_summarized'] + self.prompt3), axis=1)
+        
+        return data

@@ -41,15 +41,14 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
  public:
   MLDecompositionPushdownRewriteAction() {}
 
-  void clearVectors() {
-  }
+  void clearVectors() {}
 
   std::string findPushdownNodeId(
       std::shared_ptr<const core::PlanNode> curNode,
       std::string expr,
       std::vector<std::string> exprSources,
       std::string rootNodeId,
-      std::vector<std::string>& pushdownNodeIds) {
+      std::string& finalPushdownNodeId) {
     std::string pushdownNodeId;
     // std::string pushdownNodeId = curNode->id();
     std::string curNodeId = curNode->id();
@@ -69,7 +68,7 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
         // need to check all expression sources are presented
         int numSourcesPresented = 0;
-        for (auto exprSrc: exprSources) {
+        for (auto exprSrc : exprSources) {
           for (int i = 0; i < expressionAlias.size(); i++) {
             if (expressionAlias[i] == exprSrc) {
               numSourcesPresented += 1;
@@ -78,9 +77,9 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
         }
 
         if (numSourcesPresented == exprSources.size()) {
-          std::cout << "[DEBUG] found a match, expr: " << expr
-                    << " pushdownNodeId: " << curNodeId
-                    << " expressionAlias: " << expressionAlias << std::endl;
+          // std::cout << "[DEBUG] found a match, expr: " << expr
+          //           << " pushdownNodeId: " << curNodeId
+          //           << " expressionAlias: " << expressionAlias << std::endl;
           pushdownNodeId = curNodeId;
         }
       } else {
@@ -88,13 +87,13 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
       }
     }
     for (const auto& source : sources) {
-      std::string returnedPushdownNodeId =
-          findPushdownNodeId(source, expr, exprSources, rootNodeId, pushdownNodeIds);
+      std::string returnedPushdownNodeId = findPushdownNodeId(
+          source, expr, exprSources, rootNodeId, finalPushdownNodeId);
       // Only the pushdownable node through a JOIN node will be added as a valid
       // node to the vector
       if (curNodeName.find("Join") != std::string::npos &&
           returnedPushdownNodeId != "") {
-        pushdownNodeIds.push_back(returnedPushdownNodeId);
+        finalPushdownNodeId = returnedPushdownNodeId;
       } else {
         pushdownNodeId = pushdownNodeId;
       }
@@ -108,10 +107,12 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
       std::string expr,
       std::vector<std::string> exprSources,
       std::string rootNodeId) {
-    std::vector<std::string> pushdownNodeIds;
-    findPushdownNodeId(curNode, expr, exprSources, rootNodeId, pushdownNodeIds);
-    std::cout << "[DEBUG] pushdownNodeIds: " << pushdownNodeIds << std::endl;
-    return pushdownNodeIds.size() > 0;
+    std::string finalPushdownNodeId;
+    findPushdownNodeId(
+        curNode, expr, exprSources, rootNodeId, finalPushdownNodeId);
+    // std::cout << "[DEBUG] finalPushdownNodeId: " << finalPushdownNodeId
+    //           << std::endl;
+    return finalPushdownNodeId != "";
   }
 
   /**
@@ -147,7 +148,12 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
       CataLog& cataLog) override {
     clearVectors();
     bool transformationApplied = false;
-    // std::set<std::string> finalProjectExprSets;
+
+    // The set to store the target project node expression
+    std::set<std::string> pushdownProjectExprSets;
+    std::set<std::string> targetProjectExprSets;
+    std::map<std::string, std::shared_ptr<const core::PlanNode>>
+        pushdownNodesMap;
     // Iterate over each target in the targets container
     for (auto target : targets) {
       // Start from the current node
@@ -171,396 +177,328 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
           // Check if the number of projections is equal to the number
           // of projection names
           assert(numProjections == projectionsNames.size());
+          // Get the names of projections
+          std::vector<std::string> pushdownNodeProjectionsNames;
           // Flag indicates whether the target UDF is found
           bool findRewriteTarget = false;
+          bool isPartialPushDown = true;
           // The pushdown udf could exist in multiple expressions,
           // so we need to store the pushdown node id for each expression
-          std::vector<std::vector<std::string>> pushdownNodesVector;
+          // std::vector<std::string> pushdownNodeIds;
+
+          std::string finalPushdownNodeId;
+          std::shared_ptr<const core::PlanNode> pushdownPlanNode;
+          std::string pushdownResultName;
           // Iterate each projection
           for (int exprIdx = 0; exprIdx < numProjections; exprIdx++) {
             auto expression = projections[exprIdx];
             // Get the string of expression
             std::string exprStr = expression->toString();
+            std::string targetExprName = projectionsNames[exprIdx];
             // Check if target exist in the expression
             if (exprStr.find(target) != std::string::npos) {
               // Capture the data src
-              std::vector<string> matchedDataSources = findDataSrcFromExpr(exprStr);
+              std::vector<string> matchedDataSources =
+                  findDataSrcFromExpr(exprStr);
 
-              std::vector<std::string> pushdownNodeIds;
               findPushdownNodeId(
                   curNode,
                   exprStr,
                   matchedDataSources,
                   curNode->id(),
-                  pushdownNodeIds);
+                  finalPushdownNodeId);
 
               // find applicable pushdown Node
-              if (pushdownNodeIds.size() > 0) {
-                std::cout << "[DEBUG] found pushdownNodeIds: " << pushdownNodeIds
-                          << std::endl;
-                for (auto candidatePushdownNodeId: pushdownNodeIds) {
-                  // get the candidateNode
-                  auto candidateNode = findPlanNodeById(curNode, candidatePushdownNodeId);
-                  // it should be found
-                  assert(candidateNode);
-                }
-                
-              }
+              if (finalPushdownNodeId != "") {
+                // std::cout << "[DEBUG] found pushdownNodeId: "
+                //           << finalPushdownNodeId << std::endl;
 
+                // get the candidateNode
+                pushdownPlanNode =
+                    findPlanNodeById(curNode, finalPushdownNodeId);
+                // it should be found
+                assert(pushdownPlanNode);
+                
+                pushdownResultName = targetExprName;
+
+                // get the expressions of the pushdown Node
+                auto pushdownProjectNode =
+                    std::dynamic_pointer_cast<const ProjectNode>(
+                        pushdownPlanNode);
+                assert(pushdownProjectNode);
+
+
+                // Get the names of projections
+               pushdownNodeProjectionsNames =
+                    pushdownProjectNode->names();
+
+                for (auto pushdownName : pushdownNodeProjectionsNames) {
+                  pushdownProjectExprSets.insert(pushdownName);
+                }
+
+                // Parse the target pushdown expressions
+                std::string pushDownExpression = target;
+                std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+                std::smatch matches;
+                // Start position for the search
+                std::string::const_iterator searchStart(target.cbegin());
+                int rewriteSrcIdx = 0;
+                // Search out the matched data source and store in matches
+                while (std::regex_search(
+                    searchStart,
+                    target.cend(),
+                    matches,
+                    patternToMatchRawSource)) {
+                  auto matchedDataSrc = matches[1].str();
+                  std::regex patternOfReplaceExpr(
+                      escapeRegex(matches[0].str()));
+                  pushDownExpression = std::regex_replace(
+                      pushDownExpression, patternOfReplaceExpr, matchedDataSrc);
+                  // Update the search start position
+                  searchStart = matches.suffix().first;
+                  // pushDownExpression = escapeRegex(pushDownExpression);
+                }
+                pushDownExpression = replaceDoubleQuotes(pushDownExpression);
+
+                pushDownExpression =
+                    pushDownExpression + " AS " + pushdownResultName;
+                pushdownProjectExprSets.insert(pushDownExpression);
+
+                // extract the computation after target rewrite
+                // UDF
+                std::string escapedRegex = escapeRegex(target);
+                std::regex patternOfRewriteFinalExpr(escapedRegex);
+                auto targetExprStr = std::regex_replace(
+                    exprStr, patternOfRewriteFinalExpr, pushdownResultName);
+
+                // set flag to false if the whole expression is pushed down
+                if (targetExprStr == pushdownResultName) {
+                  // isPartialPushDown = false;
+                  targetProjectExprSets.insert(targetExprName);
+                } else {
+                  targetProjectExprSets.insert(
+                      targetExprStr + " AS " + targetExprName);
+                }
+
+                // std::cout << "[DEBUG] target expression: nodeName: " << nodeName
+                //           << " rewriteExpr: "
+                //           << targetExprStr + " AS " + targetExprName
+                //           << std::endl;
+                findRewriteTarget = true;
+              } else {
+                throw std::invalid_argument(
+                    "[Error] pushdown node not found for target expression: " +
+                    target);
+              }
+            } else {
+              // Parse the non-target expressions
+              auto rewriteExpr = exprStr;
+              std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+              std::smatch matches;
+              // Start position for the search
+              std::string::const_iterator searchStart(exprStr.cbegin());
+
+              // Search out the matched data source and store in matches
+              while (std::regex_search(
+                  searchStart,
+                  exprStr.cend(),
+                  matches,
+                  patternToMatchRawSource)) {
+                auto matchedDataSrc = matches[1].str();
+                std::regex patternOfReplaceExpr(escapeRegex(matches[0].str()));
+
+                rewriteExpr = std::regex_replace(
+                    rewriteExpr, patternOfReplaceExpr, matchedDataSrc);
+                // Update the search start position
+                searchStart = matches.suffix().first;
+              }
+              rewriteExpr = replaceDoubleQuotes(rewriteExpr);
+
+              targetProjectExprSets.insert(
+                  rewriteExpr + " AS " + projectionsNames[exprIdx]);
+
+              // std::cout << "[DEBUG] non-target expression: nodeName: "
+              //           << nodeName << " rewriteExpr: "
+              //           << rewriteExpr + " AS " + projectionsNames[exprIdx]
+              //           << std::endl;
             }
+          }
+
+          if (findRewriteTarget) {
+            std::vector<std::string> pushdownProjectExprs(
+                pushdownProjectExprSets.begin(), pushdownProjectExprSets.end());
+
+            std::vector<std::string> pushdownNodeProjectionsNameCopy = pushdownNodeProjectionsNames;
+            pushdownNodeProjectionsNameCopy.push_back(pushdownResultName);
+            
+            // std::cout << "[DEBUG]pushdownProjectExprs: " 
+            //           << pushdownProjectExprs << std::endl;
+
+            // std::cout << "[DEBUG] pushdownNodeProjectionsNameCopy: "
+            //           << pushdownNodeProjectionsNameCopy << std::endl;
+
+            // create a project node after pushdown node
+            auto pushdownNodePlanBuilder =
+                exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .setRoot(pushdownPlanNode)
+                    .project({pushdownProjectExprs})
+                    // Add a helper project node. The reason is using to capture the filed in 
+                    // serialized plan in a more convenient way, the following node will be 
+                    // removed after capture it.
+                    .project({pushdownNodeProjectionsNameCopy}); 
+
+            // std::cout << "[DEBUG] pushdownNodePlanBuilder: "
+            //           << pushdownNodePlanBuilder.planNode()->toString(
+            //                  true, true)
+            //           << std::endl;
+
+
+            auto serializedPushdownPlan =
+                pushdownNodePlanBuilder.planNode()->serialize();
+
+            // Got the filed
+            folly::dynamic pushdownExprFiled = folly::dynamic::object;
+            for (auto& field : serializedPushdownPlan["projections"]) {
+              if (field["fieldName"] == pushdownResultName) {
+                pushdownExprFiled = field;
+                break;
+              }
+            }
+
+            // std::cout << "[DEBUG] pushdownExprFiled: "
+            //           << pushdownExprFiled
+            //           << std::endl;
+
+            assert(!pushdownExprFiled.empty());
+            // remove the last helper node
+            pushdownNodePlanBuilder = pushdownNodePlanBuilder.setRoot(pushdownNodePlanBuilder.planNode()->sources()[0]);
+            serializedPushdownPlan = pushdownNodePlanBuilder.planNode()->serialize();
+
+            // auto newPushdownNodeId = pushdownNodePlanBuilder.planNode()->id();
+            // .project({"pushdown_0", "user_id", "user_description"});
+            // std::cout << "[DEBUG] pushdownNodePlanBuilder: "
+            //           << pushdownNodePlanBuilder.planNode()->toString(
+            //                  true, true)
+            //           << std::endl;
+
+            
+            auto serializedPlan = planBuilder.planNode()->serialize();
+            replaceSourceWithIdInSerializedPlan(
+                serializedPlan, serializedPushdownPlan, finalPushdownNodeId);
+            auto deserlizedUpdatedPlanNode =
+                ISerializable::deserialize<core::PlanNode>(
+                    serializedPlan, pool_.get());
+
+            // std::cout << "[DEBUG] query plan after 1st changes: "
+            //           << deserlizedUpdatedPlanNode->toString(true, true)
+            //           << std::endl;
+
+            // std::cout << "[DEBUG] seralized plan after 1st changes:\n"
+            //           << serializedPlan
+            //           << std::endl;
+
+            auto curNodeInUpdatePlan =
+                    findPlanNodeById(deserlizedUpdatedPlanNode, curNode->id());
+
+            std::vector<std::string> nodeIdsBetweenSourceAndTarget;
+            findNodeIdsBetweenIds(
+                curNodeInUpdatePlan,
+                pushdownNodePlanBuilder.planNode()->id(),
+                curNodeInUpdatePlan->id(),
+                nodeIdsBetweenSourceAndTarget);
+            // std::cout << "[DEBUG] src Node Id: " << pushdownNodePlanBuilder.planNode()->id()
+            //           << " target Node Id: " << curNodeInUpdatePlan->id() << std::endl;
+
+            // std::cout << "[DEBUG] nodeIdsBetweenSourceAndTarget: "
+            //           << nodeIdsBetweenSourceAndTarget << std::endl;
+
+            
+
+            // std::cout << "[DEBUG] pushdownExprFiled: "
+            //           << pushdownExprFiled
+            //           << std::endl;
+
+            // std::cout << "[DEBUG] query plan before add filed: "
+            //           << serializedPlan
+            //           << std::endl;
+
+            addProjectionFiledInSerializedPlan(serializedPlan, pushdownExprFiled, nodeIdsBetweenSourceAndTarget);
+
+            // std::cout << "[DEBUG] query plan after add filed: "
+            //           << serializedPlan
+            //           << std::endl;
+
+            deserlizedUpdatedPlanNode =
+                ISerializable::deserialize<core::PlanNode>(
+                    serializedPlan, pool_.get());
+            
+            // std::cout << "[DEBUG] success of add filed" << std::endl;
+
+            // if (isPartialPushDown) {
+              // if it is partially pushdown, we need to create a new project
+              // node to replace the curNode in new plan to finish the computation
+              // after the pushdown expression
+              std::string curNodeId = curNode->id();
+              auto curNodeInUpdatedPlan =
+                      findPlanNodeById(deserlizedUpdatedPlanNode, curNodeId);
+              
+              std::vector<std::string> targetProjectExprs(
+                  targetProjectExprSets.begin(), targetProjectExprSets.end());
+
+              // std::cout << "[DEBUG] findRewriteTarget: " << findRewriteTarget
+              //           << std::endl;
+              // std::cout << "[DEBUG] pushdownProjectExprSets: "
+              //           << pushdownProjectExprSets << std::endl;
+              // std::cout << "[DEBUG] targetProjectExprSets: "
+              //           << targetProjectExprSets << std::endl;
+
+              auto rewritePlan =
+                    exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .setRoot(curNodeInUpdatedPlan->sources()[0])
+                    .project(targetProjectExprs);
+
+              // std::cout << "[DEBUG] rewritePlan: "
+              //           << rewritePlan.planNode()->toString(true, true)
+              //           << std::endl;
+              
+              auto serializedNewSource =
+                  rewritePlan.planNode()->serialize();
+              
+              replaceSourceWithIdInSerializedPlan(
+                  serializedPlan, serializedNewSource, curNodeId);
+              
+              auto deserlizedFinalPlanNode =
+                      ISerializable::deserialize<core::PlanNode>(
+                          serializedPlan, pool_.get());
+              planBuilder.setRoot(deserlizedFinalPlanNode);
+            // } else {
+            //   planBuilder.setRoot(deserlizedUpdatedPlanNode);
+            // }
+            // std::cout << "[INFO] final serialized query plan: \n" << serializedPlan << std::endl;
+
+            // std::cout << "[DEBUG] query plan after add filed: "
+            //           << deserlizedUpdatedPlanNode->toString(true, true)
+            //           << std::endl;
+
+            // std::cout << "[debug] captured filed: " << pushdownExprFiled
+            //           << std::endl;
+            // folly::dynamic&
+
+            // std::cout << "[DEBUG] final plan: \n"
+            //           << planBuilder.planNode()->toString(true,true) << std::endl;
+
+            
           }
         }
       }
 
-      //             targetExprStr = exprStr;
-      //             core::QueryConfig config({});
-      //             std::vector<std::string> parsedSingleExprs;
-      //             std::vector<std::string> matchedExprs;
-      //             // parse the target string into a
-      //             std::vecotor<DLKernel(string)> parseDLExpressions(target,
-      //             parsedSingleExprs, matchedExprs); std::reverse(
-      //                 parsedSingleExprs.begin(), parsedSingleExprs.end());
-
-      //             std::vector<velox::dl::KernelType> kernelTypes;
-      //             std::vector<float*> weights;
-      //             std::vector<int> dims;
-      //             // process each expression from the innermost DL kernel
-      //             for (int i = 0; i < parsedSingleExprs.size(); i++) {
-      //               // double check it is supported DL kernel
-      //               assert(isSupportedDLKernel(parsedSingleExprs[i]));
-      //               auto dlKernelName = parsedSingleExprs[i];
-      //               std::vector<int> udfDims;
-      //               if (dlKernelName.find("mat_mul") != std::string::npos)
-      //               {
-      //                 auto myDL = getVectorFunction(
-      //                     dlKernelName, {ARRAY(REAL())}, {}, config);
-      //                 assert(myDL);
-      //                 auto myDLFunc =
-      //                     std::dynamic_pointer_cast<MatrixMultiply>(myDL);
-      //                 assert(myDLFunc);
-      //                 weights.push_back(myDLFunc->getTensor());
-      //                 udfDims = myDLFunc->getDims();
-      //                 kernelTypes.push_back(velox::dl::KernelType::MatMul);
-      //               } else if (
-      //                   dlKernelName.find("mat_add") != std::string::npos
-      //                   || dlKernelName.find("mat_vector_add") !=
-      //                       std::string::npos) {
-      //                 auto myDL = getVectorFunction(
-      //                     dlKernelName, {ARRAY(REAL())}, {}, config);
-      //                 assert(myDL);
-      //                 auto myDLFunc =
-      //                     std::dynamic_pointer_cast<MatrixVectorAddition>(myDL);
-      //                 assert(myDLFunc);
-      //                 weights.push_back(myDLFunc->getTensor());
-      //                 udfDims = myDLFunc->getDims();
-      //                 kernelTypes.push_back(velox::dl::KernelType::MatAdd);
-      //               } else if (dlKernelName.find("relu") !=
-      //               std::string::npos)
-      //               {
-      //                 // Relu itself does not have dims stored in the UDF
-      //                 will use
-      //                 // the last element in dims. current limitation: relu
-      //                 cannot
-      //                 // be the innermost UDF.
-      //                 assert(!dims.empty());
-      //                 udfDims = {dims.back()};
-      //                 kernelTypes.push_back(velox::dl::KernelType::ReLU);
-      //               } else if (
-      //                   dlKernelName.find("batch_norm") !=
-      //                   std::string::npos) {
-      //                 // BachNorm
-      //                 auto myDL = getVectorFunction(
-      //                     dlKernelName, {ARRAY(REAL())}, {}, config);
-      //                 assert(myDL);
-      //                 auto myDLFunc =
-      //                     std::dynamic_pointer_cast<BatchNorm1D>(myDL);
-      //                 assert(myDLFunc);
-      //                 weights.push_back(myDLFunc->getWeight());
-      //                 weights.push_back(myDLFunc->getBias());
-      //                 udfDims = myDLFunc->getDims();
-      //                 kernelTypes.push_back(velox::dl::KernelType::BatchNorm);
-      //               } else if (
-      //                   dlKernelName.find("softmax") != std::string::npos)
-      //                   {
-      //                 // Softmax itself does not have dims stored in the
-      //                 UDF will
-      //                 // use the last element in dims. current limitation:
-      //                 softmax
-      //                 // cannot be the innermost UDF.
-      //                 udfDims = {dims.back()};
-      //                 kernelTypes.push_back(velox::dl::KernelType::Softmax);
-      //               } else {
-      //                 std::cout
-      //                     << "ERROR, Unsupported DL kernel: " <<
-      //                     dlKernelName
-      //                     << std::endl;
-      //               }
-
-      //               // Size of dimension should equal to size of DLs + 1,
-      //               since
-      //               // the first entry is the input size.
-      //               if (dims.empty()) {
-      //                 if (udfDims.size() == 2) {
-      //                   // For DLs have two dimensions, like MatMul
-      //                   dims.push_back(udfDims[0]);
-      //                   dims.push_back(udfDims[1]);
-      //                 } else {
-      //                   dims.push_back(udfDims[0]);
-      //                   dims.push_back(udfDims[0]);
-      //                 }
-      //               } else {
-      //                 // Add DL's last dimension
-      //                 dims.push_back(udfDims.back());
-      //               }
-      //             }
-
-      //             std::string torchDNNName =
-      //                 fmt::format("torchDNN_{}", rewriteTorchDNNCounter++);
-
-      //             exec::registerVectorFunction(
-      //                 torchDNNName,
-      //                 TorchDNNV2::signatures(),
-      //                 std::make_unique<TorchDNNV2>(kernelTypes, weights,
-      //                 dims));
-
-      //             // Capture the data src
-      //             std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
-      //             std::smatch matches;
-      //             // Object to capture the matched data source
-      //             std::string matchedDataSrc;
-      //             std::string targetExprName = projectionsNames[exprIdx];
-      //             // Search out the matched data source and store in
-      //             matches if (std::regex_search(
-      //                     targetExprStr, matches, patternToMatchRawSource))
-      //                     {
-      //               matchedDataSrc = matches[1].str();
-      //             } else {
-      //               LOG(ERROR) << "Uncaptured data source" << std::endl;
-      //             }
-
-      //             std::regex pattern(escapeRegex(target));
-      //             // Replace the expression
-      //             targetExprStr = std::regex_replace(
-      //                 targetExprStr,
-      //                 pattern,
-      //                 fmt::format("{}({})", torchDNNName, matchedDataSrc));
-
-      //             finalProjectExprSets.insert(
-      //                 targetExprStr + " AS " + targetExprName);
-      //             std::cout << fmt::format("exprStr: {}", targetExprStr)
-      //                       << std::endl;
-
-      //             findRewriteTarget = true;
-      //           } else {
-      //             // Parse the non-target expressions
-      //             std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
-      //             std::smatch matches;
-      //             if (std::regex_search(
-      //                     exprStr, matches, patternToMatchRawSource)) {
-      //               auto matchedDataSrc = matches[1].str();
-      //               auto rewriteExpr = std::regex_replace(
-      //                   exprStr, patternToMatchRawSource, matchedDataSrc);
-
-      //               finalProjectExprSets.insert(
-      //                   rewriteExpr + " AS " + projectionsNames[exprIdx]);
-      //             } else {
-      //               LOG(ERROR)
-      //                   << "Error: undefined-edge case detected: " <<
-      //                   exprStr
-      //                   << std::endl;
-      //             }
-      //           }
-      //         }
-
-      //         if ((curNode->sources().size()) > 0 && findRewriteTarget) {
-      //           // get the source node of the current node
-      //           auto srcNode = curNode->sources()[0];
-      //           auto rewritePlan =
-      //               exec::test::PlanBuilder(planNodeIdGenerator,
-      //               pool_.get());
-      //           rewritePlan = rewritePlan.setRoot(srcNode);
-
-      //           std::vector<std::string> finalProjectExprs(
-      //               finalProjectExprSets.begin(),
-      //               finalProjectExprSets.end());
-      //           rewritePlan = rewritePlan.project(finalProjectExprs);
-      //           if (prevNode == nullptr) {
-      //             planBuilder.setRoot(rewritePlan.planNode());
-      //           } else {
-      //             // use seralization and deserialization to replace the
-      //             source
-      //             // node
-      //             auto serializedPlan =
-      //             planBuilder.planNode()->serialize(); auto
-      //             serializedNewSource =
-      //             rewritePlan.planNode()->serialize(); auto
-      //             srcNodeIdToBeReplaced = curNode->id();
-      //             replaceSourceWithIdInSerializedPlan(
-      //                 serializedPlan, serializedNewSource,
-      //                 srcNodeIdToBeReplaced);
-      //             auto deserlizedUpdatedPlanNode =
-      //                 ISerializable::deserialize<core::PlanNode>(
-      //                     serializedPlan, pool_.get());
-      //             planBuilder.setRoot(deserlizedUpdatedPlanNode);
-      //           }
-      //           transformationApplied = true;
-      //         }
-      //       }
-      //     }
-      //     // Search for a filter node, which is similar to the project node
-      //     if (nodeName == "Filter") {
-      //       std::shared_ptr<const FilterNode> myFilterNode =
-      //           std::dynamic_pointer_cast<const FilterNode>(curNode);
-
-      //       const TypedExprPtr& filterExpr = myFilterNode->filter();
-
-      //       targetExprStr = filterExpr->toString();
-
-      //       if (targetExprStr == target) {
-      //         if (auto call =
-      //                 std::dynamic_pointer_cast<const core::CallTypedExpr>(
-      //                     filterExpr)) {
-      //           core::QueryConfig config({});
-      //           // Stored the names for mat_add and mat_mul
-      //           std::vector<std::string> mat_add_occurrences;
-      //           std::vector<std::string> mat_mul_occurrences;
-
-      //           std::regex pattern_add(R"(mat_add\d+)");
-      //           std::regex pattern_mul(R"(mat_mul\d+)");
-
-      //           auto words_begin_add = std::sregex_iterator(
-      //               target.begin(), target.end(), pattern_add);
-      //           auto words_end_add = std::sregex_iterator();
-      //           for (std::sregex_iterator i = words_begin_add; i !=
-      //           words_end_add;
-      //                ++i) {
-      //             std::smatch match = *i;
-      //             mat_add_occurrences.push_back(match.str());
-      //           }
-
-      //           auto words_begin_mul = std::sregex_iterator(
-      //               target.begin(), target.end(), pattern_mul);
-      //           auto words_end_mul = std::sregex_iterator();
-      //           for (std::sregex_iterator i = words_begin_mul; i !=
-      //           words_end_mul;
-      //                ++i) {
-      //             std::smatch match = *i;
-      //             mat_mul_occurrences.push_back(match.str());
-      //           }
-      //           // Search the pointer for registed add function
-      //           std::vector<std::shared_ptr<VectorFunction>> myAddFunc;
-      //           for (std::string mat_add_name : mat_add_occurrences) {
-      //             std::shared_ptr<VectorFunction> myAdd =
-      //             getVectorFunction(
-      //                 mat_add_name, {ARRAY(REAL())}, {}, config);
-      //             if (myAdd) {
-      //               myAddFunc.push_back(myAdd);
-      //             }
-      //           }
-      //           // Iterating over myAddFunc in reverse, the inner function
-      //           is the
-      //           // first layer add function
-      //           for (auto it = myAddFunc.rbegin(); it != myAddFunc.rend();
-      //           ++it) {
-      //             // Dynamically cast to MatrixVectorAddition
-      //             auto myAddUDF =
-      //                 std::dynamic_pointer_cast<MatrixVectorAddition>(*it);
-      //             if (myAddUDF) {
-      //               bias.push_back(myAddUDF->getTensor());
-      //             }
-      //           }
-      //           // Search the pointer for registed mul function
-      //           std::vector<std::shared_ptr<VectorFunction>> myMulFunc;
-      //           for (std::string mat_mul_name : mat_mul_occurrences) {
-      //             std::shared_ptr<VectorFunction> myMul =
-      //             getVectorFunction(
-      //                 mat_mul_name, {ARRAY(REAL())}, {}, config);
-      //             if (myMul) {
-      //               myMulFunc.push_back(myMul);
-      //             }
-      //           }
-      //           // Iterating over myMulFunc in reverse, the inner function
-      //           is the
-      //           // first layer mul function
-      //           for (auto it = myMulFunc.rbegin(); it != myMulFunc.rend();
-      //           ++it) {
-      //             // Dynamically cast to MatrixVectorAddition
-      //             auto myMulUDF =
-      //             std::dynamic_pointer_cast<MatrixMultiply>(*it); if
-      //             (myMulUDF)
-      //             {
-      //               weights.push_back(myMulUDF->getTensor());
-      //               if (dims.empty()) {
-      //                 // We extract two parameters from the first layer,
-      //                 and we
-      //                 // only need one parameter for later layer
-      //                 dims.push_back(myMulUDF->getDims()[0]);
-      //                 dims.push_back(myMulUDF->getDims()[1]);
-      //               } else {
-      //                 dims.push_back(myMulUDF->getDims()[1]);
-      //               }
-      //             }
-      //           }
-      //           // Register torchdnn_multi
-      //           registerVectorFunction(
-      //               "torchDNN",
-      //               TorchDNN::signatures(),
-      //               std::make_unique<TorchDNN>(weights, bias, dims));
-      //           // TODO:catalog process
-
-      //           if (curNode->sources().size() > 0) {
-      //             // Here, we focus on the inner case. For example:
-      //             //
-      //             project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))})
-      //             // ---> project({torchnnx(v)}) The format for inner case
-      //             // is project(twolayer())
-      //             // TODO: Medium case - project(func1(twolayer(func2())))
-      //             // TODO: Outer case -
-      //             // project({twolayer(func1(func2()))}) Plan Builder
-      //             // start from the previous node.
-      //             planBuilder = planBuilder.setRoot(curNode->sources()[0]);
-      //             // Regular expression match
-      //             std::regex pattern(R"(softmax\d+\(.*\)\))");
-      //             // Replace the expression
-      //             targetExprStr =
-      //                 std::regex_replace(targetExprStr, pattern,
-      //                 "torchDNN(v)");
-      //             // Plan Builder add the new node.
-      //             planBuilder = planBuilder.project({targetExprStr});
-
-      //             transformationApplied = true;
-      //           }
-      //         }
-      //         if (curNode->sources().size() > 0) {
-      //           // Here, we focus on the inner case. For example:
-      //           //
-      //           project({softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))})
-      //           // ---> project({torchnnx(v)}) The format for inner case is
-      //           // project(twolayer())
-      //           // TODO: Medium case - project(func1(twolayer(func2())))
-      //           // TODO: Outer case - project({twolayer(func1(func2()))})
-      //           // Plan Builder start from the previous node.
-      //           planBuilder = planBuilder.setRoot(curNode->sources()[0]);
-
-      //           std::regex pattern(R"(softmax\d+\(.*\)\))");
-
-      //           targetExprStr =
-      //               std::regex_replace(targetExprStr, pattern,
-      //               "torchDNN(v)");
-
-      //           planBuilder = planBuilder.project({targetExprStr});
-
-      //           transformationApplied = true;
-      //         }
-      //       }
-      //     }
-      //   }
+      
       // Serach lower level plan node
       std::vector<std::shared_ptr<const PlanNode>> sources = curNode->sources();
       // Until leaf node
       if (sources.size() == 0)
         return false;
-      // recursive search 
+      // recursive search
       for (auto source : sources)
         transformationApplied |= apply(
             source,
@@ -634,11 +572,11 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
       // Search each expressions
       for (const auto& expression : expressions) {
-        // Note: current implementation support pushdown starting from the innermost function
-        // Example:
-        // Support:                    |<----Pushdown:--->|
+        // Note: current implementation support pushdown starting from the
+        // innermost function Example:
+        // Support: |<----Pushdown:--->|
         // softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))
-        // Not-Support:    |<------Fuse:---->|
+        // Not-Support:    |<----Pushdown:---->|
         // softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))
         std::string expr = expression->toString();
         // std::cout << "expr: " << expr << std::endl;
@@ -652,14 +590,14 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
         std::vector<std::string> matchedDataSources = findDataSrcFromExpr(expr);
 
-
         for (int i = 0; i < parsedSingleExprs.size(); i++) {
-          targetExprStr = parsedSingleExprs[i];
-          std::cout << "reached here: " << targetExprStr
-                    << " matchedDataSources: " << matchedDataSources
-                    << " curNodeId: " << curNodeId << std::endl;
-          if (mayPushdown(rootNode, targetExprStr, matchedDataSources, curNodeId)) {
-            targetActions.push_back(matchedExprs[i]);
+          targetExprStr = matchedExprs[i];
+          // std::cout << "reached here: " << targetExprStr
+          //           << " matchedDataSources: " << matchedDataSources
+          //           << " curNodeId: " << curNodeId << std::endl;
+          if (mayPushdown(
+                  rootNode, targetExprStr, matchedDataSources, curNodeId)) {
+            targetActions.push_back(targetExprStr);
           }
         }
       }
@@ -690,9 +628,6 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
   std::string targetExprStr;
   std::vector<float*> weights;
   std::vector<float*> bias;
-  std::vector<std::string> supportedDLKernels =
-      {"mat_mul", "mat_add", "relu", "batch_norm", "softmax"};
-  static inline int rewriteTorchDNNCounter = 0;
 };
 
 } // namespace optimization

@@ -1,7 +1,5 @@
 #pragma once
-// #include <curl/curl.h>
 #include <fmt/format.h>
-// #include <json/json.h>
 #include "functions.h"
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
@@ -136,6 +134,15 @@ class ChatGPT : public MLFunction {
 
       cpr::Response response = cpr::Post(
           cpr::Url{url_}, cpr::Header{headers}, cpr::Body{payload.dump()});
+      int failureCount = 0;
+      // retry
+      while (response.status_code != 200) {
+        response = cpr::Post(
+          cpr::Url{url_}, cpr::Header{headers}, cpr::Body{payload.dump()});
+        if (failureCount++ > 10) {
+          break;
+        }
+      }
       if (response.status_code == 200) {
         // parse the returned value
         nlohmann::json response_json = nlohmann::json::parse(response.text);
@@ -279,6 +286,17 @@ class ChatGPTRecommender : public MLFunction {
 
       cpr::Response response = cpr::Post(
           cpr::Url{url_}, cpr::Header{headers}, cpr::Body{payload.dump()});
+      
+      int failureCount = 0;
+      // retry
+      while (response.status_code != 200) {
+        response = cpr::Post(
+          cpr::Url{url_}, cpr::Header{headers}, cpr::Body{payload.dump()});
+        if (failureCount++ > 10) {
+          break;
+        }
+      }
+      
       if (response.status_code == 200) {
         // parse the returned value
         nlohmann::json response_json = nlohmann::json::parse(response.text);
@@ -304,7 +322,7 @@ class ChatGPTRecommender : public MLFunction {
                 .argumentType("VARCHAR")
                 .returnType("VARCHAR")
                 .build(),
-            // supports with prompt prefix
+            // supports with prompt suffix
             exec::FunctionSignatureBuilder()
                 .argumentType("VARCHAR")
                 .argumentType("VARCHAR")
