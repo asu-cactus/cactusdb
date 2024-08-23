@@ -1549,6 +1549,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
    * @param rewrite A boolean value indicating whether to perform a rewrite.
    */
   void testSingleRewrite(
+      std::string model,
       bool rewrite,
       int repeatRun,
       int featureSize,
@@ -1561,8 +1562,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Set data source config.
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
-    int first_layer_output_size = 1024;
-    int second_layer_output_size = 14588;
+    PlanBuilder myPlan;
     // Set splits number
     // Initialize CataLog
     CataLog cataLog;
@@ -1576,105 +1576,93 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         numSplit = 32;
       }
     }
-    // Generate data source
-    auto data = data_generate(
-        input_features_size,
-        num_samples,
-        first_layer_output_size,
-        second_layer_output_size,
-        numSplit);
-    // Split inputs into many splits and return paths as a std::vector
-    std::vector<std::shared_ptr<TempFilePath>> files = data.feature_paths;
-    RowTypePtr inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
-    //  Check the input size against the blocking threshold in cataLog.
-    //  If yes, preblock the input vector, store it, and add information in
-    //  cataLog. If not, set dataSource in cataLog.
-    if (input_features_size > cataLog.getBlockingThreshold()) {
-      // FIXME: temporary disable the following blocking for vertical partition
-      // since we have deallocate the data.features in data_generate function to
-      // save unnecessary memory usage.
-      /* // If input size is larger than blocking threshold, preblock and store
-      in
-      // cataLog
-      std::vector<std::vector<float>> valuesBlock =
-          optimization::create_input_block(
-              input_features_size * num_samples,
-              data.features,
-              cataLog.getDefaultBlocksNum());
-      optimization::FileStructure values = optimization::block_to_files(
-          valuesBlock, cataLog.getDefaultBlocksNum(), 0);
-      // Set data source blocks in cataLog
-      cataLog.setDataSourceBlocks(values.schema, values.paths); */
-    } else {
-      // If input size is not larger than blocking threshold, set dataSource in
-      // cataLog
-      cataLog.setDataSource(inputRowType, files);
-    }
-    // Set data source statistics in cataLog
-    cataLog.setDataSourceStat({num_samples, input_features_size});
-    cataLog.setUDFSchema("value", inputRowType);
-    // Build two dense layers UDFs using registerFunction in optimization
-    // namespace
-    bool isVerticalPartition = true;
-    if (benchmarkMode.find("mul2joinAggHorizontal") != std::string::npos) {
-      isVerticalPartition = false;
-    }
-    std::string computationStr = registerFunctions(
-        first_layer_output_size,
-        second_layer_output_size,
-        input_features_size,
-        first_layer_output_size,
-        data.weights[0],
-        data.weights[1],
-        data.bias[0],
-        data.bias[1],
-        cataLog,
-        isVerticalPartition);
-    // Initialize planNodeID
-    core::PlanNodeId p0;
-    // Initialize planNodeIdGenerator
+
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    // Create a plan for FFNN using two dense layers UDFs
-    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(inputRowType)
-                      .capturePlanNodeId(p0)
-                      .project({fmt::format(computationStr, "v"), "v as v1"})
-                      .project({"v", "v1"});
+    std::vector<std::string> inputFilePaths;
+    std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
+    std::string computationStr;
 
-    std::cout << "computationStr: " << fmt::format(computationStr, "v")
-              << std::endl;
-    std::cout << "query plan:" << myPlan.planNode()->toString(true, true)
-              << std::endl;
-    // auto myPlan0 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-    //                   .tableScan(inputRowType)
-    //                   .capturePlanNodeId(p0)
-    //                   .project({fmt::format(computationStr, "v")});
-    // auto myPlan = myPlan0.project({"v", "v"});
+    if (model == "ffnn") {
+      // Set data source config.
+      int input_features_size = featureSize; // 597540
+      int num_samples = numSamples;
+      int first_layer_output_size = 1024;
+      int second_layer_output_size = 14588;
+      cataLog.setDefaultBlocksSize(blockSize);
+      cataLog.setBlockingThreshold(1);
+      // Set splits number
+      // Generate data source
+      auto data = data_generate(
+          input_features_size,
+          num_samples,
+          first_layer_output_size,
+          second_layer_output_size,
+          numSplit);
+      // Split inputs into many splits and return paths as a std::vector
+      inputTempFiles = data.feature_paths;
 
-    // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, files);
-    // Set vector name and nodeId of data source
-    cataLog.setVectorIdMap(p0, "v");
-    // Add source to catalog
-    std::shared_ptr<OutputStat> stat =
-        std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
-    Source src = Source(p0, Source::Type::FILE, std::move(stat));
-    cataLog.addSource(std::make_shared<Source>(src));
+      bool isVerticalPartition = false;
+      computationStr = registerFunctions(
+          first_layer_output_size,
+          second_layer_output_size,
+          input_features_size,
+          first_layer_output_size,
+          data.weights[0],
+          data.weights[1],
+          data.bias[0],
+          data.bias[1],
+          cataLog,
+          isVerticalPartition);
 
-    // Get the logical plan
-    auto planNode = myPlan.planNode();
-    // auto planNode = myPlan.planNodeModifiable();
-    // Create ruleManager
+    } else if (model == "df") {
+      // TODO: current the data is load froma file not generated
+      numSamples = 56962;
+      featureSize = 28;
+      registerDecisionForestFunctions();
+
+      std::string dataFilePath =
+          "/home/velox/resources/data/creditcard_test.csv";
+
+      std::vector<std::vector<float>> inputFeatureVectors =
+          loadFeaturesFromCSV(dataFilePath, numSamples, featureSize);
+      inputTempFiles = splitDataToFiles(
+          inputFeatureVectors, 4 /*numSplit*/, true /*createIndex*/);
+      computationStr = "decision_forest_predict({}) as v";
+    } else if (model == "two-tower") {
+      registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+      inputFilePaths = generateTwoTowerQueryData(numSamples, 6040, 3706, 1);
+      featureSize = 2;
+      std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
+    } else if (model == "llm") {
+      exec::registerVectorFunction(
+          "chatgpt_server1",
+          ChatGPT::signatures(),
+          std::make_unique<ChatGPT>());
+      exec::registerVectorFunction(
+          "chatgpt_server2",
+          ChatGPT::signatures(),
+          std::make_unique<ChatGPT>());
+      exec::registerVectorFunction(
+          "chatgpt_recommender",
+          ChatGPTRecommender::signatures(),
+          std::make_unique<ChatGPTRecommender>());
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", model));
+    }
+
+    myPlan = setupQueryPlan(
+        model,
+        computationStr,
+        inputFilePaths,
+        inputTempFiles,
+        numSamples,
+        featureSize,
+        cataLog,
+        planNodeIdGenerator);
+
     RuleManager ruleManager;
-    ruleManager.rules.emplace(
-        "TwoLayerUDF2TorchNNRewriteAction",
-        std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
-    // std::cout<<"rule size" << ruleManager.rules.size() << std::endl;
-    // auto it = ruleManager.rules.find("TwoLayerUDF2TorchNNRewriteAction");
-    // ruleManager.rules.erase(it);
-    // std::cout<<"rule size" << ruleManager.rules.size() << std::endl;
-    // Create planState
     PlanState planState(ruleManager);
+    auto planNode = myPlan.planNode();
 
     // Run rewriten rule
     if (rewrite) {
@@ -1693,14 +1681,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
       } else if (benchmarkMode == "udf2torchNN") {
         testAction = std::make_pair(
-            "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0(ROW[\"v\"]))))))",
+            "softmax(mat_add0_1(mat_mul0_1(relu(mat_add0_0(mat_mul0_0(ROW[\"v\"]))))))",
             "MultiLayerUDF2TorchNNRewriteAction");
       } else if (benchmarkMode == "mul2joinAggHorizontal") {
         testAction =
-            std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
+            std::make_pair("mat_mul0_0", "Mul2JoinAggHorizontalRewriteAction");
       } else if (benchmarkMode == "mul2joinAggHorizontal1") {
         testAction =
-            std::make_pair("mat_mul1", "Mul2JoinAggHorizontalRewriteAction");
+            std::make_pair("mat_mul0_1", "Mul2JoinAggHorizontalRewriteAction");
       } else {
         throw std::runtime_error(
             fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
@@ -2489,6 +2477,7 @@ int main(int argc, char** argv) {
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
+        model,
         rewrite,
         repeatRun,
         featureSize,
