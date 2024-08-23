@@ -1,14 +1,15 @@
 #pragma once
-#include <fmt/format.h>
-#include "functions.h"
 #include <cpr/cpr.h>
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
-#include <iostream>
-#include <fstream>
 #include <chrono>
-#include <iomanip>
 #include <cstdint>
 #include <ctime>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <thread>
+#include "functions.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
@@ -28,24 +29,42 @@ std::string getEnvVar(std::string const& key) {
 
 // Function to count the number of words in a string
 int countWords(const std::string& str) {
-    std::istringstream iss(str);
-    int wordCount = 0;
-    std::string word;
-    while (iss >> word) {
-        ++wordCount;
-    }
-    return wordCount;
+  std::istringstream iss(str);
+  int wordCount = 0;
+  std::string word;
+  while (iss >> word) {
+    ++wordCount;
+  }
+  return wordCount;
 }
 
 // Function to count the number of punctuation marks in a string
 int countPunctuation(const std::string& str) {
-    int punctuationCount = 0;
-    for (char ch : str) {
-        if (std::ispunct(ch)) {
-            ++punctuationCount;
-        }
+  int punctuationCount = 0;
+  for (char ch : str) {
+    if (std::ispunct(ch)) {
+      ++punctuationCount;
     }
-    return punctuationCount;
+  }
+  return punctuationCount;
+}
+
+void sendRequestViaCpr(
+    const std::string& url,
+    const cpr::Header& headers,
+    const std::string& payload,
+    cpr::Response& response) {
+      // cpr::Response response = cpr::Post(
+      //     cpr::Url{url}, cpr::Header{headers}, cpr::Body{payload.dump()});
+  response = cpr::Post(cpr::Url{url}, cpr::Header{headers}, cpr::Body{payload});
+  int failureCount = 0;
+  while (response.status_code != 200) {
+    response = cpr::Post(cpr::Url{url}, cpr::Header{headers}, cpr::Body{payload});
+    if (++failureCount > 10) {
+      throw std::runtime_error(fmt::format(
+          "[ERROR] Failed to send request to OpenAI API. Reached maximum number of retries: 10"));
+    }
+  }
 }
 
 class ChatGPT : public MLFunction {
@@ -78,8 +97,8 @@ class ChatGPT : public MLFunction {
     std::string filename = "chatgpt.log";
     std::ofstream file(filename, std::ios::app);
     if (!file) {
-        std::cerr << "Unable to open file: " << filename << std::endl;
-        return;
+      std::cerr << "Unable to open file: " << filename << std::endl;
+      return;
     }
     // Get the current time
     auto now = std::chrono::system_clock::now();
@@ -89,7 +108,8 @@ class ChatGPT : public MLFunction {
     file << std::put_time(std::localtime(&now_c), "%Y-%m-%d %H:%M:%S") << " ";
 
     // Write the uint64_t values to the file
-    file << "# Input:" <<  inputTokenNumber_ << " # Output: " << outputTokenNumber_ << std::endl;
+    file << "# Input:" << inputTokenNumber_
+         << " # Output: " << outputTokenNumber_ << std::endl;
     file.close();
   }
 
@@ -99,7 +119,6 @@ class ChatGPT : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-    
     std::string promptPrefix = "";
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
@@ -121,6 +140,10 @@ class ChatGPT : public MLFunction {
         {"Content-Type", "application/json"},
         {"Authorization", "Bearer " + apiKey_}};
 
+    // Thread vector
+    std::vector<std::thread> threads;
+    std::vector<cpr::Response> responses(numInput);
+
     for (int i = 0; i < numInput; i++) {
       StringView val = decodedStringInput->valueAt<StringView>(i);
       std::string valString = promptPrefix + std::string(val);
@@ -128,31 +151,37 @@ class ChatGPT : public MLFunction {
       // Add message
       messageArrays.push_back({{"role", "user"}, {"content", valString}});
 
-      const_cast<uint64_t&>(inputTokenNumber_) = inputTokenNumber_ + countWords(valString) + countPunctuation(valString);
+      const_cast<uint64_t&>(inputTokenNumber_) = inputTokenNumber_ +
+          countWords(valString) + countPunctuation(valString);
 
-      nlohmann::json payload = {{"model", model_}, {"messages", messageArrays}, {"max_tokens", 150}};
+      nlohmann::json payload = {
+          {"model", model_}, {"messages", messageArrays}, {"max_tokens", 150}};
 
-      cpr::Response response = cpr::Post(
-          cpr::Url{url_}, cpr::Header{headers}, cpr::Body{payload.dump()});
-      int failureCount = 0;
-      // retry
-      while (response.status_code != 200) {
-        response = cpr::Post(
-          cpr::Url{url_}, cpr::Header{headers}, cpr::Body{payload.dump()});
-        if (failureCount++ > 10) {
-          break;
-        }
-      }
-      if (response.status_code == 200) {
+      threads.emplace_back(sendRequestViaCpr, url_, headers, payload.dump(), std::ref(responses[i]));
+
+    }
+
+    for (auto& thread : threads) {
+      thread.join();
+    }
+
+    for (int i = 0; i < numInput; i++) {
+      if (responses[i].status_code == 200) {
         // parse the returned value
-        nlohmann::json response_json = nlohmann::json::parse(response.text);
+        nlohmann::json response_json = nlohmann::json::parse(responses[i].text);
         std::string generated_message =
             response_json["choices"][0]["message"]["content"];
         results.push_back(generated_message);
-        const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ + countWords(generated_message) + countPunctuation(generated_message);
-        LOG(INFO) << fmt::format("[INFO] i: {} / {}, results: {}", i+1, numInput, generated_message) << std::endl;
+        const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ +
+            countWords(generated_message) + countPunctuation(generated_message);
+        LOG(INFO) << fmt::format(
+                         "[INFO] i: {} / {}, results: {}",
+                         i + 1,
+                         numInput,
+                         generated_message)
+                  << std::endl;
       } else {
-        std::cout << "Error: " << response.status_code << " - " << response.text
+        std::cout << "Error: " << responses[i].status_code << " - " << responses[i].text
                   << std::endl;
       }
     }
@@ -162,16 +191,17 @@ class ChatGPT : public MLFunction {
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .argumentType("VARCHAR")
-                .returnType("VARCHAR")
-                .build(),
-            // supports with prompt prefix
-            exec::FunctionSignatureBuilder()
-                .argumentType("VARCHAR")
-                .argumentType("VARCHAR")
-                .returnType("VARCHAR")
-                .build()};
+    return {
+        exec::FunctionSignatureBuilder()
+            .argumentType("VARCHAR")
+            .returnType("VARCHAR")
+            .build(),
+        // supports with prompt prefix
+        exec::FunctionSignatureBuilder()
+            .argumentType("VARCHAR")
+            .argumentType("VARCHAR")
+            .returnType("VARCHAR")
+            .build()};
   }
 
   float* getTensor() const override {
@@ -226,8 +256,8 @@ class ChatGPTRecommender : public MLFunction {
     std::string filename = "chatgpt_recommender.log";
     std::ofstream file(filename, std::ios::app);
     if (!file) {
-        std::cerr << "Unable to open file: " << filename << std::endl;
-        return;
+      std::cerr << "Unable to open file: " << filename << std::endl;
+      return;
     }
     // Get the current time
     auto now = std::chrono::system_clock::now();
@@ -237,7 +267,8 @@ class ChatGPTRecommender : public MLFunction {
     file << std::put_time(std::localtime(&now_c), "%Y-%m-%d %H:%M:%S") << " ";
 
     // Write the uint64_t values to the file
-    file << "# Input:" <<  inputTokenNumber_ << " # Output: " << outputTokenNumber_ << std::endl;
+    file << "# Input:" << inputTokenNumber_
+         << " # Output: " << outputTokenNumber_ << std::endl;
     file.close();
   }
 
@@ -247,7 +278,6 @@ class ChatGPTRecommender : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-    
     std::string promptSuffix = "";
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
@@ -272,42 +302,51 @@ class ChatGPTRecommender : public MLFunction {
         {"Content-Type", "application/json"},
         {"Authorization", "Bearer " + apiKey_}};
 
+    // Thread vector
+    std::vector<std::thread> threads;
+    std::vector<cpr::Response> responses(numInput);
+
     for (int i = 0; i < numInput; i++) {
       StringView val1 = decodedStringInput1->valueAt<StringView>(i);
       StringView val2 = decodedStringInput2->valueAt<StringView>(i);
-      std::string valString = "Summarized user statistics data (preference): " + std::string(val1) + ". \n Summarized user movie metadata:  " + std::string(val2) + ".\n" + promptSuffix;
+      std::string valString =
+          "Summarized user statistics data (preference): " + std::string(val1) +
+          ". \n Summarized user movie metadata:  " + std::string(val2) + ".\n" +
+          promptSuffix;
       nlohmann::json messageArrays = nlohmann::json::array();
       // Add message
       messageArrays.push_back({{"role", "user"}, {"content", valString}});
 
-      const_cast<uint64_t&>(inputTokenNumber_) = inputTokenNumber_ + countWords(valString) + countPunctuation(valString);
+      const_cast<uint64_t&>(inputTokenNumber_) = inputTokenNumber_ +
+          countWords(valString) + countPunctuation(valString);
 
-      nlohmann::json payload = {{"model", model_}, {"messages", messageArrays}, {"max_tokens", 500}};
+      nlohmann::json payload = {
+          {"model", model_}, {"messages", messageArrays}, {"max_tokens", 500}};
 
-      cpr::Response response = cpr::Post(
-          cpr::Url{url_}, cpr::Header{headers}, cpr::Body{payload.dump()});
-      
-      int failureCount = 0;
-      // retry
-      while (response.status_code != 200) {
-        response = cpr::Post(
-          cpr::Url{url_}, cpr::Header{headers}, cpr::Body{payload.dump()});
-        if (failureCount++ > 10) {
-          break;
-        }
-      }
-      
-      if (response.status_code == 200) {
+      threads.emplace_back(sendRequestViaCpr, url_, headers, payload.dump(), std::ref(responses[i]));
+    }
+
+    for (auto& thread : threads) {
+      thread.join();
+    }
+
+    for (int i = 0; i < numInput; i++) {
+      if (responses[i].status_code == 200) {
         // parse the returned value
-        nlohmann::json response_json = nlohmann::json::parse(response.text);
+        nlohmann::json response_json = nlohmann::json::parse(responses[i].text);
         std::string generated_message =
             response_json["choices"][0]["message"]["content"];
         results.push_back(generated_message);
-        const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ + countWords(generated_message) + countPunctuation(generated_message);
-        // std::cout << fmt::format("[INFO] i: {} / {}, results: {}", i+1, numInput, generated_message) << std::endl;
-        // std::cout << fmt::format("[DEBUG] payload: {}", payload.dump()) << std::endl;
+        const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ +
+            countWords(generated_message) + countPunctuation(generated_message);
+        LOG(INFO) << fmt::format(
+                         "[INFO] i: {} / {}, results: {}",
+                         i + 1,
+                         numInput,
+                         generated_message)
+                  << std::endl;
       } else {
-        std::cout << "Error: " << response.status_code << " - " << response.text
+        std::cout << "Error: " << responses[i].status_code << " - " << responses[i].text
                   << std::endl;
       }
     }
@@ -317,18 +356,19 @@ class ChatGPTRecommender : public MLFunction {
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .argumentType("VARCHAR")
-                .argumentType("VARCHAR")
-                .returnType("VARCHAR")
-                .build(),
-            // supports with prompt suffix
-            exec::FunctionSignatureBuilder()
-                .argumentType("VARCHAR")
-                .argumentType("VARCHAR")
-                .argumentType("VARCHAR")
-                .returnType("VARCHAR")
-                .build()};
+    return {
+        exec::FunctionSignatureBuilder()
+            .argumentType("VARCHAR")
+            .argumentType("VARCHAR")
+            .returnType("VARCHAR")
+            .build(),
+        // supports with prompt suffix
+        exec::FunctionSignatureBuilder()
+            .argumentType("VARCHAR")
+            .argumentType("VARCHAR")
+            .argumentType("VARCHAR")
+            .returnType("VARCHAR")
+            .build()};
   }
 
   float* getTensor() const override {
