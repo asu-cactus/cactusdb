@@ -611,7 +611,7 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
           // Regular expression match
           // match mat_mul and filter out the _wb (weight block) and _h
           // (block-based mat_mul) case
-          std::regex pattern(R"(mat_mul\d+\()");
+          std::regex pattern(R"(mat_mul\d+\_\d+\()");
           auto wordsBegin =
               std::sregex_iterator(expr.begin(), expr.end(), pattern);
           auto wordsEnd = std::sregex_iterator();
@@ -624,6 +624,8 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
             if (cataLog.checkExistsUDFFileAddr(
                     functionName + "_weights_vertical")) {
               targetActions.push_back(functionName);
+            } else {
+              LOG(ERROR) << "[ERROR]: " << functionName + "_weights_vertical" << "does not exist in catalog" << std::endl;
             }
           }
         }
