@@ -16,6 +16,7 @@ from tqdm.auto import tqdm
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, pandas_udf
 from pyspark.sql.types import ArrayType, FloatType, StringType
+import pickle
 
 
 def get_batch_sizes(num_samples, batch_size):
@@ -950,13 +951,15 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.prompt3 = "Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason."
 
         self.openAI_client = utils.get_openAI_client()
+        self.llm_ffnn_model = tf.keras.models.load_model("/home/velox/data/llm_mr_ffnn.h5")
+        self.min_max_scaler = pickle.load(open("/home/velox/data/llm_mr_minmax_scaler_py.pkl", "rb"))
 
     def loading_meta_impl(self):
         pass
 
     def data_loading_impl(self, batch_size):
         join_query = """
-            select user_id, llm_u.description as user_description, id as movie_id, llm_m.description as movie_description from llm_recommend_user llm_u cross join llm_recommend_movie  llm_m limit {}
+            select user_id, llm_u.description as user_description, id as movie_id, llm_m.description as movie_description, llm_m.popularity, llm_m.vote_average, llm_m.vote_count, llm_m.spoken_languages from llm_recommend_user llm_u cross join llm_recommend_movie  llm_m where llm_m.spoken_languages LIKE '%English%' limit {}
         """.format(batch_size)
         joined_df = utils.fetch_data_from_postgres_via_connectorx(join_query)
         return joined_df
@@ -965,7 +968,11 @@ class LLMRecommendationPipelinePython(Pipeline):
         return data
 
     def model_inference_impl(self, data):
-        
+        data_features = data[["popularity", "vote_average", "vote_count"]]
+        data_features = self.min_max_scaler.transform(data_features)
+        trendening_label = np.argmax(self.llm_ffnn_model.predict(data_features), axis=1)
+        trendening_label = trendening_label == True
+        data = data[trendening_label]
         data.loc[:, "user_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt1 + x['user_description']), axis=1)
         data.loc[:, "movie_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt2 + x['movie_description']), axis=1)
         data.loc[:, "result"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, "Summarized user statistics data (preference): " + x['user_description_summarized'] +". \n Summarized user movie metadata:  " + x['movie_description_summarized'] + self.prompt3), axis=1)
