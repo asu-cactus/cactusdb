@@ -119,6 +119,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   void test_mat_add();
   void test_relu();
   void test_softmax();
+  void test_argmax();
   void test_dense_layer();
   void test_torch_dense_layer();
   void test_mnist();
@@ -360,6 +361,37 @@ void MLFunctionsTest::test_softmax(){
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                   .values({inputRowVector})
                   .project({"softmax(x)"})
+		              .planNode();
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+  auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "Time for Softmax (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::cout << "Results:" << results->toString() << std::endl;
+  std::cout << results->toString(0, results->size()) << std::endl;
+  
+}
+
+void MLFunctionsTest::test_argmax(){
+ 
+  int num_rows = 10;
+  int num_cols = 2; 
+
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+  std::vector<std::vector<float>> inputVectors =
+      randomGenerator.genFloat2dVector(num_rows, num_cols);
+
+  auto inputArrayVector = maker.arrayVector<float>(inputVectors, REAL());
+  auto inputRowVector = maker.rowVector({"x"}, {inputArrayVector});
+  
+  // step1: Register
+  exec::registerVectorFunction(
+  "argmax",
+  Argmax::signatures(),
+  std::make_unique<Argmax>());
+
+  auto myPlan = exec::test::PlanBuilder(pool_.get())
+                  .values({inputRowVector})
+                  .project({"argmax(x)"})
 		              .planNode();
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
@@ -1849,6 +1881,7 @@ void MLFunctionsTest::run(int numDriver, int memoryPoolSizeMB, int spillMemThres
   //  test_mat_add();
   //  test_relu();
   //  test_softmax()
+  test_argmax();
   //  test_dense_layer();
   //  test_torch_dense_layer_multithreading();
   //  test_mnist();
@@ -1863,7 +1896,7 @@ void MLFunctionsTest::run(int numDriver, int memoryPoolSizeMB, int spillMemThres
   //  test_mnist_multithreading();
   //  test_mnist_oom_weights();
   // test_torch_dense_layer();
-  test_complex_torchnn();
+  // test_complex_torchnn();
 
 }
 

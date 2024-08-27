@@ -6,6 +6,8 @@ import numpy as np
 import os
 import math
 import shutil
+from sklearn.preprocessing import MinMaxScaler
+import pickle
 
 def change_df_dtypes(df):
   df_dtypes = df.dtypes
@@ -40,12 +42,23 @@ def write_orc(df, batch_size, dir_path):
         end = min(start + batch_size, len(df))
         df[start:end].to_parquet(path)
 
-NUM_USER_DATA = 10
-NUM_MOVIE_DATA = 50
-NUM_SPLIT = 4
+NUM_USER_DATA = 1
+NUM_MOVIE_DATA = 30
+NUM_SPLIT = 1
 
 remove_all_in_directory('movie_recommendation/movie')
 df1 = pd.read_csv('mr_movie_metadata.csv')
+
+movie_scaler = MinMaxScaler()
+movie_scaler.fit(df1[['popularity', 'vote_average', 'vote_count']])
+# movie_scaler.fit(df1[['popularity', 'vote_average']])
+with open('llm_mr_minmax_scaler.txt', 'w') as f:
+  f.write(' '.join(map(str, movie_scaler.data_min_)) + '\n')
+  f.write(' '.join(map(str, movie_scaler.data_max_)) + '\n')
+
+with open('llm_mr_minmax_scaler_py.pkl', 'wb') as f:
+  pickle.dump(movie_scaler, f)
+
 df1 = change_df_dtypes(df1).iloc[:NUM_MOVIE_DATA]
 batch_size = math.ceil(len(df1) / NUM_SPLIT)
 write_orc(df1, batch_size, 'movie_recommendation/movie')
@@ -60,8 +73,3 @@ write_orc(df2, batch_size, 'movie_recommendation/user')
 with open('llm_mr_statistics.txt', 'w') as f:
     f.write(f'{NUM_USER_DATA}\n')
     f.write(f'{NUM_MOVIE_DATA}\n')
-
-# remove_all_in_directory('movielens/user')
-# df3 = pq.read_table('movielens_user_s_8192.parquet').to_pandas()
-# batch_size = math.ceil(len(df3) / 8)
-# write_orc(df3, batch_size, 'movielens/user')

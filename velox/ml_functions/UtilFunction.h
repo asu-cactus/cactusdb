@@ -2,6 +2,7 @@
 #include <iostream>
 #include "functions.h"
 #include <Eigen/Dense>
+#include <filesystem>
 #include <cmath>
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
@@ -230,6 +231,73 @@ class ConvertDoubleToFloatArray : public MLFunction {
 
  private:
 };
+
+class ConvertDoubleArrayToFloatArray : public MLFunction {
+ public:
+  ConvertDoubleArrayToFloatArray() {
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+    // auto input = args[0];
+
+    // Decoder is required to handle address error, reference code:
+    // ArrayIntersectExcept.cpp
+    BaseVector* input = args[0].get();
+
+    exec::LocalDecodedVector inputHolder(context, *input, rows);
+    auto decodedInputArray = inputHolder.get();
+    auto baseInputArray =
+        decodedInputArray->base()->as<ArrayVector>()->elements();
+    
+    double* inputValues = baseInputArray->values()->asMutable<double>();
+
+    int numInput = rows.size();
+    int numElements = baseInputArray->size();
+    int sizeOfArray = numElements / numInput;
+
+    std::vector<std::vector<float>> result(numInput, std::vector<float>(sizeOfArray));
+
+    for (int i = 0; i < numInput; i++) {
+      std::transform(inputValues + i * sizeOfArray, inputValues + (i + 1) * sizeOfArray, result[i].begin(),
+                       [](double val) { return static_cast<float>(val); });
+    }
+
+    VectorMaker maker{context.pool()};
+    output = maker.arrayVector<float>(result, REAL());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {exec::FunctionSignatureBuilder()
+                .argumentType("array(DOUBLE)")
+                .returnType("array(REAL)")
+                .build()};
+  }
+
+  static std::string getName() {
+    return "convert_double_array_to_float_array";
+  };
+
+  float* getTensor() const override {
+    // FIXME
+    return nullptr;
+  }
+
+  void setWeight() {
+    //
+  }
+
+
+ private:
+};
+
 
 std::string LoadBytesFromFile(const std::string& path) {
   std::ifstream fs(path, std::ios::in | std::ios::binary);

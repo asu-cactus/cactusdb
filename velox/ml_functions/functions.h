@@ -4,6 +4,7 @@
 #include <Eigen/Dense>
 #include <cblas.h>
 #include <chrono>
+#include <filesystem>
 #include <torch/torch.h>
 #include "velox/exec/Task.h"
 #include "velox/cost_model/CostEstimate.h"
@@ -762,6 +763,187 @@ public:
         return CostEstimate(cost, inputDims[0], inputDims[1]);
     }
 };
+
+class Argmax: public MLFunction {
+public:
+    Argmax() {}
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        int input_size = input_elements->size();
+
+        int num_rows = args[0]->size();
+        int num_cols = input_size / num_rows;
+        
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
+
+
+      std::vector<int> result(num_rows);
+      for (int i = 0; i < num_rows; i++) {
+          Eigen::Index maxRow, maxCol;
+          m.row(i).maxCoeff(&maxRow, &maxCol);
+          result[i] = maxCol;
+      }
+
+      // There could be a more efficient way to do this
+      // Ref: https://stackoverflow.com/a/41384560
+
+
+
+        VectorMaker maker{context.pool()};
+        output = maker.flatVector<int>(result);
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("INTEGER")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+
+    std::string getFuncName() {
+        return getName();
+    };
+
+    static std::string getName() {
+        return "argmax";
+    };
+
+    CostEstimate getCost(std::vector<int> inputDims){
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
+};
+
+class MinMaxScaler: public MLFunction {
+public:
+    MinMaxScaler(float* scalerMinValues, float* scalerMaxValues, int numCols) {
+      scalerMinValues_ = new float[numCols];
+      scalerMaxValues_ = new float[numCols];
+      std::memcpy(scalerMinValues_, scalerMinValues, numCols * sizeof(float));
+      std::memcpy(scalerMaxValues_, scalerMaxValues, numCols * sizeof(float));
+      numCols_ = numCols;
+    }
+
+    MinMaxScaler(std::string minMaxScalerDataPath) {
+      std::vector<float> scalerMinVector;
+      std::vector<float> scalerMaxVector;
+
+      if (!std::filesystem::exists(minMaxScalerDataPath)) {
+        throw std::runtime_error("File not found: " + minMaxScalerDataPath);
+      }
+      std::ifstream file(minMaxScalerDataPath);
+      std::string line;
+      // Read each line from the file
+      int lineCount = 0;
+      while (std::getline(file, line)) {
+          std::istringstream iss(line); // Create a string stream from the line
+          float value;
+
+          // Read each value from the line
+          // First line should be min values
+          // Second line should be max values
+          while (iss >> value) {
+            if (lineCount == 0) {
+              scalerMinVector.push_back(value); // Store the value in tempValues
+            } else if (lineCount == 1) {
+              scalerMaxVector.push_back(value); // Store the value in tempValues
+            } else {
+              throw std::runtime_error("Invalid file format, parsed lineCount: " + std::to_string(lineCount));
+            }
+          }
+          lineCount++;
+      }
+      file.close(); // Close the file
+      // the size should be equal
+      assert(scalerMinVector.size() == scalerMaxVector.size());
+      numCols_ = scalerMinVector.size();
+
+      scalerMinValues_ = new float[numCols_];
+      scalerMaxValues_ = new float[numCols_];
+      std::memcpy(scalerMinValues_, scalerMinVector.data(), numCols_ * sizeof(float));
+      std::memcpy(scalerMaxValues_, scalerMaxVector.data(), numCols_ * sizeof(float));
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+        auto input_elements = args[0]->as<ArrayVector>()->elements();
+        float* input_values = input_elements->values()->asMutable<float>();
+        int input_size = input_elements->size();
+
+        int num_rows = args[0]->size();
+        int num_cols = input_size / num_rows;
+        
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> minVals(scalerMinValues_, 1, num_cols);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> maxVals(scalerMaxValues_, 1, num_cols);
+
+        m = (m.rowwise() - minVals.row(0)).array().rowwise() / (maxVals.row(0) - minVals.row(0)).array();
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < num_rows; i++) {
+            std::vector<float> row(
+            m.row(i).data(),
+            m.row(i).data() + m.cols());
+            result.push_back(row);
+        }
+        VectorMaker maker{context.pool()};
+        output = maker.arrayVector<float>(result, REAL());
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+
+    std::string getFuncName() {
+        return getName();
+    };
+
+    static std::string getName() {
+        return "min_max_scaler";
+    };
+
+    CostEstimate getCost(std::vector<int> inputDims){
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
+
+    private:
+     float* scalerMinValues_;
+     float* scalerMaxValues_;
+     int numCols_;
+};
+
 
 class TorchDNN2Level: public MLFunction {
 public:
