@@ -47,6 +47,7 @@
 #include "velox/type/Type.h"
 #include "velox/vector/fuzzer/VectorFuzzer.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
+#include <H5Cpp.h>
 
 // Custom headers
 #include <json/json.h>
@@ -64,6 +65,65 @@ using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
 #define BUFFER_SIZE 1024
+
+std::vector<std::vector<float>> loadHDF5Array(const std::string& filename, const std::string& datasetName) {
+    if (!std::filesystem::exists(filename)) {
+          throw std::runtime_error("File not found: " + filename);
+    }
+    H5::H5File file(filename, H5F_ACC_RDONLY);
+    H5::DataSet dataset = file.openDataSet(datasetName);
+    H5::DataSpace dataspace = dataset.getSpace();
+
+    // Get the number of dimensions
+    int rank = dataspace.getSimpleExtentNdims();
+    // std::cout << "Rank: " << rank << std::endl;
+
+    // Allocate space for the dimensions
+    std::vector<hsize_t> dims(rank);
+
+    // Get the dataset dimensions
+    dataspace.getSimpleExtentDims(dims.data(), nullptr);
+
+    size_t rows;
+    size_t cols;
+
+    if (rank == 1) {
+      rows = dims[0];
+      cols = 1;
+    } else if (rank == 2) {
+      rows = dims[0];
+      cols = dims[1];
+    } else {
+      throw std::runtime_error("Unsupported rank: " + std::to_string(rank));
+    }
+
+    // Get dimensions
+    // hsize_t dims[2];
+    // dataspace.getSimpleExtentDims(dims, nullptr);
+    // size_t rows = dims[0];
+    // size_t cols = dims[1];
+
+    // std::cout << "Rows: " << dims[0] << ", Cols: " << dims[1] << std::endl;
+
+    // Read data into a 1D vector
+    std::vector<float> flatData(rows * cols);
+    dataset.read(flatData.data(), H5::PredType::NATIVE_FLOAT);
+
+    // Convert to 2D vector
+    std::vector<std::vector<float>> result(rows, std::vector<float>(cols));
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            result[i][j] = flatData[i * cols + j];
+        }
+    }
+
+    // Close the dataset and file
+    dataset.close();
+    file.close();
+
+    return result;
+}
+
 
 Json::Value receiveJsonFromSocket(int clientSocket) {
   char messageBuffer[BUFFER_SIZE];
@@ -1293,26 +1353,24 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
    *
    * @param units1 Number of units in the first layer.
    * @param units2 Number of units in the second layer.
-   * @param input_size1 Size of the input for the first layer.
-   * @param input_size2 Size of the input for the second layer.
-   * @param weightsFile_1 Pointer to the weights for the first layer.
-   * @param weightsFile_2 Pointer to the weights for the second layer.
-   * @param biasFile_1 Pointer to the bias for the first layer.
-   * @param biasFile_2 Pointer to the bias for the second layer.
+   * @param input_size Size of the input for the first layer.
+   * @param weights1 Pointer to the weights for the first layer.
+   * @param weights2 Pointer to the weights for the second layer.
+   * @param bias1 Pointer to the bias for the first layer.
+   * @param bias2 Pointer to the bias for the second layer.
    * @param catalog Reference to a CataLog object to store metadata and
    * information.
    *
    * @return A string representing the composed vector function expression.
    */
-  std::string registerFunctions(
+  std::string registerFFNNFunctions(
       int units1,
       int units2,
-      int input_size1,
-      int input_size2,
-      float* weightsFile_1,
-      float* weightsFile_2,
-      float* biasFile_1,
-      float* biasFile_2,
+      int input_size,
+      float* weights1,
+      float* weights2,
+      float* bias1,
+      float* bias2,
       CataLog& catalog,
       bool isVerticalPartition) {
     // Register matrix multiplication function for the first layer
@@ -1320,7 +1378,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         "mat_mul0_0",
         MatrixMultiply::signatures(),
         std::make_unique<MatrixMultiply>(
-            std::move(weightsFile_1), input_size1, units1),
+            std::move(weights1), input_size, units1),
         {},
         true,
         catalog,
@@ -1329,7 +1387,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "mat_add0_0",
         MatrixVectorAddition::signatures(),
-        std::make_unique<MatrixVectorAddition>(std::move(biasFile_1), units1),
+        std::make_unique<MatrixVectorAddition>(std::move(bias1), units1),
         {},
         true,
         catalog);
@@ -1345,8 +1403,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "mat_mul0_1",
         MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(
-            std::move(weightsFile_2), input_size2, units2),
+        std::make_unique<MatrixMultiply>(std::move(weights2), units1, units2),
         {},
         true,
         catalog,
@@ -1355,7 +1412,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "mat_add0_1",
         MatrixVectorAddition::signatures(),
-        std::make_unique<MatrixVectorAddition>(std::move(biasFile_2), units2),
+        std::make_unique<MatrixVectorAddition>(std::move(bias2), units2),
         {},
         true,
         catalog);
@@ -1370,6 +1427,159 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Compose and return the vector function expression
     // return "mat_mul0({})";
     return "softmax(mat_add0_1(mat_mul0_1(relu(mat_add0_0(mat_mul0_0({})))))) as v";
+  }
+
+  void registerLLMFunctions(
+      int units1,
+      int units2,
+      int input_size,
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    bool isVerticalPartition = false;
+    VectorMaker maker{pool_.get()};
+    std::cout << "[INFO]: Register LLM Function functions" << std::endl;
+
+    std::vector<std::vector<float>> w1 = loadHDF5Array(
+        "/home/velox/data/llm_mr_ffnn/model.h5", "w1");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(
+        "/home/velox/data/llm_mr_ffnn/model.h5", "b1");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(
+        "/home/velox/data/llm_mr_ffnn/model.h5", "w2");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(
+        "/home/velox/data/llm_mr_ffnn/model.h5", "b2");
+
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    std::vector<std::vector<float>> ffnnWeight1 =
+        randomGenerator.genFloat2dVector(input_size, units1);
+    auto ffnnWeight1Vector = maker.arrayVector<float>(w1, REAL());
+
+    std::vector<std::vector<float>> ffnnBias1 =
+        randomGenerator.genFloat2dVector(units1, 1);
+    auto ffnnBias1Vector = maker.arrayVector<float>(b1, REAL());
+
+    std::vector<std::vector<float>> ffnnWeight2 =
+        randomGenerator.genFloat2dVector(units1, units2);
+    auto ffnnWeight2Vector = maker.arrayVector<float>(w2, REAL());
+
+    std::vector<std::vector<float>> ffnnBias2 =
+        randomGenerator.genFloat2dVector(units2, 1);
+    auto ffnnBias2Vector = maker.arrayVector<float>(b2, REAL());
+
+    optimization::registerVectorFunction(
+        "mat_mul3_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                ffnnWeight1Vector->elements()->values()->asMutable<float>()),
+            input_size,
+            units1),
+        {},
+        true,
+        catalog,
+        isVerticalPartition);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add3_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                ffnnBias1Vector->elements()->values()->asMutable<float>()),
+            units1),
+        {},
+        true,
+        catalog,
+        isVerticalPartition);
+
+    optimization::registerVectorFunction(
+        "mat_mul3_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                ffnnWeight2Vector->elements()->values()->asMutable<float>()),
+            units1,
+            units2),
+        {},
+        true,
+        catalog,
+        isVerticalPartition);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add3_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                ffnnBias2Vector->elements()->values()->asMutable<float>()),
+            units2),
+        {},
+        true,
+        catalog,
+        isVerticalPartition);
+
+    // Register ReLU activation function for the first layer
+    optimization::registerVectorFunction(
+        "relu",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog);
+
+    // Register softmax activation function for the second layer
+    optimization::registerVectorFunction(
+        "softmax",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "chatgpt_server1",
+        ChatGPT::signatures(),
+        std::make_unique<ChatGPT>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "chatgpt_server2",
+        ChatGPT::signatures(),
+        std::make_unique<ChatGPT>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "chatgpt_recommender",
+        ChatGPTRecommender::signatures(),
+        std::make_unique<ChatGPTRecommender>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "argmax",
+        Argmax::signatures(),
+        std::make_unique<Argmax>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "convert_double_array_to_float_array",
+        ConvertDoubleArrayToFloatArray::signatures(),
+        std::make_unique<ConvertDoubleArrayToFloatArray>(),
+        {},
+        true,
+        catalog,
+        isVerticalPartition);
+    optimization::registerVectorFunction(
+        "llm_ffnn_minmax_scaler",
+        MinMaxScaler::signatures(),
+        std::make_unique<MinMaxScaler>("/home/velox/data/llm_mr_minmax_scaler.txt"),
+        {},
+        true,
+        catalog,
+        isVerticalPartition);
   }
 
   std::vector<std::vector<float>>
@@ -1602,11 +1812,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       inputTempFiles = data.feature_paths;
 
       bool isVerticalPartition = false;
-      computationStr = registerFunctions(
+      computationStr = registerFFNNFunctions(
           first_layer_output_size,
           second_layer_output_size,
           input_features_size,
-          first_layer_output_size,
           data.weights[0],
           data.weights[1],
           data.bias[0],
@@ -1634,18 +1843,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       featureSize = 2;
       std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
     } else if (model == "llm") {
-      exec::registerVectorFunction(
-          "chatgpt_server1",
-          ChatGPT::signatures(),
-          std::make_unique<ChatGPT>());
-      exec::registerVectorFunction(
-          "chatgpt_server2",
-          ChatGPT::signatures(),
-          std::make_unique<ChatGPT>());
-      exec::registerVectorFunction(
-          "chatgpt_recommender",
-          ChatGPTRecommender::signatures(),
-          std::make_unique<ChatGPTRecommender>());
+      registerLLMFunctions(64, 2, 3, cataLog, pool_);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -1777,7 +1975,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       auto userDataRowType =
           ROW({"user_id", "description"}, {INTEGER(), VARCHAR()});
       auto movieDataRowType =
-          ROW({"id", "description"}, {INTEGER(), VARCHAR()});
+          ROW({"id", "description", "popularity",
+          "vote_average",
+          "vote_count", "spoken_languages"}, {INTEGER(), VARCHAR(), REAL(), REAL(), INTEGER(), VARCHAR()});
 
       std::ifstream llmStatistics("/home/velox/data/llm_mr_statistics.txt");
       if (!llmStatistics) {
@@ -1808,26 +2008,52 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                       .capturePlanNodeId(readMoviewDataPlanNodeId)
                       .project(
                           {"CAST(id AS VARCHAR) AS movie_id",
-                           "description AS movie_description"})
+                           "description AS movie_description",
+                          //  "array_constructor(popularity, vote_average, vote_count) AS movie_description_array",
+                           "convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count)) AS movie_description_array",
+                           "spoken_languages",
+                           })
                       .planNode(),
                   {"user_id",
                    "movie_id",
                    "user_description",
-                   "movie_description"})
+                   "movie_description",
+                   "spoken_languages",
+                   "movie_description_array"})
               .project(
                   {"user_id",
                    "movie_id",
+                   "spoken_languages",
+                   "movie_description_array",
                    "CONCAT(user_id, user_description) AS user_description_processed",
-                   "CONCAT(movie_id, movie_description) AS movie_description_processed"})
+                   "CONCAT(movie_id, movie_description) AS movie_description_processed"
+                   })
               .project(
                   {"user_id",
                    "movie_id",
+                   "spoken_languages",
+                   "movie_description_array",
                    "chatgpt_server1(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
                    "chatgpt_server2(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
               .project(
                   {"user_id",
                    "movie_id",
-                   "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.')"});
+                   "spoken_languages",
+                   "movie_description_array",
+                  //  "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"
+                  })
+              .project(
+                {
+                  "user_id",
+                  "movie_id",
+                  "spoken_languages",
+                  "movie_description_array",
+                  "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(llm_ffnn_minmax_scaler(movie_description_array))))))))",
+                  // "result"
+                }
+              )
+              // .filter("spoken_languages LIKE '\%Français\%'")
+              ;
       cataLog.setIdAddressMap(
           readUserDataPlanNodeId,
           userDataPaths,
@@ -2091,11 +2317,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       inputTempFiles = data.feature_paths;
 
       bool isVerticalPartition = false;
-      computationStr = registerFunctions(
+      computationStr = registerFFNNFunctions(
           first_layer_output_size,
           second_layer_output_size,
           input_features_size,
-          first_layer_output_size,
           data.weights[0],
           data.weights[1],
           data.bias[0],
@@ -2123,18 +2348,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       featureSize = 2;
       std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
     } else if (model == "llm") {
-      exec::registerVectorFunction(
-          "chatgpt_server1",
-          ChatGPT::signatures(),
-          std::make_unique<ChatGPT>());
-      exec::registerVectorFunction(
-          "chatgpt_server2",
-          ChatGPT::signatures(),
-          std::make_unique<ChatGPT>());
-      exec::registerVectorFunction(
-          "chatgpt_recommender",
-          ChatGPTRecommender::signatures(),
-          std::make_unique<ChatGPTRecommender>());
+      registerLLMFunctions(64, 2, 3, cataLog, pool_);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -2164,91 +2378,101 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::cout << entry.first << ": " << entry.second << std::endl;
     }
 
-    std::pair<std::string, std::string> testAction = std::make_pair("concat(ROW[\"user_id\"],ROW[\"user_description\"])", "MLDecompositionPushdownRewriteAction");
+    // std::pair<std::string, std::string> testAction =
+    // std::make_pair("concat(ROW[\"user_id\"],ROW[\"user_description\"])",
+    // "MLDecompositionPushdownRewriteAction");
 
-    planState.takeAction(
-              planNode,
-              nullptr,
-              maker,
-              myPlan,
-              pool_,
-              planNodeIdGenerator,
-              {testAction},
-              cataLog);
+    // planState.takeAction(
+    //           planNode,
+    //           nullptr,
+    //           maker,
+    //           myPlan,
+    //           pool_,
+    //           planNodeIdGenerator,
+    //           {testAction},
+    //           cataLog);
 
-    planState.update(myPlan, cataLog);
-    
-    planNode = myPlan.planNode();
+    // planState.update(myPlan, cataLog);
 
-    planState.getPossibleActions(planNode, cataLog);
+    // planNode = myPlan.planNode();
+
+    // planState.getPossibleActions(planNode, cataLog);
+
+    // // std::cout << "[INFO] All possible actions:" << std::endl;
+    // // for (auto entry : planState.actionsPair) {
+    // //   std::cout << entry.first << ": " << entry.second << std::endl;
+    // // }
+
+    // testAction =
+    // std::make_pair("concat(ROW[\"movie_id\"],ROW[\"movie_description\"])",
+    // "MLDecompositionPushdownRewriteAction");
+
+    // planState.takeAction(
+    //           planNode,
+    //           nullptr,
+    //           maker,
+    //           myPlan,
+    //           pool_,
+    //           planNodeIdGenerator,
+    //           {testAction},
+    //           cataLog);
+
+    // planState.update(myPlan, cataLog);
+
+    // planNode = myPlan.planNode();
+
+    // planState.getPossibleActions(planNode, cataLog);
+
+    // testAction =
+    // std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please
+    // summarize the users description. The following are the average ratings
+    // given by users to movies in each genre.\")",
+    // "MLDecompositionPushdownRewriteAction");
+
+    // planState.takeAction(
+    //           planNode,
+    //           nullptr,
+    //           maker,
+    //           myPlan,
+    //           pool_,
+    //           planNodeIdGenerator,
+    //           {testAction},
+    //           cataLog);
+
+    // planState.update(myPlan, cataLog);
+    // planNode = myPlan.planNode();
+
+    // testAction =
+    // std::make_pair("chatgpt_server2(ROW[\"movie_description_processed\"],\"Please
+    // summarize the movies description. The following are the detailed
+    // information of the movie.\")", "MLDecompositionPushdownRewriteAction");
+
+    // planState.takeAction(
+    //           planNode,
+    //           nullptr,
+    //           maker,
+    //           myPlan,
+    //           pool_,
+    //           planNodeIdGenerator,
+    //           {testAction},
+    //           cataLog);
+
+    // planState.update(myPlan, cataLog);
+
+    // planNode = myPlan.planNode();
+
+    // planState.getPossibleActions(planNode, cataLog);
 
     // std::cout << "[INFO] All possible actions:" << std::endl;
     // for (auto entry : planState.actionsPair) {
     //   std::cout << entry.first << ": " << entry.second << std::endl;
     // }
 
-    testAction = std::make_pair("concat(ROW[\"movie_id\"],ROW[\"movie_description\"])", "MLDecompositionPushdownRewriteAction");
-
-    planState.takeAction(
-              planNode,
-              nullptr,
-              maker,
-              myPlan,
-              pool_,
-              planNodeIdGenerator,
-              {testAction},
-              cataLog);
-
-    planState.update(myPlan, cataLog);
-    
-    planNode = myPlan.planNode();
-
-    planState.getPossibleActions(planNode, cataLog);
-
-    
-    testAction = std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please summarize the users description. The following are the average ratings given by users to movies in each genre.\")", "MLDecompositionPushdownRewriteAction");
-
-    planState.takeAction(
-              planNode,
-              nullptr,
-              maker,
-              myPlan,
-              pool_,
-              planNodeIdGenerator,
-              {testAction},
-              cataLog);
-
-    planState.update(myPlan, cataLog);
-    planNode = myPlan.planNode();
-
-    testAction = std::make_pair("chatgpt_server2(ROW[\"movie_description_processed\"],\"Please summarize the movies description. The following are the detailed information of the movie.\")", "MLDecompositionPushdownRewriteAction");
-
-    planState.takeAction(
-              planNode,
-              nullptr,
-              maker,
-              myPlan,
-              pool_,
-              planNodeIdGenerator,
-              {testAction},
-              cataLog);
-
-    planState.update(myPlan, cataLog);
-    
-    planNode = myPlan.planNode();
-
-    planState.getPossibleActions(planNode, cataLog);
-
-    std::cout << "[INFO] All possible actions:" << std::endl;
-    for (auto entry : planState.actionsPair) {
-      std::cout << entry.first << ": " << entry.second << std::endl;
-    }
-
-
-    std::cout << "[DEBUG] final executed plan: \n" << myPlan.planNode()->toString(true, true) << std::endl;
+    std::cout << "[DEBUG] final executed plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
 
     float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 2, verbose);
-    
+
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
     // auto serializedPlan = myPlan.planNode()->serialize();
 

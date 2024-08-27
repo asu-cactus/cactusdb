@@ -43,6 +43,8 @@ RUN apt-get install -y zip
 RUN apt-get install -y default-jre 
 RUN apt-get install -y kmod
 RUN apt-get install -y nlohmann-json3-dev
+RUN apt-get install -y libhdf5-dev
+RUN apt-get install -y catch2
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
 RUN apt-get install -y openjdk-11-jdk
 RUN apt install -y openssh-server openssh-client
@@ -63,7 +65,21 @@ ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 # # install cudnn
 # RUN apt-get install -y libnccl3-dev
 
+# set-up catch2 (required for h5cpp)
+WORKDIR /home
+RUN git clone https://github.com/catchorg/Catch2.git \
+  && cd Catch2 \
+  && cmake -Bbuild -H. -DBUILD_TESTING=OFF \
+  && cmake --build build/ --target install 
 
+# set-up h5cpp
+WORKDIR /home
+RUN git clone https://github.com/ess-dmsc/h5cpp.git \
+  && cd h5cpp \
+  && mkdir build \
+  && cd build \
+  && cmake .. -DH5CPP_CONAN=DISABLE\
+  && make
 
 # set-up eigen
 WORKDIR /usr/include
