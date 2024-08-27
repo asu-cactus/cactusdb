@@ -22,6 +22,8 @@ using namespace facebook::velox::exec;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
+#define MAX_ALLOWED_CHATGPT_TRY 30
+
 std::string getEnvVar(std::string const& key) {
   char const* val = getenv(key.c_str());
   return val == NULL ? std::string() : std::string(val);
@@ -53,18 +55,20 @@ void sendRequestViaCpr(
     const std::string& url,
     const cpr::Header& headers,
     const std::string& payload,
-    cpr::Response& response) {
-      // cpr::Response response = cpr::Post(
-      //     cpr::Url{url}, cpr::Header{headers}, cpr::Body{payload.dump()});
+    cpr::Response& response,
+    int& numFailures) {
   response = cpr::Post(cpr::Url{url}, cpr::Header{headers}, cpr::Body{payload});
   int failureCount = 0;
   while (response.status_code != 200) {
-    response = cpr::Post(cpr::Url{url}, cpr::Header{headers}, cpr::Body{payload});
-    if (++failureCount > 10) {
+    response =
+        cpr::Post(cpr::Url{url}, cpr::Header{headers}, cpr::Body{payload});
+    if (++failureCount > MAX_ALLOWED_CHATGPT_TRY) {
       throw std::runtime_error(fmt::format(
-          "[ERROR] Failed to send request to OpenAI API. Reached maximum number of retries: 10"));
+          "[ERROR] Failed to send request to OpenAI API. Reached maximum number of retries: {}, error message: {}",
+          MAX_ALLOWED_CHATGPT_TRY, payload));
     }
   }
+  numFailures = failureCount;
 }
 
 class ChatGPT : public MLFunction {
@@ -79,6 +83,7 @@ class ChatGPT : public MLFunction {
     model_ = "gpt-3.5-turbo";
     inputTokenNumber_ = 0;
     outputTokenNumber_ = 0;
+    numFailures_ = 0;
   }
 
   ChatGPT(std::string url, std::string model) {
@@ -91,6 +96,7 @@ class ChatGPT : public MLFunction {
     model_ = model;
     inputTokenNumber_ = 0;
     outputTokenNumber_ = 0;
+    numFailures_ = 0;
   }
 
   ~ChatGPT() {
@@ -106,10 +112,10 @@ class ChatGPT : public MLFunction {
 
     // Write the timestamp to the file
     file << std::put_time(std::localtime(&now_c), "%Y-%m-%d %H:%M:%S") << " ";
-
     // Write the uint64_t values to the file
     file << "# Input:" << inputTokenNumber_
-         << " # Output: " << outputTokenNumber_ << std::endl;
+         << " # Output: " << outputTokenNumber_
+         << " # NumFailure: " << numFailures_ << std::endl;
     file.close();
   }
 
@@ -143,6 +149,7 @@ class ChatGPT : public MLFunction {
     // Thread vector
     std::vector<std::thread> threads;
     std::vector<cpr::Response> responses(numInput);
+    std::vector<int> numFailures(numInput);
 
     for (int i = 0; i < numInput; i++) {
       StringView val = decodedStringInput->valueAt<StringView>(i);
@@ -157,8 +164,13 @@ class ChatGPT : public MLFunction {
       nlohmann::json payload = {
           {"model", model_}, {"messages", messageArrays}, {"max_tokens", 150}};
 
-      threads.emplace_back(sendRequestViaCpr, url_, headers, payload.dump(), std::ref(responses[i]));
-
+      threads.emplace_back(
+          sendRequestViaCpr,
+          url_,
+          headers,
+          payload.dump(),
+          std::ref(responses[i]),
+          std::ref(numFailures[i]));
     }
 
     for (auto& thread : threads) {
@@ -174,15 +186,21 @@ class ChatGPT : public MLFunction {
         results.push_back(generated_message);
         const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ +
             countWords(generated_message) + countPunctuation(generated_message);
+        const_cast<uint64_t&>(numFailures_) = numFailures_ + numFailures[i];
+        if (numFailures[i] > 0) {
+          std::cout << "[WARNING] Failed to send request to OpenAI API. Number of retries: "
+                    << numFailures[i] << " numFailures_: " << numFailures_ << std::endl;
+        }
         LOG(INFO) << fmt::format(
-                         "[INFO] i: {} / {}, results: {}",
+                         "[INFO] i: {} / {}, results: {}, numFailures: {}",
                          i + 1,
                          numInput,
-                         generated_message)
+                         generated_message,
+                         numFailures[i])
                   << std::endl;
       } else {
-        std::cout << "Error: " << responses[i].status_code << " - " << responses[i].text
-                  << std::endl;
+        std::cout << "Error: " << responses[i].status_code << " - "
+                  << responses[i].text << std::endl;
       }
     }
 
@@ -224,6 +242,7 @@ class ChatGPT : public MLFunction {
   std::string model_;
   uint64_t inputTokenNumber_;
   uint64_t outputTokenNumber_;
+  uint64_t numFailures_;
 };
 
 class ChatGPTRecommender : public MLFunction {
@@ -238,6 +257,7 @@ class ChatGPTRecommender : public MLFunction {
     model_ = "gpt-3.5-turbo";
     inputTokenNumber_ = 0;
     outputTokenNumber_ = 0;
+    numFailures_ = 0;
   }
 
   ChatGPTRecommender(std::string url, std::string model) {
@@ -250,6 +270,7 @@ class ChatGPTRecommender : public MLFunction {
     model_ = model;
     inputTokenNumber_ = 0;
     outputTokenNumber_ = 0;
+    numFailures_ = 0;
   }
 
   ~ChatGPTRecommender() {
@@ -268,7 +289,8 @@ class ChatGPTRecommender : public MLFunction {
 
     // Write the uint64_t values to the file
     file << "# Input:" << inputTokenNumber_
-         << " # Output: " << outputTokenNumber_ << std::endl;
+         << " # Output: " << outputTokenNumber_
+         << " # NumFailure: " << numFailures_ << std::endl;
     file.close();
   }
 
@@ -305,6 +327,7 @@ class ChatGPTRecommender : public MLFunction {
     // Thread vector
     std::vector<std::thread> threads;
     std::vector<cpr::Response> responses(numInput);
+    std::vector<int> numFailures(numInput);
 
     for (int i = 0; i < numInput; i++) {
       StringView val1 = decodedStringInput1->valueAt<StringView>(i);
@@ -323,7 +346,13 @@ class ChatGPTRecommender : public MLFunction {
       nlohmann::json payload = {
           {"model", model_}, {"messages", messageArrays}, {"max_tokens", 500}};
 
-      threads.emplace_back(sendRequestViaCpr, url_, headers, payload.dump(), std::ref(responses[i]));
+      threads.emplace_back(
+          sendRequestViaCpr,
+          url_,
+          headers,
+          payload.dump(),
+          std::ref(responses[i]),
+          std::ref(numFailures[i]));
     }
 
     for (auto& thread : threads) {
@@ -339,15 +368,21 @@ class ChatGPTRecommender : public MLFunction {
         results.push_back(generated_message);
         const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ +
             countWords(generated_message) + countPunctuation(generated_message);
+        const_cast<uint64_t&>(numFailures_) = numFailures_ + numFailures[i];
+        if (numFailures[i] > 0) {
+          std::cout << "[WARNING] Failed to send request to OpenAI API. Number of retries: "
+                    << numFailures[i] << " numFailures_: " << numFailures_ << std::endl;
+        }
         LOG(INFO) << fmt::format(
-                         "[INFO] i: {} / {}, results: {}",
+                         "[INFO] i: {} / {}, results: {}, numFailures: {}",
                          i + 1,
                          numInput,
-                         generated_message)
+                         generated_message,
+                         numFailures[i])
                   << std::endl;
       } else {
-        std::cout << "Error: " << responses[i].status_code << " - " << responses[i].text
-                  << std::endl;
+        std::cout << "Error: " << responses[i].status_code << " - "
+                  << responses[i].text << std::endl;
       }
     }
 
@@ -391,4 +426,5 @@ class ChatGPTRecommender : public MLFunction {
   std::string model_;
   uint64_t inputTokenNumber_;
   uint64_t outputTokenNumber_;
+  uint64_t numFailures_;
 };

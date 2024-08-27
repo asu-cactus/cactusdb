@@ -79,7 +79,7 @@ RUN git clone https://github.com/ess-dmsc/h5cpp.git \
   && mkdir build \
   && cd build \
   && cmake .. -DH5CPP_CONAN=DISABLE\
-  && make
+  && make install
 
 # set-up eigen
 WORKDIR /usr/include
