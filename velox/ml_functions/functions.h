@@ -776,11 +776,14 @@ public:
         VectorPtr& output) const override {
 
         BaseVector::ensureWritable(rows, type, context.pool(), output);
-
-        auto input_elements = args[0]->as<ArrayVector>()->elements();
-        float* input_values = input_elements->values()->asMutable<float>();
-        int input_size = input_elements->size();
-
+        BaseVector* input = args[0].get();
+        exec::LocalDecodedVector inputHolder(context, *input, rows);
+        auto decodedInputArray = inputHolder.get();
+        auto baseInputArray =
+            decodedInputArray->base()->as<ArrayVector>()->elements();
+    
+        float* input_values = baseInputArray->values()->asMutable<float>();
+        int input_size = baseInputArray->size();
         int num_rows = args[0]->size();
         int num_cols = input_size / num_rows;
         
@@ -889,23 +892,29 @@ public:
 
         BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-        auto input_elements = args[0]->as<ArrayVector>()->elements();
-        float* input_values = input_elements->values()->asMutable<float>();
-        int input_size = input_elements->size();
+        BaseVector* input = args[0].get();
+        exec::LocalDecodedVector inputHolder(context, *input, rows);
+        auto decodedInputArray = inputHolder.get();
+        auto baseInputArray =
+            decodedInputArray->base()->as<ArrayVector>()->elements();
+    
+        float* input_values = baseInputArray->values()->asMutable<float>();
+        int input_size = baseInputArray->size();
 
-        int num_rows = args[0]->size();
-        int num_cols = input_size / num_rows;
-        
+        int num_rows = rows.size();
+        int num_cols = numCols_;
+
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> minVals(scalerMinValues_, 1, num_cols);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> maxVals(scalerMaxValues_, 1, num_cols);
-
-        m = (m.rowwise() - minVals.row(0)).array().rowwise() / (maxVals.row(0) - minVals.row(0)).array();
+        // Note: The result should be stored as a new object instead of modifying the original matrix
+        // since it will modify the original data stored in Velox and will affect the subsequent operations
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> resultMatrix = (m.rowwise() - minVals.row(0)).array().rowwise() / (maxVals.row(0) - minVals.row(0)).array();
         std::vector<std::vector<float>> result;
         for (int i = 0; i < num_rows; i++) {
             std::vector<float> row(
-            m.row(i).data(),
-            m.row(i).data() + m.cols());
+            resultMatrix.row(i).data(),
+            resultMatrix.row(i).data() + resultMatrix.cols());
             result.push_back(row);
         }
         VectorMaker maker{context.pool()};

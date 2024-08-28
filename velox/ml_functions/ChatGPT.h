@@ -65,10 +65,39 @@ void sendRequestViaCpr(
     if (++failureCount > MAX_ALLOWED_CHATGPT_TRY) {
       throw std::runtime_error(fmt::format(
           "[ERROR] Failed to send request to OpenAI API. Reached maximum number of retries: {}, error message: {}",
-          MAX_ALLOWED_CHATGPT_TRY, payload));
+          MAX_ALLOWED_CHATGPT_TRY,
+          payload));
     }
   }
   numFailures = failureCount;
+}
+
+void sendRequestViaCprBatch(
+    const std::string& url,
+    const cpr::Header& headers,
+    const std::vector<std::string>& payloadVector,
+    std::vector<cpr::Response>& responseVector,
+    const int& startIdx,
+    std::vector<int>& numFailureVector) {
+  int index = startIdx;
+  for (std::string payload : payloadVector) {
+    int failureCount = 0;
+    auto response =
+        cpr::Post(cpr::Url{url}, cpr::Header{headers}, cpr::Body{payload});
+    while (response.status_code != 200) {
+      response =
+          cpr::Post(cpr::Url{url}, cpr::Header{headers}, cpr::Body{payload});
+      if (++failureCount > MAX_ALLOWED_CHATGPT_TRY) {
+        throw std::runtime_error(fmt::format(
+            "[ERROR] Failed to send request to OpenAI API. Reached maximum number of retries: {}, error message: {}",
+            MAX_ALLOWED_CHATGPT_TRY,
+            payload));
+      }
+    }
+    responseVector[index] = response;
+    numFailureVector[index] = failureCount;
+    index++;
+  }
 }
 
 class ChatGPT : public MLFunction {
@@ -79,6 +108,9 @@ class ChatGPT : public MLFunction {
       throw std::runtime_error(fmt::format(
           "[ERROR] OpenAI API key is not set, please set OPENAI_API_KEY"));
     }
+    numThreads_ = getEnvVar("NUM_THREADS") == ""
+        ? 8
+        : std::stoi(getEnvVar("NUM_THREADS"));
     url_ = "https://api.openai.com/v1/chat/completions";
     model_ = "gpt-3.5-turbo";
     inputTokenNumber_ = 0;
@@ -92,6 +124,9 @@ class ChatGPT : public MLFunction {
       throw std::runtime_error(fmt::format(
           "[ERROR] OpenAI API key is not set, please set OPENAI_API_KEY"));
     }
+    numThreads_ = getEnvVar("NUM_THREADS") == ""
+        ? 8
+        : std::stoi(getEnvVar("NUM_THREADS"));
     url_ = url;
     model_ = model;
     inputTokenNumber_ = 0;
@@ -149,7 +184,11 @@ class ChatGPT : public MLFunction {
     // Thread vector
     std::vector<std::thread> threads;
     std::vector<cpr::Response> responses(numInput);
-    std::vector<int> numFailures(numInput);
+    std::vector<int> numFailureVector(numInput);
+
+    int numInputsPerThread = int(std::ceil(float(numInput) / numThreads_));
+    int processedInputCount = 0;
+    std::vector<std::string> payloadsBatchVector;
 
     for (int i = 0; i < numInput; i++) {
       StringView val = decodedStringInput->valueAt<StringView>(i);
@@ -164,13 +203,21 @@ class ChatGPT : public MLFunction {
       nlohmann::json payload = {
           {"model", model_}, {"messages", messageArrays}, {"max_tokens", 150}};
 
-      threads.emplace_back(
-          sendRequestViaCpr,
-          url_,
-          headers,
-          payload.dump(),
-          std::ref(responses[i]),
-          std::ref(numFailures[i]));
+      payloadsBatchVector.push_back(payload.dump());
+      processedInputCount++;
+
+      if (processedInputCount == numInputsPerThread || i == numInput - 1) {
+        threads.emplace_back(
+            sendRequestViaCprBatch,
+            url_,
+            headers,
+            payloadsBatchVector,
+            std::ref(responses),
+            i - processedInputCount + 1,
+            std::ref(numFailureVector));
+        processedInputCount = 0;
+        payloadsBatchVector.clear();
+      }
     }
 
     for (auto& thread : threads) {
@@ -186,21 +233,24 @@ class ChatGPT : public MLFunction {
         results.push_back(generated_message);
         const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ +
             countWords(generated_message) + countPunctuation(generated_message);
-        const_cast<uint64_t&>(numFailures_) = numFailures_ + numFailures[i];
-        if (numFailures[i] > 0) {
-          std::cout << "[WARNING] Failed to send request to OpenAI API. Number of retries: "
-                    << numFailures[i] << " numFailures_: " << numFailures_ << std::endl;
+        const_cast<uint64_t&>(numFailures_) =
+            numFailures_ + numFailureVector[i];
+        if (numFailureVector[i] > 0) {
+          LOG(WARNING)
+              << "[WARNING] Failed to send request to OpenAI API. Number of retries: "
+              << numFailureVector[i] << " numFailures_: " << numFailures_
+              << std::endl;
         }
         LOG(INFO) << fmt::format(
                          "[INFO] i: {} / {}, results: {}, numFailures: {}",
                          i + 1,
                          numInput,
                          generated_message,
-                         numFailures[i])
+                         numFailureVector[i])
                   << std::endl;
       } else {
-        std::cout << "Error: " << responses[i].status_code << " - "
-                  << responses[i].text << std::endl;
+        LOG(ERROR) << "Error: " << responses[i].status_code << " - "
+                   << responses[i].text << std::endl;
       }
     }
 
@@ -243,6 +293,7 @@ class ChatGPT : public MLFunction {
   uint64_t inputTokenNumber_;
   uint64_t outputTokenNumber_;
   uint64_t numFailures_;
+  int numThreads_;
 };
 
 class ChatGPTRecommender : public MLFunction {
@@ -253,6 +304,9 @@ class ChatGPTRecommender : public MLFunction {
       throw std::runtime_error(fmt::format(
           "[ERROR] OpenAI API key is not set, please set OPENAI_API_KEY"));
     }
+    numThreads_ = getEnvVar("NUM_THREADS") == ""
+        ? 8
+        : std::stoi(getEnvVar("NUM_THREADS"));
     url_ = "https://api.openai.com/v1/chat/completions";
     model_ = "gpt-3.5-turbo";
     inputTokenNumber_ = 0;
@@ -266,6 +320,9 @@ class ChatGPTRecommender : public MLFunction {
       throw std::runtime_error(fmt::format(
           "[ERROR] OpenAI API key is not set, please set OPENAI_API_KEY"));
     }
+    numThreads_ = getEnvVar("NUM_THREADS") == ""
+        ? 8
+        : std::stoi(getEnvVar("NUM_THREADS"));
     url_ = url;
     model_ = model;
     inputTokenNumber_ = 0;
@@ -327,7 +384,11 @@ class ChatGPTRecommender : public MLFunction {
     // Thread vector
     std::vector<std::thread> threads;
     std::vector<cpr::Response> responses(numInput);
-    std::vector<int> numFailures(numInput);
+    std::vector<int> numFailureVector(numInput);
+
+    int numInputsPerThread = int(std::ceil(float(numInput) / numThreads_));
+    int processedInputCount = 0;
+    std::vector<std::string> payloadsBatchVector;
 
     for (int i = 0; i < numInput; i++) {
       StringView val1 = decodedStringInput1->valueAt<StringView>(i);
@@ -346,13 +407,21 @@ class ChatGPTRecommender : public MLFunction {
       nlohmann::json payload = {
           {"model", model_}, {"messages", messageArrays}, {"max_tokens", 500}};
 
-      threads.emplace_back(
-          sendRequestViaCpr,
-          url_,
-          headers,
-          payload.dump(),
-          std::ref(responses[i]),
-          std::ref(numFailures[i]));
+      payloadsBatchVector.push_back(payload.dump());
+      processedInputCount++;
+
+      if (processedInputCount == numInputsPerThread || i == numInput - 1) {
+        threads.emplace_back(
+            sendRequestViaCprBatch,
+            url_,
+            headers,
+            payloadsBatchVector,
+            std::ref(responses),
+            i - processedInputCount + 1,
+            std::ref(numFailureVector));
+        processedInputCount = 0;
+        payloadsBatchVector.clear();
+      }
     }
 
     for (auto& thread : threads) {
@@ -368,21 +437,24 @@ class ChatGPTRecommender : public MLFunction {
         results.push_back(generated_message);
         const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ +
             countWords(generated_message) + countPunctuation(generated_message);
-        const_cast<uint64_t&>(numFailures_) = numFailures_ + numFailures[i];
-        if (numFailures[i] > 0) {
-          std::cout << "[WARNING] Failed to send request to OpenAI API. Number of retries: "
-                    << numFailures[i] << " numFailures_: " << numFailures_ << std::endl;
+        const_cast<uint64_t&>(numFailures_) =
+            numFailures_ + numFailureVector[i];
+        if (numFailureVector[i] > 0) {
+          LOG(WARNING)
+              << "[WARNING] Failed to send request to OpenAI API. Number of retries: "
+              << numFailureVector[i] << " numFailures_: " << numFailures_
+              << std::endl;
         }
         LOG(INFO) << fmt::format(
                          "[INFO] i: {} / {}, results: {}, numFailures: {}",
                          i + 1,
                          numInput,
                          generated_message,
-                         numFailures[i])
+                         numFailureVector[i])
                   << std::endl;
       } else {
-        std::cout << "Error: " << responses[i].status_code << " - "
-                  << responses[i].text << std::endl;
+        LOG(ERROR) << "Error: " << responses[i].status_code << " - "
+                   << responses[i].text << std::endl;
       }
     }
 
@@ -427,4 +499,5 @@ class ChatGPTRecommender : public MLFunction {
   uint64_t inputTokenNumber_;
   uint64_t outputTokenNumber_;
   uint64_t numFailures_;
+  int numThreads_;
 };
