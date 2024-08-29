@@ -252,14 +252,16 @@ def chatgpt_server_restfulAPI(message):
           {"role": "user", "content": message}
       ]
   }
+  count_failures = 0
   response = requests.post(url, headers=headers, json=data)
   while response.status_code != 200:
+      count_failures += 1
       response = requests.post(url, headers=headers, json=data)
   response = response.json()
   returned_message = response['choices'][0]['message']['content']
   num_input_token = response['usage']['prompt_tokens']
   num_output_token = response['usage']['completion_tokens']
-  return returned_message, num_input_token, num_output_token
+  return returned_message, num_input_token, num_output_token, count_failures
 
 def chatgpt_server(openAI_client, message):
     chat_completion = openAI_client.chat.completions.create(
