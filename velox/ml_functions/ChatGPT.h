@@ -197,9 +197,6 @@ class ChatGPT : public MLFunction {
       // Add message
       messageArrays.push_back({{"role", "user"}, {"content", valString}});
 
-      const_cast<uint64_t&>(inputTokenNumber_) = inputTokenNumber_ +
-          countWords(valString) + countPunctuation(valString);
-
       nlohmann::json payload = {
           {"model", model_}, {"messages", messageArrays}, {"max_tokens", 150}};
 
@@ -231,8 +228,10 @@ class ChatGPT : public MLFunction {
         std::string generated_message =
             response_json["choices"][0]["message"]["content"];
         results.push_back(generated_message);
+        const_cast<uint64_t&>(inputTokenNumber_) = inputTokenNumber_ +
+          response_json["usage"]["prompt_tokens"].get<int>();
         const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ +
-            countWords(generated_message) + countPunctuation(generated_message);
+            response_json["usage"]["completion_tokens"].get<int>();
         const_cast<uint64_t&>(numFailures_) =
             numFailures_ + numFailureVector[i];
         if (numFailureVector[i] > 0) {
@@ -401,9 +400,6 @@ class ChatGPTRecommender : public MLFunction {
       // Add message
       messageArrays.push_back({{"role", "user"}, {"content", valString}});
 
-      const_cast<uint64_t&>(inputTokenNumber_) = inputTokenNumber_ +
-          countWords(valString) + countPunctuation(valString);
-
       nlohmann::json payload = {
           {"model", model_}, {"messages", messageArrays}, {"max_tokens", 500}};
 
@@ -435,8 +431,10 @@ class ChatGPTRecommender : public MLFunction {
         std::string generated_message =
             response_json["choices"][0]["message"]["content"];
         results.push_back(generated_message);
+        const_cast<uint64_t&>(inputTokenNumber_) = inputTokenNumber_ +
+          response_json["usage"]["prompt_tokens"].get<int>();
         const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ +
-            countWords(generated_message) + countPunctuation(generated_message);
+            response_json["usage"]["completion_tokens"].get<int>();
         const_cast<uint64_t&>(numFailures_) =
             numFailures_ + numFailureVector[i];
         if (numFailureVector[i] > 0) {
