@@ -1032,9 +1032,9 @@ class LLMRecommendationPipelinePython(Pipeline):
 
     def model_inference_impl(self, data):
         # stage - 1 filtering
-
-        spoken_language_filter = data["spoken_languages"].str.contains("English")
-        data = data[data["spoken_languages"].str.contains("English")]
+        # done in data loading stage
+        # spoken_language_filter = data["spoken_languages"].str.contains("English")
+        # data = data[data["spoken_languages"].str.contains("English")]
 
         # print("stage 1 filtering selectivity: ", len(data) / len(spoken_language_filter))
 
