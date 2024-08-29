@@ -56,7 +56,7 @@ class Pipeline(object):
         if hasattr(self, "batch_size"):
             self.list_batches = get_batch_sizes(self.num_sample, self.batch_size)
         print("[INFO] Batches: ", self.list_batches)
-        self.timer_additional = collections.defaultdict(int)
+        self.metrics_additional = collections.defaultdict(int)
 
     @abstractmethod
     def loading_meta_impl(self):
@@ -119,8 +119,8 @@ class Pipeline(object):
         t_model_inference /= self.num_loop
         t_end_end /= self.num_loop
         t_additional = ""
-        for timer_name, timer_t in self.timer_additional.items():
-            t_additional += f"{timer_name}: {timer_t/self.num_loop}, "
+        for metric_name, metric_value in self.metrics_additional.items():
+            t_additional += f"{metric_name}: {metric_value/self.num_loop}, "
 
         result_df = pd.DataFrame(
             {
@@ -935,18 +935,17 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
 
 
 def pd_func_summarize_description(df, column_name, prompt):
-    openAI_client = utils.get_openAI_client()
-    df.loc[:, "{}_summarized".format(column_name)] = df[column_name].apply(
-        lambda x: utils.chatgpt_server(openAI_client, prompt + x)
-    )
+    df.loc[:, ["{}_summarized".format(column_name), "num_send_token", "num_receive_token"]] = df.apply(
+        lambda x: utils.chatgpt_server_restfulAPI(prompt + x[column_name]),
+        axis=1,
+        result_type="expand"
+    ).values
     return df
 
 
 def pd_func_recommend_description(df, prompt):
-    openAI_client = utils.get_openAI_client()
-    df.loc[:, "result"] = df.apply(
-        lambda x: utils.chatgpt_server(
-            openAI_client,
+    df.loc[:, ["result", "num_send_token", "num_receive_token"]] = df.apply(
+        lambda x: utils.chatgpt_server_restfulAPI(
             "Summarized user statistics data (preference): "
             + x["user_description_summarized"]
             + ". \n Summarized user movie metadata:  "
@@ -954,7 +953,8 @@ def pd_func_recommend_description(df, prompt):
             + prompt,
         ),
         axis=1,
-    )
+        result_type="expand"
+    ).values
     return df
 
 
@@ -1027,29 +1027,52 @@ class LLMRecommendationPipelinePython(Pipeline):
         return data
 
     def model_inference_impl(self, data):
-        self.t_llm1 = 0
-        self.t_llm2 = 0
-        self.t_llm3 = 0
+        self.metrics_additional["t_llm1"] = 0
+        self.metrics_additional["t_llm2"] = 0
+        self.metrics_additional["t_llm3"] = 0
+        self.num_send_tokens = 0
+        self.num_receive_tokens = 0
+        
+        # stage - 1 filtering
+
+        spoken_language_filter = data["spoken_languages"].str.contains("English")
+        data = data[data["spoken_languages"].str.contains("English")]
+
+        # print("stage 1 filtering selectivity: ", len(data) / len(spoken_language_filter))
+
+        # stage - 2 filtering
         data_features = data[["popularity", "vote_average", "vote_count"]]
         data_features = self.min_max_scaler.transform(data_features)
         trendening_label = np.argmax(self.llm_ffnn_model.predict(data_features), axis=1)
         trendening_label = trendening_label == True
         data = data[trendening_label]
-        # print("filtering selectivity: ", len(data) / len(trendening_label))
+
+        # print("stage 2 filtering selectivity ", len(data) / len(trendening_label))
+
         self.timer.tic()
         data = parallelize_dataframe(
             data, "user_description", self.prompt1, False, self.num_thread
         )
         # data.loc[:, "user_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt1 + x['user_description']), axis=1)
-        self.timer_additional["t_llm1"] += self.timer.toc()
+        self.metrics_additional["t_llm1"] += self.timer.toc()
+        self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
+        self.metrics_additional["num_receive_tokens"] += np.sum(data["num_receive_token"])
         self.timer.tic()
+
         data = parallelize_dataframe(
             data, "movie_description", self.prompt2, False, self.num_thread
         )
         # data.loc[:, "movie_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt2 + x['movie_description']), axis=1)
-        self.timer_additional["t_llm2"] += self.timer.toc()
+        
+        self.metrics_additional["t_llm2"] += self.timer.toc()
+        self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
+        self.metrics_additional["num_receive_tokens"] += np.sum(data["num_receive_token"])
         self.timer.tic()
         data = parallelize_dataframe(data, None, self.prompt3, True, self.num_thread)
         # data.loc[:, "result"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, "Summarized user statistics data (preference): " + x['user_description_summarized'] +". \n Summarized user movie metadata:  " + x['movie_description_summarized'] + self.prompt3), axis=1)
-        # self.timer_additional["t_llm3"] += self.timer.toc()
+        
+        self.metrics_additional["t_llm3"] += self.timer.toc()
+        self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
+        self.metrics_additional["num_receive_tokens"] += np.sum(data["num_receive_token"])
+
         return data

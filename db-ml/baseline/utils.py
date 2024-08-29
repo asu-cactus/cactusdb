@@ -7,6 +7,7 @@ import evadb
 import multiprocessing
 import subprocess
 import connectorx as cx
+import requests
 from openai import OpenAI
 
 
@@ -228,6 +229,37 @@ def get_openAI_client():
 
     return client
 
+
+def get_openAI_key():
+    if not "OPENAI_API_KEY" in os.environ:
+        raise Exception("Please set the OPENAI_API_KEY environment variable.")
+    return os.environ["OPENAI_API_KEY"]
+
+def chatgpt_server_restfulAPI(message):
+  openAI_key = get_openAI_key()
+  # Replace 'your_api_key' with your actual OpenAI API key
+  url = 'https://api.openai.com/v1/chat/completions'
+
+  headers = {
+      'Authorization': f'Bearer {openAI_key}',
+      'Content-Type': 'application/json'
+  }
+
+  # Define the conversation or prompt
+  data = {
+      "model": "gpt-3.5-turbo",
+      "messages": [
+          {"role": "user", "content": message}
+      ]
+  }
+  response = requests.post(url, headers=headers, json=data)
+  while response.status_code != 200:
+      response = requests.post(url, headers=headers, json=data)
+  response = response.json()
+  returned_message = response['choices'][0]['message']['content']
+  num_input_token = response['usage']['prompt_tokens']
+  num_output_token = response['usage']['completion_tokens']
+  return returned_message, num_input_token, num_output_token
 
 def chatgpt_server(openAI_client, message):
     chat_completion = openAI_client.chat.completions.create(
