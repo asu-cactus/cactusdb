@@ -92,6 +92,7 @@ class Pipeline(object):
         t_data_loading = 0
         t_data_processing = 0
         t_model_inference = 0
+        self.metrics_additional = collections.defaultdict(int)
 
         for _ in tqdm(range(self.num_loop)):
             return_data = []
@@ -935,7 +936,7 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
 
 
 def pd_func_summarize_description(df, column_name, prompt):
-    df.loc[:, ["{}_summarized".format(column_name), "num_send_token", "num_receive_token"]] = df.apply(
+    df.loc[:, ["{}_summarized".format(column_name), "num_send_token", "num_receive_token", "num_failures"]] = df.apply(
         lambda x: utils.chatgpt_server_restfulAPI(prompt + x[column_name]),
         axis=1,
         result_type="expand"
@@ -944,7 +945,7 @@ def pd_func_summarize_description(df, column_name, prompt):
 
 
 def pd_func_recommend_description(df, prompt):
-    df.loc[:, ["result", "num_send_token", "num_receive_token"]] = df.apply(
+    df.loc[:, ["result", "num_send_token", "num_receive_token", "num_failures"]] = df.apply(
         lambda x: utils.chatgpt_server_restfulAPI(
             "Summarized user statistics data (preference): "
             + x["user_description_summarized"]
@@ -1010,6 +1011,9 @@ class LLMRecommendationPipelinePython(Pipeline):
         )
         self.timer = utils.Timer()
         self.num_thread = int(os.environ.get("NUM_THREADS", 8))
+        self.metrics_additional["t_llm1"] = 0
+        self.metrics_additional["t_llm2"] = 0
+        self.metrics_additional["t_llm3"] = 0
 
     def loading_meta_impl(self):
         pass
@@ -1027,12 +1031,6 @@ class LLMRecommendationPipelinePython(Pipeline):
         return data
 
     def model_inference_impl(self, data):
-        self.metrics_additional["t_llm1"] = 0
-        self.metrics_additional["t_llm2"] = 0
-        self.metrics_additional["t_llm3"] = 0
-        self.num_send_tokens = 0
-        self.num_receive_tokens = 0
-        
         # stage - 1 filtering
 
         spoken_language_filter = data["spoken_languages"].str.contains("English")
@@ -1057,6 +1055,7 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.metrics_additional["t_llm1"] += self.timer.toc()
         self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
         self.metrics_additional["num_receive_tokens"] += np.sum(data["num_receive_token"])
+        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
         self.timer.tic()
 
         data = parallelize_dataframe(
@@ -1067,6 +1066,7 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.metrics_additional["t_llm2"] += self.timer.toc()
         self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
         self.metrics_additional["num_receive_tokens"] += np.sum(data["num_receive_token"])
+        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
         self.timer.tic()
         data = parallelize_dataframe(data, None, self.prompt3, True, self.num_thread)
         # data.loc[:, "result"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, "Summarized user statistics data (preference): " + x['user_description_summarized'] +". \n Summarized user movie metadata:  " + x['movie_description_summarized'] + self.prompt3), axis=1)
@@ -1074,5 +1074,6 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.metrics_additional["t_llm3"] += self.timer.toc()
         self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
         self.metrics_additional["num_receive_tokens"] += np.sum(data["num_receive_token"])
+        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
 
         return data
