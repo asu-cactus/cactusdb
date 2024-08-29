@@ -8,6 +8,8 @@ import torch
 from torch.utils.data import DataLoader
 import utils
 import load_data_to_db
+import collections
+import os
 from abc import ABC, abstractmethod
 from models.preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
 from models.dssm import DSSM_Torch, DSSM_TF, get_var_feature, get_test_var_feature
@@ -17,6 +19,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, pandas_udf
 from pyspark.sql.types import ArrayType, FloatType, StringType
 import pickle
+import multiprocessing as mp
 
 
 def get_batch_sizes(num_samples, batch_size):
@@ -53,6 +56,7 @@ class Pipeline(object):
         if hasattr(self, "batch_size"):
             self.list_batches = get_batch_sizes(self.num_sample, self.batch_size)
         print("[INFO] Batches: ", self.list_batches)
+        self.timer_additional = collections.defaultdict(int)
 
     @abstractmethod
     def loading_meta_impl(self):
@@ -114,6 +118,9 @@ class Pipeline(object):
         t_data_processing /= self.num_loop
         t_model_inference /= self.num_loop
         t_end_end /= self.num_loop
+        t_additional = ""
+        for timer_name, timer_t in self.timer_additional.items():
+            t_additional += f"{timer_name}: {timer_t/self.num_loop}, "
 
         result_df = pd.DataFrame(
             {
@@ -123,6 +130,7 @@ class Pipeline(object):
                 "t_data_process": t_data_processing,
                 "t_model": t_model_inference,
                 "t_end_end": t_end_end,
+                "t_additonal": t_additional,
             },
             index=[0],
         )
@@ -926,6 +934,49 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
         return result_df
 
 
+def pd_func_summarize_description(df, column_name, prompt):
+    openAI_client = utils.get_openAI_client()
+    df.loc[:, "{}_summarized".format(column_name)] = df[column_name].apply(
+        lambda x: utils.chatgpt_server(openAI_client, prompt + x)
+    )
+    return df
+
+
+def pd_func_recommend_description(df, prompt):
+    openAI_client = utils.get_openAI_client()
+    df.loc[:, "result"] = df.apply(
+        lambda x: utils.chatgpt_server(
+            openAI_client,
+            "Summarized user statistics data (preference): "
+            + x["user_description_summarized"]
+            + ". \n Summarized user movie metadata:  "
+            + x["movie_description_summarized"]
+            + prompt,
+        ),
+        axis=1,
+    )
+    return df
+
+
+def parallelize_dataframe(
+    df, column_name, prompt, is_recommend_task=False, num_cores=4
+):
+    df_split = np.array_split(df, num_cores)
+
+    with mp.Pool(num_cores) as pool:
+        if is_recommend_task:
+            results = pool.starmap(
+                pd_func_recommend_description,
+                [(df_chunk, prompt) for df_chunk in df_split],
+            )
+        else:
+            results = pool.starmap(
+                pd_func_summarize_description,
+                [(df_chunk, column_name, prompt) for df_chunk in df_split],
+            )
+    return pd.concat(results)
+
+
 class LLMRecommendationPipelinePython(Pipeline):
     def __init__(
         self,
@@ -939,8 +990,8 @@ class LLMRecommendationPipelinePython(Pipeline):
             num_sample=num_user * num_movie,
             num_loop=num_loop,
         )
-        self.num_user = 5
-        self.num_movie = 10
+        self.num_user = num_user
+        self.num_movie = num_movie
         load_data_to_db.load_llm_recommendation_data_to_postgres(
             self.num_user, self.num_movie
         )
@@ -951,8 +1002,14 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.prompt3 = "Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason."
 
         self.openAI_client = utils.get_openAI_client()
-        self.llm_ffnn_model = tf.keras.models.load_model("/home/velox/data/llm_mr_ffnn.h5")
-        self.min_max_scaler = pickle.load(open("/home/velox/data/llm_mr_minmax_scaler_py.pkl", "rb"))
+        self.llm_ffnn_model = tf.keras.models.load_model(
+            "/home/velox/data/llm_mr_ffnn.h5"
+        )
+        self.min_max_scaler = pickle.load(
+            open("/home/velox/data/llm_mr_minmax_scaler_py.pkl", "rb")
+        )
+        self.timer = utils.Timer()
+        self.num_thread = int(os.environ.get("NUM_THREADS", 8))
 
     def loading_meta_impl(self):
         pass
@@ -960,7 +1017,9 @@ class LLMRecommendationPipelinePython(Pipeline):
     def data_loading_impl(self, batch_size):
         join_query = """
             select user_id, llm_u.description as user_description, id as movie_id, llm_m.description as movie_description, llm_m.popularity, llm_m.vote_average, llm_m.vote_count, llm_m.spoken_languages from llm_recommend_user llm_u cross join llm_recommend_movie  llm_m where llm_m.spoken_languages LIKE '%English%' limit {}
-        """.format(batch_size)
+        """.format(
+            batch_size
+        )
         joined_df = utils.fetch_data_from_postgres_via_connectorx(join_query)
         return joined_df
 
@@ -968,13 +1027,31 @@ class LLMRecommendationPipelinePython(Pipeline):
         return data
 
     def model_inference_impl(self, data):
+        self.t_llm1 = 0
+        self.t_llm2 = 0
+        self.t_llm3 = 0
         data_features = data[["popularity", "vote_average", "vote_count"]]
         data_features = self.min_max_scaler.transform(data_features)
         trendening_label = np.argmax(self.llm_ffnn_model.predict(data_features), axis=1)
         trendening_label = trendening_label == True
         data = data[trendening_label]
+        # print("filtering selectivity: ", len(data) / len(trendening_label))
+        self.timer.tic()
+        pickle.dump(data, open("debug.pkl", "wb"))
+        np.save("debug.npy", data)
+        # data1 = parallelize_dataframe(
+        #     data, "user_description", self.prompt1, False, self.num_thread
+        # )
         data.loc[:, "user_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt1 + x['user_description']), axis=1)
+        self.timer_additional["t_llm1"] += self.timer.toc()
+        self.timer.tic()
+        # data2 = parallelize_dataframe(
+        #     data1, "movie_description", self.prompt2, False, self.num_thread
+        # )
         data.loc[:, "movie_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt2 + x['movie_description']), axis=1)
+        self.timer_additional["t_llm2"] += self.timer.toc()
+        self.timer.tic()
+        # data3 = parallelize_dataframe(data2, None, self.prompt3, True, self.num_thread)
         data.loc[:, "result"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, "Summarized user statistics data (preference): " + x['user_description_summarized'] +". \n Summarized user movie metadata:  " + x['movie_description_summarized'] + self.prompt3), axis=1)
-        
+        self.timer_additional["t_llm3"] += self.timer.toc()
         return data

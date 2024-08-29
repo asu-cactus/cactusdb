@@ -21,14 +21,14 @@ def benchmark_llm():
     list_benchmark = []
     list_benchmark += [benchmark_llm_recommendation_pipeline_python]
     # list_benchmark += [benchmark_ffnn_pipeline_evadb]
-    # list_benchmark += [benchmark_ffnn_pipeline_tf]
+    # list_benchmark += [benchmark_ffnn_pipeline_tf] 
     # list_benchmark += [benchmark_ffnn_pipeline_pytorch]
     # list_benchmark += [benchmark_ffnn_pipeline_sparksqlhadoop]
-    list_num_user = [10]
-    list_num_movie = [50]
+    list_num_user = [5]
+    list_num_movie = [30]
 
     result_df = None
-    num_loop = 5
+    num_loop = 2
 
     
     today = datetime.date.today()

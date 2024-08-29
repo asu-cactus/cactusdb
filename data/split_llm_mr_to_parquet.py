@@ -42,9 +42,9 @@ def write_orc(df, batch_size, dir_path):
         end = min(start + batch_size, len(df))
         df[start:end].to_parquet(path)
 
-NUM_USER_DATA = 1
+NUM_USER_DATA = 5
 NUM_MOVIE_DATA = 30
-NUM_SPLIT = 1
+NUM_SPLIT = 4
 
 remove_all_in_directory('movie_recommendation/movie')
 df1 = pd.read_csv('mr_movie_metadata.csv')
