@@ -1037,21 +1037,19 @@ class LLMRecommendationPipelinePython(Pipeline):
         data = data[trendening_label]
         # print("filtering selectivity: ", len(data) / len(trendening_label))
         self.timer.tic()
-        pickle.dump(data, open("debug.pkl", "wb"))
-        np.save("debug.npy", data)
-        # data1 = parallelize_dataframe(
-        #     data, "user_description", self.prompt1, False, self.num_thread
-        # )
-        data.loc[:, "user_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt1 + x['user_description']), axis=1)
+        data = parallelize_dataframe(
+            data, "user_description", self.prompt1, False, self.num_thread
+        )
+        # data.loc[:, "user_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt1 + x['user_description']), axis=1)
         self.timer_additional["t_llm1"] += self.timer.toc()
         self.timer.tic()
-        # data2 = parallelize_dataframe(
-        #     data1, "movie_description", self.prompt2, False, self.num_thread
-        # )
-        data.loc[:, "movie_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt2 + x['movie_description']), axis=1)
+        data = parallelize_dataframe(
+            data, "movie_description", self.prompt2, False, self.num_thread
+        )
+        # data.loc[:, "movie_description_summarized"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, self.prompt2 + x['movie_description']), axis=1)
         self.timer_additional["t_llm2"] += self.timer.toc()
         self.timer.tic()
-        # data3 = parallelize_dataframe(data2, None, self.prompt3, True, self.num_thread)
-        data.loc[:, "result"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, "Summarized user statistics data (preference): " + x['user_description_summarized'] +". \n Summarized user movie metadata:  " + x['movie_description_summarized'] + self.prompt3), axis=1)
-        self.timer_additional["t_llm3"] += self.timer.toc()
+        data = parallelize_dataframe(data, None, self.prompt3, True, self.num_thread)
+        # data.loc[:, "result"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, "Summarized user statistics data (preference): " + x['user_description_summarized'] +". \n Summarized user movie metadata:  " + x['movie_description_summarized'] + self.prompt3), axis=1)
+        # self.timer_additional["t_llm3"] += self.timer.toc()
         return data
