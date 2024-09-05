@@ -167,6 +167,9 @@ class ChatGPT : public MLFunction {
     auto decodedStringInput = decodedStringHolder.get();
 
     int numInput = rows.size();
+    int numSelected = rows.countSelected();
+    LOG(INFO) << "[INFO ChatGPT:] countSelected: " << rows.countSelected() << " numInput: " << numInput << std::endl;
+    
 
     if (args.size() == 2) {
       exec::LocalDecodedVector decodedStringHolder(context, *args[1], rows);
@@ -186,11 +189,22 @@ class ChatGPT : public MLFunction {
     std::vector<cpr::Response> responses(numInput);
     std::vector<int> numFailureVector(numInput);
 
-    int numInputsPerThread = int(std::ceil(float(numInput) / numThreads_));
+    int numInputsPerThread = int(std::ceil(float(numSelected) / numThreads_));
     int processedInputCount = 0;
     std::vector<std::string> payloadsBatchVector;
+    int processedIndex = 0;
 
+    // Version 1
+    // This approach is more efficient by sending requests in batches and leveraging
+    // multiple threads to send requests concurrently, it requires additional 
+    // isValid check to skip the rows that are not selected. Note: at the end of this
+    // approach, it is required to invoke context.moveOrCopyResult to copy the results
+    // back to the output vector since we only compute the results for selected ones
     for (int i = 0; i < numInput; i++) {
+      // if the row is not selected, skip
+      if (!rows.isValid(i)) {
+        continue;
+      }
       StringView val = decodedStringInput->valueAt<StringView>(i);
       std::string valString = promptPrefix + std::string(val);
       nlohmann::json messageArrays = nlohmann::json::array();
@@ -210,18 +224,19 @@ class ChatGPT : public MLFunction {
             headers,
             payloadsBatchVector,
             std::ref(responses),
-            i - processedInputCount + 1,
+            processedIndex - processedInputCount + 1,
             std::ref(numFailureVector));
         processedInputCount = 0;
         payloadsBatchVector.clear();
       }
+      processedIndex++;
     }
 
     for (auto& thread : threads) {
       thread.join();
     }
 
-    for (int i = 0; i < numInput; i++) {
+    for (int i = 0; i < numSelected; i++) {
       if (responses[i].status_code == 200) {
         // parse the returned value
         nlohmann::json response_json = nlohmann::json::parse(responses[i].text);
@@ -243,7 +258,7 @@ class ChatGPT : public MLFunction {
         LOG(INFO) << fmt::format(
                          "[INFO] i: {} / {}, results: {}, numFailures: {}",
                          i + 1,
-                         numInput,
+                         numSelected,
                          generated_message,
                          numFailureVector[i])
                   << std::endl;
@@ -254,7 +269,46 @@ class ChatGPT : public MLFunction {
     }
 
     VectorMaker maker{context.pool()};
-    output = maker.flatVector<std::string>(results);
+    VectorPtr localResult = maker.flatVector<std::string>(results);
+
+    context.moveOrCopyResult(localResult, rows, output);
+
+    // Version 2: Leveraging applyToSelected function, while this is done
+    // sequentially, it is easier to implement and debug but less efficient
+    /*
+    auto flatResult = output->asFlatVector<StringView>();
+    rows.applyToSelected([&](vector_size_t row) {
+      StringView val = decodedStringInput->valueAt<StringView>(row);
+      std::string valString = promptPrefix + std::string(val);
+      nlohmann::json messageArrays = nlohmann::json::array();
+      // Add message
+      messageArrays.push_back({{"role", "user"}, {"content", valString}});
+
+      nlohmann::json payload = {
+          {"model", model_}, {"messages", messageArrays}, {"max_tokens", 150}};
+      sendRequestViaCpr(url_, headers, payload.dump(), responses[row], numFailureVector[row]);
+
+      // parse the returned value
+      nlohmann::json response_json = nlohmann::json::parse(responses[row].text);
+        std::string generated_message =
+            response_json["choices"][0]["message"]["content"];
+        flatResult->set(row, StringView(generated_message));
+        // results.push_back(generated_message);
+        const_cast<uint64_t&>(inputTokenNumber_) = inputTokenNumber_ +
+          response_json["usage"]["prompt_tokens"].get<int>();
+        const_cast<uint64_t&>(outputTokenNumber_) = outputTokenNumber_ +
+            response_json["usage"]["completion_tokens"].get<int>();
+        const_cast<uint64_t&>(numFailures_) =
+            numFailures_ + numFailureVector[row];
+      LOG(INFO) << fmt::format(
+                         "[INFO] Selected row: {} / {}, results: {}, numFailures: {}",
+                         row + 1,
+                         numSelected,
+                         generated_message,
+                         numFailureVector[row])
+                  << std::endl;
+    });
+    */
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -366,6 +420,8 @@ class ChatGPTRecommender : public MLFunction {
     auto decodedStringInput2 = decodedStringHolder2.get();
 
     int numInput = rows.size();
+    int numSelected = rows.countSelected();
+    LOG(INFO) << "[INFO ChatGPTRecommender:] countSelected: " << rows.countSelected() << " numInput: " << numInput << std::endl;
 
     if (args.size() == 3) {
       exec::LocalDecodedVector decodedStringHolder3(context, *args[2], rows);
@@ -385,11 +441,16 @@ class ChatGPTRecommender : public MLFunction {
     std::vector<cpr::Response> responses(numInput);
     std::vector<int> numFailureVector(numInput);
 
-    int numInputsPerThread = int(std::ceil(float(numInput) / numThreads_));
+    int numInputsPerThread = int(std::ceil(float(numSelected) / numThreads_));
     int processedInputCount = 0;
     std::vector<std::string> payloadsBatchVector;
+    int processedIndex = 0;
 
     for (int i = 0; i < numInput; i++) {
+      // if the row is not selected, skip
+      if (!rows.isValid(i)) {
+        continue;
+      }
       StringView val1 = decodedStringInput1->valueAt<StringView>(i);
       StringView val2 = decodedStringInput2->valueAt<StringView>(i);
       std::string valString =
@@ -413,18 +474,19 @@ class ChatGPTRecommender : public MLFunction {
             headers,
             payloadsBatchVector,
             std::ref(responses),
-            i - processedInputCount + 1,
+            processedIndex - processedInputCount + 1,
             std::ref(numFailureVector));
         processedInputCount = 0;
         payloadsBatchVector.clear();
       }
+      processedIndex ++;
     }
 
     for (auto& thread : threads) {
       thread.join();
     }
 
-    for (int i = 0; i < numInput; i++) {
+    for (int i = 0; i < numSelected; i++) {
       if (responses[i].status_code == 200) {
         // parse the returned value
         nlohmann::json response_json = nlohmann::json::parse(responses[i].text);
@@ -446,7 +508,7 @@ class ChatGPTRecommender : public MLFunction {
         LOG(INFO) << fmt::format(
                          "[INFO] i: {} / {}, results: {}, numFailures: {}",
                          i + 1,
-                         numInput,
+                         numSelected,
                          generated_message,
                          numFailureVector[i])
                   << std::endl;
@@ -457,7 +519,9 @@ class ChatGPTRecommender : public MLFunction {
     }
 
     VectorMaker maker{context.pool()};
-    output = maker.flatVector<std::string>(results);
+    VectorPtr localResult = maker.flatVector<std::string>(results);
+
+    context.moveOrCopyResult(localResult, rows, output);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

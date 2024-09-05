@@ -769,33 +769,41 @@ public:
     Argmax() {}
 
     void apply(
-        const SelectivityVector& rows,
-        std::vector<VectorPtr>& args,
-        const TypePtr& type,
-        exec::EvalCtx& context,
-        VectorPtr& output) const override {
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
 
-        BaseVector::ensureWritable(rows, type, context.pool(), output);
-        BaseVector* input = args[0].get();
-        exec::LocalDecodedVector inputHolder(context, *input, rows);
-        auto decodedInputArray = inputHolder.get();
-        auto baseInputArray =
-            decodedInputArray->base()->as<ArrayVector>()->elements();
-    
-        float* input_values = baseInputArray->values()->asMutable<float>();
-        int input_size = baseInputArray->size();
-        int num_rows = args[0]->size();
-        int num_cols = input_size / num_rows;
-        
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
+      BaseVector::ensureWritable(rows, type, context.pool(), output);
+      BaseVector* input = args[0].get();
+      exec::LocalDecodedVector inputHolder(context, *input, rows);
+      auto decodedInputArray = inputHolder.get();
+      auto baseInputArray =
+          decodedInputArray->base()->as<ArrayVector>()->elements();
+  
+      float* input_values = baseInputArray->values()->asMutable<float>();
+      int input_size = baseInputArray->size();
+      int num_rows = args[0]->size();
+      int num_cols = input_size / num_rows;
 
+      LOG(INFO) << "[INFO Argmax:] countSelected: " << rows.countSelected() << " numInput: " << num_rows << std::endl;
+      
+      Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
 
+      std::unordered_map<int, int> valueCounts;
       std::vector<int> result(num_rows);
       for (int i = 0; i < num_rows; i++) {
           Eigen::Index maxRow, maxCol;
           m.row(i).maxCoeff(&maxRow, &maxCol);
           result[i] = maxCol;
+          valueCounts[maxCol]++;
       }
+
+      for (const auto& pair : valueCounts) {
+        LOG(INFO) << "[INFO] Label Distributions: Key: " << pair.first << ", Value: " << pair.second << std::endl;
+      }
+
 
       // There could be a more efficient way to do this
       // Ref: https://stackoverflow.com/a/41384560
@@ -803,7 +811,10 @@ public:
 
 
         VectorMaker maker{context.pool()};
-        output = maker.flatVector<int>(result);
+        // output = maker.flatVector<int>(result);
+        auto localResult = maker.flatVector<int>(result);
+
+        context.moveOrCopyResult(localResult, rows, output);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -892,9 +903,8 @@ public:
 
         BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-        BaseVector* input = args[0].get();
-        exec::LocalDecodedVector inputHolder(context, *input, rows);
-        auto decodedInputArray = inputHolder.get();
+        exec::LocalDecodedVector decodedInputHolder(context, *args[0], rows);
+        auto decodedInputArray = decodedInputHolder.get();
         auto baseInputArray =
             decodedInputArray->base()->as<ArrayVector>()->elements();
     
@@ -903,6 +913,7 @@ public:
 
         int num_rows = rows.size();
         int num_cols = numCols_;
+        LOG(INFO) << "[INFO MinMaxScaler:] countSelected: " << rows.countSelected() << " numInput: " << num_rows << std::endl;
 
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> minVals(scalerMinValues_, 1, num_cols);
@@ -918,7 +929,11 @@ public:
             result.push_back(row);
         }
         VectorMaker maker{context.pool()};
-        output = maker.arrayVector<float>(result, REAL());
+        // output = maker.arrayVector<float>(result, REAL());
+        
+        auto localResult = maker.arrayVector<float>(result, REAL());
+
+        context.moveOrCopyResult(localResult, rows, output);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
