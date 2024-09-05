@@ -246,8 +246,6 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
 
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-    // auto input = args[0];
-
     // Decoder is required to handle address error, reference code:
     // ArrayIntersectExcept.cpp
     BaseVector* input = args[0].get();
@@ -259,19 +257,56 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
     
     double* inputValues = baseInputArray->values()->asMutable<double>();
 
-    int numInput = rows.size();
+    // There is a tricky thing here, rows.size() return the number of raw inputs
+    // while rows.countSelected() return the number of selected rows (after filtering)
+    // the second one should be used for computation and the numElements is mapped to the
+    // rows.countSelected() instead of rows.size(). If using the following code, the size
+    // of the result vector should be mapped to the rows.size() otherwise the returned 
+    // vector won't be aligned with the selected inputs. Another workaround is to use
+    // rows.applyToSelected() to iterate over the selected rows for computation, which is
+    // temporarily marked as #TODO.
+
+    int numRawInput = rows.size();
+    int numInput = rows.countSelected();
     int numElements = baseInputArray->size();
     int sizeOfArray = numElements / numInput;
 
-    std::vector<std::vector<float>> result(numInput, std::vector<float>(sizeOfArray));
-
-    for (int i = 0; i < numInput; i++) {
-      std::transform(inputValues + i * sizeOfArray, inputValues + (i + 1) * sizeOfArray, result[i].begin(),
+    std::vector<std::vector<float>> result(numRawInput, std::vector<float>(sizeOfArray));
+    int processedIndex = 0;
+    for (int i = 0; i < numRawInput; i++) {
+      if (!rows.isValid(i)) {
+        // Skip invalid rows
+        continue;
+      }
+      // inputValues only has the length equal to the number of selected rows, so we another
+      // index to access the inputValues, which is processedIndex
+      std::transform(inputValues + processedIndex * sizeOfArray, inputValues + (processedIndex + 1) * sizeOfArray, result[i].begin(),
                        [](double val) { return static_cast<float>(val); });
+      processedIndex++;
     }
 
     VectorMaker maker{context.pool()};
-    output = maker.arrayVector<float>(result, REAL());
+    // output = maker.arrayVector<float>(result, REAL());
+    auto localResult = maker.arrayVector<float>(result, REAL());
+    context.moveOrCopyResult(localResult, rows, output);
+
+    /*
+    auto  arrayResult = output->as<ArrayVector>();
+    auto sizes = arrayResult->mutableSizes(rows.end());
+    auto rawSizes = sizes->asMutable<int32_t>();
+    auto offsets = arrayResult->mutableOffsets(rows.end());
+    auto rawOffsets = offsets->asMutable<int32_t>();
+    auto elementsResult = arrayResult->elements();
+    rows.applyToSelected([&](vector_size_t row) {
+          rawSizes[row] = numArgs;
+          rawOffsets[row] = offset;
+
+          targetRows.setValid(offset, true);
+          toSourceRow[offset] = row;
+
+          offset += numArgs;
+    }); 
+    */
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
