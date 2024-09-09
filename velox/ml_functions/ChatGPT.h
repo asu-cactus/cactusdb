@@ -148,7 +148,7 @@ class ChatGPT : public MLFunction {
     // Write the timestamp to the file
     file << std::put_time(std::localtime(&now_c), "%Y-%m-%d %H:%M:%S") << " ";
     // Write the uint64_t values to the file
-    file << "# Input:" << inputTokenNumber_
+    file << "[ChatGPT] # Input:" << inputTokenNumber_
          << " # Output: " << outputTokenNumber_
          << " # NumFailure: " << numFailures_ << std::endl;
     file.close();
@@ -384,7 +384,7 @@ class ChatGPTRecommender : public MLFunction {
   }
 
   ~ChatGPTRecommender() {
-    std::string filename = "chatgpt_recommender.log";
+    std::string filename = "chatgpt.log";
     std::ofstream file(filename, std::ios::app);
     if (!file) {
       std::cerr << "Unable to open file: " << filename << std::endl;
@@ -398,7 +398,7 @@ class ChatGPTRecommender : public MLFunction {
     file << std::put_time(std::localtime(&now_c), "%Y-%m-%d %H:%M:%S") << " ";
 
     // Write the uint64_t values to the file
-    file << "# Input:" << inputTokenNumber_
+    file << "[ChatGPT Recommender] # Input:" << inputTokenNumber_
          << " # Output: " << outputTokenNumber_
          << " # NumFailure: " << numFailures_ << std::endl;
     file.close();

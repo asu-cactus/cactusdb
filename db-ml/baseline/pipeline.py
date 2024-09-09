@@ -1011,12 +1011,11 @@ class LLMRecommendationPipelinePython(Pipeline):
         )
         self.timer = utils.Timer()
         self.num_thread = int(os.environ.get("NUM_THREADS", 8))
+
+    def loading_meta_impl(self):
         self.metrics_additional["t_llm1"] = 0
         self.metrics_additional["t_llm2"] = 0
         self.metrics_additional["t_llm3"] = 0
-
-    def loading_meta_impl(self):
-        pass
 
     def data_loading_impl(self, batch_size):
         join_query = """
