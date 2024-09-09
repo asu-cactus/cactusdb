@@ -164,6 +164,8 @@ class CataLog {
     std::vector<std::string> filePathStr;
     for (auto& path : filePath) {
       filePathStr.push_back(path->path);
+      // preserve it for cleanup
+      preserveTempFilePaths.push_back(path);
     }
     idFileAddrMap[p] = filePathStr;
     idFileFormatMap[p] = dwio::common::FileFormat::DWRF;
@@ -336,6 +338,7 @@ class CataLog {
   std::map<std::string, RowTypePtr> UDFSchemaMap;
   std::map<core::PlanNodeId, RowTypePtr> fileSchemaMap;
   std::unordered_map<std::string, std::shared_ptr<Source>> sourceMap;
+  std::vector<std::shared_ptr<TempFilePath>> preserveTempFilePaths;
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(

@@ -4,6 +4,8 @@ It is recommended to automatically configure your development environment throug
 
 Please go to check [Docker-README](./asu-doc/README.md) under asu-doc to set-up your docker environment.
 
+Note: if still facing the issue of missing library, please go to check [Dockerfile](./asu-doc/Dockerfile) for the installation.
+
 # Installation
 ## xgboost C APIs
 [Reference URL](https://github.com/asu-cactus/velox/edit/main/velox/ml_functions/README.md)
@@ -40,10 +42,37 @@ sudo ln -sf eigen3/Eigen Eigen
 sudo ln -sf eigen3/unsupported unsupported
 ```
 
+## EvaDB
+```shell
+git clone https://github.com/lixi-zhou/evadb.git
+cd evadb
+git checkout array
+pip install ./[ray]
+```
+
 ## openblas
 ```shell
 sudo apt-get install libopenblas-dev
 ```
+## CUDA
+CUDA version 11.8 should be installed because of the libtorch.
+
+[CUDA Toolkit 11.8 Downloads](https://developer.nvidia.com/cuda-11-8-0-download-archive)
+
+[CUDA install Reference URL](https://www.cherryservers.com/blog/install-cuda-ubuntu)
+
+## cpr
+
+```shell
+git clone https://github.com/libcpr/cpr.git
+cd cpr
+git checkout 481c0476319e04b16ccc20f2b732706fc0fa787c
+mkdir build && cd build
+cmake .. -DCPR_USE_SYSTEM_CURL=ON
+cmake --build . --parallel
+sudo cmake --install .
+```
+
 ## gcc update(may needed)
 ```shell
 # update gcc-9 to gcc-11
