@@ -1,0 +1,221 @@
+digraph {
+    graph [ rankdir=TB ]
+
+    0 [ label="f5<94.7350006" ]
+    0 -> 1 [label="yes, missing" color="#0000FF"]
+    0 -> 2 [label="no" color="#FF0000"]
+
+    1 [ label="f5<93.0449982" ]
+    1 -> 3 [label="yes, missing" color="#0000FF"]
+    1 -> 4 [label="no" color="#FF0000"]
+
+    3 [ label="f4<40.5" ]
+    3 -> 7 [label="yes, missing" color="#0000FF"]
+    3 -> 8 [label="no" color="#FF0000"]
+
+    7 [ label="f4<39.5" ]
+    7 -> 13 [label="yes, missing" color="#0000FF"]
+    7 -> 14 [label="no" color="#FF0000"]
+
+    13 [ label="f2<37.5" ]
+    13 -> 19 [label="yes, missing" color="#0000FF"]
+    13 -> 20 [label="no" color="#FF0000"]
+
+    19 [ label="leaf=0.0417110771" ]
+
+    20 [ label="f0<27800.5" ]
+    20 -> 29 [label="yes, missing" color="#0000FF"]
+    20 -> 30 [label="no" color="#FF0000"]
+
+    29 [ label="f0<13330" ]
+    29 -> 41 [label="yes, missing" color="#0000FF"]
+    29 -> 42 [label="no" color="#FF0000"]
+
+    41 [ label="f3<74.5" ]
+    41 -> 55 [label="yes" color="#FF0000"]
+    41 -> 56 [label="no, missing" color="#0000FF"]
+
+    55 [ label="leaf=-0.0249460787" ]
+
+    56 [ label="leaf=0.0392054245" ]
+
+    42 [ label="leaf=-0.0956179723" ]
+
+    30 [ label="leaf=0.0434415974" ]
+
+    14 [ label="f8<15209.5" ]
+    14 -> 21 [label="yes, missing" color="#0000FF"]
+    14 -> 22 [label="no" color="#FF0000"]
+
+    21 [ label="leaf=0.0669282526" ]
+
+    22 [ label="leaf=0.00350802206" ]
+
+    8 [ label="f4<42.5" ]
+    8 -> 15 [label="yes, missing" color="#0000FF"]
+    8 -> 16 [label="no" color="#FF0000"]
+
+    15 [ label="f0<20928" ]
+    15 -> 23 [label="yes, missing" color="#0000FF"]
+    15 -> 24 [label="no" color="#FF0000"]
+
+    23 [ label="f3<43" ]
+    23 -> 31 [label="yes" color="#FF0000"]
+    23 -> 32 [label="no, missing" color="#0000FF"]
+
+    31 [ label="leaf=0.0524280481" ]
+
+    32 [ label="leaf=-0.0395182818" ]
+
+    24 [ label="f0<33297.5" ]
+    24 -> 33 [label="yes, missing" color="#0000FF"]
+    24 -> 34 [label="no" color="#FF0000"]
+
+    33 [ label="leaf=-0.112876631" ]
+
+    34 [ label="leaf=-0.00398448808" ]
+
+    16 [ label="f5<2.7750001" ]
+    16 -> 25 [label="yes, missing" color="#0000FF"]
+    16 -> 26 [label="no" color="#FF0000"]
+
+    25 [ label="f0<27564" ]
+    25 -> 35 [label="yes, missing" color="#0000FF"]
+    25 -> 36 [label="no" color="#FF0000"]
+
+    35 [ label="f0<27085.5" ]
+    35 -> 43 [label="yes, missing" color="#0000FF"]
+    35 -> 44 [label="no" color="#FF0000"]
+
+    43 [ label="f0<27037.5" ]
+    43 -> 57 [label="yes, missing" color="#0000FF"]
+    43 -> 58 [label="no" color="#FF0000"]
+
+    57 [ label="leaf=-0.00197146158" ]
+
+    58 [ label="leaf=0.0603477731" ]
+
+    44 [ label="f5<1.88499999" ]
+    44 -> 59 [label="yes, missing" color="#0000FF"]
+    44 -> 60 [label="no" color="#FF0000"]
+
+    59 [ label="leaf=-0.101648808" ]
+
+    60 [ label="leaf=-0.0197581295" ]
+
+    36 [ label="f0<27608.5" ]
+    36 -> 45 [label="yes, missing" color="#0000FF"]
+    36 -> 46 [label="no" color="#FF0000"]
+
+    45 [ label="leaf=0.0779704675" ]
+
+    46 [ label="f5<1.85500002" ]
+    46 -> 61 [label="yes, missing" color="#0000FF"]
+    46 -> 62 [label="no" color="#FF0000"]
+
+    61 [ label="leaf=-0.00608693622" ]
+
+    62 [ label="leaf=0.0174881071" ]
+
+    26 [ label="f0<30631.5" ]
+    26 -> 37 [label="yes, missing" color="#0000FF"]
+    26 -> 38 [label="no" color="#FF0000"]
+
+    37 [ label="f3<89.5" ]
+    37 -> 47 [label="yes" color="#FF0000"]
+    37 -> 48 [label="no, missing" color="#0000FF"]
+
+    47 [ label="f3<85.5" ]
+    47 -> 63 [label="yes" color="#FF0000"]
+    47 -> 64 [label="no, missing" color="#0000FF"]
+
+    63 [ label="leaf=0.0120744072" ]
+
+    64 [ label="leaf=0.0485334396" ]
+
+    48 [ label="f0<21726" ]
+    48 -> 65 [label="yes, missing" color="#0000FF"]
+    48 -> 66 [label="no" color="#FF0000"]
+
+    65 [ label="leaf=0.00561953383" ]
+
+    66 [ label="leaf=-0.0537812375" ]
+
+    38 [ label="f0<31633" ]
+    38 -> 49 [label="yes, missing" color="#0000FF"]
+    38 -> 50 [label="no" color="#FF0000"]
+
+    49 [ label="f8<14774.5" ]
+    49 -> 67 [label="yes, missing" color="#0000FF"]
+    49 -> 68 [label="no" color="#FF0000"]
+
+    67 [ label="leaf=0.0221318714" ]
+
+    68 [ label="leaf=-0.0921105146" ]
+
+    50 [ label="f2<103" ]
+    50 -> 69 [label="yes, missing" color="#0000FF"]
+    50 -> 70 [label="no" color="#FF0000"]
+
+    69 [ label="leaf=0.0543190837" ]
+
+    70 [ label="leaf=-0.0181031432" ]
+
+    4 [ label="leaf=0.0952953547" ]
+
+    2 [ label="f5<124.854996" ]
+    2 -> 5 [label="yes, missing" color="#0000FF"]
+    2 -> 6 [label="no" color="#FF0000"]
+
+    5 [ label="f0<25667" ]
+    5 -> 9 [label="yes, missing" color="#0000FF"]
+    5 -> 10 [label="no" color="#FF0000"]
+
+    9 [ label="leaf=-0.0582816415" ]
+
+    10 [ label="leaf=-0.0155170476" ]
+
+    6 [ label="f5<127.115005" ]
+    6 -> 11 [label="yes, missing" color="#0000FF"]
+    6 -> 12 [label="no" color="#FF0000"]
+
+    11 [ label="leaf=0.0740975067" ]
+
+    12 [ label="f5<158.915009" ]
+    12 -> 17 [label="yes, missing" color="#0000FF"]
+    12 -> 18 [label="no" color="#FF0000"]
+
+    17 [ label="leaf=-0.0628135726" ]
+
+    18 [ label="f5<164.325012" ]
+    18 -> 27 [label="yes, missing" color="#0000FF"]
+    18 -> 28 [label="no" color="#FF0000"]
+
+    27 [ label="leaf=0.036381688" ]
+
+    28 [ label="f5<197.845001" ]
+    28 -> 39 [label="yes, missing" color="#0000FF"]
+    28 -> 40 [label="no" color="#FF0000"]
+
+    39 [ label="f8<14878.5" ]
+    39 -> 51 [label="yes, missing" color="#0000FF"]
+    39 -> 52 [label="no" color="#FF0000"]
+
+    51 [ label="leaf=0.0133464485" ]
+
+    52 [ label="leaf=-0.0635796115" ]
+
+    40 [ label="f5<207.714996" ]
+    40 -> 53 [label="yes, missing" color="#0000FF"]
+    40 -> 54 [label="no" color="#FF0000"]
+
+    53 [ label="leaf=0.0350343473" ]
+
+    54 [ label="f5<221.845001" ]
+    54 -> 71 [label="yes, missing" color="#0000FF"]
+    54 -> 72 [label="no" color="#FF0000"]
+
+    71 [ label="leaf=-0.058073204" ]
+
+    72 [ label="leaf=-0.000162284152" ]
+}
