@@ -548,7 +548,9 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
       std::string_view nodeName = rootNode->name();
 
       std::vector<TypedExprPtr> expressions;
-      // We first check the project node
+      // Currently we support Project and Filter nodes pushdown,
+      // need to use different cast for different node types to 
+      // obtain the expressions
       if (nodeName == "Project") {
         auto myProjectNode =
             std::dynamic_pointer_cast<const ProjectNode>(rootNode);
@@ -574,18 +576,18 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
       for (const auto& expression : expressions) {
         // Note: current implementation support pushdown starting from the
         // innermost function Example:
-        // Support: |<----Pushdown:--->|
+        // Support: |<-----------Pushdown:------------>|
         // softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))
         // Not-Support:    |<----Pushdown:---->|
         // softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))
         std::string expr = expression->toString();
-        // std::cout << "expr: " << expr << std::endl;
+        // Note: the ordering of stored expression is starting from including all UDFs
+        // then excluding the outermost UDFs.
+        // Example of matchedExprs:
+        // {softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))), mat_add(mat_mul(relu(mat_add(mat_mul(v)))), mat_mul(relu(mat_add(mat_mul(v)))}
         std::vector<std::string> parsedSingleExprs;
         std::vector<std::string> matchedExprs;
         parseDLExpressions(expr, parsedSingleExprs, matchedExprs);
-        // reverse to get the innermost function first
-        std::reverse(parsedSingleExprs.begin(), parsedSingleExprs.end());
-        std::reverse(matchedExprs.begin(), matchedExprs.end());
         std::string targetExprStr;
 
         std::vector<std::string> matchedDataSources = findDataSrcFromExpr(expr);
@@ -598,6 +600,9 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
           if (mayPushdown(
                   rootNode, targetExprStr, matchedDataSources, curNodeId)) {
             targetActions.push_back(targetExprStr);
+            // If found a pushdown target, then break the loop, since the afterward expressions
+            // are included in the current iterated expression
+            break;
           }
         }
       }
