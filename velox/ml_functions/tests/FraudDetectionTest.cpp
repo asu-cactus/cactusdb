@@ -723,14 +723,14 @@ void FraudDetectionTest::registerFunctions(std::string modelFilePath, int numCol
   std::string xgboost_fraud_model_path = "resources/model/fraud_xgboost_9_1600";
   exec::registerVectorFunction(
         "xgboost_fraud_predict",
-        TreePrediction::signatures(),
+        ForestPrediction::signatures(),
         std::make_unique<ForestPrediction>(xgboost_fraud_model_path, 9, true));
   std::cout << "Completed registering function for xgboost_fraud_predict" << std::endl;
 
   std::string xgboost_fraud_transaction_path = "resources/model/fraud_xgboost_5_16";
     exec::registerVectorFunction(
           "xgboost_fraud_transaction",
-          TreePrediction::signatures(),
+          ForestPrediction::signatures(),
           std::make_unique<ForestPrediction>(xgboost_fraud_transaction_path, 5, true));
     std::cout << "Completed registering function for xgboost_fraud_transaction" << std::endl;
 
