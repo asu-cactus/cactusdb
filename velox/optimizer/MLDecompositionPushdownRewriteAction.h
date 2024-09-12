@@ -95,7 +95,11 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
           returnedPushdownNodeId != "") {
         finalPushdownNodeId = returnedPushdownNodeId;
       } else {
-        pushdownNodeId = pushdownNodeId;
+        // If found the expr can be further pushed down, then update the
+        // pushdownNodeId
+        if (returnedPushdownNodeId != "") {
+          pushdownNodeId = returnedPushdownNodeId;
+        }
       }
     }
 
@@ -218,7 +222,7 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                     findPlanNodeById(curNode, finalPushdownNodeId);
                 // it should be found
                 assert(pushdownPlanNode);
-                
+
                 pushdownResultName = targetExprName;
 
                 // get the expressions of the pushdown Node
@@ -227,10 +231,8 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                         pushdownPlanNode);
                 assert(pushdownProjectNode);
 
-
                 // Get the names of projections
-               pushdownNodeProjectionsNames =
-                    pushdownProjectNode->names();
+                pushdownNodeProjectionsNames = pushdownProjectNode->names();
 
                 for (auto pushdownName : pushdownNodeProjectionsNames) {
                   pushdownProjectExprSets.insert(pushdownName);
@@ -280,7 +282,8 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                       targetExprStr + " AS " + targetExprName);
                 }
 
-                // std::cout << "[DEBUG] target expression: nodeName: " << nodeName
+                // std::cout << "[DEBUG] target expression: nodeName: " <<
+                // nodeName
                 //           << " rewriteExpr: "
                 //           << targetExprStr + " AS " + targetExprName
                 //           << std::endl;
@@ -328,10 +331,11 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
             std::vector<std::string> pushdownProjectExprs(
                 pushdownProjectExprSets.begin(), pushdownProjectExprSets.end());
 
-            std::vector<std::string> pushdownNodeProjectionsNameCopy = pushdownNodeProjectionsNames;
+            std::vector<std::string> pushdownNodeProjectionsNameCopy =
+                pushdownNodeProjectionsNames;
             pushdownNodeProjectionsNameCopy.push_back(pushdownResultName);
-            
-            // std::cout << "[DEBUG]pushdownProjectExprs: " 
+
+            // std::cout << "[DEBUG]pushdownProjectExprs: "
             //           << pushdownProjectExprs << std::endl;
 
             // std::cout << "[DEBUG] pushdownNodeProjectionsNameCopy: "
@@ -342,16 +346,15 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                 exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                     .setRoot(pushdownPlanNode)
                     .project({pushdownProjectExprs})
-                    // Add a helper project node. The reason is using to capture the filed in 
-                    // serialized plan in a more convenient way, the following node will be 
-                    // removed after capture it.
-                    .project({pushdownNodeProjectionsNameCopy}); 
+                    // Add a helper project node. The reason is using to capture
+                    // the filed in serialized plan in a more convenient way,
+                    // the following node will be removed after capture it.
+                    .project({pushdownNodeProjectionsNameCopy});
 
             // std::cout << "[DEBUG] pushdownNodePlanBuilder: "
             //           << pushdownNodePlanBuilder.planNode()->toString(
             //                  true, true)
             //           << std::endl;
-
 
             auto serializedPushdownPlan =
                 pushdownNodePlanBuilder.planNode()->serialize();
@@ -371,17 +374,19 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
             assert(!pushdownExprFiled.empty());
             // remove the last helper node
-            pushdownNodePlanBuilder = pushdownNodePlanBuilder.setRoot(pushdownNodePlanBuilder.planNode()->sources()[0]);
-            serializedPushdownPlan = pushdownNodePlanBuilder.planNode()->serialize();
+            pushdownNodePlanBuilder = pushdownNodePlanBuilder.setRoot(
+                pushdownNodePlanBuilder.planNode()->sources()[0]);
+            serializedPushdownPlan =
+                pushdownNodePlanBuilder.planNode()->serialize();
 
-            // auto newPushdownNodeId = pushdownNodePlanBuilder.planNode()->id();
-            // .project({"pushdown_0", "user_id", "user_description"});
-            // std::cout << "[DEBUG] pushdownNodePlanBuilder: "
+            // auto newPushdownNodeId =
+            // pushdownNodePlanBuilder.planNode()->id(); .project({"pushdown_0",
+            // "user_id", "user_description"}); std::cout << "[DEBUG]
+            // pushdownNodePlanBuilder: "
             //           << pushdownNodePlanBuilder.planNode()->toString(
             //                  true, true)
             //           << std::endl;
 
-            
             auto serializedPlan = planBuilder.planNode()->serialize();
             replaceSourceWithIdInSerializedPlan(
                 serializedPlan, serializedPushdownPlan, finalPushdownNodeId);
@@ -398,7 +403,7 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
             //           << std::endl;
 
             auto curNodeInUpdatePlan =
-                    findPlanNodeById(deserlizedUpdatedPlanNode, curNode->id());
+                findPlanNodeById(deserlizedUpdatedPlanNode, curNode->id());
 
             std::vector<std::string> nodeIdsBetweenSourceAndTarget;
             findNodeIdsBetweenIds(
@@ -406,13 +411,13 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                 pushdownNodePlanBuilder.planNode()->id(),
                 curNodeInUpdatePlan->id(),
                 nodeIdsBetweenSourceAndTarget);
-            // std::cout << "[DEBUG] src Node Id: " << pushdownNodePlanBuilder.planNode()->id()
-            //           << " target Node Id: " << curNodeInUpdatePlan->id() << std::endl;
+            // std::cout << "[DEBUG] src Node Id: " <<
+            // pushdownNodePlanBuilder.planNode()->id()
+            //           << " target Node Id: " << curNodeInUpdatePlan->id() <<
+            //           std::endl;
 
             // std::cout << "[DEBUG] nodeIdsBetweenSourceAndTarget: "
             //           << nodeIdsBetweenSourceAndTarget << std::endl;
-
-            
 
             // std::cout << "[DEBUG] pushdownExprFiled: "
             //           << pushdownExprFiled
@@ -422,7 +427,10 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
             //           << serializedPlan
             //           << std::endl;
 
-            addProjectionFiledInSerializedPlan(serializedPlan, pushdownExprFiled, nodeIdsBetweenSourceAndTarget);
+            addProjectionFiledInSerializedPlan(
+                serializedPlan,
+                pushdownExprFiled,
+                nodeIdsBetweenSourceAndTarget);
 
             // std::cout << "[DEBUG] query plan after add filed: "
             //           << serializedPlan
@@ -431,50 +439,50 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
             deserlizedUpdatedPlanNode =
                 ISerializable::deserialize<core::PlanNode>(
                     serializedPlan, pool_.get());
-            
+
             // std::cout << "[DEBUG] success of add filed" << std::endl;
 
             // if (isPartialPushDown) {
-              // if it is partially pushdown, we need to create a new project
-              // node to replace the curNode in new plan to finish the computation
-              // after the pushdown expression
-              std::string curNodeId = curNode->id();
-              auto curNodeInUpdatedPlan =
-                      findPlanNodeById(deserlizedUpdatedPlanNode, curNodeId);
-              
-              std::vector<std::string> targetProjectExprs(
-                  targetProjectExprSets.begin(), targetProjectExprSets.end());
+            // if it is partially pushdown, we need to create a new project
+            // node to replace the curNode in new plan to finish the computation
+            // after the pushdown expression
+            std::string curNodeId = curNode->id();
+            auto curNodeInUpdatedPlan =
+                findPlanNodeById(deserlizedUpdatedPlanNode, curNodeId);
 
-              // std::cout << "[DEBUG] findRewriteTarget: " << findRewriteTarget
-              //           << std::endl;
-              // std::cout << "[DEBUG] pushdownProjectExprSets: "
-              //           << pushdownProjectExprSets << std::endl;
-              // std::cout << "[DEBUG] targetProjectExprSets: "
-              //           << targetProjectExprSets << std::endl;
+            std::vector<std::string> targetProjectExprs(
+                targetProjectExprSets.begin(), targetProjectExprSets.end());
 
-              auto rewritePlan =
-                    exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+            // std::cout << "[DEBUG] findRewriteTarget: " << findRewriteTarget
+            //           << std::endl;
+            // std::cout << "[DEBUG] pushdownProjectExprSets: "
+            //           << pushdownProjectExprSets << std::endl;
+            // std::cout << "[DEBUG] targetProjectExprSets: "
+            //           << targetProjectExprSets << std::endl;
+
+            auto rewritePlan =
+                exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                     .setRoot(curNodeInUpdatedPlan->sources()[0])
                     .project(targetProjectExprs);
 
-              // std::cout << "[DEBUG] rewritePlan: "
-              //           << rewritePlan.planNode()->toString(true, true)
-              //           << std::endl;
-              
-              auto serializedNewSource =
-                  rewritePlan.planNode()->serialize();
-              
-              replaceSourceWithIdInSerializedPlan(
-                  serializedPlan, serializedNewSource, curNodeId);
-              
-              auto deserlizedFinalPlanNode =
-                      ISerializable::deserialize<core::PlanNode>(
-                          serializedPlan, pool_.get());
-              planBuilder.setRoot(deserlizedFinalPlanNode);
+            // std::cout << "[DEBUG] rewritePlan: "
+            //           << rewritePlan.planNode()->toString(true, true)
+            //           << std::endl;
+
+            auto serializedNewSource = rewritePlan.planNode()->serialize();
+
+            replaceSourceWithIdInSerializedPlan(
+                serializedPlan, serializedNewSource, curNodeId);
+
+            auto deserlizedFinalPlanNode =
+                ISerializable::deserialize<core::PlanNode>(
+                    serializedPlan, pool_.get());
+            planBuilder.setRoot(deserlizedFinalPlanNode);
             // } else {
             //   planBuilder.setRoot(deserlizedUpdatedPlanNode);
             // }
-            // std::cout << "[INFO] final serialized query plan: \n" << serializedPlan << std::endl;
+            // std::cout << "[INFO] final serialized query plan: \n" <<
+            // serializedPlan << std::endl;
 
             // std::cout << "[DEBUG] query plan after add filed: "
             //           << deserlizedUpdatedPlanNode->toString(true, true)
@@ -485,14 +493,101 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
             // folly::dynamic&
 
             // std::cout << "[DEBUG] final plan: \n"
-            //           << planBuilder.planNode()->toString(true,true) << std::endl;
+            //           << planBuilder.planNode()->toString(true,true) <<
+            //           std::endl;
+          }
+        } else if (nodeName == "Filter") {
+          auto myFilterNode =
+              std::dynamic_pointer_cast<const FilterNode>(curNode);
 
-            
+          if (!myFilterNode) {
+            throw std::runtime_error("Failed to cast to FilterNode");
+          }
+
+          // Each filter node has only one expression
+          auto filterExpression = myFilterNode->filter();
+          std::string exprStr = filterExpression->toString();
+          std::string finalPushdownNodeId;
+          std::shared_ptr<const core::PlanNode> pushdownPlanNode;
+          if (exprStr.find(target) != std::string::npos) {
+            // Capture the data src
+            std::vector<string> matchedDataSources =
+                findDataSrcFromExpr(exprStr);
+
+            findPushdownNodeId(
+                curNode,
+                exprStr,
+                matchedDataSources,
+                curNode->id(),
+                finalPushdownNodeId);
+            if (finalPushdownNodeId != "") {
+              // get the candidateNode
+              pushdownPlanNode = findPlanNodeById(curNode, finalPushdownNodeId);
+              // it should be found
+              assert(pushdownPlanNode);
+            }
+
+            // Parse the target pushdown expressions to make it can be
+            // recognized by Velox by removing ROW
+            std::string pushDownExpression = target;
+            std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+            std::smatch matches;
+            // Start position for the search
+            std::string::const_iterator searchStart(target.cbegin());
+            int rewriteSrcIdx = 0;
+            // Search out the matched data source and store in matches
+            while (std::regex_search(
+                searchStart, target.cend(), matches, patternToMatchRawSource)) {
+              auto matchedDataSrc = matches[1].str();
+              std::regex patternOfReplaceExpr(escapeRegex(matches[0].str()));
+              pushDownExpression = std::regex_replace(
+                  pushDownExpression, patternOfReplaceExpr, matchedDataSrc);
+              // Update the search start position
+              searchStart = matches.suffix().first;
+              // pushDownExpression = escapeRegex(pushDownExpression);
+            }
+
+            // Invoke the cast function to fix the parsing issue
+            if (pushDownExpression.find("cast") != std::string::npos) {
+              pushDownExpression =
+                  fix_cast_function_parsing(pushDownExpression);
+            }
+            pushDownExpression = replaceDoubleQuotes(pushDownExpression);
+
+            // Add a filter node after the pushdown node
+            auto pushdownNodePlanBuilder =
+                exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .setRoot(pushdownPlanNode)
+                    .filter(pushDownExpression);
+
+            auto serializedPushdownPlan =
+                pushdownNodePlanBuilder.planNode()->serialize();
+            auto serializedPlan = planBuilder.planNode()->serialize();
+            replaceSourceWithIdInSerializedPlan(
+                serializedPlan, serializedPushdownPlan, finalPushdownNodeId);
+
+            auto deserlizedUpdatedPlanNode =
+                ISerializable::deserialize<core::PlanNode>(
+                    serializedPlan, pool_.get());
+
+            auto curNodeInUpdatedPlan =
+                findPlanNodeById(deserlizedUpdatedPlanNode, curNode->id());
+            auto rewritePlanByRemovePushdownedFilter =
+                exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .setRoot(curNodeInUpdatedPlan->sources()[0]);
+            auto serializedNewSource =
+                rewritePlanByRemovePushdownedFilter.planNode()->serialize();
+            replaceSourceWithIdInSerializedPlan(
+                serializedPlan, serializedNewSource, curNode->id());
+
+            auto deserlizedFinalPlanNode =
+                ISerializable::deserialize<core::PlanNode>(
+                    serializedPlan, pool_.get());
+            planBuilder.setRoot(deserlizedFinalPlanNode);
           }
         }
       }
 
-      
       // Serach lower level plan node
       std::vector<std::shared_ptr<const PlanNode>> sources = curNode->sources();
       // Until leaf node
@@ -549,7 +644,7 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
       std::vector<TypedExprPtr> expressions;
       // Currently we support Project and Filter nodes pushdown,
-      // need to use different cast for different node types to 
+      // need to use different cast for different node types to
       // obtain the expressions
       if (nodeName == "Project") {
         auto myProjectNode =
@@ -581,10 +676,11 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
         // Not-Support:    |<----Pushdown:---->|
         // softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))
         std::string expr = expression->toString();
-        // Note: the ordering of stored expression is starting from including all UDFs
-        // then excluding the outermost UDFs.
-        // Example of matchedExprs:
-        // {softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))), mat_add(mat_mul(relu(mat_add(mat_mul(v)))), mat_mul(relu(mat_add(mat_mul(v)))}
+        // Note: the ordering of stored expression is starting from including
+        // all UDFs then excluding the outermost UDFs. Example of matchedExprs:
+        // {softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))),
+        // mat_add(mat_mul(relu(mat_add(mat_mul(v)))),
+        // mat_mul(relu(mat_add(mat_mul(v)))}
         std::vector<std::string> parsedSingleExprs;
         std::vector<std::string> matchedExprs;
         parseDLExpressions(expr, parsedSingleExprs, matchedExprs);
@@ -600,8 +696,9 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
           if (mayPushdown(
                   rootNode, targetExprStr, matchedDataSources, curNodeId)) {
             targetActions.push_back(targetExprStr);
-            // If found a pushdown target, then break the loop, since the afterward expressions
-            // are included in the current iterated expression
+            // If found a pushdown target, then break the loop, since the
+            // afterward expressions are included in the current iterated
+            // expression
             break;
           }
         }
