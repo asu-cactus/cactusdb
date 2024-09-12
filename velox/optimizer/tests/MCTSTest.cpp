@@ -97,14 +97,6 @@ std::vector<std::vector<float>> loadHDF5Array(const std::string& filename, const
       throw std::runtime_error("Unsupported rank: " + std::to_string(rank));
     }
 
-    // Get dimensions
-    // hsize_t dims[2];
-    // dataspace.getSimpleExtentDims(dims, nullptr);
-    // size_t rows = dims[0];
-    // size_t cols = dims[1];
-
-    // std::cout << "Rows: " << dims[0] << ", Cols: " << dims[1] << std::endl;
-
     // Read data into a 1D vector
     std::vector<float> flatData(rows * cols);
     dataset.read(flatData.data(), H5::PredType::NATIVE_FLOAT);
@@ -1534,15 +1526,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
 
     optimization::registerVectorFunction(
-        "chatgpt_server1",
-        ChatGPT::signatures(),
-        std::make_unique<ChatGPT>(),
-        {},
-        true,
-        catalog);
-
-    optimization::registerVectorFunction(
-        "chatgpt_server2",
+        "chatgpt_server",
         ChatGPT::signatures(),
         std::make_unique<ChatGPT>(),
         {},
@@ -2009,8 +1993,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                       .project(
                           {"CAST(id AS VARCHAR) AS movie_id",
                            "description AS movie_description",
-                          //  "array_constructor(popularity, vote_average, vote_count) AS movie_description_array",
-                           "convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count)) AS movie_description_array",
+                           "llm_ffnn_minmax_scaler(convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count))) AS movie_description_array",
                            "spoken_languages",
                            })
                       .planNode(),
@@ -2033,26 +2016,27 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                    "movie_id",
                    "spoken_languages",
                    "movie_description_array",
-                   "chatgpt_server1(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
-                   "chatgpt_server2(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
+                   "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
+                   "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"
+                  })
               .project(
                   {"user_id",
                    "movie_id",
                    "spoken_languages",
                    "movie_description_array",
-                  //  "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"
+                   "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"
                   })
               .project(
                 {
                   "user_id",
                   "movie_id",
                   "spoken_languages",
-                  "movie_description_array",
-                  "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(llm_ffnn_minmax_scaler(movie_description_array))))))))",
-                  // "result"
+                  "result",
+                  "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(movie_description_array))))))) AS trending_prediction",
                 }
               )
-              // .filter("spoken_languages LIKE '\%Français\%'")
+              .filter("spoken_languages LIKE '\%English\%'")
+              .filter("trending_prediction = 1")
               ;
       cataLog.setIdAddressMap(
           readUserDataPlanNodeId,
@@ -2668,7 +2652,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 DEFINE_string(mode, "mcts", "Mode: mcts or benchmark");
 DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower, llm");
 DEFINE_bool(rewrite, true, "Whether  rewrite");
-DEFINE_int32(num_repeat, 5, "Number of repeat run");
+DEFINE_int32(num_repeat, 1, "Number of repeat run");
 DEFINE_int32(feature_size, 1000, "FFNN Feature size");
 DEFINE_int32(num_sample, 1000, "Number of samples");
 DEFINE_int32(num_driver, 8, "Number of drivers");
