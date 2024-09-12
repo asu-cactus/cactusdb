@@ -482,8 +482,10 @@ void addProjectionFiledInSerializedPlan(
       serializedPlan["outputType"]["cTypes"].push_back(filedToBeAdded["type"]);
       serializedPlan["outputType"]["names"].push_back(
           filedToBeAdded["fieldName"]);
+    } else if (currentNodeName.find("Filter") != std::string::npos) {
+      // No need to add the filed to the FilterNode
     } else {
-      throw std::runtime_error("Unsupported node type: " + currentNodeName);
+      throw std::runtime_error("[Helper] addProjectionFiledInSerializedPlan: Unsupported node type: " + currentNodeName);
     }
   }
 
@@ -493,5 +495,20 @@ void addProjectionFiledInSerializedPlan(
   }
 
   return;
+}
+
+// In Velox, when parsing the cast function, parentheses are omitted in the exprStr output, 
+// making it unusable directly. This function reconstructs the correct cast 
+// expression by adding the necessary parentheses to match the body of the expression.
+// For example:
+// Input: eq(cast argmax(ROW["trending_prediction"]) as BIGINT, 1)
+// Output: eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
+std::string fix_cast_function_parsing(std::string input) {
+  // Use regex to match the pattern "cast" followed by a space and a function call
+  std::regex cast_regex(R"(cast\s+(\w+\(.*?\))\s+as\s+(\w+))");
+  
+  // Use a lambda function for the replacement to insert parentheses
+  std::string result = std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
+  return result;
 }
 } // namespace optimization
