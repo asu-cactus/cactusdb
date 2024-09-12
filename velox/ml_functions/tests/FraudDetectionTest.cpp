@@ -89,19 +89,20 @@ class IsWeekday : public MLFunction {
     exec::LocalDecodedVector vecHolder(context, *baseVec, rows);
     auto decodedArray = vecHolder.get();
     auto inputTimes = decodedArray->base()->as<FlatVector<int64_t>>();
-    //auto inputTimes = args[0]->as<FlatVector<int64_t>>();
 
     const int secondsInADay = 86400;
     for (int i = 0; i < rows.size(); i++) {
         int64_t timestamp = inputTimes->valueAt(i);
-        // Calculate the number of days since Unix epoch
-        int64_t daysSinceEpoch = timestamp / secondsInADay;
 
+        std::time_t time = static_cast<std::time_t>(timestamp);
+        std::tm* time_info = std::localtime(&time);
+        int dayOfWeek = time_info->tm_wday;
+
+        /*int64_t daysSinceEpoch = timestamp / secondsInADay;
         // Unix epoch (Jan 1, 1970) was a Thursday, so dayOfWeek for epoch is 4 (0=Sunday, 6=Saturday)
         int dayOfWeekEpoch = 4;  // Thursday
-
         // Calculate the current day of the week (0=Sunday, ..., 6=Saturday)
-        int dayOfWeek = (daysSinceEpoch + dayOfWeekEpoch) % 7;
+        int dayOfWeek = (daysSinceEpoch + dayOfWeekEpoch) % 7;*/
 
         // Return true if the day is Saturday (6) or Sunday (0)
         if (dayOfWeek == 0 || dayOfWeek == 6) {
@@ -232,24 +233,25 @@ class GetTransactionFeatures : public MLFunction {
     auto tTimestamps = decodedArray3->base()->as<FlatVector<int64_t>>();
 
     for (int i = 0; i < rows.size(); i++) {
-        int64_t totalOrder = totalOrders->valueAt(i);
-        float tAmount = tAmounts->valueAt(i);
-        int64_t timeDiff = timeDiffs->valueAt(i);
+        float totalOrder = (static_cast<float>(totalOrders->valueAt(i)))/79.0;
+        float tAmount = (tAmounts->valueAt(i))/16048.0;
+        float timeDiff = (static_cast<float>(timeDiffs->valueAt(i)))/729.0;
         int64_t tTimestamp = tTimestamps->valueAt(i);
 
+        // Calculate day of week
+        std::time_t time = static_cast<std::time_t>(tTimestamp);
+        std::tm* time_info = std::localtime(&time);
+        float dayOfWeek = (static_cast<float>(time_info->tm_wday))/6.0;
+
         // Calculate the number of days since Unix epoch
-        int64_t daysSinceEpoch = tTimestamp / secondsInADay;
-        // Unix epoch (Jan 1, 1970) was a Thursday, so dayOfWeek for epoch is 4 (0=Sunday, 6=Saturday)
-        int dayOfWeekEpoch = 4;  // Thursday
-        // Calculate the current day of the week (0=Sunday, ..., 6=Saturday)
-        int dayOfWeek = (daysSinceEpoch + dayOfWeekEpoch) % 7;
+        float daysSinceEpoch = (static_cast<float>(tTimestamp / secondsInADay))/15338.0;
 
         std::vector<float> vec;
-        vec.push_back(static_cast<float>(totalOrder));
+        vec.push_back(totalOrder);
         vec.push_back(tAmount);
-        vec.push_back(static_cast<float>(timeDiff));
-        vec.push_back(static_cast<float>(dayOfWeek));
-        vec.push_back(static_cast<float>(daysSinceEpoch));
+        vec.push_back(timeDiff);
+        vec.push_back(dayOfWeek);
+        vec.push_back(daysSinceEpoch);
 
         results.push_back(vec);
     }
@@ -322,16 +324,16 @@ class GetCustomerFeatures : public MLFunction {
     auto cAges = decodedArray3->base()->as<FlatVector<int>>();
 
     for (int i = 0; i < rows.size(); i++) {
-        int cAddressNum = cAddressNums->valueAt(i);
-        int cCustFlag = cCustFlags->valueAt(i);
-        int cBirthCountry = cBirthCountries->valueAt(i);
-        int cAge = cAges->valueAt(i);
+        float cAddressNum = (static_cast<float>(cAddressNums->valueAt(i)))/35352.0;
+        float cCustFlag = static_cast<float>(cCustFlags->valueAt(i));
+        float cBirthCountry = (static_cast<float>(cBirthCountries->valueAt(i)))/211.0;
+        float cAge = (static_cast<float>(cAges->valueAt(i)))/94.0;
 
         std::vector<float> vec;
-        vec.push_back(static_cast<float>(cAddressNum));
-        vec.push_back(static_cast<float>(cCustFlag));
-        vec.push_back(static_cast<float>(cBirthCountry));
-        vec.push_back(static_cast<float>(cAge));
+        vec.push_back(cAddressNum);
+        vec.push_back(cCustFlag);
+        vec.push_back(cBirthCountry);
+        vec.push_back(cAge);
 
         results.push_back(vec);
     }
@@ -455,12 +457,11 @@ class DateToTimestamp : public MLFunction {
     auto decodedStringInput = decodedStringHolder.get();
 
     std::vector<int64_t> results;
-    struct std::tm t;
+    struct std::tm t = {};
 
     for (int i = 0; i < rows.size(); i++) {
       StringView val = decodedStringInput->valueAt<StringView>(i);
       std::string inputStr = std::string(val);
-      //std::string inputStr = std::string(inputStrings->valueAt(i));// + " 00:00:00";
 
       std::istringstream ss(inputStr);
       ss >> std::get_time(&t, dateFormat);
@@ -599,6 +600,7 @@ class FraudDetectionTest : public HiveConnectorTestBase {
   ~FraudDetectionTest() {}
 
   void registerFunctions(std::string modelFilePath, int numCols);
+  void registerNNFunctions(int numCols);
   void run( int option, int numDataSplits, int numTreeSplits, int numTreeRows, int dataBatchSize, int numRows, int numCols, std::string dataFilePath, std::string modelFilePath, std::string orderDataFilePath);
 
   RowVectorPtr getOrderData(std::string filePath);
@@ -645,27 +647,6 @@ class FraudDetectionTest : public HiveConnectorTestBase {
 };
 
 void FraudDetectionTest::registerFunctions(std::string modelFilePath, int numCols) {
-
-  std::cout <<"To register function for TreePrediction" << std::endl;
-
-  exec::registerVectorFunction(
-      "decision_tree_predict",
-      TreePrediction::signatures(),
-      std::make_unique<TreePrediction>(0, "resources/model/fraud_xgboost_10_8/0.txt", 28, false));
-
-  std::cout << "To register function for XGBoost Prediction" << std::endl;
-
-  exec::registerVectorFunction(
-      "xgboost_predict",
-      TreePrediction::signatures(),
-      std::make_unique<ForestPrediction>(modelFilePath, numCols, true));
-
-  std::cout << "To register function for Concatenation" << std::endl;
-
-  exec::registerVectorFunction(
-      "concat_vectors",
-      Concat::signatures(),
-      std::make_unique<Concat>(10, 18));
   
   exec::registerVectorFunction(
       "is_weekday",
@@ -734,11 +715,74 @@ void FraudDetectionTest::registerFunctions(std::string modelFilePath, int numCol
           std::make_unique<ForestPrediction>(xgboost_fraud_transaction_path, 5, true));
     std::cout << "Completed registering function for xgboost_fraud_transaction" << std::endl;
 
-  exec::registerVectorFunction(
-        "relu", Relu::signatures(), std::make_unique<Relu>());
+}
+
+
+void FraudDetectionTest::registerNNFunctions(int numCols) {
+
+  std::vector<std::vector<float>> w1 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc1.weight", 0);
+  std::vector<std::vector<float>> b1 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc1.bias", 0);
+  std::vector<std::vector<float>> w2 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc2.weight", 0);
+  std::vector<std::vector<float>> b2 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc2.bias", 0);
+  std::vector<std::vector<float>> w3 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc3.weight", 0);
+  std::vector<std::vector<float>> b3 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc3.bias", 0);
+
+  auto itemNNweight1Vector = maker.arrayVector<float>(w1, REAL());
+  auto itemNNweight2Vector = maker.arrayVector<float>(w2, REAL());
+  auto itemNNweight3Vector = maker.arrayVector<float>(w3, REAL());
+  auto itemNNBias1Vector = maker.arrayVector<float>(b1, REAL());
+  auto itemNNBias2Vector = maker.arrayVector<float>(b2, REAL());
+  auto itemNNBias3Vector = maker.arrayVector<float>(b3, REAL());
 
   exec::registerVectorFunction(
-        "softmax", Softmax::signatures(), std::make_unique<Softmax>());
+      "mat_mul_1",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(itemNNweight1Vector->elements()->values()->asMutable<float>()),
+          numCols,
+          32));
+
+  exec::registerVectorFunction(
+      "mat_vector_add_1",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(itemNNBias1Vector->elements()->values()->asMutable<float>()), 32));
+
+  exec::registerVectorFunction(
+      "mat_mul_2",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(itemNNweight2Vector->elements()->values()->asMutable<float>()),
+          32,
+          16));
+
+  exec::registerVectorFunction(
+      "mat_vector_add_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(itemNNBias2Vector->elements()->values()->asMutable<float>()), 16));
+
+  exec::registerVectorFunction(
+      "mat_mul_3",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(itemNNweight3Vector->elements()->values()->asMutable<float>()),
+          16,
+          2));
+
+  exec::registerVectorFunction(
+      "mat_vector_add_3",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(itemNNBias3Vector->elements()->values()->asMutable<float>()), 2));
+
+  exec::registerVectorFunction(
+      "relu", Relu::signatures(), std::make_unique<Relu>(),
+          {},
+          true);
+
+  exec::registerVectorFunction(
+      "softmax", Softmax::signatures(), std::make_unique<Softmax>());
 
 }
 
@@ -1222,36 +1266,7 @@ void FraudDetectionTest::testingWithRealData(int numDataSplits, int dataBatchSiz
      RowVectorPtr customerRowVector = getCustomerData("resources/data/customer.csv");
      std::cout << "customerRowVector data generated" << std::endl;
 
-     //std::cout << "printing w1" << std::endl;
-     std::vector<std::vector<float>> w1 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc1.weight", 0);
-     //std::cout << "printing b1" << std::endl;
-     std::vector<std::vector<float>> b1 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc1.bias", 0);
-     std::vector<std::vector<float>> w2 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc2.weight", 0);
-     std::vector<std::vector<float>> b2 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc2.bias", 0);
-     std::vector<std::vector<float>> w3 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc3.weight", 0);
-     std::vector<std::vector<float>> b3 = loadHDF5Array("resources/model/fraud_dnn_weights.h5", "fc3.bias", 0);
-
-     auto itemNNweight1Vector = maker.arrayVector<float>(w1, REAL());
-     auto itemNNweight2Vector = maker.arrayVector<float>(w2, REAL());
-     auto itemNNweight3Vector = maker.arrayVector<float>(w3, REAL());
-     auto itemNNBias1Vector = maker.arrayVector<float>(b1, REAL());
-     auto itemNNBias2Vector = maker.arrayVector<float>(b2, REAL());
-     auto itemNNBias3Vector = maker.arrayVector<float>(b3, REAL());
-
-     std::string dnn_fraud_model =  NNBuilder()
-                                  .denseLayer(32, 9,
-                                  itemNNweight1Vector->elements()->values()->asMutable<float>(),
-                                  itemNNBias1Vector->elements()->values()->asMutable<float>(),
-                                  NNBuilder::RELU)
-                                  .denseLayer(16, 32,
-                                  itemNNweight2Vector->elements()->values()->asMutable<float>(),
-                                  itemNNBias2Vector->elements()->values()->asMutable<float>(),
-                                  NNBuilder::RELU)
-                                  .denseLayer(2, 16,
-                                  itemNNweight3Vector->elements()->values()->asMutable<float>(),
-                                  itemNNBias3Vector->elements()->values()->asMutable<float>(),
-                                  NNBuilder::SOFTMAX)
-                                  .build();
+     registerNNFunctions(9);
 
      auto dataHiveSplits =  makeHiveConnectorSplits(path, numDataSplits, dwio::common::FileFormat::DWRF);
 
@@ -1275,7 +1290,7 @@ void FraudDetectionTest::testingWithRealData(int numDataSplits, int dataBatchSiz
                              core::JoinType::kInner
                          )
                          .project({"o_customer_sk", "total_order", "transaction_id", "t_amount", "t_timestamp", "time_diff_in_days(o_last_order_time, t_timestamp) as time_diff"})
-                         .filter("time_diff <= 28")
+                         .filter("time_diff <= 500")
                          .project({"o_customer_sk", "transaction_id", "get_transaction_features(total_order, t_amount, time_diff, t_timestamp) as transaction_features"})
                          .filter("xgboost_fraud_transaction(transaction_features) >= 0.5")
                          .hashJoin({"o_customer_sk"},
@@ -1289,10 +1304,9 @@ void FraudDetectionTest::testingWithRealData(int numDataSplits, int dataBatchSiz
                              {"transaction_id", "transaction_features", "customer_features"}
                          )
                          .project({"transaction_id", "concat_vectors2(customer_features, transaction_features) AS all_features"})
-                         .project({"transaction_id", "all_features"})
-                         .filter("xgboost_fraud_predict(all_features) >= 0.5")
-                         .project({"transaction_id", fmt::format(dnn_fraud_model, "all_features") + " AS fraudulent_probs"})
+                         .project({"transaction_id", "all_features", "softmax(mat_vector_add_3(mat_mul_3(relu(mat_vector_add_2(mat_mul_2(relu(mat_vector_add_1(mat_mul_1(all_features))))))))) AS fraudulent_probs"})
                          .filter("get_binary_class(fraudulent_probs) = 1")
+                         .filter("xgboost_fraud_predict(all_features) >= 0.5")
                          .project({"transaction_id"})
                          .planNode();
    
@@ -1303,6 +1317,7 @@ void FraudDetectionTest::testingWithRealData(int numDataSplits, int dataBatchSiz
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
     //std::cout << "Results:" << results->toString() << std::endl;
+    std::cout << "Results Size: " << results->size() << std::endl;
     std::cout << results->toString(0, 5) << std::endl;
    
     std::cout << "Time for Executing with Real Data (sec): " << std::endl;
