@@ -1191,7 +1191,8 @@ namespace velox::dl {
     MatAdd,
     ReLU,
     Softmax,
-    BatchNorm
+    BatchNorm,
+    Argmax
       };
 
   std::ostream& operator<<(std::ostream& os, KernelType kernelType) {
@@ -1201,10 +1202,21 @@ namespace velox::dl {
         case KernelType::ReLU:     return os << "ReLU";
         case KernelType::Softmax:  return os << "Softmax";
         case KernelType::BatchNorm:return os << "BatchNorm";
+        case KernelType::Argmax:   return os << "Argmax";
         default:                   return os << "Unknown";
     }
 }
 }; // namespace velox::dl::kernel
+
+struct LibTorchArgmaxKernel : torch::nn::Module {
+    int64_t dim;
+
+    LibTorchArgmaxKernel(int64_t dim_) : dim(dim_) {}
+
+    torch::Tensor forward(torch::Tensor x) {
+        return torch::argmax(x, dim);
+    }
+};
 
 
 class TorchDNNV2 : public MLFunction {
@@ -1216,6 +1228,7 @@ public:
         kernelTypes_ = kernelTypes;
         int numLayers = kernelTypes.size();
         int weightIdx = 0;
+        hasArgmax_ = false;
         model_ = torch::nn::Sequential();
         for (int i = 0; i < numLayers; ++i) {
           if (kernelTypes[i] == velox::dl::KernelType::MatMul && kernelTypes[i+1] == velox::dl::KernelType::MatAdd) {
@@ -1223,6 +1236,8 @@ public:
             denseLayer->weight.set_data(torch::from_blob(weights[weightIdx++], {dims[i], dims[i+1]}).t());
             denseLayer->bias.set_data(torch::from_blob(weights[weightIdx++], {dims[i+1]}));
             model_->push_back(denseLayer);
+          } else if (kernelTypes[i] == velox::dl::KernelType::MatAdd) {
+            // Do nothing, which is handled by creating a Dense Layer in the above code
           } else if (kernelTypes[i] == velox::dl::KernelType::BatchNorm) {
             auto batchNormLayer = torch::nn::BatchNorm1d(dims[i]);
             batchNormLayer->weight.set_data(torch::from_blob(weights[weightIdx++], {dims[i+1]}));
@@ -1232,6 +1247,11 @@ public:
             model_->push_back(torch::nn::ReLU());
           } else if (kernelTypes[i] == velox::dl::KernelType::Softmax) {
             model_->push_back(torch::nn::Softmax(1));
+          } else if (kernelTypes[i] == velox::dl::KernelType::Argmax) {
+            model_->push_back(LibTorchArgmaxKernel(1));
+            hasArgmax_ = true;
+          } else {
+            throw std::runtime_error(fmt::format("Unsupported kernel type of TorchDNNV2: {}",kernelTypes[i]));
           }
         }
       // enable evaluation mode, this is required for inference, otherwise some module could 
@@ -1253,21 +1273,37 @@ public:
         torch::Tensor output_tensor = input;
 
         output_tensor = const_cast<torch::nn::Sequential&>(model_)->forward(output_tensor);
-        float* data = output_tensor.data_ptr<float>();
-
-        // Prepare results
-        std::vector<std::vector<float>> results;
-        for (int i = 0; i < rows.size(); ++i) {
-            std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
-            results.push_back(result);
-        }
         VectorMaker maker{context.pool()};
-        output = maker.arrayVector<float>(results, REAL());
+        VectorPtr& localResult = output;
+
+        if (hasArgmax_) {
+          // convert to int
+          auto int_tensor = output_tensor.to(torch::kInt);               
+          int* data = int_tensor.data_ptr<int>();
+          std::vector<int> results(data, data + rows.size());
+          //output = maker.flatVector<int>(results, INTEGER());
+          localResult = maker.flatVector<int>(results, INTEGER());
+        } else {
+          float* data = output_tensor.data_ptr<float>();
+          std::vector<std::vector<float>> results;
+          for (int i = 0; i < rows.size(); ++i) {
+              std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
+              results.push_back(result);
+          }
+          localResult = maker.arrayVector<float>(results, REAL());
+        }
+
+        context.moveOrCopyResult(localResult, rows, output);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
         return {exec::FunctionSignatureBuilder()
                      .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build(),
+                // Output flat vector of int when Argmax is applied
+                exec::FunctionSignatureBuilder()
+                     .returnType("INTEGER")
                      .argumentType("array(REAL)")
                      .build()};
     }
@@ -1306,6 +1342,7 @@ private:
     std::vector<float*> weights;
     std::vector<float*> bias;
     std::vector<velox::dl::KernelType> kernelTypes_;
+    bool hasArgmax_;
     // std::vector<torch::nn::AnyModule> layers_;
 
     torch::nn::Sequential model_;
