@@ -145,6 +145,7 @@ class CataLog {
   // Set file address map for a given PlanNodeId
   void setIdAddressMap(core::PlanNodeId p, std::vector<std::string> filePath) {
     idFileAddrMap[p] = filePath;
+    idFileFormatMap[p] = dwio::common::FileFormat::DWRF;
   }
 
   // Set file address map for a given PlanNodeId
