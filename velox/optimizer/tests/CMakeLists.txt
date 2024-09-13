@@ -4,10 +4,8 @@ add_definitions(-DC10_USE_GLOG)
 
 include_directories("/usr/include/hdf5/serial")
 include_directories("/home/h5cpp/build/src/h5cpp")
-# set(h5cpp_DIR "$HOME/h5cpp")
 
 find_package(h5cpp REQUIRED)
-# find_package(HDF5 REQUIRED)
 find_package(HDF5 COMPONENTS C CXX HL REQUIRED)
 link_directories( ${HDF5_LIBRARY_DIRS} )
 include_directories( ${HDF5_INCLUDE_DIRS} )
