@@ -11,6 +11,7 @@
 #include <string>
 
 // Velox headers
+#include <H5Cpp.h>
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/common/memory/MemoryArbitrator.h"
@@ -37,6 +38,7 @@
 #include "velox/ml_functions/Dropout.h"
 #include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/Encoder.h"
+#include "velox/ml_functions/FraudDetectionFunctions.h"
 #include "velox/ml_functions/NNBuilder.h"
 #include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/UtilFunction.h"
@@ -66,56 +68,57 @@ using namespace facebook::velox::test;
 
 #define BUFFER_SIZE 1024
 
-std::vector<std::vector<float>> loadHDF5Array(const std::string& filename, const std::string& datasetName) {
-    if (!std::filesystem::exists(filename)) {
-          throw std::runtime_error("File not found: " + filename);
+std::vector<std::vector<float>> loadHDF5Array(
+    const std::string& filename,
+    const std::string& datasetName) {
+  if (!std::filesystem::exists(filename)) {
+    throw std::runtime_error("File not found: " + filename);
+  }
+  H5::H5File file(filename, H5F_ACC_RDONLY);
+  H5::DataSet dataset = file.openDataSet(datasetName);
+  H5::DataSpace dataspace = dataset.getSpace();
+
+  // Get the number of dimensions
+  int rank = dataspace.getSimpleExtentNdims();
+  // std::cout << "Rank: " << rank << std::endl;
+
+  // Allocate space for the dimensions
+  std::vector<hsize_t> dims(rank);
+
+  // Get the dataset dimensions
+  dataspace.getSimpleExtentDims(dims.data(), nullptr);
+
+  size_t rows;
+  size_t cols;
+
+  if (rank == 1) {
+    rows = dims[0];
+    cols = 1;
+  } else if (rank == 2) {
+    rows = dims[0];
+    cols = dims[1];
+  } else {
+    throw std::runtime_error("Unsupported rank: " + std::to_string(rank));
+  }
+
+  // Read data into a 1D vector
+  std::vector<float> flatData(rows * cols);
+  dataset.read(flatData.data(), H5::PredType::NATIVE_FLOAT);
+
+  // Convert to 2D vector
+  std::vector<std::vector<float>> result(rows, std::vector<float>(cols));
+  for (size_t i = 0; i < rows; ++i) {
+    for (size_t j = 0; j < cols; ++j) {
+      result[i][j] = flatData[i * cols + j];
     }
-    H5::H5File file(filename, H5F_ACC_RDONLY);
-    H5::DataSet dataset = file.openDataSet(datasetName);
-    H5::DataSpace dataspace = dataset.getSpace();
+  }
 
-    // Get the number of dimensions
-    int rank = dataspace.getSimpleExtentNdims();
-    // std::cout << "Rank: " << rank << std::endl;
+  // Close the dataset and file
+  dataset.close();
+  file.close();
 
-    // Allocate space for the dimensions
-    std::vector<hsize_t> dims(rank);
-
-    // Get the dataset dimensions
-    dataspace.getSimpleExtentDims(dims.data(), nullptr);
-
-    size_t rows;
-    size_t cols;
-
-    if (rank == 1) {
-      rows = dims[0];
-      cols = 1;
-    } else if (rank == 2) {
-      rows = dims[0];
-      cols = dims[1];
-    } else {
-      throw std::runtime_error("Unsupported rank: " + std::to_string(rank));
-    }
-
-    // Read data into a 1D vector
-    std::vector<float> flatData(rows * cols);
-    dataset.read(flatData.data(), H5::PredType::NATIVE_FLOAT);
-
-    // Convert to 2D vector
-    std::vector<std::vector<float>> result(rows, std::vector<float>(cols));
-    for (size_t i = 0; i < rows; ++i) {
-        for (size_t j = 0; j < cols; ++j) {
-            result[i][j] = flatData[i * cols + j];
-        }
-    }
-
-    // Close the dataset and file
-    dataset.close();
-    file.close();
-
-    return result;
+  return result;
 }
-
 
 Json::Value receiveJsonFromSocket(int clientSocket) {
   char messageBuffer[BUFFER_SIZE];
@@ -235,6 +238,264 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     options.compression = compressionKind;
     return std::make_unique<facebook::velox::parquet::Writer>(
         std::move(sink), options, rowType);
+  }
+
+  RowVectorPtr getOrderData(std::string filePath) {
+    std::ifstream file(filePath.c_str());
+
+    if (file.fail()) {
+      std::cerr << "Data File:" << filePath << " => Read Error" << std::endl;
+      exit(1);
+    }
+
+    std::vector<int> oOrderId;
+    std::vector<int> oCustomerSk;
+    std::vector<std::string> oWeekday;
+    std::vector<std::string> oDate;
+
+    std::string line;
+
+    // Ignore the first line (header)
+    if (std::getline(file, line)) {
+      // std::cout << "Ignoring header: " << line << std::endl;
+    }
+
+    while (std::getline(file, line)) { // Read a line from the file
+
+      // std::vector<float> curRow(numCols);
+
+      // std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        /*if (index < 5) {
+            std::cout << colIndex << ": " << numberStr << std::endl;
+        }*/
+        // Trim leading and trailing whitespace from the input string (if any)
+        if (numberStr.size() >= 2 && numberStr.front() == '"' &&
+            numberStr.back() == '"') {
+          numberStr = numberStr.substr(1, numberStr.size() - 2);
+        }
+        if (colIndex == 0) {
+          oOrderId.push_back(std::stoi(numberStr));
+        } else if (colIndex == 1) {
+          oCustomerSk.push_back(std::stoi(numberStr));
+        } else if (colIndex == 2) {
+          oWeekday.push_back(numberStr);
+        } else if (colIndex == 3) {
+          oDate.push_back(numberStr);
+        }
+
+        colIndex++;
+      }
+    }
+
+    file.close();
+
+    // Prepare Customer table
+    auto oOrderIdVector = maker.flatVector<int>(oOrderId);
+    auto oCustomerSkVector = maker.flatVector<int>(oCustomerSk);
+    auto oWeekdayVector = maker.flatVector<std::string>(oWeekday);
+    auto oDateVector = maker.flatVector<std::string>(oDate);
+    auto orderRowVector = maker.rowVector(
+        {"o_order_id", "o_customer_sk", "o_weekday", "o_date"},
+        {oOrderIdVector, oCustomerSkVector, oWeekdayVector, oDateVector});
+
+    return orderRowVector;
+  }
+
+  RowVectorPtr getTransactionData(std::string filePath) {
+    std::ifstream file(filePath.c_str());
+
+    if (file.fail()) {
+      std::cerr << "Data File:" << filePath << " => Read Error" << std::endl;
+      exit(1);
+    }
+
+    std::vector<float> tAmount;
+    std::vector<int> tSender;
+    std::vector<std::string> tReceiver;
+    std::vector<int64_t> transactionId;
+    std::vector<std::string> tTime;
+
+    std::string line;
+
+    // Ignore the first line (header)
+    if (std::getline(file, line)) {
+      // std::cout << "Ignoring header: " << line << std::endl;
+    }
+
+    while (std::getline(file, line)) { // Read a line from the file
+
+      // std::vector<float> curRow(numCols);
+
+      // std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        /*if (index < 5) {
+            std::cout << colIndex << ": " << numberStr << std::endl;
+        }*/
+        // Trim leading and trailing whitespace from the input string (if any)
+        if (numberStr.size() >= 2 && numberStr.front() == '"' &&
+            numberStr.back() == '"') {
+          numberStr = numberStr.substr(1, numberStr.size() - 2);
+        }
+        if (colIndex == 0) {
+          tAmount.push_back(std::stof(numberStr));
+        } else if (colIndex == 1) {
+          tSender.push_back(std::stoi(numberStr));
+        } else if (colIndex == 2) {
+          tReceiver.push_back(numberStr);
+        } else if (colIndex == 3) {
+          transactionId.push_back(std::stoll(numberStr));
+        } else if (colIndex == 4) {
+          tTime.push_back(numberStr);
+        }
+
+        colIndex++;
+      }
+    }
+
+    file.close();
+
+    // Prepare Customer table
+    auto tAmountVector = maker.flatVector<float>(tAmount);
+    auto tSenderVector = maker.flatVector<int>(tSender);
+    auto tReceiverVector = maker.flatVector<std::string>(tReceiver);
+    auto transactionIdVector = maker.flatVector<int64_t>(transactionId);
+    auto tTimeVector = maker.flatVector<std::string>(tTime);
+    auto transactionRowVector = maker.rowVector(
+        {"t_amount", "t_sender", "t_receiver", "transaction_id", "t_time"},
+        {tAmountVector,
+         tSenderVector,
+         tReceiverVector,
+         transactionIdVector,
+         tTimeVector});
+
+    return transactionRowVector;
+  }
+
+  RowVectorPtr getCustomerData(std::string filePath) {
+    std::ifstream file(filePath.c_str());
+
+    if (file.fail()) {
+      std::cerr << "Data File:" << filePath << " => Read Error" << std::endl;
+      exit(1);
+    }
+
+    std::vector<int> cCustomerSk;
+    std::vector<int> cAddrerssNum;
+    std::vector<int> cCustFlag;
+    std::vector<int> cBirthYear;
+    std::vector<int> cBirthCountry;
+
+    std::unordered_map<std::string, int> countryMap = getCountryMap();
+    int countryIndex = countryMap.size();
+
+    std::string line;
+
+    // Ignore the first line (header)
+    if (std::getline(file, line)) {
+      // std::cout << "Ignoring header: " << line << std::endl;
+    }
+
+    while (std::getline(file, line)) { // Read a line from the file
+
+      // std::vector<float> curRow(numCols);
+
+      // std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        /*if (index < 5) {
+            std::cout << colIndex << ": " << numberStr << std::endl;
+        }*/
+        // Trim leading and trailing whitespace from the input string (if any)
+        if (numberStr.size() >= 2 && numberStr.front() == '"' &&
+            numberStr.back() == '"') {
+          numberStr = numberStr.substr(1, numberStr.size() - 2);
+        }
+
+        size_t first = numberStr.find_first_not_of(' ');
+        if (first == std::string::npos)
+          numberStr = "0";
+        else {
+          size_t last = numberStr.find_last_not_of(' ');
+          numberStr = numberStr.substr(first, (last - first + 1));
+        }
+
+        // std::cout << "Column Index: " << colIndex << ", Value: " << numberStr
+        // << std::endl;
+        if (colIndex == 0) {
+          cCustomerSk.push_back(std::stoi(numberStr));
+        } else if (colIndex == 2) {
+          cAddrerssNum.push_back(std::stoi(numberStr));
+        } else if (colIndex == 5) {
+          if (numberStr == "N")
+            cCustFlag.push_back(0);
+          else
+            cCustFlag.push_back(1);
+        } else if (colIndex == 8) {
+          cBirthYear.push_back(std::stoi(numberStr));
+        } else if (colIndex == 9) {
+          if (countryMap.find(numberStr) == countryMap.end()) {
+            // Key does not exist, insert it
+            countryMap[numberStr] = countryIndex;
+            cBirthCountry.push_back(countryIndex);
+            countryIndex++;
+          } else {
+            // Key exists, retrieve its value
+            cBirthCountry.push_back(countryMap[numberStr]);
+          }
+        }
+
+        colIndex++;
+      }
+    }
+
+    file.close();
+
+    // Prepare Customer table
+    auto cCustomerSkVector = maker.flatVector<int>(cCustomerSk);
+    auto cAddrerssNumVector = maker.flatVector<int>(cAddrerssNum);
+    auto cCustFlagVector = maker.flatVector<int>(cCustFlag);
+    auto cBirthYearVector = maker.flatVector<int>(cBirthYear);
+    auto cBirthCountryVector = maker.flatVector<int>(cBirthCountry);
+    auto customerRowVector = maker.rowVector(
+        {"c_customer_sk",
+         "c_address_num",
+         "c_cust_flag",
+         "c_birth_year",
+         "c_birth_country"},
+        {cCustomerSkVector,
+         cAddrerssNumVector,
+         cCustFlagVector,
+         cBirthYearVector,
+         cBirthCountryVector});
+
+    return customerRowVector;
   }
 
   std::vector<std::string> generateTwoTowerQueryData(
@@ -1431,14 +1692,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     VectorMaker maker{pool_.get()};
     std::cout << "[INFO]: Register LLM Function functions" << std::endl;
 
-    std::vector<std::vector<float>> w1 = loadHDF5Array(
-        "/home/velox/data/llm_mr_ffnn/model.h5", "w1");
-    std::vector<std::vector<float>> b1 = loadHDF5Array(
-        "/home/velox/data/llm_mr_ffnn/model.h5", "b1");
-    std::vector<std::vector<float>> w2 = loadHDF5Array(
-        "/home/velox/data/llm_mr_ffnn/model.h5", "w2");
-    std::vector<std::vector<float>> b2 = loadHDF5Array(
-        "/home/velox/data/llm_mr_ffnn/model.h5", "b2");
+    std::vector<std::vector<float>> w1 =
+        loadHDF5Array("/home/velox/data/llm_mr_ffnn/model.h5", "w1");
+    std::vector<std::vector<float>> b1 =
+        loadHDF5Array("/home/velox/data/llm_mr_ffnn/model.h5", "b1");
+    std::vector<std::vector<float>> w2 =
+        loadHDF5Array("/home/velox/data/llm_mr_ffnn/model.h5", "w2");
+    std::vector<std::vector<float>> b2 =
+        loadHDF5Array("/home/velox/data/llm_mr_ffnn/model.h5", "b2");
 
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
     std::vector<std::vector<float>> ffnnWeight1 =
@@ -1559,11 +1820,214 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     optimization::registerVectorFunction(
         "llm_ffnn_minmax_scaler",
         MinMaxScaler::signatures(),
-        std::make_unique<MinMaxScaler>("/home/velox/data/llm_mr_minmax_scaler.txt"),
+        std::make_unique<MinMaxScaler>(
+            "/home/velox/data/llm_mr_minmax_scaler.txt"),
         {},
         true,
         catalog,
         isVerticalPartition);
+  }
+
+  void registerFraudDetectionFunctions(
+      int numCols,
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    // Register Pre-processing functions
+    optimization::registerVectorFunction(
+        "is_weekday", IsWeekday::signatures(), std::make_unique<IsWeekday>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "date_to_timestamp_1",
+        DateToTimestamp::signatures(),
+        std::make_unique<DateToTimestamp>("%Y-%m-%d"),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "date_to_timestamp_2",
+        DateToTimestamp::signatures(),
+        std::make_unique<DateToTimestamp>("%Y-%m-%dT%H:%M"),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "time_diff_in_days",
+        TimeDiffInDays::signatures(),
+        std::make_unique<TimeDiffInDays>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "get_transaction_features",
+        GetTransactionFeatures::signatures(),
+        std::make_unique<GetTransactionFeatures>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "get_customer_features",
+        GetCustomerFeatures::signatures(),
+        std::make_unique<GetCustomerFeatures>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "get_age", GetAge::signatures(), std::make_unique<GetAge>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "concat_vectors2",
+        Concat::signatures(),
+        std::make_unique<Concat>(4, 5),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "get_binary_class",
+        GetBinaryClass::signatures(),
+        std::make_unique<GetBinaryClass>(),
+        {},
+        true,
+        catalog);
+
+    // Register Random Forest model
+    std::string xgboost_fraud_model_path =
+        "/home/velox/resources/model/fraud_xgboost_9_1600";
+    optimization::registerVectorFunction(
+        "xgboost_fraud_predict",
+        ForestPrediction::signatures(),
+        std::make_unique<ForestPrediction>(xgboost_fraud_model_path, 9, true),
+        {},
+        true,
+        catalog);
+
+    std::string xgboost_fraud_transaction_path =
+        "/home/velox/resources/model/fraud_xgboost_5_16";
+    optimization::registerVectorFunction(
+        "xgboost_fraud_transaction",
+        ForestPrediction::signatures(),
+        std::make_unique<ForestPrediction>(
+            xgboost_fraud_transaction_path, 5, true),
+        {},
+        true,
+        catalog);
+
+    // Register FFNN model
+    std::vector<std::vector<float>> w1 =
+        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc1.weight");
+    std::vector<std::vector<float>> b1 =
+        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc1.bias");
+    std::vector<std::vector<float>> w2 =
+        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc2.weight");
+    std::vector<std::vector<float>> b2 =
+        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc2.bias");
+    std::vector<std::vector<float>> w3 =
+        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc3.weight");
+    std::vector<std::vector<float>> b3 =
+        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc3.bias");
+
+    auto itemNNweight1Vector = maker.arrayVector<float>(w1, REAL());
+    auto itemNNweight2Vector = maker.arrayVector<float>(w2, REAL());
+    auto itemNNweight3Vector = maker.arrayVector<float>(w3, REAL());
+    auto itemNNBias1Vector = maker.arrayVector<float>(b1, REAL());
+    auto itemNNBias2Vector = maker.arrayVector<float>(b2, REAL());
+    auto itemNNBias3Vector = maker.arrayVector<float>(b3, REAL());
+
+    optimization::registerVectorFunction(
+        "mat_mul1_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                itemNNweight1Vector->elements()->values()->asMutable<float>()),
+            numCols,
+            32),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add1_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                itemNNBias1Vector->elements()->values()->asMutable<float>()),
+            32),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul1_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                itemNNweight2Vector->elements()->values()->asMutable<float>()),
+            32,
+            16),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add1_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                itemNNBias2Vector->elements()->values()->asMutable<float>()),
+            16),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul1_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                itemNNweight3Vector->elements()->values()->asMutable<float>()),
+            16,
+            2),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add1_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                itemNNBias3Vector->elements()->values()->asMutable<float>()),
+            2),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "relu",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "softmax",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog);
   }
 
   std::vector<std::vector<float>>
@@ -1959,9 +2423,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       auto userDataRowType =
           ROW({"user_id", "description"}, {INTEGER(), VARCHAR()});
       auto movieDataRowType =
-          ROW({"id", "description", "popularity",
-          "vote_average",
-          "vote_count", "spoken_languages"}, {INTEGER(), VARCHAR(), REAL(), REAL(), INTEGER(), VARCHAR()});
+          ROW({"id",
+               "description",
+               "popularity",
+               "vote_average",
+               "vote_count",
+               "spoken_languages"},
+              {INTEGER(), VARCHAR(), REAL(), REAL(), INTEGER(), VARCHAR()});
 
       std::ifstream llmStatistics("/home/velox/data/llm_mr_statistics.txt");
       if (!llmStatistics) {
@@ -1990,12 +2458,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                   PlanBuilder(planNodeIdGenerator, pool_.get())
                       .tableScan(movieDataRowType, {}, "")
                       .capturePlanNodeId(readMoviewDataPlanNodeId)
-                      .project(
-                          {"CAST(id AS VARCHAR) AS movie_id",
-                           "description AS movie_description",
-                           "llm_ffnn_minmax_scaler(convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count))) AS movie_description_array",
-                           "spoken_languages",
-                           })
+                      .project({
+                          "CAST(id AS VARCHAR) AS movie_id",
+                          "description AS movie_description",
+                          "llm_ffnn_minmax_scaler(convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count))) AS movie_description_array",
+                          "spoken_languages",
+                      })
                       .planNode(),
                   {"user_id",
                    "movie_id",
@@ -2009,35 +2477,29 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                    "spoken_languages",
                    "movie_description_array",
                    "CONCAT(user_id, user_description) AS user_description_processed",
-                   "CONCAT(movie_id, movie_description) AS movie_description_processed"
-                   })
+                   "CONCAT(movie_id, movie_description) AS movie_description_processed"})
               .project(
                   {"user_id",
                    "movie_id",
                    "spoken_languages",
                    "movie_description_array",
                    "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
-                   "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"
-                  })
+                   "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
               .project(
                   {"user_id",
                    "movie_id",
                    "spoken_languages",
                    "movie_description_array",
-                   "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"
-                  })
-              .project(
-                {
+                   "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"})
+              .project({
                   "user_id",
                   "movie_id",
                   "spoken_languages",
                   "result",
                   "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(movie_description_array))))))) AS trending_prediction",
-                }
-              )
+              })
               .filter("spoken_languages LIKE '\%English\%'")
-              .filter("trending_prediction = 1")
-              ;
+              .filter("trending_prediction = 1");
       cataLog.setIdAddressMap(
           readUserDataPlanNodeId,
           userDataPaths,
@@ -2596,7 +3058,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
           float executeTime =
-              runPlanWithCataLog(8, 8, myPlan, cataLog, 4, verbose);
+              runPlanWithCataLog(8, 8, myPlan, cataLog, repeatRun, verbose);
           jsonMessage["reward"] = executeTime;
           LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
                     << std::endl;
