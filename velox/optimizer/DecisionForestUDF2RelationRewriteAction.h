@@ -212,22 +212,6 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
                                 false)
                             .project(
                                 {"idx as idx", "if (sum > 0.0, 1.0, 0.0)"});
-                    // 										planBuilder
-                    // =
-                    // planBuilder.nestedLoopJoin(exec::test::PlanBuilder(planNodeIdGenerator,
-                    // pool_.get()) 														.tableScan(asRowType(tree){treeRowVector})
-                    // 														.capturePlanNodeId(p1)
-                    // 														.project({"tree_id
-                    // as tree_id", "velox_decision_tree_construct(tree_path) as
-                    // tree"}) 														.planNode(), {"idx", "v", "tree_id", "tree"})
-                    // 														.project({"idx
-                    // as idx", "tree_id as tree_id",
-                    // "velox_decision_tree_predict(v, tree) as prediction"})
-                    // 														.aggregation({"idx"},
-                    // {"sum(prediction) as sum"},{},
-                    // core::AggregationNode::Step::kPartial, false)
-                    // 														.project({"idx
-                    // as idx", "if (sum > 0.0, 1.0, 0.0)"});
                     std::shared_ptr<OutputStat> inputStat =
                         std::make_shared<OutputStat>(OutputStat(numTrees, 1));
                     Source inputSource =
@@ -338,7 +322,7 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
           std::string expr = expression->toString();
           // For this rule, we only check wheather decision_forest_predict UDF
           // function is in expressions
-          std::regex pattern(R"(decision_forest_predict)");
+          std::regex pattern(R"(decision_forest_predict\d*)");
 
           auto wordsBegin =
               std::sregex_iterator(expr.begin(), expr.end(), pattern);
