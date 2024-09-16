@@ -40,6 +40,10 @@ class IsWeekday : public MLFunction {
 
     const int secondsInADay = 86400;
     for (int i = 0; i < rows.size(); i++) {
+      if (!rows.isValid(i)) {
+        continue;
+      }
+
       int64_t timestamp = inputTimes->valueAt(i);
 
       std::time_t time = static_cast<std::time_t>(timestamp);
@@ -61,7 +65,8 @@ class IsWeekday : public MLFunction {
     }
 
     VectorMaker maker{context.pool()};
-    output = maker.flatVector<int>(results);
+    auto localResult = maker.flatVector<int>(results);
+    context.moveOrCopyResult(localResult, rows, output);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -159,25 +164,25 @@ class GetTransactionFeatures : public MLFunction {
 
     exec::LocalDecodedVector firstHolder(context, *base0, rows);
     auto decodedArray0 = firstHolder.get();
-    auto totalOrders = decodedArray0->base()->as<FlatVector<int64_t>>();
+    // auto totalOrders = decodedArray0->base()->as<FlatVector<int64_t>>();
 
     exec::LocalDecodedVector secondHolder(context, *base1, rows);
     auto decodedArray1 = secondHolder.get();
-    auto tAmounts = decodedArray1->base()->as<FlatVector<float>>();
+    // auto tAmounts = decodedArray1->base()->as<FlatVector<float>>();
 
     exec::LocalDecodedVector thirdHolder(context, *base2, rows);
     auto decodedArray2 = thirdHolder.get();
-    auto timeDiffs = decodedArray2->base()->as<FlatVector<int64_t>>();
+    // auto timeDiffs = decodedArray2->base()->as<FlatVector<int64_t>>();
 
     exec::LocalDecodedVector fourthHolder(context, *base3, rows);
     auto decodedArray3 = fourthHolder.get();
-    auto tTimestamps = decodedArray3->base()->as<FlatVector<int64_t>>();
+    // auto tTimestamps = decodedArray3->base()->as<FlatVector<int64_t>>();
 
     for (int i = 0; i < rows.size(); i++) {
-      float totalOrder = (static_cast<float>(totalOrders->valueAt(i))) / 79.0;
-      float tAmount = (tAmounts->valueAt(i)) / 16048.0;
-      float timeDiff = (static_cast<float>(timeDiffs->valueAt(i))) / 729.0;
-      int64_t tTimestamp = tTimestamps->valueAt(i);
+      float totalOrder = (static_cast<float>(decodedArray0->valueAt<int64_t>(i))) / 79.0;
+      float tAmount = (decodedArray1->valueAt<float>(i)) / 16048.0;
+      float timeDiff = (static_cast<float>(decodedArray2->valueAt<int64_t>(i))) / 729.0;
+      int64_t tTimestamp = decodedArray3->valueAt<int64_t>(i);
 
       // Calculate day of week
       std::time_t time = static_cast<std::time_t>(tTimestamp);
@@ -247,27 +252,27 @@ class GetCustomerFeatures : public MLFunction {
 
     exec::LocalDecodedVector firstHolder(context, *base0, rows);
     auto decodedArray0 = firstHolder.get();
-    auto cAddressNums = decodedArray0->base()->as<FlatVector<int>>();
+    // auto cAddressNums = decodedArray0->base()->as<FlatVector<int>>();
 
     exec::LocalDecodedVector secondHolder(context, *base1, rows);
     auto decodedArray1 = secondHolder.get();
-    auto cCustFlags = decodedArray1->base()->as<FlatVector<int>>();
+    // auto cCustFlags = decodedArray1->base()->as<FlatVector<int>>();
 
     exec::LocalDecodedVector thirdHolder(context, *base2, rows);
     auto decodedArray2 = thirdHolder.get();
-    auto cBirthCountries = decodedArray2->base()->as<FlatVector<int>>();
+    // auto cBirthCountries = decodedArray2->base()->as<FlatVector<int>>();
 
     exec::LocalDecodedVector fourthHolder(context, *base3, rows);
     auto decodedArray3 = fourthHolder.get();
-    auto cAges = decodedArray3->base()->as<FlatVector<int>>();
+    // auto cAges = decodedArray3->base()->as<FlatVector<int>>();
 
     for (int i = 0; i < rows.size(); i++) {
       float cAddressNum =
-          (static_cast<float>(cAddressNums->valueAt(i))) / 35352.0;
-      float cCustFlag = static_cast<float>(cCustFlags->valueAt(i));
+          (static_cast<float>(decodedArray0->valueAt<int>(i))) / 35352.0;
+      float cCustFlag = static_cast<float>(decodedArray1->valueAt<int>(i));
       float cBirthCountry =
-          (static_cast<float>(cBirthCountries->valueAt(i))) / 211.0;
-      float cAge = (static_cast<float>(cAges->valueAt(i))) / 94.0;
+          (static_cast<float>(decodedArray2->valueAt<int>(i))) / 211.0;
+      float cAge = (static_cast<float>(decodedArray3->valueAt<int>(i))) / 94.0;
 
       std::vector<float> vec;
       vec.push_back(cAddressNum);
@@ -320,29 +325,37 @@ class TimeDiffInDays : public MLFunction {
     BaseVector* left = args[0].get();
     BaseVector* right = args[1].get();
 
-    exec::LocalDecodedVector leftHolder(context, *left, rows);
+    // The following decoded approach won't fetch the values correctly
+    // if there is a filter applied before. Use LocalDecodedVector instead.
+    /* exec::LocalDecodedVector leftHolder(context, *left, rows);
     auto decodedLeftArray = leftHolder.get();
     auto inputTimes1 = decodedLeftArray->base()->as<FlatVector<int64_t>>();
 
     exec::LocalDecodedVector rightHolder(context, *right, rows);
     auto decodedRightArray = rightHolder.get();
-    auto inputTimes2 = decodedRightArray->base()->as<FlatVector<int64_t>>();
+    auto inputTimes2 = decodedRightArray->base()->as<FlatVector<int64_t>>(); */
+    
+    LocalDecodedVector decodedInput1(context, *args[0], rows);
+    LocalDecodedVector decodedInput2(context, *args[1], rows); 
 
     std::vector<int64_t> results;
     int secondsInADay = 86400;
 
     for (int i = 0; i < rows.size(); i++) {
-      int64_t timestamp1 = inputTimes1->valueAt(i);
-      int64_t timestamp2 = inputTimes2->valueAt(i);
+      if (!rows.isValid(i)) {
+        continue;
+      }
+      int64_t timestamp1 = decodedInput1->valueAt<int64_t>(i);
+      int64_t timestamp2 = decodedInput2->valueAt<int64_t>(i);
 
       int64_t differenceInSeconds = std::abs(timestamp1 - timestamp2);
       int64_t differenceInDays = differenceInSeconds / secondsInADay;
-
       results.push_back(differenceInDays);
     }
 
     VectorMaker maker{context.pool()};
-    output = maker.flatVector<int64_t>(results);
+    auto localResult = maker.flatVector<int64_t>(results);
+    context.moveOrCopyResult(localResult, rows, output);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -390,6 +403,9 @@ class DateToTimestamp : public MLFunction {
     struct std::tm t = {};
 
     for (int i = 0; i < rows.size(); i++) {
+      if (!rows.isValid(i)) {
+        continue;
+      }
       StringView val = decodedStringInput->valueAt<StringView>(i);
       std::string inputStr = std::string(val);
 
@@ -411,7 +427,8 @@ class DateToTimestamp : public MLFunction {
     }
 
     VectorMaker maker{context.pool()};
-    output = maker.flatVector<int64_t>(results);
+    auto localResult = maker.flatVector<int64_t>(results);
+    context.moveOrCopyResult(localResult, rows, output);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
