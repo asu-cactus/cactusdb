@@ -49,7 +49,6 @@
 #include "velox/type/Type.h"
 #include "velox/vector/fuzzer/VectorFuzzer.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
-#include <H5Cpp.h>
 
 // Custom headers
 #include <json/json.h>
@@ -362,7 +361,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         } else if (colIndex == 2) {
           tReceiver.push_back(numberStr);
         } else if (colIndex == 3) {
-          transactionId.push_back(std::stoll(numberStr));
+          // Convert to double first using std::stod
+          double numberDouble = std::stod(numberStr);
+          transactionId.push_back(static_cast<long long>(numberDouble));
         } else if (colIndex == 4) {
           tTime.push_back(numberStr);
         }
