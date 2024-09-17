@@ -176,12 +176,14 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
               assert(myDecisionForestUDF);
 
               int numCols = myDecisionForestUDF->getNumFeatures();
-              decisionTreePredictFuncName = fmt::format("velox_decision_tree_predict{}", rewriteDecisionForestCounter);
+              decisionTreePredictFuncName = fmt::format(
+                  "velox_decision_tree_predict{}",
+                  rewriteDecisionForestCounter);
 
               exec::registerVectorFunction(
-                                     decisionTreePredictFuncName,
-                                     VeloxTreePrediction::signatures(),
-                                     std::make_unique<VeloxTreePrediction>(numCols));
+                  decisionTreePredictFuncName,
+                  VeloxTreePrediction::signatures(),
+                  std::make_unique<VeloxTreePrediction>(numCols));
 
               // Get the target expression name
               std::string targetExprName = projectionsNames[exprIdx];
@@ -361,7 +363,6 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
             cataLog.addSource(std::make_shared<Source>(inputSource));
             cataLog.setIdAddressMap(p1, treePaths);
 
-
             if (prevNode == nullptr) {
               planBuilder.setRoot(rewritePlan.planNode());
             } else {
@@ -369,8 +370,9 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
               // node
               auto serializedPlan = planBuilder.planNode()->serialize();
               auto serializedNewSource = rewritePlan.planNode()->serialize();
-              // FIXME: due the missing implementation of serialization and deserialization
-              // of Tree Type, the current branch is not reachble which limited by check `
+              // FIXME: due the missing implementation of serialization and
+              // deserialization of Tree Type, the current branch is not
+              // reachble which limited by check `
               auto srcNodeIdToBeReplaced = curNode->id();
               replaceSourceWithIdInSerializedPlan(
                   serializedPlan, serializedNewSource, srcNodeIdToBeReplaced);
@@ -462,10 +464,7 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
           if (std::regex_search(
                   exprStr, matches, patternToMatchDecisionForest)) {
             auto matchedExpr = matches[1].str();
-            if (matchedExpr == exprStr & prevNode == nullptr) {
-              // FIXME: due the serialization and deserialization bug, we can only support
-              // rewrite the decision forest where the project node is the last 
-              // node
+            if (matchedExpr == exprStr) {
               targetActions.push_back(matchedExpr);
             } else {
               LOG(ERROR) << "Error: undefined-edge case detected: " << exprStr
@@ -509,9 +508,13 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
         return true;
       }
 
-      for (const auto& source : sources) {
-        checkSuccess &= check(source, targetActions, cataLog);
-      }
+      // FIXME: due the serialization and deserialization bug, we can only
+      // support rewrite the decision forest where the project node is the last
+      // node
+
+      // for (const auto& source : sources) {
+      //   checkSuccess &= check(source, targetActions, cataLog);
+      // }
 
       return checkSuccess;
     } catch (const std::exception& e) {
