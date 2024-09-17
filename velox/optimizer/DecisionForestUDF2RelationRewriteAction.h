@@ -77,7 +77,35 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
       std::vector<std::string> targets,
       CataLog& cataLog) override {
+    /*
+     * Case II: If this function call is the last expression in the
+     * projection (e.g.,
+     * project({"decision_forest_predict(func1(func2(x)))"})), we
+     * need to split this project node into two project nodes (e.g.,
+     * project({"func1(func2(x)) as
+     * y"}).project("decision_forest_predict(y)")) Then, we apply
+     * the rewrite action as described in Case I.
+     */
+
+    // TODO
+
+    /*
+     * Case III: If this function call is a middle expression in the
+     * projection (e.g.,
+     * project({"func4(func3(decision_forest_predict(func1(func2(x)))))"})),
+     * we need to split this project node into three project nodes
+     * (e.g., project({"func1(func2(x)) as
+     * z0"}).project("decision_forest_predict(z0) as
+     * z1").project("func4(func3(z1))")) Then, we apply the rewrite
+     * action as described in Case I.
+     */
     bool transformationApplied = false;
+    std::set<std::string> constructTreeExprSets;
+    std::set<std::string> nestedLoopProjectExprSets;
+    std::set<std::string> singleTreePredictProjectExprSets;
+    std::set<std::string> treePredictAggKeySets;
+    std::set<std::string> treePredictAggExprSets;
+    std::set<std::string> finalProjectExprSets;
     for (auto target : targets) {
       if (curNode) {
         std::string_view nodeName = curNode->name();
@@ -88,167 +116,271 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
 
           const std::vector<TypedExprPtr>& projections =
               myProjectNode->projections();
+          // Get the names of projections
+          const std::vector<std::string>& projectionsNames =
+              myProjectNode->names();
+          // Search each expression in projections
+          int numProjections = projections.size();
 
-          for (auto expression : projections) {
-            if (auto call =
-                    std::dynamic_pointer_cast<const core::CallTypedExpr>(
-                        expression)) {
-              std::string callName = call->name();
+          bool findRewriteTarget = false;
+          int numTrees;
+          std::vector<std::shared_ptr<TempFilePath>> treePaths;
 
-              if (callName.find(target) != std::string::npos) {
-                /* "decision_forest_predict"
-                 * Case I: If this function call is the only expression in the
-                 * projection (e.g.,project({"decision_forest_predict(x)"})), we
-                 * need to extract the model path from the expression to
-                 * initialize treeRowVector as a member of this object, and then
-                 * replace this node by the following plan:
-                 *
-                 * nestedLoopJoin(
-                 *    exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                 *    .values({treeRowVector})
-                 *    .project({"tree_id as tree_id",
-                 * "velox_decision_tree_construct(tree_path) as tree"})
-                 *    .planNode(), {"idx", "x", "tree_id", "tree"})
-                 *    .project({"idx as idx", "tree_id as tree_id",
-                 * "velox_decision_tree_predict(x, tree) as prediction"})
-                 *    .aggregation({"idx"}, {"sum(prediction) as sum"},{},
-                 * core::AggregationNode::Step::kPartial, false) .project({"idx
-                 * as idx", "if (sum > 0.0, 1.0, 0.0)"})
-                 */
+          std::string treeIdName;
+          std::string treePathName;
+          std::string decisionTreePredictFuncName;
+          for (int exprIdx = 0; exprIdx < numProjections; exprIdx++) {
+            auto expression = projections[exprIdx];
+            // Get the string of expression
+            std::string exprStr = expression->toString();
 
-                if (projections.size() == 1) {
-                  // We are the only expression in the project operator
+            if (exprStr.find(target) != std::string::npos) {
+              /* "decision_forest_predict"
+               * Case I: If this function call is the only expression in the
+               * projection (e.g.,project({"decision_forest_predict(x)"})), we
+               * need to extract the model path from the expression to
+               * initialize treeRowVector as a member of this object, and then
+               * replace this node by the following plan:
+               *
+               * nestedLoopJoin(
+               *    exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+               *    .values({treeRowVector})
+               *    .project({"tree_id as tree_id",
+               * "velox_decision_tree_construct(tree_path) as tree"})
+               *    .planNode(), {"idx", "x", treeIdName, "tree"})
+               *    .project({"idx as idx", "tree_id as tree_id",
+               * "velox_decision_tree_predict(x, tree) as prediction"})
+               *    .aggregation({"idx"}, {"sum(prediction) as sum"},{},
+               * core::AggregationNode::Step::kPartial, false) .project({"idx
+               * as idx", "if (sum > 0.0, 1.0, 0.0)"})
+               */
 
-                  // We shall extract the path
-                  core::QueryConfig config({});
+              // We are the only expression in the project operator
 
-                  std::shared_ptr<VectorFunction> myUDF =
-                      getVectorFunction(callName, {ARRAY(REAL())}, {}, config);
-                  int numTrees;
-                  std::vector<std::shared_ptr<TempFilePath>> treePaths;
+              // We shall extract the path
+              core::QueryConfig config({});
 
-                  if (myUDF) {
-                    std::cout << "In MyUDF" << std::endl;
+              // Parse the function name from target
+              // Extract the function name
+              size_t openParen = target.find('(');
+              std::string funcName = target.substr(0, openParen);
+              funcName = trim(funcName);
 
-                    std::shared_ptr<ForestPrediction> myDecisionForestUDF =
-                        dynamic_pointer_cast<ForestPrediction>(myUDF);
+              std::shared_ptr<VectorFunction> myUDF =
+                  getVectorFunction(funcName, {ARRAY(REAL())}, {}, config);
+              assert(myUDF);
 
-                    if (myDecisionForestUDF) {
-                      std::string modelPath =
-                          myDecisionForestUDF->getForestPath();
+              // Get the original decision forest UDF
+              std::shared_ptr<ForestPrediction> myDecisionForestUDF =
+                  dynamic_pointer_cast<ForestPrediction>(myUDF);
+              assert(myDecisionForestUDF);
 
-                      std::vector<std::string> pathVectors;
+              int numCols = myDecisionForestUDF->getNumFeatures();
+              decisionTreePredictFuncName = fmt::format("velox_decision_tree_predict{}", rewriteDecisionForestCounter);
 
-                      Forest::vectorizeForestFolder(modelPath, pathVectors);
+              exec::registerVectorFunction(
+                                     decisionTreePredictFuncName,
+                                     VeloxTreePrediction::signatures(),
+                                     std::make_unique<VeloxTreePrediction>(numCols));
 
-                      numTrees = pathVectors.size();
-                      // TODO: can set as a parameter in the future
-                      int numTreeSplits = 8;
-                      uint32_t numTreeRowsPerSplit =
-                          ceil(numTrees / numTreeSplits);
-                      uint32_t treeIndex = 0;
-                      optimization::MyFileTest myFile;
-                      for (size_t i = 0; i < numTreeSplits; i++) {
-                        auto startIdx = treeIndex;
-                        auto endIdx = treeIndex + (i + 1) * numTreeRowsPerSplit;
-                        endIdx = (endIdx < numTrees) ? endIdx : numTrees;
-                        size_t numDataInPartition = endIdx - startIdx;
+              // Get the target expression name
+              std::string targetExprName = projectionsNames[exprIdx];
+              // capture the data src
+              std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+              std::smatch matches;
+              // object to capture the matched data source
+              std::string matchedDataSrc;
+              // Search out the matched data source and store in matches
+              if (std::regex_search(target, matches, patternToMatchRawSource)) {
+                matchedDataSrc = matches[1].str();
+              } else {
+                LOG(ERROR) << "Uncaptured data source" << std::endl;
+              }
+              nestedLoopProjectExprSets.insert(matchedDataSrc);
 
-                        auto model =
-                            maker.flatVector<StringView>(numDataInPartition);
-                        auto treeIndexVector =
-                            maker.flatVector<int16_t>(numDataInPartition);
-                        for (int j = 0; j < numDataInPartition; j++) {
-                          model->set(
-                              j, StringView(pathVectors[treeIndex].c_str()));
-                          treeIndexVector->set(j, treeIndex);
-                          treeIndex += 1;
-                        }
+              std::string modelPath = myDecisionForestUDF->getForestPath();
+              std::vector<std::string> pathVectors;
+              Forest::vectorizeForestFolder(modelPath, pathVectors);
 
-                        treeRowVector = maker.rowVector(
-                            {"tree_id", "tree_path"}, {treeIndexVector, model});
+              numTrees = pathVectors.size();
+              // TODO: can set as a parameter in the future
+              int numTreeSplits = 8;
+              uint32_t numTreeRowsPerSplit = ceil(numTrees / numTreeSplits);
+              uint32_t treeIndex = 0;
+              optimization::MyFileTest myFile;
 
-                        auto file = TempFilePath::create();
-                        auto config =
-                            std::make_shared<facebook::velox::dwrf::Config>();
-                        myFile.writeToFile(file->path, {treeRowVector}, config);
-                        treePaths.push_back(file);
-                      }
-                      assert(treeIndex == numTrees);
-                    }
-                  }
+              treeIdName =
+                  fmt::format("tree_id{}", rewriteDecisionForestCounter);
+              treePathName =
+                  fmt::format("tree_path{}", rewriteDecisionForestCounter);
+              std::string intermediateTreeName = fmt::format(
+                  "tree_intermediate{}", rewriteDecisionForestCounter);
+              std::string intermediateTreePredictName = fmt::format(
+                  "tree_intermediate_predict{}", rewriteDecisionForestCounter);
+              std::string aggregatedTreePredictName = fmt::format(
+                  "aggregated_tree_predict{}", rewriteDecisionForestCounter);
+              rewriteDecisionForestCounter++;
 
-                  // We remove the current node from the plan
-                  //
-                  if (curNode->sources().size() > 0) {
-                    planBuilder = planBuilder.setRoot((curNode->sources())[0]);
-                    std::cout << "debug, current plan"
-                              << planBuilder.planNode()->toString(true, true)
-                              << std::endl;
+              for (size_t i = 0; i < numTreeSplits; i++) {
+                auto startIdx = treeIndex;
+                auto endIdx = treeIndex + (i + 1) * numTreeRowsPerSplit;
+                endIdx = (endIdx < numTrees) ? endIdx : numTrees;
+                size_t numDataInPartition = endIdx - startIdx;
 
-                    // We build the plan from this point
-                    core::PlanNodeId p1;
-
-                    planBuilder =
-                        exec::test::PlanBuilder(
-                            planNodeIdGenerator, pool_.get())
-                            .tableScan(asRowType(treeRowVector->type()))
-                            .capturePlanNodeId(p1)
-                            .project(
-                                {"tree_id as tree_id",
-                                 "velox_decision_tree_construct(tree_path) as tree"})
-                            .nestedLoopJoin(
-                                planBuilder.planNode(),
-                                {"idx", "v", "tree_id", "tree"})
-                            .project(
-                                {"idx as idx",
-                                 "tree_id as tree_id",
-                                 "velox_decision_tree_predict(v, tree) as prediction"})
-                            .aggregation(
-                                {"idx"},
-                                {"sum(prediction) as sum"},
-                                {},
-                                core::AggregationNode::Step::kPartial,
-                                false)
-                            .project(
-                                {"idx as idx", "if (sum > 0.0, 1.0, 0.0)"});
-                    std::shared_ptr<OutputStat> inputStat =
-                        std::make_shared<OutputStat>(OutputStat(numTrees, 1));
-                    Source inputSource =
-                        Source(p1, Source::Type::FILE, std::move(inputStat));
-                    cataLog.addSource(std::make_shared<Source>(inputSource));
-                    cataLog.setIdAddressMap(p1, treePaths);
-
-                    transformationApplied = true;
-                  }
+                auto model = maker.flatVector<StringView>(numDataInPartition);
+                auto treeIndexVector =
+                    maker.flatVector<int16_t>(numDataInPartition);
+                for (int j = 0; j < numDataInPartition; j++) {
+                  model->set(j, StringView(pathVectors[treeIndex].c_str()));
+                  treeIndexVector->set(j, treeIndex);
+                  treeIndex += 1;
                 }
 
-                /*
-                 * Case II: If this function call is the last expression in the
-                 * projection (e.g.,
-                 * project({"decision_forest_predict(func1(func2(x)))"})), we
-                 * need to split this project node into two project nodes (e.g.,
-                 * project({"func1(func2(x)) as
-                 * y"}).project("decision_forest_predict(y)")) Then, we apply
-                 * the rewrite action as described in Case I.
-                 */
+                treeRowVector = maker.rowVector(
+                    {treeIdName, treePathName}, {treeIndexVector, model});
 
-                // TODO
+                auto file = TempFilePath::create();
+                auto config = std::make_shared<facebook::velox::dwrf::Config>();
+                myFile.writeToFile(file->path, {treeRowVector}, config);
+                treePaths.push_back(file);
+              }
 
-                /*
-                 * Case III: If this function call is a middle expression in the
-                 * projection (e.g.,
-                 * project({"func4(func3(decision_forest_predict(func1(func2(x)))))"})),
-                 * we need to split this project node into three project nodes
-                 * (e.g., project({"func1(func2(x)) as
-                 * z0"}).project("decision_forest_predict(z0) as
-                 * z1").project("func4(func3(z1))")) Then, we apply the rewrite
-                 * action as described in Case I.
-                 */
+              constructTreeExprSets.insert(treeIdName);
+              constructTreeExprSets.insert(fmt::format(
+                  "velox_decision_tree_construct({}) as {}",
+                  treePathName,
+                  intermediateTreeName));
+              nestedLoopProjectExprSets.insert(treeIdName);
+              nestedLoopProjectExprSets.insert(intermediateTreeName);
+              nestedLoopProjectExprSets.insert(matchedDataSrc);
+              singleTreePredictProjectExprSets.insert(treeIdName);
+              singleTreePredictProjectExprSets.insert(fmt::format(
+                  "{}({}, {}) as {}",
+                  decisionTreePredictFuncName,
+                  matchedDataSrc,
+                  intermediateTreeName,
+                  intermediateTreePredictName));
+              treePredictAggExprSets.insert(fmt::format(
+                  "sum({}) as {}",
+                  intermediateTreePredictName,
+                  aggregatedTreePredictName));
+              finalProjectExprSets.insert(fmt::format(
+                  "if ({} > 0.0, 1.0, 0.0) AS {}",
+                  aggregatedTreePredictName,
+                  targetExprName));
 
-                // TODO
+              assert(treeIndex == numTrees);
+              findRewriteTarget = true;
+
+              // TODO
+            } else {
+              // Parse the non-target expressions
+              auto rewriteExpr = exprStr;
+              std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+              std::smatch matches;
+              // Start position for the search
+              std::string::const_iterator searchStart(exprStr.cbegin());
+
+              // Search out the matched data source and store in matches
+              while (std::regex_search(
+                  searchStart,
+                  exprStr.cend(),
+                  matches,
+                  patternToMatchRawSource)) {
+                auto matchedDataSrc = matches[1].str();
+                std::regex patternOfReplaceExpr(escapeRegex(matches[0].str()));
+
+                rewriteExpr = std::regex_replace(
+                    rewriteExpr, patternOfReplaceExpr, matchedDataSrc);
+                // Update the search start position
+                searchStart = matches.suffix().first;
+                nestedLoopProjectExprSets.insert(matchedDataSrc);
+                singleTreePredictProjectExprSets.insert(matchedDataSrc);
+                treePredictAggKeySets.insert(matchedDataSrc);
+              }
+              rewriteExpr = replaceDoubleQuotes(rewriteExpr);
+
+              finalProjectExprSets.insert(
+                  rewriteExpr + " AS " + projectionsNames[exprIdx]);
+            }
+          }
+
+          // Found rewrite
+          if (curNode->sources().size() > 0 && findRewriteTarget) {
+            // do an inference to obtain the id column to aggregate tree
+            // predictions assume the id column contains "id"
+            std::string matMulAggKey;
+            for (std::string colName : nestedLoopProjectExprSets) {
+              if (containsStrButNotEqual(colName, "id")) {
+                matMulAggKey = colName;
+                break;
               }
             }
+            treePredictAggKeySets.insert(matMulAggKey);
+
+            std::vector<std::string> constructTreeExprs(
+                constructTreeExprSets.begin(), constructTreeExprSets.end());
+            std::vector<std::string> nestedLoopProjectExprs(
+                nestedLoopProjectExprSets.begin(),
+                nestedLoopProjectExprSets.end());
+            std::vector<std::string> singleTreePredictProjectExprs(
+                singleTreePredictProjectExprSets.begin(),
+                singleTreePredictProjectExprSets.end());
+            std::vector<std::string> treePredictAggKeyExprs(
+                treePredictAggKeySets.begin(), treePredictAggKeySets.end());
+            std::vector<std::string> treePredictAggExprs(
+                treePredictAggExprSets.begin(), treePredictAggExprSets.end());
+            std::vector<std::string> finalProjectExprs(
+                finalProjectExprSets.begin(), finalProjectExprSets.end());
+
+            // Remove the current node
+            planBuilder = planBuilder.setRoot((curNode->sources())[0]);
+
+            // We build the plan from this point
+            core::PlanNodeId p1;
+
+            auto rewritePlan =
+                exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(asRowType(treeRowVector->type()))
+                    .capturePlanNodeId(p1)
+                    .project(constructTreeExprs)
+                    .nestedLoopJoin(
+                        planBuilder.planNode(), nestedLoopProjectExprs)
+                    .project(singleTreePredictProjectExprs)
+                    .aggregation(
+                        treePredictAggKeyExprs,
+                        treePredictAggExprs,
+                        {},
+                        core::AggregationNode::Step::kPartial,
+                        false)
+                    .project(finalProjectExprs);
+            std::shared_ptr<OutputStat> inputStat =
+                std::make_shared<OutputStat>(OutputStat(numTrees, 1));
+            Source inputSource =
+                Source(p1, Source::Type::FILE, std::move(inputStat));
+            cataLog.addSource(std::make_shared<Source>(inputSource));
+            cataLog.setIdAddressMap(p1, treePaths);
+
+
+            if (prevNode == nullptr) {
+              planBuilder.setRoot(rewritePlan.planNode());
+            } else {
+              // use seralization and deserialization to replace the source
+              // node
+              auto serializedPlan = planBuilder.planNode()->serialize();
+              auto serializedNewSource = rewritePlan.planNode()->serialize();
+              // FIXME: due the missing implementation of serialization and deserialization
+              // of Tree Type, the current branch is not reachble which limited by check `
+              auto srcNodeIdToBeReplaced = curNode->id();
+              replaceSourceWithIdInSerializedPlan(
+                  serializedPlan, serializedNewSource, srcNodeIdToBeReplaced);
+              auto deserlizedUpdatedPlanNode =
+                  ISerializable::deserialize<core::PlanNode>(
+                      serializedPlan, pool_.get());
+              planBuilder.setRoot(deserlizedUpdatedPlanNode);
+            }
+
+            transformationApplied = true;
           }
         }
 
@@ -319,45 +451,54 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
             myProjectNode->projections();
 
         for (const auto& expression : projections) {
-          std::string expr = expression->toString();
+          std::string exprStr = expression->toString();
           // For this rule, we only check wheather decision_forest_predict UDF
-          // function is in expressions
-          std::regex pattern(R"(decision_forest_predict\d*)");
+          // function is in expressions and limite to the case there is no
+          // other UDF in the expression
 
-          auto wordsBegin =
-              std::sregex_iterator(expr.begin(), expr.end(), pattern);
-
-          auto wordsEnd = std::sregex_iterator();
-          // Find applicable UDF name and store in targetActions
-          for (auto it = wordsBegin; it != wordsEnd; ++it) {
-            targetActions.push_back(it->str());
+          std::regex patternToMatchDecisionForest(
+              "(decision_forest_predict\\d*\\(ROW\\[\"(.*?)\"\\]\\))");
+          std::smatch matches;
+          if (std::regex_search(
+                  exprStr, matches, patternToMatchDecisionForest)) {
+            auto matchedExpr = matches[1].str();
+            if (matchedExpr == exprStr & prevNode == nullptr) {
+              // FIXME: due the serialization and deserialization bug, we can only support
+              // rewrite the decision forest where the project node is the last 
+              // node
+              targetActions.push_back(matchedExpr);
+            } else {
+              LOG(ERROR) << "Error: undefined-edge case detected: " << exprStr
+                         << std::endl;
+            }
           }
         }
       }
 
       if (nodeName == "Filter") {
-        auto myFilterNode =
-            std::dynamic_pointer_cast<const FilterNode>(rootNode);
+        // FIXME: needed to be refactorized
+        // auto myFilterNode =
+        //     std::dynamic_pointer_cast<const FilterNode>(rootNode);
 
-        if (!myFilterNode) {
-          throw std::runtime_error("Failed to cast to FilterNode");
-        }
+        // if (!myFilterNode) {
+        //   throw std::runtime_error("Failed to cast to FilterNode");
+        // }
 
-        const TypedExprPtr& filterExpr = myFilterNode->filter();
+        // const TypedExprPtr& filterExpr = myFilterNode->filter();
 
-        std::string expr = filterExpr->toString();
-        // For this rule, we only check wheather decision_forest_predict UDF
-        // function is in expressions
-        std::regex pattern(R"(decision_forest_predict)");
+        // std::string expr = filterExpr->toString();
+        // // For this rule, we only check wheather decision_forest_predict UDF
+        // // function is in expressions
+        // std::regex pattern(R"(decision_forest_predict)");
 
-        auto wordsBegin =
-            std::sregex_iterator(expr.begin(), expr.end(), pattern);
+        // auto wordsBegin =
+        //     std::sregex_iterator(expr.begin(), expr.end(), pattern);
 
-        auto wordsEnd = std::sregex_iterator();
-        // Find applicable UDF name and store in targetActions
-        for (auto it = wordsBegin; it != wordsEnd; ++it) {
-          targetActions.push_back(it->str());
-        }
+        // auto wordsEnd = std::sregex_iterator();
+        // // Find applicable UDF name and store in targetActions
+        // for (auto it = wordsBegin; it != wordsEnd; ++it) {
+        //   targetActions.push_back(it->str());
+        // }
       }
 
       std::vector<std::shared_ptr<const core::PlanNode>> sources =
@@ -381,6 +522,7 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
 
  private:
   RowVectorPtr treeRowVector;
+  static inline int rewriteDecisionForestCounter = 0;
 };
 
 } // namespace optimization
