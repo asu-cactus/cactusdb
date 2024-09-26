@@ -1693,14 +1693,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     VectorMaker maker{pool_.get()};
     std::cout << "[INFO]: Register LLM Function functions" << std::endl;
 
-    std::vector<std::vector<float>> w1 =
-        loadHDF5Array("/home/velox/data/llm_mr_ffnn/model.h5", "w1");
-    std::vector<std::vector<float>> b1 =
-        loadHDF5Array("/home/velox/data/llm_mr_ffnn/model.h5", "b1");
-    std::vector<std::vector<float>> w2 =
-        loadHDF5Array("/home/velox/data/llm_mr_ffnn/model.h5", "w2");
-    std::vector<std::vector<float>> b2 =
-        loadHDF5Array("/home/velox/data/llm_mr_ffnn/model.h5", "b2");
+    std::vector<std::vector<float>> w1 = loadHDF5Array(
+        "/home/velox/resources/model/llm_mr/velox/llm_ffnn.h5", "w1");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(
+        "/home/velox/resources/model/llm_mr/velox/llm_ffnn.h5", "b1");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(
+        "/home/velox/resources/model/llm_mr/velox/llm_ffnn.h5", "w2");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(
+        "/home/velox/resources/model/llm_mr/velox/llm_ffnn.h5", "b2");
 
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
     std::vector<std::vector<float>> ffnnWeight1 =
@@ -1822,7 +1822,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         "llm_ffnn_minmax_scaler",
         MinMaxScaler::signatures(),
         std::make_unique<MinMaxScaler>(
-            "/home/velox/data/llm_mr_minmax_scaler.txt"),
+            "/home/velox/resources/model/llm_mr/velox/llm_mr_minmax_scaler.txt"),
         {},
         true,
         catalog,
@@ -1835,7 +1835,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::shared_ptr<memory::MemoryPool> pool_) {
     // Register Pre-processing functions
     optimization::registerVectorFunction(
-        "is_weekday", IsWeekday::signatures(), std::make_unique<IsWeekday>(),
+        "is_weekday",
+        IsWeekday::signatures(),
+        std::make_unique<IsWeekday>(),
         {},
         true,
         catalog);
@@ -1881,15 +1883,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
 
     optimization::registerVectorFunction(
-        "get_age", GetAge::signatures(), std::make_unique<GetAge>(),
-        {},
-        true,
-        catalog);
-
-    optimization::registerVectorFunction(
-        "concat_vectors2",
-        Concat::signatures(),
-        std::make_unique<Concat>(4, 5),
+        "get_age",
+        GetAge::signatures(),
+        std::make_unique<GetAge>(),
         {},
         true,
         catalog);
@@ -1925,18 +1921,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
 
     // Register FFNN model
-    std::vector<std::vector<float>> w1 =
-        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc1.weight");
-    std::vector<std::vector<float>> b1 =
-        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc1.bias");
-    std::vector<std::vector<float>> w2 =
-        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc2.weight");
-    std::vector<std::vector<float>> b2 =
-        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc2.bias");
-    std::vector<std::vector<float>> w3 =
-        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc3.weight");
-    std::vector<std::vector<float>> b3 =
-        loadHDF5Array("/home/velox/resources/model/fraud_dnn_weights.h5", "fc3.bias");
+    std::vector<std::vector<float>> w1 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc1.weight");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc1.bias");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc2.weight");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc2.bias");
+    std::vector<std::vector<float>> w3 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc3.weight");
+    std::vector<std::vector<float>> b3 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc3.bias");
 
     auto itemNNweight1Vector = maker.arrayVector<float>(w1, REAL());
     auto itemNNweight2Vector = maker.arrayVector<float>(w2, REAL());
@@ -2418,9 +2414,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       cataLog.setFileSchema(p0, inputRowType);
     } else if (model == "llm") {
       std::vector<std::string> userDataPaths =
-          getFilePathsFromDir("/home/velox/data/movie_recommendation/user");
-      std::vector<std::string> movieDataPaths =
-          getFilePathsFromDir("/home/velox/data/movie_recommendation/movie");
+          getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/user");
+      std::vector<std::string> movieDataPaths = getFilePathsFromDir(
+          "/home/velox/resources/data/parquet/llm_mr/movie");
       auto userDataRowType =
           ROW({"user_id", "description"}, {INTEGER(), VARCHAR()});
       auto movieDataRowType =
@@ -2432,10 +2428,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                "spoken_languages"},
               {INTEGER(), VARCHAR(), REAL(), REAL(), INTEGER(), VARCHAR()});
 
-      std::ifstream llmStatistics("/home/velox/data/llm_mr_statistics.txt");
+      std::string llmDataStatsFilePath =
+          "/home/velox/resources/data/parquet/llm_mr/llm_mr_statistics.txt";
+      std::ifstream llmStatistics(llmDataStatsFilePath);
       if (!llmStatistics) {
         throw std::runtime_error(
-            "Unable to open file: /home/velox/data/llm_mr_statistics.txt");
+            "Unable to open file: " + llmDataStatsFilePath);
       }
       // TODO: need more smart way to do this
       std::string line1, line2;
@@ -2723,6 +2721,178 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       cataLog.setFileSchema(readRatingDataPlanNodeId1, ratingDataRowType);
       cataLog.setFileSchema(readRatingDataPlanNodeId1, ratingDataRowType);
       cataLog.setFileSchema(readQueryDataPlanNodeId, queryDataRowType);
+    } else if (model == "fraud") {
+      auto orderDataRowType =
+          ROW({"o_order_id", "o_customer_sk", "o_weekday", "o_date"},
+              {INTEGER(), INTEGER(), VARCHAR(), VARCHAR()});
+
+      auto transactionDataRowType = ROW(
+          {"t_amount", "t_sender", "t_receiver", "transaction_id", "t_time"},
+          {REAL(), INTEGER(), VARCHAR(), BIGINT(), VARCHAR()});
+
+      auto customerDataRowType =
+          ROW({"c_customer_sk",
+               "c_address_num",
+               "c_cust_flag",
+               "c_birth_year",
+               "c_birth_country"},
+              {INTEGER(), INTEGER(), INTEGER(), INTEGER(), INTEGER()});
+      std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+      if (dataDirPrefix == "") {
+        // use default value:
+        dataDirPrefix = "/home/velox/resources/data/parquet/fraud/50_mb/";
+      }
+
+      std::vector<std::string> orderDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "order");
+      std::vector<std::string> transactionDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "financial_transactions");
+      std::vector<std::string> customerDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "customer");
+
+      int orderNumRows, orderNumCols, transactionNumRows, transactionNumCols,
+          customerNumRows, customerNumCols;
+
+      readDataStats(
+          dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
+      readDataStats(
+          dataDirPrefix + "financial_transactions_stats.txt",
+          transactionNumRows,
+          transactionNumCols);
+      readDataStats(
+          dataDirPrefix + "customer_stats.txt",
+          customerNumRows,
+          customerNumCols);
+
+      std::cout << "[INFO] orderNumRows: " << orderNumRows
+                << ", orderNumCols: " << orderNumCols << std::endl;
+      std::cout << "[INFO] transactionNumRows: " << transactionNumRows
+                << ", transactionNumCols: " << transactionNumCols << std::endl;
+      std::cout << "[INFO] customerNumRows: " << customerNumRows
+                << ", customerNumCols: " << customerNumCols << std::endl;
+
+      PlanNodeId readOrderDataPlanNodeId;
+      PlanNodeId readTransactionDataPlanNodeId;
+      PlanNodeId readCustomerDataPlanNodeId;
+
+      myPlan =
+          exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+              // .values({orderRowVector})
+              .tableScan(orderDataRowType)
+              .capturePlanNodeId(readOrderDataPlanNodeId)
+              .project(
+                  {"o_customer_sk",
+                   "o_order_id",
+                   "date_to_timestamp_1(o_date) AS o_timestamp"})
+              .filter("o_timestamp IS NOT NULL")
+              .filter("is_weekday(o_timestamp) = 1")
+              .partialAggregation(
+                  {"o_customer_sk"},
+                  {"count(o_order_id) as total_order",
+                   "max(o_timestamp) as o_last_order_time"})
+              .finalAggregation()
+              .hashJoin(
+                  {"o_customer_sk"},
+                  {"t_sender"},
+                  exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                      // .values({transactionRowVector})
+                      .tableScan(transactionDataRowType)
+                      .capturePlanNodeId(readTransactionDataPlanNodeId)
+                      .project(
+                          {"t_amount",
+                           "t_sender",
+                           "t_receiver",
+                           "transaction_id",
+                           "date_to_timestamp_2(t_time) as t_timestamp"})
+                      .filter("t_timestamp IS NOT NULL")
+                      .planNode(),
+                  "",
+                  {"o_customer_sk",
+                   "total_order",
+                   "o_last_order_time",
+                   "transaction_id",
+                   "t_amount",
+                   "t_timestamp"},
+                  core::JoinType::kInner)
+              .project(
+                  {"o_customer_sk",
+                   "total_order",
+                   "transaction_id",
+                   "t_amount",
+                   "t_timestamp",
+                   "time_diff_in_days(o_last_order_time, t_timestamp) as time_diff"})
+              .filter("time_diff <= 500")
+              .project(
+                  {"o_customer_sk",
+                   "transaction_id",
+                   "get_transaction_features(total_order, t_amount, time_diff, t_timestamp) as transaction_features"})
+              .filter("xgboost_fraud_transaction(transaction_features) >= 0.5")
+              .hashJoin(
+                  {"o_customer_sk"},
+                  {"c_customer_sk"},
+                  exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                      // .values({customerRowVector})
+                      .tableScan(customerDataRowType)
+                      .capturePlanNodeId(readCustomerDataPlanNodeId)
+                      .project(
+                          {"c_customer_sk",
+                           "c_address_num",
+                           "c_cust_flag",
+                           "c_birth_country",
+                           "get_age(c_birth_year) as c_age"})
+                      .project(
+                          {"c_customer_sk",
+                           "get_customer_features(c_address_num, c_cust_flag, c_birth_country, c_age) as customer_features"})
+                      .planNode(),
+                  "",
+                  {"transaction_id",
+                   "transaction_features",
+                   "customer_features"})
+              .project(
+                  {"transaction_id",
+                   "concat(customer_features, transaction_features) AS all_features"})
+              .project(
+                  {"transaction_id",
+                   "all_features",
+                   "softmax(mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(all_features))))))))) AS fraudulent_probs"})
+              .filter("get_binary_class(fraudulent_probs) = 1")
+              .filter("xgboost_fraud_predict(all_features) >= 0.5")
+              .project({"transaction_id"});
+      cataLog.setIdAddressMap(
+          readOrderDataPlanNodeId,
+          orderDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readTransactionDataPlanNodeId,
+          transactionDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readCustomerDataPlanNodeId,
+          customerDataPaths,
+          dwio::common::FileFormat::PARQUET);
+
+      cataLog.setFileSchema(readOrderDataPlanNodeId, orderDataRowType);
+      cataLog.setFileSchema(
+          readTransactionDataPlanNodeId, transactionDataRowType);
+      cataLog.setFileSchema(readCustomerDataPlanNodeId, customerDataRowType);
+
+      std::shared_ptr<OutputStat> orderStat =
+          std::make_shared<OutputStat>(OutputStat(orderNumRows, orderNumCols));
+      Source orderSrc =
+          Source(readOrderDataPlanNodeId, Source::Type::FILE, orderStat);
+      cataLog.addSource(std::make_shared<Source>(orderSrc));
+      std::shared_ptr<OutputStat> transactionStat =
+          std::make_shared<OutputStat>(
+              OutputStat(transactionNumRows, transactionNumCols));
+      Source transactionSrc = Source(
+          readTransactionDataPlanNodeId, Source::Type::FILE, transactionStat);
+      cataLog.addSource(std::make_shared<Source>(transactionSrc));
+      std::shared_ptr<OutputStat> customerStat = std::make_shared<OutputStat>(
+          OutputStat(customerNumRows, customerNumCols));
+      Source customerSrc =
+          Source(readCustomerDataPlanNodeId, Source::Type::FILE, customerStat);
+      cataLog.addSource(std::make_shared<Source>(customerSrc));
+
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -2796,6 +2966,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
     } else if (model == "llm") {
       registerLLMFunctions(64, 2, 3, cataLog, pool_);
+    } else if (model == "fraud") {
+      registerFraudDetectionFunctions(9, cataLog, pool_);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }

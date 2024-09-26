@@ -40,9 +40,6 @@ class IsWeekday : public MLFunction {
 
     const int secondsInADay = 86400;
     for (int i = 0; i < rows.size(); i++) {
-      if (!rows.isValid(i)) {
-        continue;
-      }
 
       int64_t timestamp = inputTimes->valueAt(i);
 
@@ -67,6 +64,9 @@ class IsWeekday : public MLFunction {
     VectorMaker maker{context.pool()};
     auto localResult = maker.flatVector<int>(results);
     context.moveOrCopyResult(localResult, rows, output);
+    output = maker.flatVector<int>(results, INTEGER());
+    // auto localResult = maker.flatVector<int>(results);
+    // context.moveOrCopyResult(localResult, rows, output);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -403,9 +403,6 @@ class DateToTimestamp : public MLFunction {
     struct std::tm t = {};
 
     for (int i = 0; i < rows.size(); i++) {
-      if (!rows.isValid(i)) {
-        continue;
-      }
       StringView val = decodedStringInput->valueAt<StringView>(i);
       std::string inputStr = std::string(val);
 
@@ -427,8 +424,9 @@ class DateToTimestamp : public MLFunction {
     }
 
     VectorMaker maker{context.pool()};
-    auto localResult = maker.flatVector<int64_t>(results);
-    context.moveOrCopyResult(localResult, rows, output);
+    output = maker.flatVector<int64_t>(results, BIGINT());
+    // auto localResult = maker.flatVector<int64_t>(results);
+    // context.moveOrCopyResult(localResult, rows, output);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

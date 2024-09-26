@@ -1281,8 +1281,8 @@ public:
           auto int_tensor = output_tensor.to(torch::kInt);               
           int* data = int_tensor.data_ptr<int>();
           std::vector<int> results(data, data + rows.size());
-          //output = maker.flatVector<int>(results, INTEGER());
-          localResult = maker.flatVector<int>(results, INTEGER());
+          output = maker.flatVector<int>(results, INTEGER());
+          // localResult = maker.flatVector<int>(results, INTEGER());
         } else {
           float* data = output_tensor.data_ptr<float>();
           std::vector<std::vector<float>> results;
@@ -1290,10 +1290,11 @@ public:
               std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
               results.push_back(result);
           }
-          localResult = maker.arrayVector<float>(results, REAL());
+          // localResult = maker.arrayVector<float>(results, REAL());
+          output = maker.arrayVector<float>(results, REAL());
         }
 
-        context.moveOrCopyResult(localResult, rows, output);
+        // context.moveOrCopyResult(localResult, rows, output);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

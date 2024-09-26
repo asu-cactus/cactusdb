@@ -15,6 +15,7 @@
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 #include "velox/expression/VectorFunction.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
+#include "velox/ml_functions/UtilFunction.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -24,10 +25,6 @@ using namespace facebook::velox::memory;
 
 #define MAX_ALLOWED_CHATGPT_TRY 30
 
-std::string getEnvVar(std::string const& key) {
-  char const* val = getenv(key.c_str());
-  return val == NULL ? std::string() : std::string(val);
-}
 
 // Function to count the number of words in a string
 int countWords(const std::string& str) {
