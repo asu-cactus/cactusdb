@@ -348,3 +348,21 @@ std::string LoadBytesFromFile(const std::string& path) {
   fs.read(data.data(), size);
   return data;
 }
+
+std::string getEnvVar(std::string const& key) {
+  char const* val = getenv(key.c_str());
+  return val == NULL ? std::string() : std::string(val);
+}
+
+void readDataStats(const std::string& path, int& numRows, int& numCols) {
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    std::cerr << "Cannot open " << path << std::endl;
+    exit(1);
+  }
+  std::string line;
+  std::getline(file, line);
+  numRows = std::stoi(line);
+  std::getline(file, line);
+  numCols = std::stoi(line);
+}

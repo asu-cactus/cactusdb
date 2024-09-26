@@ -21,6 +21,8 @@ def change_df_dtypes(df):
   
 
 def remove_all_in_directory(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
         
@@ -46,30 +48,30 @@ NUM_USER_DATA = 5
 NUM_MOVIE_DATA = 30
 NUM_SPLIT = 4
 
-remove_all_in_directory('movie_recommendation/movie')
-df1 = pd.read_csv('mr_movie_metadata.csv')
+remove_all_in_directory('./data/parquet/llm_mr/movie')
+df1 = pd.read_csv('./data/llm/mr_movie_metadata.csv')
 
 movie_scaler = MinMaxScaler()
 movie_scaler.fit(df1[['popularity', 'vote_average', 'vote_count']])
 # movie_scaler.fit(df1[['popularity', 'vote_average']])
-with open('llm_mr_minmax_scaler.txt', 'w') as f:
+with open('./model/llm_mr/velox/llm_mr_minmax_scaler.txt', 'w') as f:
   f.write(' '.join(map(str, movie_scaler.data_min_)) + '\n')
   f.write(' '.join(map(str, movie_scaler.data_max_)) + '\n')
 
-with open('llm_mr_minmax_scaler_py.pkl', 'wb') as f:
+with open('./model/llm_mr/tf/llm_mr_minmax_scaler_py.pkl', 'wb') as f:
   pickle.dump(movie_scaler, f)
 
 df1 = change_df_dtypes(df1).iloc[:NUM_MOVIE_DATA]
 batch_size = math.ceil(len(df1) / NUM_SPLIT)
-write_orc(df1, batch_size, 'movie_recommendation/movie')
+write_orc(df1, batch_size, './data/parquet/llm_mr/movie')
 
-remove_all_in_directory('movie_recommendation/user')
-df2 = pd.read_csv('mr_user_genre_ratings.csv')
+remove_all_in_directory('./data/parquet/llm_mr/user')
+df2 = pd.read_csv('./data/llm/mr_user_genre_ratings.csv')
 df2 = change_df_dtypes(df2).iloc[:NUM_USER_DATA]
 batch_size = math.ceil(len(df2) / NUM_SPLIT)
-write_orc(df2, batch_size, 'movie_recommendation/user')
+write_orc(df2, batch_size, './data/parquet/llm_mr/user')
 
 # write num_user and num_movie to a file 
-with open('llm_mr_statistics.txt', 'w') as f:
+with open('./data/parquet/llm_mr/llm_mr_statistics.txt', 'w') as f:
     f.write(f'{NUM_USER_DATA}\n')
     f.write(f'{NUM_MOVIE_DATA}\n')
