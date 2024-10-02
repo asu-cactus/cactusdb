@@ -37,11 +37,21 @@ class CosineSimilarity : public MLFunction {
       VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-    auto input1Features = args[0]->as<ArrayVector>()->elements();
-    float* input1Values = input1Features->values()->asMutable<float>();
+    BaseVector* left = args[0].get();
+    BaseVector* right = args[1].get();
 
-    auto input2Features = args[1]->as<ArrayVector>()->elements();
-    float* input2Values = input2Features->values()->asMutable<float>();
+    exec::LocalDecodedVector leftHolder(context, *left, rows);
+    auto decodedLeftArray = leftHolder.get();
+    auto baseLeftArray =
+        decodedLeftArray->base()->as<ArrayVector>()->elements();
+
+    exec::LocalDecodedVector rightHolder(context, *right, rows);
+    auto decodedRightArray = rightHolder.get();
+    auto baseRightArray =
+        decodedRightArray->base()->as<ArrayVector>()->elements();
+    
+    float* input1Values = baseLeftArray->values()->asMutable<float>();
+    float* input2Values = baseRightArray->values()->asMutable<float>();
 
     int numInput = rows.size();
 
