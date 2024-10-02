@@ -366,3 +366,31 @@ void readDataStats(const std::string& path, int& numRows, int& numCols) {
   std::getline(file, line);
   numCols = std::stoi(line);
 }
+
+template <typename T>
+T* flattenVectorToPointer(const std::vector<std::vector<T>>& vec2D, size_t& totalSize) {
+    // Calculate total size in one pass
+    totalSize = 0;
+    for (const auto& row : vec2D) {
+        totalSize += row.size();
+    }
+
+    // Allocate memory for the flattened array
+    T* flatArray = new T[totalSize];
+
+    // Flatten the 2D vector into the 1D array
+    T* ptr = flatArray;
+    for (const auto& row : vec2D) {
+        std::copy(row.begin(), row.end(), ptr);
+        ptr += row.size();
+    }
+
+    return flatArray;
+}
+
+// Overloaded version without totalSize (default)
+template <typename T>
+T* flattenVectorToPointer(const std::vector<std::vector<T>>& vec2D) {
+    size_t totalSize = 0;  // A local variable to hold the size if not provided by the caller
+    return flattenVectorToPointer(vec2D, totalSize);
+}
