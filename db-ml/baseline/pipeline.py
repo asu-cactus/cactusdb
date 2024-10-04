@@ -282,6 +282,300 @@ class TwoTowerModelPipelinePyTorch(Pipeline):
         return y_preds
 
 
+sql_movielens_final_fetch_query = """
+WITH t_changed_rating AS (
+SELECT *,
+       CASE
+           WHEN r_rating > 3 THEN 1
+           ELSE 0
+       END AS changed_rating
+FROM movielens_rating
+),
+t_user_rating AS (
+SELECT mu.u_user_id, u_gender, u_age, u_occupation, avg(tcr.changed_rating) AS u_user_mean_rating
+FROM movielens_user mu, t_changed_rating tcr
+WHERE mu.u_user_id = tcr.r_user_id
+GROUP BY mu.u_user_id, u_gender, u_age, u_occupation
+),
+t_movie_rating AS (
+SELECT mm.m_movie_id, m_genres, m_popularity, m_vote_average, m_vote_count, avg(tcr.changed_rating) AS m_movie_mean_rating
+FROM movielens_movie mm , t_changed_rating tcr
+WHERE mm.m_movie_id = tcr.r_movie_id AND m_genres like '%Action%'
+GROUP BY mm.m_movie_id, m_genres, m_popularity, m_vote_average, m_vote_count
+)
+select *
+from t_user_rating tur cross join t_movie_rating tmr;
+"""
+
+
+class MovielensQ1PipelineDLCentric(Pipeline):
+    def __init__(self, num_sample=-1, num_loop=4):
+        self.postgres_conn = utils.get_postgres_connection_config()
+        super(MovielensQ1PipelineDLCentric, self).__init__(
+            "movielens-q1-pipeline-dl-centric", num_sample=num_sample, num_loop=num_loop
+        )
+
+    def loading_meta_impl(self):
+        embedding_dim = 32
+        epoch = 15
+        batch_size = 2048
+        lr = 0.001
+        seed = 1023
+        dropout = 0.3
+
+        ori_data = pd.read_csv("/home/velox/resources/data/movielens/final/movielens_processed.csv")
+
+        sparse_features = ["user_id", "movie_id", "gender", "age", "occupation"]
+        dense_features = ["user_mean_rating", "movie_mean_rating"]
+        target = ["rating"]
+        device = "cpu"
+        user_sparse_features, user_dense_features = [
+            "user_id",
+            "gender",
+            "age",
+            "occupation",
+        ], ["user_mean_rating"]
+        item_sparse_features, item_dense_features = [
+            "movie_id",
+        ], ["movie_mean_rating"]
+        dict_encoder = dict()
+        for feat in sparse_features:
+            lbe = LabelEncoder()
+            lbe.fit(ori_data[feat])
+            dict_encoder[feat] = lbe
+
+        genres_key2index, train_genres_list, genres_maxlen = get_var_feature(
+            ori_data, "genres"
+        )
+
+        user_feature_columns = [
+            SparseFeat(feat, ori_data[feat].nunique(), embedding_dim=embedding_dim)
+            for i, feat in enumerate(user_sparse_features)
+        ] + [
+            DenseFeat(
+                feat,
+                1,
+            )
+            for feat in user_dense_features
+        ]
+        item_feature_columns = [
+            SparseFeat(feat, ori_data[feat].nunique(), embedding_dim=embedding_dim)
+            for i, feat in enumerate(item_sparse_features)
+        ] + [
+            DenseFeat(
+                feat,
+                1,
+            )
+            for feat in item_dense_features
+        ]
+        model = DSSM_Torch(
+            user_feature_columns, item_feature_columns, task="binary", device=device
+        )
+        model.compile(
+            "adam", "binary_crossentropy", metrics=["auc", "accuracy", "logloss"], lr=lr
+        )
+        self.model = model
+        self.meta["model"] = model
+        self.meta["sparse_features"] = sparse_features
+        self.meta["dense_features"] = dense_features
+        self.meta["dict_encoder"] = dict_encoder
+        self.meta["genres_key2index"] = genres_key2index
+        self.meta["genres_maxlen"] = genres_maxlen
+        self.ffnn_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q1_ffnn_tf.h5")
+        self.min_max_scaler = pickle.load(open("../../resources/model/movielens/final/tf/q1_ffnn_minmax_scaler_py.pkl", "rb"))
+
+    def data_loading_impl(self, batch_size):
+        data = utils.fetch_data_from_postgres_via_psycopg2(
+            sql_movielens_final_fetch_query
+        )
+        return data
+
+    def data_processing_impl(self, data):
+        # first stage filtering 
+        X_for_ffnn = self.min_max_scaler.transform(data[['m_popularity', 'm_vote_average', 'm_vote_count']].values)
+        y = np.argmax(self.ffnn_model(X_for_ffnn), axis=1)
+        data = data[y == 1]
+
+        # rename column names
+        data.columns = ['user_id', 'gender', 'age', 'occupation', 'user_mean_rating', 'movie_id', 'genres', 'popularity', 'vote_average', 'vote_count', 'movie_mean_rating']
+
+        sparse_features = self.meta["sparse_features"]
+        dense_features = self.meta["dense_features"]
+        dict_encoder = self.meta["dict_encoder"]
+        genres_key2index = self.meta["genres_key2index"]
+        genres_maxlen = self.meta["genres_maxlen"]
+
+        data["user_mean_rating"] = data["user_mean_rating"].astype(np.float64)
+        data["movie_mean_rating"] = data["movie_mean_rating"].astype(np.float64)
+
+        for feat in sparse_features:
+            lbe = dict_encoder[feat]
+            data[feat] = lbe.transform(data[feat])
+
+        test_genres_list = get_test_var_feature(
+            data, "genres", genres_key2index, genres_maxlen
+        )
+        test_model_input = {
+            name: data[name] for name in sparse_features + dense_features
+        }
+        test_model_input["genres"] = test_genres_list
+        # data['COL1'] = label_encoder.transform(data['COL1'])
+        return test_model_input
+
+    def model_inference_impl(self, data):
+        y_preds = self.model.predict(data)
+        return y_preds
+
+
+class MovielensQ1PipelineEvaDB(Pipeline):
+    
+    def __del__(self):
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_v_user_rating};").df()
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_v_movie_rating};").df()
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_v_changed_rating};").df()
+        
+    def __init__(self, num_sample=-1, num_loop=10):
+        self.cursor = evadb.connect().cursor()
+        # create changed_rating_view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_v_changed_rating AS
+            SELECT *,
+                CASE
+                    WHEN rating > 3 THEN 1
+                    ELSE 0
+                END AS changed_rating
+            FROM movielens_rating1
+            };
+        """
+        ).df()
+        # create user_rating_view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_v_user_rating AS
+            SELECT mu.user_id, gender, age, occupation, avg(tcr.changed_rating) AS user_mean_rating
+                FROM movielens_user1 mu, evadb_v_changed_rating tcr
+                WHERE mu.user_id = tcr.user_id
+                GROUP BY mu.user_id, gender, age, occupation
+            };
+        """
+        ).df()
+        # create movie_rating_view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_v_movie_rating AS
+            SELECT mm.movie_id, genres, avg(tcr.changed_rating) AS movie_mean_rating, popularity, vote_average, vote_count, genres LIKE '%Action%' AS is_action
+                FROM movielens_movie1 mm , evadb_v_changed_rating tcr
+                WHERE mm.movie_id = tcr.movie_id
+                GROUP BY mm.movie_id, genres, popularity, vote_average, vote_count
+            };
+        """
+        ).df()
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS DSSM_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS DSSM_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS MLQ1FFNN_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS MLQ1FFNN_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+
+        self.postgres_conn = utils.get_postgres_connection_config()
+        super(MovielensQ1PipelineEvaDB, self).__init__(
+            "movielens-q1-pipeline-evadb", num_sample=num_sample, num_loop=num_loop
+        )
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+
+        return None
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        return data
+
+    def run_pipeline(self):
+        self.loading_meta_impl()
+
+        timer_end_end = utils.Timer()
+        timer_data_loading = utils.Timer()
+        timer_data_processing = utils.Timer()
+        timer_model_inference = utils.Timer()
+        t_end_end = 0
+        t_data_loading = 0
+        t_data_processing = 0
+        t_model_inference = 0
+
+        for _ in tqdm(range(self.num_loop)):
+            timer_end_end.tic()
+            return_data = []
+            for batch_size in self.list_batches:
+                data = None
+                timer_data_loading.tic()
+                data = self.data_loading_impl(batch_size)
+                t_data_loading += timer_data_loading.toc()
+
+                timer_data_processing.tic()
+                data = self.data_processing_impl(data)
+                t_data_processing += timer_data_processing.toc()
+
+                timer_model_inference.tic()
+                data = self.model_inference_impl(data)
+                t_model_inference += timer_model_inference.toc()
+
+                result_df = self.cursor.query(
+                    """
+                select DSSM_EVADB(user_id, gender, age, occupation, user_mean_rating, movie_id, genres, movie_mean_rating)
+                from postgres_data.evadb_v_user_rating join postgres_data.evadb_v_movie_rating on true = true
+                where MLQ1FFNN_EVADB(popularity, vote_average, vote_count).label = 1 AND is_action = 1
+                """
+                ).df()
+
+                t_data_processing += result_df["t_process"].values[-1]
+                t_model_inference += result_df["t_model_inference"].values[-1]
+                return_data.append(result_df["label"])
+
+            t_end_end += timer_end_end.toc()
+        t_data_loading /= self.num_loop
+        t_data_processing /= self.num_loop
+        t_model_inference /= self.num_loop
+        t_end_end /= self.num_loop
+
+        result_df = pd.DataFrame(
+            {
+                "config_name": self.name,
+                "num_sample": self.num_sample,
+                "t_data_load": t_data_loading,
+                "t_data_process": t_data_processing,
+                "t_model": t_model_inference,
+                "t_end_end": t_end_end,
+            },
+            index=[0],
+        )
+        return result_df
+
+
 class TwoTowerModelPipelineTF(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
         self.postgres_conn = utils.get_postgres_connection_config()

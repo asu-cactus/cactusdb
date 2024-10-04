@@ -8,11 +8,52 @@ import os
 import gc
 import math
 import fcntl
+import pyarrow.parquet as pq
 from tqdm.auto import tqdm
 from sqlalchemy import create_engine
 from sklearn.preprocessing import LabelEncoder
 import concurrent.futures
 import multiprocessing
+
+
+def load_movielens_final_to_datastore():
+    conn_string = utils.get_postgres_connection_config()
+    db = create_engine(conn_string)
+    conn = db.connect()
+
+    data_dir = "../../resources/data/movielens/final"
+    df_movie = pq.read_table(os.path.join(data_dir, "movie.parquet")).to_pandas()
+    a = LabelEncoder().fit(df_movie["m_movie_id"])
+    b = a.transform(df_movie["m_movie_id"])
+    df_movie["m_movie_id"] = b + 1
+
+    df_rating = pq.read_table(os.path.join(data_dir, "rating.parquet")).to_pandas()
+    df_user = pq.read_table(os.path.join(data_dir, "user.parquet")).to_pandas()
+    
+
+    df_user.columns = ['user_id', 'gender', 'age', 'occupation', 'zipcode']
+    df_movie.columns = ['movie_id', 'title', 'genres', 'spoken_languages', 'popularity', 'vote_average', 'vote_count', 'overview']
+    df_rating.columns = ['user_id', 'movie_id', 'timestamp', 'rating']
+
+    df_user.to_sql("movielens_user1", db, index=False, if_exists="replace")
+    df_movie.to_sql("movielens_movie1", db, index=False, if_exists="replace")
+    df_rating.to_sql("movielens_rating1", db, index=False, if_exists="replace")
+
+    print("[INFO] load movielens dataset to postgres success!")
+
+    # check hdfs path exist
+    data_path = "/user/velox/data/movielens"
+    if not utils.check_hdfs_dir_exist(data_path):
+        utils.create_hdfs_dir(data_path)
+
+    movie_path_in_hdfs = os.path.join(data_path, "movie")
+    utils.load_csv_to_hdfs("../../resources/data/movielens/final/movie.parquet", movie_path_in_hdfs, overwrite=True)
+    user_path_in_hdfs = os.path.join(data_path, "user")
+    utils.load_csv_to_hdfs("../../resources/data/movielens/final/user.parquet", user_path_in_hdfs, overwrite=True)
+    rating_path_in_hdfs = os.path.join(data_path, "rating")
+    utils.load_csv_to_hdfs("../../resources/data/movielens/final/rating.parquet", rating_path_in_hdfs, overwrite=True)
+
+    print("[INFO] load movielens dataset to hadoop success!")
 
 
 def load_movielens_to_postgres():
@@ -268,6 +309,8 @@ def main():
         load_movielens_to_postgres()
     elif dataset == "ffnn":
         load_ffnn_data_to_postgres()
+    elif dataset == "movielens_final":
+        load_movielens_final_to_datastore()
 
 
 if __name__ == "__main__":

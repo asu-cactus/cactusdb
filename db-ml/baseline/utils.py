@@ -133,6 +133,12 @@ def check_hdfs_dir_exist(directory_path):
     print(result)
     return result.returncode == 0
 
+def check_hdfs_file_exist(file_path):
+    command = ["hdfs", "dfs", "-test", "-e", file_path]
+    result = subprocess.run(command, capture_output=True)
+    print(result)
+    return result.returncode == 0
+
 
 def create_hdfs_dir(directory_path):
     """ """
@@ -141,8 +147,12 @@ def create_hdfs_dir(directory_path):
     print(result)
 
 
-def load_csv_to_hdfs(src_path, tar_path):
+def load_csv_to_hdfs(src_path, tar_path, overwrite=False):
     """ """
+    if overwrite:
+        if check_hdfs_file_exist(tar_path):
+            rm_hdfs_file(tar_path)
+
     command = ["hdfs", "dfs", "-put", src_path, tar_path]
     result = subprocess.run(command, capture_output=True)
     print(result)
@@ -159,6 +169,7 @@ def rm_hdfs_file(path):
     """ """
     command = ["hdfs", "dfs", "-rm", "-r", path]
     result = subprocess.run(command, capture_output=True)
+    return result
 
 
 #   print(result)
