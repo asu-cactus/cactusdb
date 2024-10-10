@@ -783,40 +783,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         true,
         catalog,
         isVerticalPartition);
-    optimization::registerVectorFunction(
-        "concat1",
-        Concat::signatures(),
-        std::make_unique<Concat>(embeddingDims, embeddingDims),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
 
-    optimization::registerVectorFunction(
-        "concat2",
-        Concat::signatures(),
-        std::make_unique<Concat>(2 * embeddingDims, embeddingDims),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
 
-    optimization::registerVectorFunction(
-        "concat3",
-        Concat::signatures(),
-        std::make_unique<Concat>(3 * embeddingDims, embeddingDims),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
-    optimization::registerVectorFunction(
-        "concat4",
-        Concat::signatures(),
-        std::make_unique<Concat>(4 * embeddingDims, 1),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
 
     randomGenerator.setFloatRange(-1, 1);
     std::vector<std::vector<float>> userNNweight1 =
@@ -1100,23 +1068,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog,
         isVerticalPartition);
 
-    optimization::registerVectorFunction(
-        "concat2_1",
-        Concat::signatures(),
-        std::make_unique<Concat>(embeddingDims, embeddingDims),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
-
-    optimization::registerVectorFunction(
-        "concat2_2",
-        Concat::signatures(),
-        std::make_unique<Concat>(2 * embeddingDims, 1),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
 
     randomGenerator.setFloatRange(-1, 1);
     std::vector<std::vector<float>> itemNNweight1 =
@@ -1351,6 +1302,93 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         true,
         catalog,
         isVerticalPartition);
+  }
+
+  void registerMLQ1Functions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+
+    std::string ffnnModelPath =
+        "/home/velox/resources/model/movielens/final/velox/q1_ffnn_weights.h5";
+    std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+    std::vector<std::vector<float>> w3 = loadHDF5Array(ffnnModelPath, "w3");
+    std::vector<std::vector<float>> b3 = loadHDF5Array(ffnnModelPath, "b3");
+
+    optimization::registerVectorFunction(
+        "mat_mul3_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w1)), 3, 128),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add3_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b1)), 128),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul3_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w2)), 128, 64),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add3_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b2)), 64),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul3_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w3)), 64, 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add3_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b3)), 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "softmax",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "argmax",
+        Argmax::signatures(),
+        std::make_unique<Argmax>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "llm_ffnn_minmax_scaler",
+        MinMaxScaler::signatures(),
+        std::make_unique<MinMaxScaler>(
+            "/home/velox/resources/model/movielens/final/velox/q1_ffnn_minmax_scaler.txt"),
+        {},
+        true,
+        catalog);
   }
 
   /**
@@ -1689,7 +1727,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int input_size,
       CataLog& catalog,
       std::shared_ptr<memory::MemoryPool> pool_) {
-    bool isVerticalPartition = false;
     VectorMaker maker{pool_.get()};
     std::cout << "[INFO]: Register LLM Function functions" << std::endl;
 
@@ -1729,8 +1766,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             units1),
         {},
         true,
-        catalog,
-        isVerticalPartition);
+        catalog);
 
     optimization::registerVectorFunction(
         "mat_vector_add3_2",
@@ -1741,8 +1777,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             units1),
         {},
         true,
-        catalog,
-        isVerticalPartition);
+        catalog);
 
     optimization::registerVectorFunction(
         "mat_mul3_3",
@@ -1754,8 +1789,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             units2),
         {},
         true,
-        catalog,
-        isVerticalPartition);
+        catalog);
 
     optimization::registerVectorFunction(
         "mat_vector_add3_4",
@@ -1766,8 +1800,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             units2),
         {},
         true,
-        catalog,
-        isVerticalPartition);
+        catalog);
 
     // Register ReLU activation function for the first layer
     optimization::registerVectorFunction(
@@ -1816,8 +1849,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         std::make_unique<ConvertDoubleArrayToFloatArray>(),
         {},
         true,
-        catalog,
-        isVerticalPartition);
+        catalog);
     optimization::registerVectorFunction(
         "llm_ffnn_minmax_scaler",
         MinMaxScaler::signatures(),
@@ -1825,8 +1857,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             "/home/velox/resources/model/llm_mr/velox/llm_mr_minmax_scaler.txt"),
         {},
         true,
-        catalog,
-        isVerticalPartition);
+        catalog);
   }
 
   void registerFraudDetectionFunctions(
@@ -2289,6 +2320,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
     } else if (model == "llm") {
       registerLLMFunctions(64, 2, 3, cataLog, pool_);
+    } else if (model == "ml-q1") {
+      registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -2645,8 +2678,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               .project( // concate embedding vectors
                   {"user_id",
                    "movie_id",
-                   "concat4(concat3(concat2(concat1(user_id_embed,gender),age),occupation), user_mean_rating) as user_tower_features",
-                   "concat2_2(concat2_1(movie_id_embed, genres), movie_mean_rating) as movie_tower_features"})
+                   //  "concat4(concat3(concat2(concat1(user_id_embed,gender),age),occupation),
+                   //  user_mean_rating) as user_tower_features",
+                   "concat(user_id_embed, gender, age, occupation, user_mean_rating) as user_tower_features",
+                   //  "concat2_2(concat2_1(movie_id_embed, genres),
+                   //  movie_mean_rating) as movie_tower_features"
+                   "concat(movie_id_embed, genres, movie_mean_rating) as movie_tower_features"})
               // .project( // user/movie tower inference
               // {"user_torchNN(user_tower_features) as user_nn_out",
               //  "movie_torchNN(movie_tower_features) as movie_nn_out"})
@@ -2893,6 +2930,197 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           Source(readCustomerDataPlanNodeId, Source::Type::FILE, customerStat);
       cataLog.addSource(std::make_shared<Source>(customerSrc));
 
+    } else if (model == "ml-q1" || model == "ml-q2" || model == "ml-q3") {
+      auto movieTagDataRowType = ROW(
+          {"mt_movie_id", "mt_relevance_score"}, {INTEGER(), ARRAY(REAL())});
+      auto movieDataRowType =
+          ROW({"m_movie_id",
+               "m_title",
+               "m_genres",
+               "m_spoken_languages",
+               "m_popularity",
+               "m_vote_average",
+               "m_vote_count",
+               "m_overview"},
+              {INTEGER(),
+               VARCHAR(),
+               VARCHAR(),
+               VARCHAR(),
+               REAL(),
+               REAL(),
+               INTEGER(),
+               VARCHAR()});
+      auto userDataRowType =
+          ROW({"u_user_id", "u_gender", "u_age", "u_occupation", "u_zipcode"},
+              {INTEGER(), VARCHAR(), INTEGER(), INTEGER(), VARCHAR()});
+      auto ratingDataRowType =
+          ROW({"r_user_id", "r_movie_id", "r_rating", "r_timestamp"},
+              {INTEGER(), INTEGER(), INTEGER(), INTEGER()});
+
+      std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+      if (dataDirPrefix == "") {
+        // use default value:
+        dataDirPrefix = "/home/velox/resources/data/parquet/movielens/final/";
+      }
+
+      std::vector<std::string> movieTagDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "movie_tag_relevance");
+      std::vector<std::string> movieDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "movie");
+      std::vector<std::string> userDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "user");
+      std::vector<std::string> ratingDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "rating");
+
+      int movieTagNumRows, movieTagNumCols, movieNumRows, movieNumCols,
+          userNumRows, userNumCols, ratingNumRows, ratingNumCols;
+
+      readDataStats(
+          dataDirPrefix + "movie_tag_relevance_stats.txt",
+          movieTagNumRows,
+          movieTagNumCols);
+      readDataStats(
+          dataDirPrefix + "movie_stats.txt", movieNumRows, movieNumCols);
+      readDataStats(dataDirPrefix + "user_stats.txt", userNumRows, userNumCols);
+      readDataStats(
+          dataDirPrefix + "rating_stats.txt", ratingNumRows, ratingNumCols);
+
+      PlanNodeId readMovieTagDataPlanNodeId;
+      PlanNodeId readUserDataPlanNodeId;
+      PlanNodeId readMovieDataPlanNodeId;
+      PlanNodeId readRatingDataPlanNodeId1;
+      PlanNodeId readRatingDataPlanNodeId2;
+
+      auto readUserAvgRatingPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(userDataRowType, {}, "")
+              .capturePlanNodeId(readUserDataPlanNodeId)
+              .hashJoin(
+                  {"u_user_id"},
+                  {"r_user_id"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(ratingDataRowType, {}, "")
+                      .capturePlanNodeId(readRatingDataPlanNodeId1)
+                      .project(
+                          {"r_user_id", "if (r_rating > 3, 1, 0) as r_rating"})
+                      .partialAggregation(
+                          {"r_user_id"},
+                          {"avg(r_rating) as u_user_mean_rating"})
+                      .finalAggregation()
+                      .planNode(),
+                  "",
+                  {"u_user_id",
+                   "u_gender",
+                   "u_age",
+                   "u_occupation",
+                   "u_user_mean_rating"});
+
+      auto readMovieAvgRatingPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(movieDataRowType, {}, "")
+              .capturePlanNodeId(readMovieDataPlanNodeId)
+              .filter("m_genres LIKE '\%Action\%'")
+              .project({
+                  "m_movie_id",
+                  "m_genres",
+                  "m_spoken_languages",
+                  "m_popularity",
+                  "m_vote_average",
+                  "m_vote_count",
+                  "llm_ffnn_minmax_scaler(transform(array_constructor(m_popularity, m_vote_average, m_vote_count), x-> CAST(X as REAL)))  AS movie_description_array",
+              })
+              .project({
+                  "m_movie_id",
+                  "m_genres",
+                  "m_spoken_languages",
+                  "m_popularity",
+                  "m_vote_average",
+                  "m_vote_count",
+                  "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(movie_description_array)))))))))) AS trending_prediction",
+              })
+              .filter("trending_prediction = 1")
+              .hashJoin(
+                  {"m_movie_id"},
+                  {"r_movie_id"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(ratingDataRowType, {}, "")
+                      .capturePlanNodeId(readRatingDataPlanNodeId2)
+                      .project(
+                          {"r_movie_id", "if (r_rating > 3, 1, 0) as r_rating"})
+                      .partialAggregation(
+                          {"r_movie_id"},
+                          {"avg(r_rating) as m_movie_mean_rating"})
+                      .finalAggregation()
+                      .planNode(),
+                  "",
+                  {"m_movie_id",
+                   "m_genres",
+                   "m_spoken_languages",
+                   "m_popularity",
+                   "m_vote_average",
+                   "m_vote_count",
+                   "m_movie_mean_rating"});
+
+      myPlan =
+          readUserAvgRatingPlan
+              .project(
+                  {"u_user_id",
+                   "user_id_embedding(user_id_encoder(convert_int_array(u_user_id))) as u_user_id_embed",
+                   "gender_embedding(gender_encoder(u_gender)) as u_gender",
+                   "age_embedding(age_encoder(convert_int_array(u_age))) as u_age",
+                   "occupation_embedding(occupation_encoder(convert_int_array(u_occupation))) as u_occupation",
+                   "transform(array_constructor(u_user_mean_rating), x -> CAST(x as REAL)) as u_user_mean_rating"})
+              .project(
+                  {"u_user_id",
+                   "concat(u_user_id_embed, u_gender, u_age, u_occupation,u_user_mean_rating) as user_tower_features"})
+              .project(
+                  {"u_user_id",
+                   "relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(user_tower_features)))))))))))) as user_nn_out"})
+              .nestedLoopJoin(
+                  readMovieAvgRatingPlan.orderBy({"m_movie_id"}, false)
+                      .project(
+                          {"m_movie_id",
+                           "movie_id_embedding(movie_id_encoder(convert_int_array(m_movie_id))) as m_movie_id_embed",
+                           "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres",
+                           "transform(array_constructor(m_movie_mean_rating), x -> CAST(x as REAL)) as m_movie_mean_rating"})
+                      .project({
+                          "m_movie_id",
+                          "concat(m_movie_id_embed, m_genres, m_movie_mean_rating) as movie_tower_features",
+                      })
+                      .project(
+                          {"m_movie_id",
+                           "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
+                      .planNode(),
+                  {
+                      "u_user_id",
+                      "m_movie_id",
+                      "user_nn_out",
+                      "movie_nn_out"
+                  })
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "cosine_similarity(user_nn_out, movie_nn_out)"})
+                   ;
+
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId,
+          userDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readMovieDataPlanNodeId,
+          movieDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readRatingDataPlanNodeId1,
+          ratingDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readRatingDataPlanNodeId2,
+          ratingDataPaths,
+          dwio::common::FileFormat::PARQUET);
+
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -2968,6 +3196,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       registerLLMFunctions(64, 2, 3, cataLog, pool_);
     } else if (model == "fraud") {
       registerFraudDetectionFunctions(9, cataLog, pool_);
+    } else if (model == "ml-q1") {
+      registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+      registerMLQ1Functions(cataLog, pool_);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
