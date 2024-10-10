@@ -16,8 +16,10 @@ from models.dssm import DSSM_Torch, DSSM_TF, get_var_feature, get_test_var_featu
 from sklearn.preprocessing import LabelEncoder
 from tqdm.auto import tqdm
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, pandas_udf
-from pyspark.sql.types import ArrayType, FloatType, StringType
+from pyspark.sql.functions import col, pandas_udf, when
+import pyspark.sql.functions as F
+from pyspark.sql.types import ArrayType, FloatType, StringType, IntegerType
+from dssm_evadb import DSSM_Moel_Wrapper
 import pickle
 import multiprocessing as mp
 
@@ -381,7 +383,7 @@ class MovielensQ1PipelineDLCentric(Pipeline):
         self.meta["dict_encoder"] = dict_encoder
         self.meta["genres_key2index"] = genres_key2index
         self.meta["genres_maxlen"] = genres_maxlen
-        self.ffnn_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q1_ffnn_tf.h5")
+        self.ffnn_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q1_ffnn_tf.h5", compile=False)
         self.min_max_scaler = pickle.load(open("../../resources/model/movielens/final/tf/q1_ffnn_minmax_scaler_py.pkl", "rb"))
 
     def data_loading_impl(self, batch_size):
@@ -1229,6 +1231,90 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
         return result_df
 
 
+movielens_q1_ffnn_spark_min_max_scaler = pickle.load(open("../../resources/model/movielens/final/tf/q1_ffnn_minmax_scaler_py.pkl", "rb"))
+movielens_q1_ffnn_spark_trendeng_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q1_ffnn_tf.h5", compile=False)
+
+@pandas_udf(IntegerType())
+def movielens_q1_trending_ffnn(m_popularity: pd.Series, m_vote_average: pd.Series, m_vote_count: pd.Series) -> pd.Series:
+    X = np.array([m_popularity.values, m_vote_average.values, m_vote_count.values]).T
+    X = movielens_q1_ffnn_spark_min_max_scaler.transform(X)
+    y = np.argmax(movielens_q1_ffnn_spark_trendeng_model(X), axis=1)
+    
+    return pd.Series(y)
+
+class MovielensQ1PipelineSparkHadoop(Pipeline):
+    def __init__(
+        self,
+        num_sample=-1,
+        num_loop=10,
+    ):
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "40g")
+            .getOrCreate()
+        )
+
+        super(MovielensQ1PipelineSparkHadoop, self).__init__(
+            "MovielensQ1PipelineSparkHadoop", num_sample=num_sample, num_loop=num_loop
+        )
+
+        self.model = DSSM_Moel_Wrapper()
+        self.data_path = "hdfs://localhost:9900/user/velox/data/movielens/"
+        self.movie_path_in_hdfs = os.path.join(self.data_path, "movie")
+        self.user_path_in_hdfs = os.path.join(self.data_path, "user")
+        self.rating_path_in_hdfs = os.path.join(self.data_path, "rating")
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        df_movie = self.spark.read.parquet(self.movie_path_in_hdfs)
+        df_movie.createOrReplaceTempView("movie")
+        df_user = self.spark.read.parquet(self.user_path_in_hdfs)
+        df_user.createOrReplaceTempView("user")
+        df_rating = self.spark.read.parquet(self.rating_path_in_hdfs)
+
+        df_rating = df_rating.withColumn("new_rating", when(df_rating["r_rating"] > 3, 1).otherwise(0))
+        df_rating.createOrReplaceTempView("rating")
+        
+        movielens_q1_spark_sql = """
+        WITH t_user_rating AS (
+        SELECT mu.u_user_id, u_gender, u_age, u_occupation, avg(tcr.new_rating) AS u_user_mean_rating
+        FROM user mu, rating tcr
+        WHERE mu.u_user_id = tcr.r_user_id
+        GROUP BY mu.u_user_id, u_gender, u_age, u_occupation
+        ),
+        t_movie_rating AS (
+        SELECT mm.m_movie_id, m_genres, m_popularity, m_vote_average, m_vote_count, avg(tcr.new_rating) AS m_movie_mean_rating
+        FROM movie mm , rating tcr
+        WHERE mm.m_movie_id = tcr.r_movie_id
+        GROUP BY mm.m_movie_id, m_genres, m_popularity, m_vote_average, m_vote_count
+        )
+        select *
+        from t_user_rating tur cross join t_movie_rating tmr;
+        """
+        data = self.spark.sql(movielens_q1_spark_sql)
+        
+        return data
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        
+        data = data.withColumn("ffnn_pred", movielens_q1_trending_ffnn(
+            F.col("m_popularity"),
+            F.col("m_vote_average"),
+            F.col("m_vote_count")
+        )).filter((F.col("ffnn_pred") == 1) & (F.col('m_genres').contains('Action')))
+
+        df_data = data.toPandas()
+        df_data = df_data[['u_user_id', 'u_gender', 'u_age', 'u_occupation', 'u_user_mean_rating', 'm_movie_id', 'm_genres', 'm_movie_mean_rating']]
+        df_data.columns = ['user_id', 'gender', 'age', 'occupation', 'user_mean_rating', 'movie_id', 'genres', 'movie_mean_rating']
+        result_df = self.model.predict(df_data)
+        return result_df
+
+
 def pd_func_summarize_description(df, column_name, prompt):
     df.loc[:, ["{}_summarized".format(column_name), "num_send_token", "num_receive_token", "num_failures"]] = df.apply(
         lambda x: utils.chatgpt_server_restfulAPI(prompt + x[column_name]),
@@ -1298,7 +1384,7 @@ class LLMRecommendationPipelinePython(Pipeline):
 
         self.openAI_client = utils.get_openAI_client()
         self.llm_ffnn_model = tf.keras.models.load_model(
-            "/home/velox/data/llm_mr_ffnn.h5"
+            "/home/velox/data/llm_mr_ffnn.h5", compile=False
         )
         self.min_max_scaler = pickle.load(
             open("/home/velox/data/llm_mr_minmax_scaler_py.pkl", "rb")

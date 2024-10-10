@@ -324,3 +324,104 @@ class DSSM_EVADB(AbstractFunction):
             }
         )
         return result_df
+
+
+class DSSM_Moel_Wrapper():
+    def __init__(self):
+        self.meta = {}
+        self.load_metadata()
+
+    def load_metadata(self):
+        embedding_dim = 32
+        epoch = 15
+        batch_size = 2048
+        lr = 0.001
+        seed = 1023
+        dropout = 0.3
+
+        ori_data = pd.read_csv("/home/velox/resources/data/movielens/final/movielens_processed.csv")
+
+        sparse_features = ["user_id", "movie_id", "gender", "age", "occupation"]
+        dense_features = ["user_mean_rating", "movie_mean_rating"]
+        target = ["rating"]
+        device = "cpu"
+        user_sparse_features, user_dense_features = [
+            "user_id",
+            "gender",
+            "age",
+            "occupation",
+        ], ["user_mean_rating"]
+        item_sparse_features, item_dense_features = [
+            "movie_id",
+        ], ["movie_mean_rating"]
+        dict_encoder = dict()
+        for feat in sparse_features:
+            lbe = LabelEncoder()
+            lbe.fit(ori_data[feat])
+            dict_encoder[feat] = lbe
+
+        genres_key2index, train_genres_list, genres_maxlen = get_var_feature(
+            ori_data, "genres"
+        )
+
+        user_feature_columns = [
+            SparseFeat(feat, ori_data[feat].nunique(), embedding_dim=embedding_dim)
+            for i, feat in enumerate(user_sparse_features)
+        ] + [
+            DenseFeat(
+                feat,
+                1,
+            )
+            for feat in user_dense_features
+        ]
+        item_feature_columns = [
+            SparseFeat(feat, ori_data[feat].nunique(), embedding_dim=embedding_dim)
+            for i, feat in enumerate(item_sparse_features)
+        ] + [
+            DenseFeat(
+                feat,
+                1,
+            )
+            for feat in item_dense_features
+        ]
+        model = DSSM_Torch(
+            user_feature_columns, item_feature_columns, task="binary", device=device
+        )
+        model.compile(
+            "adam", "binary_crossentropy", metrics=["auc", "accuracy", "logloss"], lr=lr
+        )
+        self.model = model
+        self.meta["model"] = model
+        self.meta["sparse_features"] = sparse_features
+        self.meta["dense_features"] = dense_features
+        self.meta["dict_encoder"] = dict_encoder
+        self.meta["genres_key2index"] = genres_key2index
+        self.meta["genres_maxlen"] = genres_maxlen
+
+    def predict(self, data):
+
+        # rename column names
+        sparse_features = self.meta["sparse_features"]
+        dense_features = self.meta["dense_features"]
+        dict_encoder = self.meta["dict_encoder"]
+        genres_key2index = self.meta["genres_key2index"]
+        genres_maxlen = self.meta["genres_maxlen"]
+
+        data["user_mean_rating"] = data["user_mean_rating"].astype(np.float64)
+        data["movie_mean_rating"] = data["movie_mean_rating"].astype(np.float64)
+
+        for feat in sparse_features:
+            lbe = dict_encoder[feat]
+            data[feat] = lbe.transform(data[feat])
+
+        test_genres_list = get_test_var_feature(
+            data, "genres", genres_key2index, genres_maxlen
+        )
+        test_model_input = {
+            name: data[name] for name in sparse_features + dense_features
+        }
+        test_model_input["genres"] = test_genres_list
+
+        y_preds = self.model.predict(test_model_input)
+
+        return y_preds

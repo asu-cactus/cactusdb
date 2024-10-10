@@ -1,5 +1,10 @@
+import warnings
+warnings.filterwarnings('ignore')
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['PYTHONWARNINGS']='ignore'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import tensorflow as tf 
+tf.get_logger().setLevel('ERROR')
 import pipeline
 import pandas as pd
 import warnings
@@ -7,7 +12,6 @@ import load_data_to_db
 import itertools
 import datetime
 
-warnings.filterwarnings("ignore")
 from tqdm.auto import tqdm
 
 def benchmark_movielens_q1_dl(num_loop=10, **kwargs):
@@ -24,14 +28,22 @@ def benchmark_movielens_q1_evadb(num_loop=10, **kwargs):
     benchmark_result = movielens_q1_pipeline_evadb.run_pipeline()
     return benchmark_result
 
+def benchmark_movielens_q1_sparkhdoop(num_loop=10, **kwargs):
+    movielens_q1_pipeline_sparkhdoop = pipeline.MovielensQ1PipelineSparkHadoop(
+        num_loop=num_loop
+    )
+    benchmark_result = movielens_q1_pipeline_sparkhdoop.run_pipeline()
+    return benchmark_result
+
 def benchmark_movielens():
     list_benchmark = []
     # list_benchmark += [benchmark_movielens_q1_dl]
-    list_benchmark += [benchmark_movielens_q1_evadb]
+    # list_benchmark += [benchmark_movielens_q1_evadb]
+    list_benchmark += [benchmark_movielens_q1_sparkhdoop]
 
 
     result_df = None
-    num_loop = 4
+    num_loop = 1
 
     
     today = datetime.date.today()

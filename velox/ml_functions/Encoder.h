@@ -127,7 +127,7 @@ class StringEncoder : public MLFunction {
 class StringVariadicEncoder : public MLFunction {
  public:
   StringVariadicEncoder(std::unordered_map<std::string, int> mapping) {
-    mapping_ = mapping;
+    mapping_ = std::unordered_map<std::string, int>(mapping);
   }
 
   void apply(
