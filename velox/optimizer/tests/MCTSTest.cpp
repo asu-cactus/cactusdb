@@ -785,8 +785,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog,
         isVerticalPartition);
 
-
-
     randomGenerator.setFloatRange(-1, 1);
     std::vector<std::vector<float>> userNNweight1 =
         randomGenerator.genFloat2dVector(129, 300);
@@ -1068,7 +1066,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         true,
         catalog,
         isVerticalPartition);
-
 
     randomGenerator.setFloatRange(-1, 1);
     std::vector<std::vector<float>> itemNNweight1 =
@@ -2932,7 +2929,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       cataLog.addSource(std::make_shared<Source>(customerSrc));
 
     } else if (model == "ml-q1" || model == "ml-q2" || model == "ml-q3") {
-      myPlan = setupMovielensDBQuery(model, cataLog, pool_, planNodeIdGenerator);
+      myPlan =
+          setupMovielensDBQuery(model, cataLog, pool_, planNodeIdGenerator);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -3040,95 +3038,99 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::cout << entry.first << ": " << entry.second << std::endl;
     }
 
-    // std::pair<std::string, std::string> testAction =
-    // std::make_pair("concat(ROW[\"user_id\"],ROW[\"user_description\"])",
-    // "MLDecompositionPushdownRewriteAction");
+    std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
 
-    // planState.takeAction(
-    //           planNode,
-    //           nullptr,
-    //           maker,
-    //           myPlan,
-    //           pool_,
-    //           planNodeIdGenerator,
-    //           {testAction},
-    //           cataLog);
+    if (queryOptType == "fusion") {
+      std::pair<std::string, std::string> testAction;
+      testAction = std::make_pair(
+          "relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(ROW[\"user_tower_features\"]))))))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
 
-    // planState.update(myPlan, cataLog);
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
 
-    // planNode = myPlan.planNode();
+      planState.update(myPlan, cataLog);
 
-    // planState.getPossibleActions(planNode, cataLog);
+      planNode = myPlan.planNode();
 
-    // // std::cout << "[INFO] All possible actions:" << std::endl;
-    // // for (auto entry : planState.actionsPair) {
-    // //   std::cout << entry.first << ": " << entry.second << std::endl;
-    // // }
+      planState.getPossibleActions(planNode, cataLog);
 
-    // testAction =
-    // std::make_pair("concat(ROW[\"movie_id\"],ROW[\"movie_description\"])",
-    // "MLDecompositionPushdownRewriteAction");
+      // // std::cout << "[INFO] All possible actions:" << std::endl;
+      // // for (auto entry : planState.actionsPair) {
+      // //   std::cout << entry.first << ": " << entry.second << std::endl;
+      // // }
 
-    // planState.takeAction(
-    //           planNode,
-    //           nullptr,
-    //           maker,
-    //           myPlan,
-    //           pool_,
-    //           planNodeIdGenerator,
-    //           {testAction},
-    //           cataLog);
+      testAction = std::make_pair(
+          "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(ROW[\"movie_tower_features\"]))))))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
 
-    // planState.update(myPlan, cataLog);
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
 
-    // planNode = myPlan.planNode();
+      planState.update(myPlan, cataLog);
 
-    // planState.getPossibleActions(planNode, cataLog);
+      planNode = myPlan.planNode();
 
-    // testAction =
-    // std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please
-    // summarize the users description. The following are the average ratings
-    // given by users to movies in each genre.\")",
-    // "MLDecompositionPushdownRewriteAction");
+      planState.getPossibleActions(planNode, cataLog);
 
-    // planState.takeAction(
-    //           planNode,
-    //           nullptr,
-    //           maker,
-    //           myPlan,
-    //           pool_,
-    //           planNodeIdGenerator,
-    //           {testAction},
-    //           cataLog);
+      // testAction =
+      // std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please
+      // summarize the users description. The following are the average ratings
+      // given by users to movies in each genre.\")",
+      // "MLDecompositionPushdownRewriteAction");
 
-    // planState.update(myPlan, cataLog);
-    // planNode = myPlan.planNode();
+      // planState.takeAction(
+      //           planNode,
+      //           nullptr,
+      //           maker,
+      //           myPlan,
+      //           pool_,
+      //           planNodeIdGenerator,
+      //           {testAction},
+      //           cataLog);
 
-    // testAction =
-    // std::make_pair("chatgpt_server2(ROW[\"movie_description_processed\"],\"Please
-    // summarize the movies description. The following are the detailed
-    // information of the movie.\")", "MLDecompositionPushdownRewriteAction");
+      // planState.update(myPlan, cataLog);
+      // planNode = myPlan.planNode();
 
-    // planState.takeAction(
-    //           planNode,
-    //           nullptr,
-    //           maker,
-    //           myPlan,
-    //           pool_,
-    //           planNodeIdGenerator,
-    //           {testAction},
-    //           cataLog);
+      // testAction = std::make_pair(
+      //     "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(ROW[\"movie_description_array\"]))))))))))",
+      //     "MultiLayerUDF2TorchNNRewriteAction");
 
-    // planState.update(myPlan, cataLog);
+      // planState.takeAction(
+      //     planNode,
+      //     nullptr,
+      //     maker,
+      //     myPlan,
+      //     pool_,
+      //     planNodeIdGenerator,
+      //     {testAction},
+      //     cataLog);
 
-    // planNode = myPlan.planNode();
+      // planState.update(myPlan, cataLog);
 
-    // planState.getPossibleActions(planNode, cataLog);
+      // planNode = myPlan.planNode();
 
-    // std::cout << "[INFO] All possible actions:" << std::endl;
-    // for (auto entry : planState.actionsPair) {
-    //   std::cout << entry.first << ": " << entry.second << std::endl;
-    // }
+      // planState.getPossibleActions(planNode, cataLog);
+    }
+
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : planState.actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+    }
 
     std::cout << "[DEBUG] final executed plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;

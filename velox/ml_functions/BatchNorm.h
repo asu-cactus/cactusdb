@@ -30,14 +30,6 @@ class BatchNorm1D : public MLFunction {
     dims.push_back(numDims);
   }
 
-  // TODO: add support of loading from disk file
-  // BatchNorm1D(std::string weightsFile, int numEmbeddings, int embeddingDims)
-  // {
-  //   weightsFile_ = weightsFile;
-  //   dims.push_back(numEmbeddings);
-  //   dims.push_back(embeddingDims);
-  // }
-
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,

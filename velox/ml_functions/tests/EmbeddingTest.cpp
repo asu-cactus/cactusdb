@@ -17,6 +17,7 @@
 #include "velox/ml_functions/PositionEncoding.h"
 #include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
+#include "velox/optimizer/Helper.h"
 #include "velox/parse/TypeResolver.h"
 
 using namespace facebook::velox;
@@ -488,9 +489,9 @@ void EmbeddingTest::testConcat3() {
 
 void EmbeddingTest::testCosineSimilarity() {
   std::cout << "[INFO] Test of CosineSimilarity." << std::endl;
-  int numSamples = 2;
-  int input1Dims = 5;
-  int input2Dims = 5;
+  int numSamples = 5;
+  int input1Dims = 20;
+  int input2Dims = 20;
 
   RandomGenerator randomGenerator = RandomGenerator(-1, 1);
 
@@ -504,13 +505,17 @@ void EmbeddingTest::testCosineSimilarity() {
   auto inputRowVector1 = maker.rowVector({"in1"}, {indicesArrayVector1});
   auto indicesArrayVector2 = maker.arrayVector<float>(inputVectors2, REAL());
   auto inputRowVector2 = maker.rowVector({"in2"}, {indicesArrayVector2});
+  auto indicesArrayVector3 = maker.flatVector<int>({0, 1, 2, 3, 4});
 
   auto inputRowVector = maker.rowVector(
-      {"in1", "in2"}, {indicesArrayVector1, indicesArrayVector2});
+      {"in1", "in2", "id"}, {indicesArrayVector1, indicesArrayVector2, indicesArrayVector3});
+
+  auto inputRowVectorBatches = optimization::splitRowVectorIntoBatches(inputRowVector, 2);
+  std::cout << "[INFO] Number of Batches: " << inputRowVectorBatches.size() << std::endl;
 
   // Print input
   std::cout << "[INFO] input: \n"
-            << inputRowVector->toString(0, inputRowVector->size()) << std::endl;
+            << inputRowVector->toString() << std::endl;
 
   exec::registerVectorFunction(
       "cosine_similarity",
@@ -518,7 +523,9 @@ void EmbeddingTest::testCosineSimilarity() {
       std::make_unique<CosineSimilarity>(input1Dims));
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
-                    .values({inputRowVector})
+                    .values(inputRowVectorBatches)
+                    // .values({inputRowVector})
+                    .filter("id > 0")
                     .project({"cosine_similarity(in1, in2)"})
                     .planNode();
 
@@ -856,10 +863,10 @@ int main(int argc, char** argv) {
   // demo.testConcat1();
   // demo.testConcat2();
   // demo.testConcat3();
-  // demo.testCosineSimilarity();
+  demo.testCosineSimilarity();
   // demo.testEmbedding_MatMul();
   // demo.testSequencePooling();
   // demo.testDotProduct();
   // demo.testPositionEncoding();
-  demo.testHuggingFace();
+  // demo.testHuggingFace();
 }

@@ -511,4 +511,29 @@ std::string fix_cast_function_parsing(std::string input) {
   std::string result = std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
   return result;
 }
+
+std::vector<RowVectorPtr> splitRowVectorIntoBatches(
+    RowVectorPtr inputVector, size_t batchSize) {
+    
+    // Total number of rows in the input RowVector
+    size_t totalRows = inputVector->size();
+    
+    // Result vector to hold all the batches
+    std::vector<RowVectorPtr> batches;
+
+    // Split the input RowVector into batches
+    for (size_t start = 0; start < totalRows; start += batchSize) {
+        // Calculate the size of the current batch
+        size_t currentBatchSize = std::min(batchSize, totalRows - start);
+
+        // Slice the RowVector directly
+        RowVectorPtr batch = std::dynamic_pointer_cast<RowVector>(inputVector->slice(start, currentBatchSize));
+
+        // Add the batch to the result
+        batches.push_back(batch);
+    }
+
+    return batches;
+}
+
 } // namespace optimization
