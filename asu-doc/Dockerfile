@@ -50,6 +50,12 @@ RUN apt-get install -y openjdk-11-jdk
 RUN apt install -y openssh-server openssh-client
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
+# install aws cli
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+RUN unzip awscliv2.zip
+RUN ./aws/install
+
+
 RUN ln -s /usr/bin/python3 /usr/bin/python
 # install github cli (optional)
 RUN type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
@@ -169,6 +175,20 @@ COPY hadoop_conf/hdfs-site.xml /home/hadoop-3.4.0/etc/hadoop/hdfs-site.xml
 COPY hadoop_conf/mapred-site.xml /home/hadoop-3.4.0/etc/hadoop/mapred-site.xml
 COPY hadoop_conf/yarn-site.xml /home/hadoop-3.4.0/etc/hadoop/yarn-site.xml
 RUN /home/hadoop-3.4.0/bin/hdfs namenode -format
+
+# setup madlib
+WORKDIR /home
+RUN apt-get install postgresql-plpython3-14 -y 
+RUN wget https://dist.apache.org/repos/dist/release/madlib/2.1.0/apache-madlib-2.1.0-src.tar.gz
+RUN tar -xvzf apache-madlib-2.1.0-src.tar.gz
+RUN apt-get install postgresql-server-dev-14 -y
+RUN cd apache-madlib-2.1.0-src \
+    && mkdir build \
+    && cd build \
+    && cmake .. \
+    && make \
+    && make install
+ENV PATH=$PATH:/usr/lib/postgresql/14/bin
 
 # set up velox
 WORKDIR /home

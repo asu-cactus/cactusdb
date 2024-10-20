@@ -913,7 +913,7 @@ public:
 
         int num_rows = rows.size();
         int num_cols = numCols_;
-        LOG(INFO) << "[INFO MinMaxScaler:] countSelected: " << rows.countSelected() << " numInput: " << num_rows << std::endl;
+        LOG(INFO) << "[INFO MinMaxScaler:] countSelected: " << rows.countSelected() << " num_rows: " << num_rows << " num_cols: " << num_cols << " num_elements: " << baseInputArray->size() << std::endl;
 
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
         Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> minVals(scalerMinValues_, 1, num_cols);
@@ -1266,6 +1266,7 @@ public:
         const TypePtr& type,
         exec::EvalCtx& context,
         VectorPtr& output) const override {
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
      
         auto input_elements = args[0]->as<ArrayVector>()->elements();
         float* input_values = input_elements->values()->asMutable<float>();
