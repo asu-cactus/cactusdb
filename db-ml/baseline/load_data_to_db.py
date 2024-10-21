@@ -29,11 +29,62 @@ def load_movielens_final_to_datastore():
 
     df_rating = pq.read_table(os.path.join(data_dir, "rating.parquet")).to_pandas()
     df_user = pq.read_table(os.path.join(data_dir, "user.parquet")).to_pandas()
-    
+    df_movie_tag = pq.read_table(
+        os.path.join(data_dir, "movie_tag_relevance.parquet")
+    ).to_pandas()
 
-    df_user.columns = ['user_id', 'gender', 'age', 'occupation', 'zipcode']
-    df_movie.columns = ['movie_id', 'title', 'genres', 'spoken_languages', 'popularity', 'vote_average', 'vote_count', 'overview']
-    df_rating.columns = ['user_id', 'movie_id', 'timestamp', 'rating']
+    df_user.to_sql("movielens_user", db, index=False, if_exists="replace")
+    df_movie.to_sql("movielens_movie", db, index=False, if_exists="replace")
+    df_rating.to_sql("movielens_rating", db, index=False, if_exists="replace")
+
+    for idx, row in tqdm(df_movie_tag.iterrows(), total=len(df_movie_tag)):
+        df_movie_tag.at[idx, "mt_relevance_score"] = (
+            str(row["mt_relevance_score"].tolist()).replace("[", "{").replace("]", "}")
+        )
+
+    df_movie_tag_name = "movielens_movie_tag"
+    db_connection = utils.get_psycopg2_connection()
+    cursor = db_connection.cursor()
+    cursor.execute("DROP TABLE IF EXISTS {}".format(df_movie_tag_name))
+    cursor.execute(
+        """
+                CREATE TABLE IF NOT EXISTS {} (
+    mt_movie_id	 INTEGER,
+    mt_relevance_score REAL[]
+    )""".format(
+            df_movie_tag_name
+        )
+    )
+    db_connection.commit()
+
+    df_movie_tag.to_csv("./cache/ml-movie-tag.csv", index=False, header=True)
+    data_file_abs_path = os.path.abspath("./cache/ml-movie-tag.csv")
+
+    cursor.execute(
+        """    
+    COPY {}(mt_movie_id,mt_relevance_score)
+    FROM '{}'
+    DELIMITER ',' CSV HEADER
+    """.format(
+            df_movie_tag_name, data_file_abs_path
+        )
+    )
+
+    db_connection.commit()
+    db_connection.close()
+
+    df_user.columns = ["user_id", "gender", "age", "occupation", "zipcode"]
+    df_movie.columns = [
+        "movie_id",
+        "title",
+        "genres",
+        "spoken_languages",
+        "popularity",
+        "vote_average",
+        "vote_count",
+        "overview",
+    ]
+    df_rating.columns = ["user_id", "movie_id", "timestamp", "rating"]
 
     df_user.to_sql("movielens_user1", db, index=False, if_exists="replace")
     df_movie.to_sql("movielens_movie1", db, index=False, if_exists="replace")
@@ -47,11 +98,23 @@ def load_movielens_final_to_datastore():
         utils.create_hdfs_dir(data_path)
 
     movie_path_in_hdfs = os.path.join(data_path, "movie")
-    utils.load_csv_to_hdfs("../../resources/data/movielens/final/movie.parquet", movie_path_in_hdfs, overwrite=True)
+    utils.load_csv_to_hdfs(
+        "../../resources/data/movielens/final/movie.parquet",
+        movie_path_in_hdfs,
+        overwrite=True,
+    )
     user_path_in_hdfs = os.path.join(data_path, "user")
-    utils.load_csv_to_hdfs("../../resources/data/movielens/final/user.parquet", user_path_in_hdfs, overwrite=True)
+    utils.load_csv_to_hdfs(
+        "../../resources/data/movielens/final/user.parquet",
+        user_path_in_hdfs,
+        overwrite=True,
+    )
     rating_path_in_hdfs = os.path.join(data_path, "rating")
-    utils.load_csv_to_hdfs("../../resources/data/movielens/final/rating.parquet", rating_path_in_hdfs, overwrite=True)
+    utils.load_csv_to_hdfs(
+        "../../resources/data/movielens/final/rating.parquet",
+        rating_path_in_hdfs,
+        overwrite=True,
+    )
 
     print("[INFO] load movielens dataset to hadoop success!")
 
@@ -105,7 +168,6 @@ def generate_data_to_disk(
     if enable_progress_bar:
         progress_bar = tqdm(range(start_gen_idx, end_gen_idx), desc="Progress")
 
-
     for gen_idx in range(start_gen_idx, end_gen_idx):
         # print("thread: ", start_gen_idx, enable_progress_bar)
         idx_start = gen_idx * num_tuple_per_generation
@@ -117,8 +179,6 @@ def generate_data_to_disk(
         x_df = pd.DataFrame(x)
         x_df_new = x_df.copy()
         x_df_new["val"] = None
-
-        
 
         def create_feature_vec(row):
             return "{" + ",".join(row.values.astype(str)) + "}"
@@ -143,7 +203,7 @@ def generate_data_to_disk(
         gc.collect()
         if enable_progress_bar:
             progress_bar.update(1)
-    
+
     return "DONE"
 
 
@@ -160,8 +220,8 @@ def load_ffnn_data_to_postgres(
     cursor = db_connection.cursor()
 
     csv_path = "./data/ffnn_data_{}_{}.csv".format(num_generated_data, num_features)
-    
-    # return 
+
+    # return
 
     if utils.check_table_exist(cursor, table_name) and not overwrite:
         print(
@@ -186,7 +246,7 @@ def load_ffnn_data_to_postgres(
         # if os.path.exists(csv_path):
         #     os.remove(csv_path)
 
-    if not os.path.exists(csv_path) or overwrite :
+    if not os.path.exists(csv_path) or overwrite:
         pd.DataFrame({"index": [], "val": []}).to_csv(csv_path, index=False)
         size_per_tuple = num_features * 4
         SIZE_PER_GENERATION = 1 * 256 * 1024 * 1024
@@ -238,7 +298,6 @@ def load_ffnn_data_to_postgres(
             for future in concurrent.futures.as_completed(futures):
                 print(future.result())
 
-
     data_file_abs_path = os.path.abspath(csv_path)
     print("[INFO] temp data is saved to ", data_file_abs_path)
     # Load data into postgres
@@ -261,7 +320,7 @@ def load_ffnn_data_to_postgres(
     # check hdfs path exist
     if not utils.check_hdfs_dir_exist("/user/velox/data/"):
         utils.create_hdfs_dir("/user/velox/data/")
-    
+
     path_in_hdfs = "/user/velox/data/{}".format(table_name)
     utils.load_csv_to_hdfs(data_file_abs_path, path_in_hdfs)
 
@@ -273,10 +332,10 @@ def load_llm_recommendation_data_to_postgres(num_user_data, num_movie_data):
     db = create_engine(conn_string)
     conn = db.connect()
 
-    movie_data = pd.read_csv('../../data/mr_movie_metadata.csv')
+    movie_data = pd.read_csv("../../data/mr_movie_metadata.csv")
     movie_data = utils.change_df_dtypes(movie_data).iloc[:num_movie_data]
 
-    user_data = pd.read_csv('../../data/mr_user_genre_ratings.csv')
+    user_data = pd.read_csv("../../data/mr_user_genre_ratings.csv")
     user_data = utils.change_df_dtypes(user_data).iloc[:num_user_data]
 
     user_data.to_sql("llm_recommend_user", db, index=False, if_exists="replace")
