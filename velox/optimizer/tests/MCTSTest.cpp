@@ -1302,7 +1302,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         isVerticalPartition);
   }
 
-  void registerMLQ1Functions(
+  void registerMLTrendingModelFunctions(
       CataLog& catalog,
       std::shared_ptr<memory::MemoryPool> pool_) {
     VectorMaker maker{pool_.get()};
@@ -1372,6 +1372,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         true,
         catalog);
     optimization::registerVectorFunction(
+        "relu",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
         "argmax",
         Argmax::signatures(),
         std::make_unique<Argmax>(),
@@ -1384,6 +1391,375 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         MinMaxScaler::signatures(),
         std::make_unique<MinMaxScaler>(
             "/home/velox/resources/model/movielens/final/velox/q1_ffnn_minmax_scaler.txt"),
+        {},
+        true,
+        catalog);
+  }
+
+  void registerMLDLRMModelFunctions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    int embeddingDims = 128;
+    // init age encoder
+    std::unordered_map<int, int> ageMapping;
+    ageMapping[1] = 0;
+    ageMapping[18] = 1;
+    ageMapping[25] = 2;
+    ageMapping[35] = 3;
+    ageMapping[45] = 4;
+    ageMapping[50] = 5;
+    ageMapping[56] = 6;
+
+    optimization::registerVectorFunction(
+        "age_encoder",
+        IntEncoder::signatures(),
+        std::make_unique<IntEncoder>(std::move(ageMapping)),
+        {},
+        true,
+        catalog);
+
+    // init occupation  encoder
+    std::unordered_map<int, int> occupationMapping;
+    for (int i = 0; i < 21; i++) {
+      occupationMapping[i] = i;
+    }
+
+    optimization::registerVectorFunction(
+        "occupation_encoder",
+        IntEncoder::signatures(),
+        std::make_unique<IntEncoder>(std::move(occupationMapping)),
+        {},
+        true,
+        catalog);
+    
+    std::unordered_map<std::string, int> genderMapping;
+    genderMapping["F"] = 0;
+    genderMapping["M"] = 1;
+
+    optimization::registerVectorFunction(
+        "gender_encoder",
+        StringEncoder::signatures(),
+        std::make_unique<StringEncoder>(std::move(genderMapping)),
+        {},
+        true,
+        catalog);
+
+
+     // gender
+    int genderNumEmbedding = 2;
+    std::vector<std::vector<float>> genderEmbeddingWeights =
+        randomGenerator.genFloat2dVector(genderNumEmbedding, embeddingDims);
+    auto genderEmbeddingWeightsVector =
+        maker.arrayVector<float>(genderEmbeddingWeights, REAL());
+
+    // age
+    int ageNumEmbedding = 7;
+    std::vector<std::vector<float>> ageEmbeddingWeights =
+        randomGenerator.genFloat2dVector(ageNumEmbedding, embeddingDims);
+    auto ageEmbeddingWeightsVector =
+        maker.arrayVector<float>(ageEmbeddingWeights, REAL());
+
+    // occupation
+    int occupationNumEmbedding = 21;
+    std::vector<std::vector<float>> occupationEmbeddingWeights =
+        randomGenerator.genFloat2dVector(occupationNumEmbedding, embeddingDims);
+    auto occupationEmbeddingWeightsVector =
+        maker.arrayVector<float>(occupationEmbeddingWeights, REAL());
+
+
+    optimization::registerVectorFunction(
+        "gender_embedding",
+        Embedding::signatures(),
+        std::make_unique<Embedding>(
+            std::move(genderEmbeddingWeightsVector->elements()
+                          ->values()
+                          ->asMutable<float>()),
+            genderNumEmbedding,
+            embeddingDims),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "age_embedding",
+        Embedding::signatures(),
+        std::make_unique<Embedding>(
+            std::move(ageEmbeddingWeightsVector->elements()
+                          ->values()
+                          ->asMutable<float>()),
+            ageNumEmbedding,
+            embeddingDims),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "occupation_embedding",
+        Embedding::signatures(),
+        std::make_unique<Embedding>(
+            std::move(occupationEmbeddingWeightsVector->elements()
+                          ->values()
+                          ->asMutable<float>()),
+            occupationNumEmbedding,
+            embeddingDims),
+        {},
+        true,
+        catalog);
+
+    // bottom-mlp
+
+  }
+
+  void registerMLInterestMovieModelFunctions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+
+    std::string ffnnModelPath =
+        "/home/velox/resources/model/movielens/final/velox/interest_ffnn_model_weights.h5";
+    std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+
+    optimization::registerVectorFunction(
+        "mat_mul9_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w1)), 259, 128),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add9_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b1)), 128),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul9_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w2)), 128, 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add9_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b2)), 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "softmax",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "argmax",
+        Argmax::signatures(),
+        std::make_unique<Argmax>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "llm_ffnn_interest_scaler",
+        MinMaxScaler::signatures(),
+        std::make_unique<MinMaxScaler>(
+            "/home/velox/resources/model/movielens/final/velox/q2_ffnn_interest_scaler.txt"),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "convert_int_array",
+        ConvertToIntArray::signatures(),
+        std::make_unique<ConvertToIntArray>(),
+        {},
+        true,
+        catalog);
+  }
+
+  void registerMLMovieTagEncoderModelFunctions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+
+    std::string ffnnEncoderModelPath =
+        "/home/velox/resources/model/movielens/final/velox/movie_tag_standalone_encoder_weight.h5";
+    std::vector<std::vector<float>> w1 =
+        loadHDF5Array(ffnnEncoderModelPath, "w1");
+    std::vector<std::vector<float>> b1 =
+        loadHDF5Array(ffnnEncoderModelPath, "b1");
+    std::vector<std::vector<float>> w2 =
+        loadHDF5Array(ffnnEncoderModelPath, "w2");
+    std::vector<std::vector<float>> b2 =
+        loadHDF5Array(ffnnEncoderModelPath, "b2");
+
+    optimization::registerVectorFunction(
+        "mat_mul10_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w1)), 140979, 2048),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add10_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b1)), 2048),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul10_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w2)), 2048, 256),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add10_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b2)), 256),
+        {},
+        true,
+        catalog);
+
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    randomGenerator.setFloatRange(-1, 1);
+    std::vector<std::vector<float>> bottomMLPWeight1 =
+        randomGenerator.genFloat2dVector(256, 128);
+    auto bottomMLPWeight1Vector = maker.arrayVector<float>(bottomMLPWeight1, REAL());
+
+    std::vector<std::vector<float>> bottomMLPBias1 =
+        randomGenerator.genFloat2dVector(128, 1);
+    auto bottomMLPBias1Vector = maker.arrayVector<float>(bottomMLPBias1, REAL());
+
+    optimization::registerVectorFunction(
+        "mat_mul11_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                bottomMLPWeight1Vector->elements()->values()->asMutable<float>()),
+            256,
+            128),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add11_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                bottomMLPBias1Vector->elements()->values()->asMutable<float>()),
+            128),
+        {},
+        true,
+        catalog);
+    
+    std::vector<std::vector<float>> topMLPWeight1 =
+        randomGenerator.genFloat2dVector(512, 256);
+    auto topMLPWeight1Vector = maker.arrayVector<float>(bottomMLPWeight1, REAL());
+
+    std::vector<std::vector<float>> topMLPBias1 =
+        randomGenerator.genFloat2dVector(256, 1);
+    auto topMLPBias1Vector = maker.arrayVector<float>(bottomMLPBias1, REAL());
+
+    std::vector<std::vector<float>> topMLPWeight2 =
+        randomGenerator.genFloat2dVector(256, 128);
+    auto topMLPWeight2Vector = maker.arrayVector<float>(bottomMLPWeight1, REAL());
+
+    std::vector<std::vector<float>> topMLPBias2 =
+        randomGenerator.genFloat2dVector(128, 1);
+    auto topMLPBias2Vector = maker.arrayVector<float>(bottomMLPBias1, REAL());
+
+    std::vector<std::vector<float>> topMLPWeight3 =
+        randomGenerator.genFloat2dVector(128, 1);
+    auto topMLPWeight3Vector = maker.arrayVector<float>(bottomMLPWeight1, REAL());
+
+    std::vector<std::vector<float>> topMLPBias3 =
+        randomGenerator.genFloat2dVector(1, 1);
+    auto topMLPBias3Vector = maker.arrayVector<float>(bottomMLPBias1, REAL());
+    
+    optimization::registerVectorFunction(
+        "mat_mul12_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                topMLPWeight1Vector->elements()->values()->asMutable<float>()),
+            512,
+            256),
+        {},
+        true,
+        catalog);
+    
+    optimization::registerVectorFunction(
+        "mat_vector_add12_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                topMLPBias1Vector->elements()->values()->asMutable<float>()),
+            256),
+        {},
+        true,
+        catalog);
+    
+    optimization::registerVectorFunction(
+        "mat_mul12_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                topMLPWeight2Vector->elements()->values()->asMutable<float>()),
+            256,
+            128),
+        {},
+        true,
+        catalog);
+    
+    optimization::registerVectorFunction(
+        "mat_vector_add12_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                topMLPBias2Vector->elements()->values()->asMutable<float>()),
+            128),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul12_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                topMLPWeight3Vector->elements()->values()->asMutable<float>()),
+            128,
+            1),
+        {},
+        true,
+        catalog);
+    
+    optimization::registerVectorFunction(
+        "mat_vector_add12_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                topMLPBias3Vector->elements()->values()->asMutable<float>()),
+            1),
         {},
         true,
         catalog);
@@ -3008,7 +3384,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       registerFraudDetectionFunctions(9, cataLog, pool_);
     } else if (model == "ml-q1") {
       registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
-      registerMLQ1Functions(cataLog, pool_);
+      registerMLTrendingModelFunctions(cataLog, pool_);
+    } else if (model == "ml-q2") {
+      registerMLTrendingModelFunctions(cataLog, pool_);
+      registerMLInterestMovieModelFunctions(cataLog, pool_);
+      registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+      registerMLDLRMModelFunctions(cataLog, pool_);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -3039,9 +3420,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
 
     std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
+    std::pair<std::string, std::string> testAction;
 
     if (queryOptType == "fusion") {
-      std::pair<std::string, std::string> testAction;
       testAction = std::make_pair(
           "relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(ROW[\"user_tower_features\"]))))))))))))",
           "MultiLayerUDF2TorchNNRewriteAction");
@@ -3106,25 +3487,23 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // planState.update(myPlan, cataLog);
       // planNode = myPlan.planNode();
 
-      // testAction = std::make_pair(
-      //     "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(ROW[\"movie_description_array\"]))))))))))",
-      //     "MultiLayerUDF2TorchNNRewriteAction");
+    } else if (queryOptType == "ml-q2-mul2join") {
+      testAction =
+          std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
 
-      // planState.takeAction(
-      //     planNode,
-      //     nullptr,
-      //     maker,
-      //     myPlan,
-      //     pool_,
-      //     planNodeIdGenerator,
-      //     {testAction},
-      //     cataLog);
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
 
-      // planState.update(myPlan, cataLog);
-
-      // planNode = myPlan.planNode();
-
-      // planState.getPossibleActions(planNode, cataLog);
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
     }
 
     std::cout << "[INFO] All possible actions:" << std::endl;
