@@ -1433,7 +1433,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         {},
         true,
         catalog);
-    
+
     std::unordered_map<std::string, int> genderMapping;
     genderMapping["F"] = 0;
     genderMapping["M"] = 1;
@@ -1446,8 +1446,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         true,
         catalog);
 
-
-     // gender
+    // gender
     int genderNumEmbedding = 2;
     std::vector<std::vector<float>> genderEmbeddingWeights =
         randomGenerator.genFloat2dVector(genderNumEmbedding, embeddingDims);
@@ -1467,7 +1466,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         randomGenerator.genFloat2dVector(occupationNumEmbedding, embeddingDims);
     auto occupationEmbeddingWeightsVector =
         maker.arrayVector<float>(occupationEmbeddingWeights, REAL());
-
 
     optimization::registerVectorFunction(
         "gender_embedding",
@@ -1509,7 +1507,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
 
     // bottom-mlp
-
   }
 
   void registerMLInterestMovieModelFunctions(
@@ -1642,18 +1639,21 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     randomGenerator.setFloatRange(-1, 1);
     std::vector<std::vector<float>> bottomMLPWeight1 =
         randomGenerator.genFloat2dVector(256, 128);
-    auto bottomMLPWeight1Vector = maker.arrayVector<float>(bottomMLPWeight1, REAL());
+    auto bottomMLPWeight1Vector =
+        maker.arrayVector<float>(bottomMLPWeight1, REAL());
 
     std::vector<std::vector<float>> bottomMLPBias1 =
         randomGenerator.genFloat2dVector(128, 1);
-    auto bottomMLPBias1Vector = maker.arrayVector<float>(bottomMLPBias1, REAL());
+    auto bottomMLPBias1Vector =
+        maker.arrayVector<float>(bottomMLPBias1, REAL());
 
     optimization::registerVectorFunction(
         "mat_mul11_1",
         MatrixMultiply::signatures(),
         std::make_unique<MatrixMultiply>(
-            std::move(
-                bottomMLPWeight1Vector->elements()->values()->asMutable<float>()),
+            std::move(bottomMLPWeight1Vector->elements()
+                          ->values()
+                          ->asMutable<float>()),
             256,
             128),
         {},
@@ -1670,10 +1670,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         {},
         true,
         catalog);
-    
+
     std::vector<std::vector<float>> topMLPWeight1 =
         randomGenerator.genFloat2dVector(512, 256);
-    auto topMLPWeight1Vector = maker.arrayVector<float>(bottomMLPWeight1, REAL());
+    auto topMLPWeight1Vector =
+        maker.arrayVector<float>(bottomMLPWeight1, REAL());
 
     std::vector<std::vector<float>> topMLPBias1 =
         randomGenerator.genFloat2dVector(256, 1);
@@ -1681,7 +1682,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     std::vector<std::vector<float>> topMLPWeight2 =
         randomGenerator.genFloat2dVector(256, 128);
-    auto topMLPWeight2Vector = maker.arrayVector<float>(bottomMLPWeight1, REAL());
+    auto topMLPWeight2Vector =
+        maker.arrayVector<float>(bottomMLPWeight1, REAL());
 
     std::vector<std::vector<float>> topMLPBias2 =
         randomGenerator.genFloat2dVector(128, 1);
@@ -1689,12 +1691,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     std::vector<std::vector<float>> topMLPWeight3 =
         randomGenerator.genFloat2dVector(128, 1);
-    auto topMLPWeight3Vector = maker.arrayVector<float>(bottomMLPWeight1, REAL());
+    auto topMLPWeight3Vector =
+        maker.arrayVector<float>(bottomMLPWeight1, REAL());
 
     std::vector<std::vector<float>> topMLPBias3 =
         randomGenerator.genFloat2dVector(1, 1);
     auto topMLPBias3Vector = maker.arrayVector<float>(bottomMLPBias1, REAL());
-    
+
     optimization::registerVectorFunction(
         "mat_mul12_1",
         MatrixMultiply::signatures(),
@@ -1706,7 +1709,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         {},
         true,
         catalog);
-    
+
     optimization::registerVectorFunction(
         "mat_vector_add12_2",
         MatrixVectorAddition::signatures(),
@@ -1717,7 +1720,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         {},
         true,
         catalog);
-    
+
     optimization::registerVectorFunction(
         "mat_mul12_3",
         MatrixMultiply::signatures(),
@@ -1729,7 +1732,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         {},
         true,
         catalog);
-    
+
     optimization::registerVectorFunction(
         "mat_vector_add12_4",
         MatrixVectorAddition::signatures(),
@@ -1752,7 +1755,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         {},
         true,
         catalog);
-    
+
     optimization::registerVectorFunction(
         "mat_vector_add12_6",
         MatrixVectorAddition::signatures(),
@@ -3486,11 +3489,80 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
       // planState.update(myPlan, cataLog);
       // planNode = myPlan.planNode();
-
-    } else if (queryOptType == "ml-q2-mul2join") {
+    }
+    if (queryOptType == "mlq2-mul2join" || queryOptType == "optimized") {
       testAction =
           std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
 
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+    }
+    if (queryOptType == "mlq2-fusion" || queryOptType == "optimized") {
+      testAction = std::make_pair(
+          "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(ROW[\"top_mlp_input\"])))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "argmax(softmax(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(ROW[\"m_trending_features\"]))))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "relu(mat_vector_add11_2(mat_mul11_1(ROW[\"mt_relevance_score\"])))",
+          "MultiLayerUDF2TorchNNRewriteAction");
       planState.takeAction(
           planNode,
           nullptr,
