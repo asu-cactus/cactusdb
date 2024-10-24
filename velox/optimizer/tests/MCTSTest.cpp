@@ -1520,6 +1520,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
     std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
     std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+    std::vector<std::vector<float>> w3 = loadHDF5Array(ffnnModelPath, "w3");
+    std::vector<std::vector<float>> b3 = loadHDF5Array(ffnnModelPath, "b3");
+    std::vector<std::vector<float>> w4 = loadHDF5Array(ffnnModelPath, "w4");
+    std::vector<std::vector<float>> b4 = loadHDF5Array(ffnnModelPath, "b4");
 
     optimization::registerVectorFunction(
         "mat_mul9_1",
@@ -1553,6 +1557,40 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         {},
         true,
         catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul9_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w3)), 128, 64),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add9_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b3)), 64),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul9_7",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w4)), 64, 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add9_8",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b4)), 2),
+        {},
+        true,
+        catalog);
+
     optimization::registerVectorFunction(
         "softmax",
         Softmax::signatures(),
@@ -3526,6 +3564,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       planNode = myPlan.planNode();
       planState.getPossibleActions(planNode, cataLog);
 
+      // testAction = std::make_pair(
+      //     "argmax(softmax(mat_vector_add9_8(mat_mul9_7(relu(mat_vector_add9_6(mat_mul9_5(relu(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))))))))",
+      //     "MultiLayerUDF2TorchNNRewriteAction");
       testAction = std::make_pair(
           "argmax(softmax(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))",
           "MultiLayerUDF2TorchNNRewriteAction");

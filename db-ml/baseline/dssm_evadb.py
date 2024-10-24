@@ -21,6 +21,7 @@ import utils
 import ffnn
 import h5py
 import pickle
+import tensorflow as tf
 from evadb.functions.decorators.decorators import forward, setup
 from evadb.catalog.catalog_type import NdArrayType
 from evadb.functions.abstract.abstract_function import AbstractFunction
@@ -30,6 +31,7 @@ from evadb.functions.abstract.pytorch_abstract_function import (
 )
 from evadb.utils.generic_utils import try_to_import_torch, try_to_import_torchvision
 from models.dssm import DSSM_Torch
+from models.dlrm import DLRM
 from sklearn.preprocessing import LabelEncoder
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from models.preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
@@ -138,6 +140,431 @@ class MLQ1FFNN_EVADB(AbstractFunction):
         )
         return result_df
 
+class MLQ2FFNN_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of MLQ2FFNN_EVADB: \n", "count_inference: ", self.count_inference)
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "MLQ2FFNN_EVADB"
+
+    @setup(cacheable=True, function_type="classification", batchable=True)
+    def setup(self):
+        import torch.nn as nn
+
+        
+        model = ffnn.FFNNPyTorch([3,126,64,2])
+        ffnn_model_h5_file = h5py.File("/home/velox/resources/model/movielens/final/velox/q1_ffnn_weights.h5", "r")
+        
+        model.linears[0].weight = nn.Parameter(torch.tensor(ffnn_model_h5_file['w1'][:]).T)
+        model.linears[0].bias = nn.Parameter(torch.tensor(ffnn_model_h5_file['b1'][:]))
+        model.linears[1].weight = nn.Parameter(torch.tensor(ffnn_model_h5_file['w2'][:]).T)
+        model.linears[1].bias = nn.Parameter(torch.tensor(ffnn_model_h5_file['b2'][:]))
+        model.linears[2].weight = nn.Parameter(torch.tensor(ffnn_model_h5_file['w3'][:]).T)
+        model.linears[2].bias = nn.Parameter(torch.tensor(ffnn_model_h5_file['b3'][:]))
+
+        self.model = model
+        self.min_max_scaler = pickle.load(open("/home/velox/resources/model/movielens/final/tf/q1_ffnn_minmax_scaler_py.pkl", "rb"))
+        
+        self.model.eval()
+        self.timer_process = utils.Timer()
+        self.timer_model_inference = utils.Timer()
+        self.t_process = 0
+        self.t_model_inference = 0
+        self.count_inference = 0
+
+    @property
+    def labels(self):
+        return list([str(num) for num in range(10)])
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'm_popularity', 'm_vote_average', 'm_vote_count',
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.INT32
+                ],
+                column_shapes=[
+                    (None,),
+                    (None,),
+                    (None,)
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["label", "t_process", "t_model_inference"],
+                column_types=[
+                    NdArrayType.STR,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,), (None,), (None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        outcome = []
+        self.count_inference += len(data)
+        self.timer_process.tic()
+
+        X_for_ffnn = self.min_max_scaler.transform(data[['m_popularity', 'm_vote_average', 'm_vote_count']].values)
+        X_for_ffnn = torch.tensor(X_for_ffnn, dtype=torch.float32)
+
+        self.t_process += self.timer_process.toc()
+        self.timer_model_inference.tic()
+
+        predictions = np.argmax(self.model(X_for_ffnn).detach().cpu().numpy(), axis=1)
+
+        self.t_model_inference += self.timer_model_inference.toc()
+        result_df = pd.DataFrame(
+            {
+                "label": predictions,
+                "t_process": self.t_process,
+                "t_model_inference": self.t_model_inference,
+            }
+        )
+        return result_df
+
+class MLQ2InterestModel_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of MLQ2InterestModel_EVADB: \n", "count_inference: ", self.count_inference)
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "MLQ2InterestModel_EVADB"
+
+    @setup(cacheable=True, function_type="classification", batchable=True)
+    def setup(self):
+        
+        self.interest_min_max_scaler = pickle.load(open("/home/velox/resources/model/movielens/final/tf/q1_ffnn_interest_scaler_py.pkl", "rb"))
+        self.interest_ffnn_model = tf.keras.models.load_model("/home/velox/resources/model/movielens/final/tf/interest_ffnn_model.h5", compile=False)
+
+        
+        self.gender_encoder = {
+            'M': 1,
+            'F': 0
+        }
+
+        # self.model.eval()
+        self.timer_process = utils.Timer()
+        self.timer_model_inference = utils.Timer()
+        self.t_process = 0
+        self.t_model_inference = 0
+        self.count_inference = 0
+
+    @property
+    def labels(self):
+        return list([str(num) for num in range(10)])
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'u_gender', 'u_age', 'u_occupation', 'mt_relevance_ir'
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.INT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[
+                    (None,),
+                    (None,),
+                    (None,),
+                    (None,)
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["label", "t_process", "t_model_inference"],
+                column_types=[
+                    NdArrayType.STR,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,), (None,), (None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        # Column order: 'u_gender', 'u_age', 'u_occupation', 'mt_relevance_ir'
+       
+
+
+        # outcome = []
+        self.count_inference += len(data)
+        self.timer_process.tic()
+
+        gender = data.iloc[:, 0].apply(lambda x: self.gender_encoder[x]).to_numpy()
+        age_n_occupation = data.iloc[:, 1:3]
+        age_n_occupation = self.interest_min_max_scaler.transform(age_n_occupation)
+        X_relevance_score_lr = np.stack(data.iloc[:, 3].values)
+        X_interest_features = np.hstack([gender.reshape(-1,1), age_n_occupation, X_relevance_score_lr])
+        
+
+
+        # X_for_ffnn = self.min_max_scaler.transform(data[['popularity', 'vote_average', 'vote_count']].values)
+        # X_for_ffnn = torch.tensor(X_for_ffnn, dtype=torch.float32)
+
+        self.t_process += self.timer_process.toc()
+        self.timer_model_inference.tic()
+
+        predictions = np.argmax(self.interest_ffnn_model(X_interest_features), axis=1)
+
+        # predictions = np.argmax(self.model(X_for_ffnn).detach().cpu().numpy(), axis=1)
+
+        self.t_model_inference += self.timer_model_inference.toc()
+        result_df = pd.DataFrame(
+            {
+                "label": predictions,
+                "t_process": self.t_process,
+                "t_model_inference": self.t_model_inference,
+            }
+        )
+        return result_df
+
+class MLQ2DLRMModel_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of MLQ2DLRMModel_EVADB: \n", "count_inference: ", self.count_inference)
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "MLQ2DLRMModel_EVADB"
+
+    @setup(cacheable=True, function_type="classification", batchable=True)
+    def setup(self):
+        
+        embedding_dim = 32
+
+        embedding_dim = 128
+        num_numerical_features = 256
+        categorical_feature_sizes = [7, 21, 2]  # Example sizes
+        bottom_mlp_sizes = [128]
+        top_mlp_sizes = [256, 128]
+
+        self.dlrm_model = DLRM(embedding_dim, num_numerical_features, categorical_feature_sizes, bottom_mlp_sizes, top_mlp_sizes)
+        self.gender_encoder = {
+            'M': 1,
+            'F': 0
+        }
+        self.age_encoder = {
+            1: 0,
+            18: 1,
+            25: 2,
+            35: 3,
+            45: 4,
+            50: 5,
+            56: 6
+        }
+        
+        # self.model.eval()
+        self.timer_process = utils.Timer()
+        self.timer_model_inference = utils.Timer()
+        self.t_process = 0
+        self.t_model_inference = 0
+        self.count_inference = 0
+
+    @property
+    def labels(self):
+        return list([str(num) for num in range(10)])
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'u_gender', 'u_age', 'u_occupation', 'mt_relevance_ir'
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.INT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[
+                    (None,),
+                    (None,),
+                    (None,),
+                    (None,)
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["label", "t_process", "t_model_inference"],
+                column_types=[
+                    NdArrayType.STR,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,), (None,), (None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        # Column order: 'u_gender', 'u_age', 'u_occupation', 'mt_relevance_ir'
+
+        # outcome = []
+        self.count_inference += len(data)
+        self.timer_process.tic()
+
+        data['u_gender'] = data['u_gender'].apply(lambda x: self.gender_encoder[x])
+        data['u_age'] = data['u_age'].apply(lambda x: self.age_encoder[x])
+
+
+        dlrm_categorical_features = np.hstack([data['u_age'].values.reshape(-1,1),
+                                              data['u_occupation'].values.reshape(-1,1),
+                                              data['u_gender'].values.reshape(-1,1)])
+        dlrm_numerical_features = np.stack(data['mt_relevance_ir'].values)
+
+        dlrm_numerical_features = torch.Tensor(dlrm_numerical_features)
+        dlrm_categorical_features = torch.Tensor(dlrm_categorical_features.astype(np.int32))
+        dlrm_categorical_features = dlrm_categorical_features.to(torch.int32)
+
+
+        self.t_process += self.timer_process.toc()
+        self.timer_model_inference.tic()
+
+        predictions = self.dlrm_model(dlrm_numerical_features, dlrm_categorical_features).detach().cpu().numpy().reshape(-1)
+
+        self.t_model_inference += self.timer_model_inference.toc()
+        result_df = pd.DataFrame(
+            {
+                "label": predictions,
+                "t_process": self.t_process,
+                "t_model_inference": self.t_model_inference,
+            }
+        )
+        return result_df
+
+class MLQ2MovieTagEncoder_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of MLQ2MovieTagEncoder_EVADB: \n", "count_inference: ", self.count_inference)
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "MLQ2MovieTagEncoder_EVADB"
+
+    @setup(cacheable=True, function_type="classification", batchable=True)
+    def setup(self):
+        
+        self.encoder = tf.keras.models.load_model("../../resources/model/movielens/final/tf/movie_tag_standalone_encoder.h5", compile=False)
+        self.timer_process = utils.Timer()
+        self.timer_model_inference = utils.Timer()
+        self.t_process = 0
+        self.t_model_inference = 0
+        self.count_inference = 0
+
+    @property
+    def labels(self):
+        return list([str(num) for num in range(10)])
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'mt_relevance_score' 
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[
+                    (None,),
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["mt_relevance_ir", "t_process", "t_model_inference"],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,), (None,), (None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        # Column order: 'mt_relevance_score'
+       
+        # outcome = []
+        self.count_inference += len(data)
+        self.timer_process.tic()
+
+        X_relevance_score = np.stack(data['mt_relevance_score'].values)
+        
+
+
+        self.t_process += self.timer_process.toc()
+        self.timer_model_inference.tic()
+
+        X_relevance_score_lr = self.encoder(X_relevance_score).numpy()
+
+
+        self.t_model_inference += self.timer_model_inference.toc()
+        result_df = pd.DataFrame(
+            {
+                "mt_relevance_ir": X_relevance_score_lr.tolist(),
+                "t_process": self.t_process,
+                "t_model_inference": self.t_model_inference,
+            }
+        )
+        return result_df
 
 
 class DSSM_EVADB(AbstractFunction):

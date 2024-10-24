@@ -10,9 +10,12 @@ import utils
 import load_data_to_db
 import collections
 import os
+import torch
+import torch.nn as nn
 from abc import ABC, abstractmethod
 from models.preprocessing.inputs import SparseFeat, DenseFeat, VarLenSparseFeat
 from models.dssm import DSSM_Torch, DSSM_TF, get_var_feature, get_test_var_feature
+from models.dlrm import DLRM
 from sklearn.preprocessing import LabelEncoder
 from tqdm.auto import tqdm
 from pyspark.sql import SparkSession
@@ -428,6 +431,106 @@ class MovielensQ1PipelineDLCentric(Pipeline):
         y_preds = self.model.predict(data)
         return y_preds
 
+class MovielensQ2PipelineDLCentric(Pipeline):
+    def __init__(self, num_sample=-1, num_loop=4):
+        self.postgres_conn = utils.get_postgres_connection_config()
+        super(MovielensQ2PipelineDLCentric, self).__init__(
+            "movielens-q2-pipeline-dl-centric", num_sample=num_sample, num_loop=num_loop
+        )
+
+    def loading_meta_impl(self):
+        embedding_dim = 32
+
+        embedding_dim = 128
+        num_numerical_features = 256
+        categorical_feature_sizes = [7, 21, 2]  # Example sizes
+        bottom_mlp_sizes = [128]
+        top_mlp_sizes = [256, 128]
+
+        self.dlrm_model = DLRM(embedding_dim, num_numerical_features, categorical_feature_sizes, bottom_mlp_sizes, top_mlp_sizes)
+        self.gender_encoder = {
+            'M': 1,
+            'F': 0
+        }
+        self.age_encoder = {
+            1: 0,
+            18: 1,
+            25: 2,
+            35: 3,
+            45: 4,
+            50: 5,
+            56: 6
+        }
+        
+        self.trending_ffnn_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q1_ffnn_tf.h5", compile=False)
+        self.trending_min_max_scaler = pickle.load(open("../../resources/model/movielens/final/tf/q1_ffnn_minmax_scaler_py.pkl", "rb"))
+        self.encoder = tf.keras.models.load_model("../../resources/model/movielens/final/tf/movie_tag_standalone_encoder.h5", compile=False)
+        self.interest_min_max_scaler = pickle.load(open("../../resources/model/movielens/final/tf/q1_ffnn_interest_scaler_py.pkl", "rb"))
+        self.interest_ffnn_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/interest_ffnn_model.h5", compile=False)
+
+    def data_loading_impl(self, batch_size):
+        sql_q2_fetch_user_movie_data = """
+          with temp_user as(
+           select * from movielens_user
+           limit 500
+             )
+          select m_movie_id, u_user_id, m_popularity, m_vote_average, m_vote_count, u_age, u_gender, u_occupation 
+          from
+          movielens_movie 
+          cross join temp_user
+          """
+       
+        data = utils.fetch_data_from_postgres_via_connectorx(
+            sql_q2_fetch_user_movie_data
+        )
+
+        sql_q2_fetch_movie_tag_data = """
+          select * from movielens_movie_tag
+        """
+
+        data_tag = utils.fetch_data_from_postgres_via_connectorx(sql_q2_fetch_movie_tag_data)
+        return data, data_tag
+
+    def data_processing_impl(self, data):
+        data, data_tag = data
+        data['u_gender'] = data['u_gender'].apply(lambda x: self.gender_encoder[x])
+        X_trending_features = data[['m_popularity', 'm_vote_average', 'm_vote_count']].values
+        X_trending_features = self.trending_min_max_scaler.transform(X_trending_features)
+        trending_y = np.argmax(self.trending_ffnn_model(X_trending_features), axis=1)
+        data_sub = data[trending_y == 1]
+
+        X_relevance_score = np.stack(data_tag['mt_relevance_score'].values)
+        X_relevance_score_lr = self.encoder(X_relevance_score).numpy()
+
+        data_tag['mt_relevance_score_lr'] = 0
+        data_tag['mt_relevance_score_lr'] = X_relevance_score_lr.tolist()
+
+        data_sub = data_sub.merge(data_tag, left_on='m_movie_id', right_on='mt_movie_id', how='inner')
+
+        X_interest_features = data_sub[['u_age', 'u_occupation']].values
+        X_interest_features = self.interest_min_max_scaler.transform(X_interest_features)
+        X_relevance_score_lr = np.stack(data_sub['mt_relevance_score_lr'].values)
+        X_interest_features = np.hstack([data_sub['u_gender'].values.reshape(-1,1), X_interest_features, X_relevance_score_lr])
+
+        y_is_interested = np.argmax(self.interest_ffnn_model(X_interest_features), axis=1)
+        data_sub2 = data_sub[y_is_interested == 1]
+
+        dlrm_numerical_features = X_relevance_score_lr[y_is_interested == 1]
+        dlrm_categorical_features = np.hstack([data_sub2['u_age'].apply(lambda x: self.age_encoder[x]).values.reshape(-1,1),
+                                              data_sub2['u_occupation'].values.reshape(-1,1),
+                                              data_sub2['u_gender'].values.reshape(-1,1)])
+        
+        dlrm_numerical_features = torch.Tensor(dlrm_numerical_features)
+        dlrm_categorical_features = torch.Tensor(dlrm_categorical_features.astype(np.int32))
+        dlrm_categorical_features = dlrm_categorical_features.to(torch.int32)
+
+        return dlrm_numerical_features, dlrm_categorical_features
+
+    def model_inference_impl(self, data):
+        dlrm_numerical_features, dlrm_categorical_features = data
+        y_preds = self.dlrm_model(dlrm_numerical_features, dlrm_categorical_features)
+        return y_preds
+
 
 class MovielensQ1PipelineEvaDB(Pipeline):
     
@@ -576,6 +679,174 @@ class MovielensQ1PipelineEvaDB(Pipeline):
             index=[0],
         )
         return result_df
+
+
+class MovielensQ2PipelineEvaDB(Pipeline):
+    
+    def __del__(self):
+        pass
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_q2_temp_view};").df()
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_q2_user};").df()
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_q2_movie};").df()
+        
+    def __init__(self, num_sample=-1, num_loop=10):
+        self.cursor = evadb.connect().cursor()
+        # create a view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_q2_user AS
+            SELECT *
+            FROM movielens_user
+            limit 500
+            };
+        """
+        ).df()
+        # create a view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_q2_movie AS
+            SELECT * from movielens_movie
+            };
+        """
+        ).df()
+
+        self.cursor.query(
+          """
+          USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_q2_temp_view AS
+            SELECT u_user_id, m_movie_id, m_popularity, m_vote_average, m_vote_count, u_age, u_gender, u_occupation, mt_relevance_score
+            from evadb_q2_movie m join movielens_movie_tag mt
+            on mt.mt_movie_id = m.m_movie_id
+            cross join evadb_q2_user u
+          };
+          """
+        ).df()
+        
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS MLQ2MovieTagEncoder_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS MLQ2MovieTagEncoder_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS MLQ2FFNN_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS MLQ2FFNN_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS MLQ2InterestModel_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS MLQ2InterestModel_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS MLQ2DLRMModel_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS MLQ2DLRMModel_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+        self.postgres_conn = utils.get_postgres_connection_config()
+        super(MovielensQ2PipelineEvaDB, self).__init__(
+            "movielens-q2-pipeline-evadb", num_sample=num_sample, num_loop=num_loop
+        )
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+
+        return None
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        return data
+
+    def run_pipeline(self):
+        self.loading_meta_impl()
+
+        timer_end_end = utils.Timer()
+        timer_data_loading = utils.Timer()
+        timer_data_processing = utils.Timer()
+        timer_model_inference = utils.Timer()
+        t_end_end = 0
+        t_data_loading = 0
+        t_data_processing = 0
+        t_model_inference = 0
+
+        for _ in tqdm(range(self.num_loop)):
+            timer_end_end.tic()
+            return_data = []
+            for batch_size in self.list_batches:
+                data = None
+                timer_data_loading.tic()
+                data = self.data_loading_impl(batch_size)
+                t_data_loading += timer_data_loading.toc()
+
+                timer_data_processing.tic()
+                data = self.data_processing_impl(data)
+                t_data_processing += timer_data_processing.toc()
+
+                timer_model_inference.tic()
+                data = self.model_inference_impl(data)
+                t_model_inference += timer_model_inference.toc()
+
+                result_df = self.cursor.query(
+                """
+                select MLQ2DLRMModel_EVADB(u_gender, u_age, u_occupation, MLQ2MovieTagEncoder_EVADB(mt_relevance_score))
+                from postgres_data.evadb_q2_temp_view 
+                where MLQ2FFNN_EVADB(m_popularity, m_vote_average, m_vote_count).label = 1 and MLQ2InterestModel_EVADB(u_gender, u_age, u_occupation, MLQ2MovieTagEncoder_EVADB(mt_relevance_score))
+                """
+                ).df()
+
+                t_data_processing += result_df["t_process"].values[-1]
+                t_model_inference += result_df["t_model_inference"].values[-1]
+                return_data.append(result_df["label"])
+
+            t_end_end += timer_end_end.toc()
+        t_data_loading /= self.num_loop
+        t_data_processing /= self.num_loop
+        t_model_inference /= self.num_loop
+        t_end_end /= self.num_loop
+
+        result_df = pd.DataFrame(
+            {
+                "config_name": self.name,
+                "num_sample": self.num_sample,
+                "t_data_load": t_data_loading,
+                "t_data_process": t_data_processing,
+                "t_model": t_model_inference,
+                "t_end_end": t_end_end,
+            },
+            index=[0],
+        )
+        return result_df
+
+
 
 
 class TwoTowerModelPipelineTF(Pipeline):
@@ -1090,7 +1361,7 @@ class FFNNPipelineSparkSQL(Pipeline):
         self.spark = (
             SparkSession.builder.appName("ModelInference")
             .config("spark.jars.packages", "org.postgresql:postgresql:42.7.1")
-            .config("spark.driver.memory", "40g")
+            .config("spark.driver.memory", "60g")
             .getOrCreate()
         )
         self.num_total_record = num_total_record
@@ -1173,7 +1444,7 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
         np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
         self.spark = (
             SparkSession.builder.appName("ModelInference")
-            .config("spark.driver.memory", "40g")
+            .config("spark.driver.memory", "60g")
             .getOrCreate()
         )
         self.num_total_record = num_total_record
@@ -1250,7 +1521,7 @@ class MovielensQ1PipelineSparkHadoop(Pipeline):
     ):
         self.spark = (
             SparkSession.builder.appName("ModelInference")
-            .config("spark.driver.memory", "40g")
+            .config("spark.driver.memory", "60g")
             .getOrCreate()
         )
 
@@ -1313,6 +1584,76 @@ class MovielensQ1PipelineSparkHadoop(Pipeline):
         df_data.columns = ['user_id', 'gender', 'age', 'occupation', 'user_mean_rating', 'movie_id', 'genres', 'movie_mean_rating']
         result_df = self.model.predict(df_data)
         return result_df
+
+
+
+class MovielensQ2PipelineSparkHadoop(Pipeline):
+
+    def __init__(
+        self,
+        num_sample=-1,
+        num_loop=10,
+    ):
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "60g")
+            .getOrCreate()
+        )
+
+        super(MovielensQ2PipelineSparkHadoop, self).__init__(
+            "MovielensQ2PipelineSparkHadoop", num_sample=num_sample, num_loop=num_loop
+        )
+
+        self.model = DSSM_Moel_Wrapper()
+        self.data_path = "hdfs://localhost:9900/user/velox/data/movielens/"
+        self.movie_path_in_hdfs = os.path.join(self.data_path, "movie")
+        self.user_path_in_hdfs = os.path.join(self.data_path, "user")
+        self.rating_path_in_hdfs = os.path.join(self.data_path, "rating")
+        self.movie_tag_path_in_hdfs = os.path.join(self.data_path, "movie_tag")
+        
+        from register_q2_spark_func import predict_trending_ffnn, relevance_encoder, predict_interest_ffnn, predict_q2_dlrm
+        self.predict_trending_ffnn = predict_trending_ffnn
+        self.relevance_encoder = relevance_encoder
+        self.predict_interest_ffnn = predict_interest_ffnn
+        self.predict_q2_dlrm = predict_q2_dlrm
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        df_movie = self.spark.read.parquet(self.movie_path_in_hdfs)
+        df_movie.createOrReplaceTempView("movie")
+        df_user = self.spark.read.parquet(self.user_path_in_hdfs)
+        df_user.createOrReplaceTempView("user")
+        # df_rating = self.spark.read.parquet(self.rating_path_in_hdfs)
+        df_movie_tag = self.spark.read.parquet(self.movie_tag_path_in_hdfs)
+        df_movie_tag.createOrReplaceTempView("movie_tag")
+        
+        movielens_q2_spark_sql = """
+        SELECT u_user_id, m_movie_id, m_popularity, m_vote_average, m_vote_count, u_age, u_gender, u_occupation, mt_relevance_score
+            from movie m join movie_tag mt
+            on mt.mt_movie_id = m.m_movie_id
+            cross join user u
+        """
+        data = self.spark.sql(movielens_q2_spark_sql)
+        
+        return data
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        # from register_q2_spark_func import predict_trending_ffnn, relevance_encoder, predict_interest_ffnn, predict_q2_dlrm
+        
+        data = data.withColumn("trending_prediction", self.predict_trending_ffnn("m_popularity", "m_vote_average", "m_vote_count")) \
+            .filter(F.col("trending_prediction") == 1) \
+            .withColumn("mt_relevance_ir", self.relevance_encoder("mt_relevance_score")) \
+            .withColumn("interest_prediction", self.predict_interest_ffnn("u_gender", "u_age", "u_occupation", "mt_relevance_ir")) \
+            .filter(F.col("interest_prediction") == 1) \
+            .withColumn("dlrm_prediction", self.predict_q2_dlrm("u_gender", "u_age", "u_occupation", "mt_relevance_ir"))
+        result = data.collect()
+        print(result)
+        return result
 
 
 def pd_func_summarize_description(df, column_name, prompt):
