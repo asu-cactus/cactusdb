@@ -34,6 +34,7 @@ def benchmark_movielens_q1_sparkhdoop(num_loop=10, **kwargs):
     )
     benchmark_result = movielens_q1_pipeline_sparkhdoop.run_pipeline()
     return benchmark_result
+
 def benchmark_movielens_q2_dl(num_loop=10, **kwargs):
     movielens_q2_pipeline = pipeline.MovielensQ2PipelineDLCentric(
         num_loop=num_loop
@@ -55,6 +56,27 @@ def benchmark_movielens_q2_sparkhadoop(num_loop=10, **kwargs):
     benchmark_result = movielens_q2_pipeline.run_pipeline()
     return benchmark_result
 
+def benchmark_movielens_q3_dl(num_loop=10, **kwargs):
+    movielens_q3_pipeline = pipeline.MovielensQ3PipelineDLCentric(
+        num_loop=num_loop
+    )
+    benchmark_result = movielens_q3_pipeline.run_pipeline()
+    return benchmark_result
+
+def benchmark_movielens_q3_evadb(num_loop=10, **kwargs):
+    movielens_q3_pipeline = pipeline.MovielensQ3PipelineEvaDB(
+        num_loop=num_loop
+    )
+    benchmark_result = movielens_q3_pipeline.run_pipeline()
+    return benchmark_result
+
+def benchmark_movielens_q3_sparkhadoop(num_loop=10, **kwargs):
+    movielens_q3_pipeline = pipeline.MovielensQ3PipelineSparkHadoop(
+        num_loop=num_loop
+    )
+    benchmark_result = movielens_q3_pipeline.run_pipeline()
+    return benchmark_result
+
 def benchmark_movielens():
     list_benchmark = []
     # list_benchmark += [benchmark_movielens_q1_dl]
@@ -62,7 +84,10 @@ def benchmark_movielens():
     # list_benchmark += [benchmark_movielens_q1_sparkhdoop]
     # list_benchmark += [benchmark_movielens_q2_dl]
     # list_benchmark += [benchmark_movielens_q2_evadb]
-    list_benchmark += [benchmark_movielens_q2_sparkhadoop]
+    # list_benchmark += [benchmark_movielens_q2_sparkhadoop]
+    # list_benchmark += [benchmark_movielens_q3_dl]
+    list_benchmark += [benchmark_movielens_q3_evadb]
+    list_benchmark += [benchmark_movielens_q3_sparkhadoop]
 
 
     result_df = None

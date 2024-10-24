@@ -532,6 +532,87 @@ class MovielensQ2PipelineDLCentric(Pipeline):
         return y_preds
 
 
+def row_wise_cosine_similarity(arr1: np.ndarray, arr2: np.ndarray) -> np.ndarray:
+    # Ensure both arrays have the same shape
+    assert arr1.shape == arr2.shape, "Both arrays must have the same shape"
+    
+    # Compute the dot product row-wise
+    dot_product = np.sum(arr1 * arr2, axis=1)
+    
+    # Compute the norm (magnitude) of each row for both arrays
+    norm_arr1 = np.linalg.norm(arr1, axis=1)
+    norm_arr2 = np.linalg.norm(arr2, axis=1)
+    
+    # Compute cosine similarity for each row
+    cosine_similarity = dot_product / (norm_arr1 * norm_arr2)
+    
+    return cosine_similarity
+
+
+class MovielensQ3PipelineDLCentric(Pipeline):
+    def __init__(self, num_sample=-1, num_loop=4):
+        self.postgres_conn = utils.get_postgres_connection_config()
+        super(MovielensQ3PipelineDLCentric, self).__init__(
+            "movielens-q3-pipeline-dl-centric", num_sample=num_sample, num_loop=num_loop
+        )
+
+    def loading_meta_impl(self):
+        
+        self.encoder = tf.keras.models.load_model("../../resources/model/movielens/final/tf/movie_tag_standalone_encoder.h5", compile=False)
+        self.user_movie_interest_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q3_user_movie_interest_ffnn.h5", compile=False)
+        self.user_movie_rating_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q3_user_movie_rating_ffnn.h5", compile=False)
+        
+    def data_loading_impl(self, batch_size):
+        sql_q3_fetch_user_movie_data = """
+          with temp_movie as (
+          select *
+          from
+          movielens_movie limit 1000) 
+          select m_movie_id, u_user_id, m_genres, m_popularity, m_vote_average, u_gender, u_age, u_occupation
+          from temp_movie
+          cross join 
+          (select * from movielens_user limit 50) as temp_user
+          where m_genres like '%Adventure%'
+          """
+
+        data = utils.fetch_data_from_postgres_via_connectorx(
+            sql_q3_fetch_user_movie_data
+        )
+
+        sql_q3_fetch_movie_tag_data = """
+          select * from movielens_movie_tag
+        """
+
+        data_tag = utils.fetch_data_from_postgres_via_connectorx(sql_q3_fetch_movie_tag_data)
+        return data, data_tag
+
+    def data_processing_impl(self, data):
+        data, data_tag = data
+        data['u_gender'] = data['u_gender'].apply(lambda x: 1 if x == 'M' else 0)
+        X = data[['u_age', 'u_gender', 'u_occupation', 'm_popularity', 'm_vote_average']].to_numpy().astype(np.float32)
+
+        pred_is_interest = self.user_movie_interest_model.predict(X, batch_size=2048)
+        X_sub = X[np.argmax(pred_is_interest, axis=1) == 1]
+        pred_rating = self.user_movie_rating_model.predict(X_sub, batch_size=2048)
+        data_sub2 = data[np.argmax(pred_is_interest, axis=1) == 1][np.argmax(pred_rating, axis=1) == 5]
+        
+        mt_relevance_ir = self.encoder.predict(np.stack(data_tag['mt_relevance_score'].values), batch_size=2048)
+        data_tag['mt_relevance_score_ir'] = mt_relevance_ir.tolist()
+
+        df_stage1 = pd.merge(data_sub2, data_tag, left_on='m_movie_id', right_on='mt_movie_id', how='inner')[['m_movie_id', 'u_user_id', 'mt_relevance_score_ir']]
+        return df_stage1, data_tag
+
+    def model_inference_impl(self, data):
+        df_stage1, data_tag = data
+        data_tag2 = data_tag.copy()
+        data_tag2 = data_tag2.drop(columns=['mt_relevance_score'])
+        data_tag2.columns = ['mt_movie_id1', 'mt_relevance_score_ir1']
+
+        df_stage2 = pd.merge(df_stage1, data_tag2, how='cross')
+
+        cosin_sim = row_wise_cosine_similarity(np.stack(df_stage2['mt_relevance_score_ir'].values), np.stack(df_stage2['mt_relevance_score_ir1'].values))
+        return cosin_sim
+
 class MovielensQ1PipelineEvaDB(Pipeline):
     
     def __del__(self):
@@ -819,7 +900,7 @@ class MovielensQ2PipelineEvaDB(Pipeline):
                 """
                 select MLQ2DLRMModel_EVADB(u_gender, u_age, u_occupation, MLQ2MovieTagEncoder_EVADB(mt_relevance_score))
                 from postgres_data.evadb_q2_temp_view 
-                where MLQ2FFNN_EVADB(m_popularity, m_vote_average, m_vote_count).label = 1 and MLQ2InterestModel_EVADB(u_gender, u_age, u_occupation, MLQ2MovieTagEncoder_EVADB(mt_relevance_score))
+                where MLQ2FFNN_EVADB(m_popularity, m_vote_average, m_vote_count).label = 1 and MLQ2InterestModel_EVADB(u_gender, u_age, u_occupation, MLQ2MovieTagEncoder_EVADB(mt_relevance_score)).label = 1
                 """
                 ).df()
 
@@ -847,7 +928,198 @@ class MovielensQ2PipelineEvaDB(Pipeline):
         return result_df
 
 
+class MovielensQ3PipelineEvaDB(Pipeline):
+    
+    def __del__(self):
+        pass
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_q3_temp_view};").df()
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_q3_user};").df()
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_q3_movie};").df()
+        self.cursor.query("USE postgres_data{DROP VIEW IF EXISTS evadb_q3_tag1};").df()
+        
+    def __init__(self, num_sample=-1, num_loop=10):
+        self.cursor = evadb.connect().cursor()
+        # create a view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_q3_user AS
+            SELECT *
+            FROM movielens_user
+            limit 50
+            };
+        """
+        ).df()
+        # create a view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_q3_movie AS
+            SELECT * from movielens_movie
+            limit 1000
+            };
+        """
+        ).df()
 
+        # create a view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_q3_tag1 AS
+            SELECT mt_movie_id AS mt_movie_id1, mt_relevance_score AS mt_relevance_score1
+            from movielens_movie_tag
+            };
+        """
+        ).df()
+
+        self.cursor.query(
+          """
+          USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_q3_temp_view AS
+            SELECT u_user_id, m_movie_id, m_popularity, m_vote_average, m_vote_count, u_age, u_gender, u_occupation, mt_relevance_score
+            from evadb_q3_movie m join movielens_movie_tag mt
+            on mt.mt_movie_id = m.m_movie_id
+            cross join evadb_q3_user u
+            where m_genres like '%Adventure%'
+          };
+          """
+        ).df()
+        
+        
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS MLQ2MovieTagEncoder_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS MLQ2MovieTagEncoder_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS MLQ3MovieTagEncoder_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS MLQ3MovieTagEncoder_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS CosinSimilarity_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS CosinSimilarity_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS MLQ3UserMovieRatingModel_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS MLQ3UserMovieRatingModel_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS MLQ3UserMovieInterestModel_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS MLQ3UserMovieInterestModel_EVADB
+            IMPL './dssm_evadb.py';
+            """
+        ).df()
+
+        self.postgres_conn = utils.get_postgres_connection_config()
+        super(MovielensQ3PipelineEvaDB, self).__init__(
+            "movielens-q3-pipeline-evadb", num_sample=num_sample, num_loop=num_loop
+        )
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+
+        return None
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        return data
+
+    def run_pipeline(self):
+        self.loading_meta_impl()
+
+        timer_end_end = utils.Timer()
+        timer_data_loading = utils.Timer()
+        timer_data_processing = utils.Timer()
+        timer_model_inference = utils.Timer()
+        t_end_end = 0
+        t_data_loading = 0
+        t_data_processing = 0
+        t_model_inference = 0
+
+        for _ in tqdm(range(self.num_loop)):
+            timer_end_end.tic()
+            return_data = []
+            for batch_size in self.list_batches:
+                data = None
+                timer_data_loading.tic()
+                data = self.data_loading_impl(batch_size)
+                t_data_loading += timer_data_loading.toc()
+
+                timer_data_processing.tic()
+                data = self.data_processing_impl(data)
+                t_data_processing += timer_data_processing.toc()
+
+                timer_model_inference.tic()
+                data = self.model_inference_impl(data)
+                t_model_inference += timer_model_inference.toc()
+
+                result_df = self.cursor.query(
+                """
+                  select m_movie_id, mt_movie_id1, CosinSimilarity_EVADB(MLQ2MovieTagEncoder_EVADB(mt_relevance_score), MLQ3MovieTagEncoder_EVADB(mt_relevance_score1))
+                  from postgres_data.evadb_q3_temp_view
+                  join postgres_data.evadb_q3_tag1 on true=true
+                  where MLQ3UserMovieInterestModel_EVADB(u_age, u_gender, u_occupation, m_popularity, m_vote_average).label = 1 and MLQ3UserMovieRatingModel_EVADB(u_age, u_gender, u_occupation, m_popularity, m_vote_average).label = 1
+                """
+                ).df()
+
+                # t_data_processing += result_df["t_process"].values[-1]
+                # t_model_inference += result_df["t_model_inference"].values[-1]
+                # return_data.append(result_df["cosine_sim"])
+
+            t_end_end += timer_end_end.toc()
+        t_data_loading /= self.num_loop
+        t_data_processing /= self.num_loop
+        t_model_inference /= self.num_loop
+        t_end_end /= self.num_loop
+
+        result_df = pd.DataFrame(
+            {
+                "config_name": self.name,
+                "num_sample": self.num_sample,
+                "t_data_load": t_data_loading,
+                "t_data_process": t_data_processing,
+                "t_model": t_model_inference,
+                "t_end_end": t_end_end,
+            },
+            index=[0],
+        )
+        return result_df
 
 class TwoTowerModelPipelineTF(Pipeline):
     def __init__(self, num_sample=500, num_loop=10):
@@ -1651,6 +1923,78 @@ class MovielensQ2PipelineSparkHadoop(Pipeline):
             .withColumn("interest_prediction", self.predict_interest_ffnn("u_gender", "u_age", "u_occupation", "mt_relevance_ir")) \
             .filter(F.col("interest_prediction") == 1) \
             .withColumn("dlrm_prediction", self.predict_q2_dlrm("u_gender", "u_age", "u_occupation", "mt_relevance_ir"))
+        result = data.collect()
+        print(result)
+        return result
+
+class MovielensQ3PipelineSparkHadoop(Pipeline):
+
+    def __init__(
+        self,
+        num_sample=-1,
+        num_loop=10,
+    ):
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "60g")
+            .getOrCreate()
+        )
+
+        super(MovielensQ3PipelineSparkHadoop, self).__init__(
+            "MovielensQ3PipelineSparkHadoop", num_sample=num_sample, num_loop=num_loop
+        )
+
+        self.model = DSSM_Moel_Wrapper()
+        self.data_path = "hdfs://localhost:9900/user/velox/data/movielens/"
+        self.movie_path_in_hdfs = os.path.join(self.data_path, "movie")
+        self.user_path_in_hdfs = os.path.join(self.data_path, "user")
+        self.rating_path_in_hdfs = os.path.join(self.data_path, "rating")
+        self.movie_tag_path_in_hdfs = os.path.join(self.data_path, "movie_tag")
+        
+        from register_q3_spark_func import predict_user_movie_interest_ffnn, relevance_encoder, predict_user_movie_rating_ffnn, spark_cosine_similarity
+        self.predict_user_movie_interest_ffnn = predict_user_movie_interest_ffnn
+        self.relevance_encoder = relevance_encoder
+        self.predict_user_movie_rating_ffnn = predict_user_movie_rating_ffnn
+        self.spark_cosine_similarity = spark_cosine_similarity
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        df_movie = self.spark.read.parquet(self.movie_path_in_hdfs).limit(1000)
+        df_movie.createOrReplaceTempView("movie")
+        df_user = self.spark.read.parquet(self.user_path_in_hdfs).limit(50)
+        df_user.createOrReplaceTempView("user")
+        # df_rating = self.spark.read.parquet(self.rating_path_in_hdfs)
+        df_movie_tag = self.spark.read.parquet(self.movie_tag_path_in_hdfs)
+        df_movie_tag.createOrReplaceTempView("movie_tag")
+        
+        movielens_q3_spark_sql = """
+        SELECT u_user_id, m_movie_id, m_popularity, m_vote_average, m_vote_count, u_age, u_gender, u_occupation, mt_relevance_score
+            from movie m join movie_tag mt
+            on mt.mt_movie_id = m.m_movie_id
+            cross join user u
+        """
+        data = self.spark.sql(movielens_q3_spark_sql)
+
+        tag_data = self.spark.sql("SELECT mt_movie_id as mt_movie_id1, mt_relevance_score as mt_relevance_score1 FROM movie_tag") \
+        .withColumn('relevance_score_ir1', self.relevance_encoder(col('mt_relevance_score1')))
+        
+        return data, tag_data
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        data, tag_data = data
+        data = data.withColumn('is_interested', self.predict_user_movie_interest_ffnn('u_age', 'u_gender', 'u_occupation', 'm_popularity', 'm_vote_average')) \
+          .filter(F.col('is_interested') == 1) \
+          .withColumn('predict_rating', self.predict_user_movie_rating_ffnn('u_age', 'u_gender', 'u_occupation', 'm_popularity', 'm_vote_average')) \
+          .filter(F.col('predict_rating') == 5) \
+          .withColumn('relevance_score_ir', self.relevance_encoder('mt_relevance_score')) \
+          .crossJoin(tag_data) \
+          .withColumn('cosine_sim', self.spark_cosine_similarity('relevance_score_ir', 'relevance_score_ir1'))
+
         result = data.collect()
         print(result)
         return result
