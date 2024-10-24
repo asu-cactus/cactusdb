@@ -116,6 +116,13 @@ def load_movielens_final_to_datastore():
         overwrite=True,
     )
 
+    movie_tag_path_in_hdfs = os.path.join(data_path, "movie_tag")
+    utils.load_csv_to_hdfs(
+        "../../resources/data/movielens/final/movie_tag_relevance.parquet", 
+        movie_tag_path_in_hdfs, 
+        overwrite=True
+    )
+
     print("[INFO] load movielens dataset to hadoop success!")
 
 
