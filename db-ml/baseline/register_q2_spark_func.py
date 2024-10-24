@@ -35,7 +35,7 @@ trending_movie_model = tf.keras.models.load_model("../../resources/model/moviele
 def predict_trending_ffnn(m_popularity: pd.Series, m_vote_average: pd.Series, m_vote_count: pd.Series) -> pd.Series:
     X = np.array([m_popularity.values, m_vote_average.values, m_vote_count.values]).T
     X = min_max_scaler.transform(X)
-    y = np.argmax(trending_movie_model(X), axis=1)
+    y = np.argmax(trending_movie_model.predict(X, batch_size=2048), axis=1)
     
     return pd.Series(y)
 
@@ -63,13 +63,13 @@ def predict_interest_ffnn(u_gender: pd.Series, u_age: pd.Series, u_occupation: p
     age_n_occupation = interest_min_max_scaler.transform(age_n_occupation)
     X_relevance_score_lr = np.stack(mt_relevance_ir.values)
     X_interest_features = np.hstack([gender.reshape(-1,1), age_n_occupation, X_relevance_score_lr])
-    predictions = np.argmax(interest_ffnn_model(X_interest_features), axis=1)
+    predictions = np.argmax(interest_ffnn_model.predict(X_interest_features, batch_size=2048), axis=1)
     return pd.Series(predictions)
 
 @pandas_udf(ArrayType(FloatType()))
 def relevance_encoder(mt_relevance_score: pd.Series) -> pd.Series:
     mt_relevance_score = np.stack(mt_relevance_score.values)
-    output = encoder(mt_relevance_score).numpy()
+    output = encoder.predict(mt_relevance_score, batch_size=2048)
     return pd.Series(output.tolist())
 
 embedding_dim = 128

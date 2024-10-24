@@ -340,9 +340,315 @@ class MLQ2InterestModel_EVADB(AbstractFunction):
         self.t_process += self.timer_process.toc()
         self.timer_model_inference.tic()
 
-        predictions = np.argmax(self.interest_ffnn_model(X_interest_features), axis=1)
+        predictions = np.argmax(self.interest_ffnn_model.predict(X_interest_features, batch_size=2048), axis=1)
 
         # predictions = np.argmax(self.model(X_for_ffnn).detach().cpu().numpy(), axis=1)
+
+        self.t_model_inference += self.timer_model_inference.toc()
+        result_df = pd.DataFrame(
+            {
+                "label": predictions,
+                "t_process": self.t_process,
+                "t_model_inference": self.t_model_inference,
+            }
+        )
+        return result_df
+
+def row_wise_cosine_similarity(arr1: np.ndarray, arr2: np.ndarray) -> np.ndarray:
+    # Ensure both arrays have the same shape
+    assert arr1.shape == arr2.shape, "Both arrays must have the same shape"
+    
+    # Compute the dot product row-wise
+    dot_product = np.sum(arr1 * arr2, axis=1)
+    
+    # Compute the norm (magnitude) of each row for both arrays
+    norm_arr1 = np.linalg.norm(arr1, axis=1)
+    norm_arr2 = np.linalg.norm(arr2, axis=1)
+    
+    # Compute cosine similarity for each row
+    cosine_similarity = dot_product / (norm_arr1 * norm_arr2)
+    
+    return cosine_similarity
+
+
+class CosinSimilarity_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of CosinSimilarity_EVADB: \n", "count_inference: ", self.count_inference)
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "CosinSimilarity_EVADB"
+
+    @setup(cacheable=True, function_type="classification", batchable=True)
+    def setup(self):
+        
+
+        # self.model.eval()
+        self.timer_process = utils.Timer()
+        self.timer_model_inference = utils.Timer()
+        self.t_process = 0
+        self.t_model_inference = 0
+        self.count_inference = 0
+
+    @property
+    def labels(self):
+        return list([str(num) for num in range(10)])
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'mt_relevance_ir', 'mt_relevance_ir1'
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[
+                    (None,),
+                    (None,),
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["cosine_sim", "t_process", "t_model_inference"],
+                column_types=[
+                    NdArrayType.STR,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,), (None,), (None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        # Column order: 'u_gender', 'u_age', 'u_occupation', 'mt_relevance_ir'
+       
+
+
+        # outcome = []
+        self.count_inference += len(data)
+        self.timer_process.tic()
+
+        self.t_process += self.timer_process.toc()
+        self.timer_model_inference.tic()
+
+        cosin_sim = row_wise_cosine_similarity(np.stack(data['mt_relevance_ir'].values), np.stack(data['mt_relevance_ir1'].values))
+
+        self.t_model_inference += self.timer_model_inference.toc()
+        result_df = pd.DataFrame(
+            {
+                "cosine_sim": cosin_sim,
+                "t_process": self.t_process,
+                "t_model_inference": self.t_model_inference,
+            }
+        )
+        return result_df
+
+
+
+class MLQ3UserMovieInterestModel_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of MLQ3UserMovieInterestModel_EVADB: \n", "count_inference: ", self.count_inference)
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "MLQ3UserMovieInterestModel_EVADB"
+
+    @setup(cacheable=True, function_type="classification", batchable=True)
+    def setup(self):
+        self.user_movie_interest_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q3_user_movie_interest_ffnn.h5", compile=False)        
+        
+        self.gender_encoder = {
+            'M': 1,
+            'F': 0
+        }
+
+        # self.model.eval()
+        self.timer_process = utils.Timer()
+        self.timer_model_inference = utils.Timer()
+        self.t_process = 0
+        self.t_model_inference = 0
+        self.count_inference = 0
+
+    @property
+    def labels(self):
+        return list([str(num) for num in range(10)])
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'u_age', 'u_gender', 'u_occupation', 'm_popularity', 'm_vote_average'
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.INT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[
+                    (None,),
+                    (None,),
+                    (None,),
+                    (None,),
+                    (None,),
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["label", "t_process", "t_model_inference"],
+                column_types=[
+                    NdArrayType.STR,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,), (None,), (None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        # Column order: 'u_age', 'u_gender', 'u_occupation', 'm_popularity', 'm_vote_average'
+       
+        # outcome = []
+        self.count_inference += len(data)
+        self.timer_process.tic()
+
+
+        data['u_gender'] = data['u_gender'].apply(lambda x: 1 if x == 'M' else 0)
+        X = data[['u_age', 'u_gender', 'u_occupation', 'm_popularity', 'm_vote_average']].to_numpy().astype(np.float32)
+        
+
+        self.t_process += self.timer_process.toc()
+        self.timer_model_inference.tic()
+        predictions = np.argmax(self.user_movie_interest_model.predict(X, batch_size=2048), axis=1)
+
+        self.t_model_inference += self.timer_model_inference.toc()
+        result_df = pd.DataFrame(
+            {
+                "label": predictions,
+                "t_process": self.t_process,
+                "t_model_inference": self.t_model_inference,
+            }
+        )
+        return result_df
+
+class MLQ3UserMovieRatingModel_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of MLQ3UserMovieRatingModel_EVADB: \n", "count_inference: ", self.count_inference)
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "MLQ3UserMovieRatingModel_EVADB"
+
+    @setup(cacheable=True, function_type="classification", batchable=True)
+    def setup(self):
+        self.user_movie_rating_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q3_user_movie_rating_ffnn.h5", compile=False)        
+        
+        self.gender_encoder = {
+            'M': 1,
+            'F': 0
+        }
+
+        # self.model.eval()
+        self.timer_process = utils.Timer()
+        self.timer_model_inference = utils.Timer()
+        self.t_process = 0
+        self.t_model_inference = 0
+        self.count_inference = 0
+
+    @property
+    def labels(self):
+        return list([str(num) for num in range(10)])
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'u_age', 'u_gender', 'u_occupation', 'm_popularity', 'm_vote_average'
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.INT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[
+                    (None,),
+                    (None,),
+                    (None,),
+                    (None,),
+                    (None,),
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["label", "t_process", "t_model_inference"],
+                column_types=[
+                    NdArrayType.STR,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,), (None,), (None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        # Column order: 'u_age', 'u_gender', 'u_occupation', 'm_popularity', 'm_vote_average'
+       
+        # outcome = []
+        self.count_inference += len(data)
+        self.timer_process.tic()
+
+
+        data['u_gender'] = data['u_gender'].apply(lambda x: 1 if x == 'M' else 0)
+        X = data[['u_age', 'u_gender', 'u_occupation', 'm_popularity', 'm_vote_average']].to_numpy().astype(np.float32)
+        
+
+        self.t_process += self.timer_process.toc()
+        self.timer_model_inference.tic()
+        predictions = np.argmax(self.user_movie_rating_model.predict(X, batch_size=2048), axis=1)
 
         self.t_model_inference += self.timer_model_inference.toc()
         result_df = pd.DataFrame(
@@ -553,7 +859,7 @@ class MLQ2MovieTagEncoder_EVADB(AbstractFunction):
         self.t_process += self.timer_process.toc()
         self.timer_model_inference.tic()
 
-        X_relevance_score_lr = self.encoder(X_relevance_score).numpy()
+        X_relevance_score_lr = self.encoder(X_relevance_score, batch_size=2048)
 
 
         self.t_model_inference += self.timer_model_inference.toc()
@@ -562,6 +868,93 @@ class MLQ2MovieTagEncoder_EVADB(AbstractFunction):
                 "mt_relevance_ir": X_relevance_score_lr.tolist(),
                 "t_process": self.t_process,
                 "t_model_inference": self.t_model_inference,
+            }
+        )
+        return result_df
+    
+class MLQ3MovieTagEncoder_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of MLQ3MovieTagEncoder_EVADB: \n", "count_inference: ", self.count_inference)
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "MLQ3MovieTagEncoder_EVADB"
+
+    @setup(cacheable=True, function_type="classification", batchable=True)
+    def setup(self):
+        
+        self.encoder = tf.keras.models.load_model("../../resources/model/movielens/final/tf/movie_tag_standalone_encoder.h5", compile=False)
+        self.timer_process = utils.Timer()
+        self.timer_model_inference = utils.Timer()
+        self.t_process = 0
+        self.t_model_inference = 0
+        self.count_inference = 0
+
+    @property
+    def labels(self):
+        return list([str(num) for num in range(10)])
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'mt_relevance_score1' 
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[
+                    (None,),
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["mt_relevance_ir1", "t_process1", "t_model_inference1"],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,), (None,), (None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        # Column order: 'mt_relevance_score'
+       
+        # outcome = []
+        self.count_inference += len(data)
+        self.timer_process.tic()
+
+        X_relevance_score = np.stack(data['mt_relevance_score1'].values)
+        
+
+
+        self.t_process += self.timer_process.toc()
+        self.timer_model_inference.tic()
+
+        X_relevance_score_lr = self.encoder.predict(X_relevance_score, batch_size=2048)
+
+
+        self.t_model_inference += self.timer_model_inference.toc()
+        result_df = pd.DataFrame(
+            {
+                "mt_relevance_ir1": X_relevance_score_lr.tolist(),
+                "t_process1": self.t_process,
+                "t_model_inference1": self.t_model_inference,
             }
         )
         return result_df
