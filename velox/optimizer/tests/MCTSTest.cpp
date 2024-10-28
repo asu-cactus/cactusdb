@@ -11,6 +11,7 @@
 #include <string>
 
 // Velox headers
+#include <H5Cpp.h>
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/common/memory/MemoryArbitrator.h"
@@ -30,12 +31,14 @@
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/ml_functions/BatchNorm.h"
+#include "velox/ml_functions/ChatGPT.h"
 #include "velox/ml_functions/ComplexLayer.h"
 #include "velox/ml_functions/Concat.h"
 #include "velox/ml_functions/CosineSimilarity.h"
 #include "velox/ml_functions/Dropout.h"
 #include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/Encoder.h"
+#include "velox/ml_functions/FraudDetectionFunctions.h"
 #include "velox/ml_functions/NNBuilder.h"
 #include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/UtilFunction.h"
@@ -57,12 +60,65 @@
 #include "velox/optimizer/RewriteAction.h"
 #include "velox/optimizer/RuleManager.h"
 #include "velox/optimizer/TwoLayerUDF2TorchNNRewriteAction.h"
+#include "velox/optimizer/tests/BenchmarkUtils.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
 #define BUFFER_SIZE 1024
+
+std::vector<std::vector<float>> loadHDF5Array(
+    const std::string& filename,
+    const std::string& datasetName) {
+  if (!std::filesystem::exists(filename)) {
+    throw std::runtime_error("File not found: " + filename);
+  }
+  H5::H5File file(filename, H5F_ACC_RDONLY);
+  H5::DataSet dataset = file.openDataSet(datasetName);
+  H5::DataSpace dataspace = dataset.getSpace();
+
+  // Get the number of dimensions
+  int rank = dataspace.getSimpleExtentNdims();
+  // std::cout << "Rank: " << rank << std::endl;
+
+  // Allocate space for the dimensions
+  std::vector<hsize_t> dims(rank);
+
+  // Get the dataset dimensions
+  dataspace.getSimpleExtentDims(dims.data(), nullptr);
+
+  size_t rows;
+  size_t cols;
+
+  if (rank == 1) {
+    rows = dims[0];
+    cols = 1;
+  } else if (rank == 2) {
+    rows = dims[0];
+    cols = dims[1];
+  } else {
+    throw std::runtime_error("Unsupported rank: " + std::to_string(rank));
+  }
+
+  // Read data into a 1D vector
+  std::vector<float> flatData(rows * cols);
+  dataset.read(flatData.data(), H5::PredType::NATIVE_FLOAT);
+
+  // Convert to 2D vector
+  std::vector<std::vector<float>> result(rows, std::vector<float>(cols));
+  for (size_t i = 0; i < rows; ++i) {
+    for (size_t j = 0; j < cols; ++j) {
+      result[i][j] = flatData[i * cols + j];
+    }
+  }
+
+  // Close the dataset and file
+  dataset.close();
+  file.close();
+
+  return result;
+}
 
 Json::Value receiveJsonFromSocket(int clientSocket) {
   char messageBuffer[BUFFER_SIZE];
@@ -137,6 +193,28 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
   }
 
+  int cacheQueryPlan(PlanBuilder& planBuilder) {
+    int queryPlanCacheId = queryPlanCacheId_++;
+    auto serializedPlan = planBuilder.planNode()->serialize();
+    // queryPlanCaches_[queryPlanCacheId] = serializedPlan;
+
+    return queryPlanCacheId;
+  }
+
+  void resetQueryPlanFromCache(PlanBuilder& planBuilder, int queryPlanCacheId) {
+    auto it = queryPlanCaches_.find(queryPlanCacheId);
+    if (it != queryPlanCaches_.end()) {
+      auto serializedPlan = it->second;
+      auto deserlizedUpdatedPlanNode =
+          ISerializable::deserialize<core::PlanNode>(
+              serializedPlan, pool_.get());
+      planBuilder.setRoot(deserlizedUpdatedPlanNode);
+    } else {
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+    }
+  }
+
   // Function from ParquetTestBase.h
   std::unique_ptr<dwio::common::FileSink> createSink(
       const std::string& filePath) {
@@ -161,6 +239,267 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return std::make_unique<facebook::velox::parquet::Writer>(
         std::move(sink), options, rowType);
   }
+
+  RowVectorPtr getOrderData(std::string filePath) {
+    std::ifstream file(filePath.c_str());
+
+    if (file.fail()) {
+      std::cerr << "Data File:" << filePath << " => Read Error" << std::endl;
+      exit(1);
+    }
+
+    std::vector<int> oOrderId;
+    std::vector<int> oCustomerSk;
+    std::vector<std::string> oWeekday;
+    std::vector<std::string> oDate;
+
+    std::string line;
+
+    // Ignore the first line (header)
+    if (std::getline(file, line)) {
+      // std::cout << "Ignoring header: " << line << std::endl;
+    }
+
+    while (std::getline(file, line)) { // Read a line from the file
+
+      // std::vector<float> curRow(numCols);
+
+      // std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        /*if (index < 5) {
+            std::cout << colIndex << ": " << numberStr << std::endl;
+        }*/
+        // Trim leading and trailing whitespace from the input string (if any)
+        if (numberStr.size() >= 2 && numberStr.front() == '"' &&
+            numberStr.back() == '"') {
+          numberStr = numberStr.substr(1, numberStr.size() - 2);
+        }
+        if (colIndex == 0) {
+          oOrderId.push_back(std::stoi(numberStr));
+        } else if (colIndex == 1) {
+          oCustomerSk.push_back(std::stoi(numberStr));
+        } else if (colIndex == 2) {
+          oWeekday.push_back(numberStr);
+        } else if (colIndex == 3) {
+          oDate.push_back(numberStr);
+        }
+
+        colIndex++;
+      }
+    }
+
+    file.close();
+
+    // Prepare Customer table
+    auto oOrderIdVector = maker.flatVector<int>(oOrderId);
+    auto oCustomerSkVector = maker.flatVector<int>(oCustomerSk);
+    auto oWeekdayVector = maker.flatVector<std::string>(oWeekday);
+    auto oDateVector = maker.flatVector<std::string>(oDate);
+    auto orderRowVector = maker.rowVector(
+        {"o_order_id", "o_customer_sk", "o_weekday", "o_date"},
+        {oOrderIdVector, oCustomerSkVector, oWeekdayVector, oDateVector});
+
+    return orderRowVector;
+  }
+
+  RowVectorPtr getTransactionData(std::string filePath) {
+    std::ifstream file(filePath.c_str());
+
+    if (file.fail()) {
+      std::cerr << "Data File:" << filePath << " => Read Error" << std::endl;
+      exit(1);
+    }
+
+    std::vector<float> tAmount;
+    std::vector<int> tSender;
+    std::vector<std::string> tReceiver;
+    std::vector<int64_t> transactionId;
+    std::vector<std::string> tTime;
+
+    std::string line;
+
+    // Ignore the first line (header)
+    if (std::getline(file, line)) {
+      // std::cout << "Ignoring header: " << line << std::endl;
+    }
+
+    while (std::getline(file, line)) { // Read a line from the file
+
+      // std::vector<float> curRow(numCols);
+
+      // std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        /*if (index < 5) {
+            std::cout << colIndex << ": " << numberStr << std::endl;
+        }*/
+        // Trim leading and trailing whitespace from the input string (if any)
+        if (numberStr.size() >= 2 && numberStr.front() == '"' &&
+            numberStr.back() == '"') {
+          numberStr = numberStr.substr(1, numberStr.size() - 2);
+        }
+        if (colIndex == 0) {
+          tAmount.push_back(std::stof(numberStr));
+        } else if (colIndex == 1) {
+          tSender.push_back(std::stoi(numberStr));
+        } else if (colIndex == 2) {
+          tReceiver.push_back(numberStr);
+        } else if (colIndex == 3) {
+          // Convert to double first using std::stod
+          double numberDouble = std::stod(numberStr);
+          transactionId.push_back(static_cast<long long>(numberDouble));
+        } else if (colIndex == 4) {
+          tTime.push_back(numberStr);
+        }
+
+        colIndex++;
+      }
+    }
+
+    file.close();
+
+    // Prepare Customer table
+    auto tAmountVector = maker.flatVector<float>(tAmount);
+    auto tSenderVector = maker.flatVector<int>(tSender);
+    auto tReceiverVector = maker.flatVector<std::string>(tReceiver);
+    auto transactionIdVector = maker.flatVector<int64_t>(transactionId);
+    auto tTimeVector = maker.flatVector<std::string>(tTime);
+    auto transactionRowVector = maker.rowVector(
+        {"t_amount", "t_sender", "t_receiver", "transaction_id", "t_time"},
+        {tAmountVector,
+         tSenderVector,
+         tReceiverVector,
+         transactionIdVector,
+         tTimeVector});
+
+    return transactionRowVector;
+  }
+
+  RowVectorPtr getCustomerData(std::string filePath) {
+    std::ifstream file(filePath.c_str());
+
+    if (file.fail()) {
+      std::cerr << "Data File:" << filePath << " => Read Error" << std::endl;
+      exit(1);
+    }
+
+    std::vector<int> cCustomerSk;
+    std::vector<int> cAddrerssNum;
+    std::vector<int> cCustFlag;
+    std::vector<int> cBirthYear;
+    std::vector<int> cBirthCountry;
+
+    std::unordered_map<std::string, int> countryMap = getCountryMap();
+    int countryIndex = countryMap.size();
+
+    std::string line;
+
+    // Ignore the first line (header)
+    if (std::getline(file, line)) {
+      // std::cout << "Ignoring header: " << line << std::endl;
+    }
+
+    while (std::getline(file, line)) { // Read a line from the file
+
+      // std::vector<float> curRow(numCols);
+
+      // std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        /*if (index < 5) {
+            std::cout << colIndex << ": " << numberStr << std::endl;
+        }*/
+        // Trim leading and trailing whitespace from the input string (if any)
+        if (numberStr.size() >= 2 && numberStr.front() == '"' &&
+            numberStr.back() == '"') {
+          numberStr = numberStr.substr(1, numberStr.size() - 2);
+        }
+
+        size_t first = numberStr.find_first_not_of(' ');
+        if (first == std::string::npos)
+          numberStr = "0";
+        else {
+          size_t last = numberStr.find_last_not_of(' ');
+          numberStr = numberStr.substr(first, (last - first + 1));
+        }
+
+        // std::cout << "Column Index: " << colIndex << ", Value: " << numberStr
+        // << std::endl;
+        if (colIndex == 0) {
+          cCustomerSk.push_back(std::stoi(numberStr));
+        } else if (colIndex == 2) {
+          cAddrerssNum.push_back(std::stoi(numberStr));
+        } else if (colIndex == 5) {
+          if (numberStr == "N")
+            cCustFlag.push_back(0);
+          else
+            cCustFlag.push_back(1);
+        } else if (colIndex == 8) {
+          cBirthYear.push_back(std::stoi(numberStr));
+        } else if (colIndex == 9) {
+          if (countryMap.find(numberStr) == countryMap.end()) {
+            // Key does not exist, insert it
+            countryMap[numberStr] = countryIndex;
+            cBirthCountry.push_back(countryIndex);
+            countryIndex++;
+          } else {
+            // Key exists, retrieve its value
+            cBirthCountry.push_back(countryMap[numberStr]);
+          }
+        }
+
+        colIndex++;
+      }
+    }
+
+    file.close();
+
+    // Prepare Customer table
+    auto cCustomerSkVector = maker.flatVector<int>(cCustomerSk);
+    auto cAddrerssNumVector = maker.flatVector<int>(cAddrerssNum);
+    auto cCustFlagVector = maker.flatVector<int>(cCustFlag);
+    auto cBirthYearVector = maker.flatVector<int>(cBirthYear);
+    auto cBirthCountryVector = maker.flatVector<int>(cBirthCountry);
+    auto customerRowVector = maker.rowVector(
+        {"c_customer_sk",
+         "c_address_num",
+         "c_cust_flag",
+         "c_birth_year",
+         "c_birth_country"},
+        {cCustomerSkVector,
+         cAddrerssNumVector,
+         cCustFlagVector,
+         cBirthYearVector,
+         cBirthCountryVector});
+
+    return customerRowVector;
+  }
+
   std::vector<std::string> generateTwoTowerQueryData(
       int numSample,
       int maxUserId,
@@ -441,40 +780,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                           ->asMutable<float>()),
             occupationNumEmbedding,
             embeddingDims),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
-    optimization::registerVectorFunction(
-        "concat1",
-        Concat::signatures(),
-        std::make_unique<Concat>(embeddingDims, embeddingDims),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
-
-    optimization::registerVectorFunction(
-        "concat2",
-        Concat::signatures(),
-        std::make_unique<Concat>(2 * embeddingDims, embeddingDims),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
-
-    optimization::registerVectorFunction(
-        "concat3",
-        Concat::signatures(),
-        std::make_unique<Concat>(3 * embeddingDims, embeddingDims),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
-    optimization::registerVectorFunction(
-        "concat4",
-        Concat::signatures(),
-        std::make_unique<Concat>(4 * embeddingDims, 1),
         {},
         true,
         catalog,
@@ -762,24 +1067,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog,
         isVerticalPartition);
 
-    optimization::registerVectorFunction(
-        "concat2_1",
-        Concat::signatures(),
-        std::make_unique<Concat>(embeddingDims, embeddingDims),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
-
-    optimization::registerVectorFunction(
-        "concat2_2",
-        Concat::signatures(),
-        std::make_unique<Concat>(2 * embeddingDims, 1),
-        {},
-        true,
-        catalog,
-        isVerticalPartition);
-
     randomGenerator.setFloatRange(-1, 1);
     std::vector<std::vector<float>> itemNNweight1 =
         randomGenerator.genFloat2dVector(65, 300);
@@ -1013,6 +1300,510 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         true,
         catalog,
         isVerticalPartition);
+  }
+
+  void registerMLTrendingModelFunctions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+
+    std::string ffnnModelPath =
+        "/home/velox/resources/model/movielens/final/velox/q1_ffnn_weights.h5";
+    std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+    std::vector<std::vector<float>> w3 = loadHDF5Array(ffnnModelPath, "w3");
+    std::vector<std::vector<float>> b3 = loadHDF5Array(ffnnModelPath, "b3");
+
+    optimization::registerVectorFunction(
+        "mat_mul3_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w1)), 3, 128),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add3_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b1)), 128),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul3_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w2)), 128, 64),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add3_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b2)), 64),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul3_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w3)), 64, 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add3_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b3)), 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "softmax",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "relu",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "argmax",
+        Argmax::signatures(),
+        std::make_unique<Argmax>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "llm_ffnn_minmax_scaler",
+        MinMaxScaler::signatures(),
+        std::make_unique<MinMaxScaler>(
+            "/home/velox/resources/model/movielens/final/velox/q1_ffnn_minmax_scaler.txt"),
+        {},
+        true,
+        catalog);
+  }
+
+  void registerMLDLRMModelFunctions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    int embeddingDims = 128;
+    // init age encoder
+    std::unordered_map<int, int> ageMapping;
+    ageMapping[1] = 0;
+    ageMapping[18] = 1;
+    ageMapping[25] = 2;
+    ageMapping[35] = 3;
+    ageMapping[45] = 4;
+    ageMapping[50] = 5;
+    ageMapping[56] = 6;
+
+    optimization::registerVectorFunction(
+        "age_encoder",
+        IntEncoder::signatures(),
+        std::make_unique<IntEncoder>(std::move(ageMapping)),
+        {},
+        true,
+        catalog);
+
+    // init occupation  encoder
+    std::unordered_map<int, int> occupationMapping;
+    for (int i = 0; i < 21; i++) {
+      occupationMapping[i] = i;
+    }
+
+    optimization::registerVectorFunction(
+        "occupation_encoder",
+        IntEncoder::signatures(),
+        std::make_unique<IntEncoder>(std::move(occupationMapping)),
+        {},
+        true,
+        catalog);
+
+    std::unordered_map<std::string, int> genderMapping;
+    genderMapping["F"] = 0;
+    genderMapping["M"] = 1;
+
+    optimization::registerVectorFunction(
+        "gender_encoder",
+        StringEncoder::signatures(),
+        std::make_unique<StringEncoder>(std::move(genderMapping)),
+        {},
+        true,
+        catalog);
+
+    // gender
+    int genderNumEmbedding = 2;
+    std::vector<std::vector<float>> genderEmbeddingWeights =
+        randomGenerator.genFloat2dVector(genderNumEmbedding, embeddingDims);
+    auto genderEmbeddingWeightsVector =
+        maker.arrayVector<float>(genderEmbeddingWeights, REAL());
+
+    // age
+    int ageNumEmbedding = 7;
+    std::vector<std::vector<float>> ageEmbeddingWeights =
+        randomGenerator.genFloat2dVector(ageNumEmbedding, embeddingDims);
+    auto ageEmbeddingWeightsVector =
+        maker.arrayVector<float>(ageEmbeddingWeights, REAL());
+
+    // occupation
+    int occupationNumEmbedding = 21;
+    std::vector<std::vector<float>> occupationEmbeddingWeights =
+        randomGenerator.genFloat2dVector(occupationNumEmbedding, embeddingDims);
+    auto occupationEmbeddingWeightsVector =
+        maker.arrayVector<float>(occupationEmbeddingWeights, REAL());
+
+    optimization::registerVectorFunction(
+        "gender_embedding",
+        Embedding::signatures(),
+        std::make_unique<Embedding>(
+            std::move(genderEmbeddingWeightsVector->elements()
+                          ->values()
+                          ->asMutable<float>()),
+            genderNumEmbedding,
+            embeddingDims),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "age_embedding",
+        Embedding::signatures(),
+        std::make_unique<Embedding>(
+            std::move(ageEmbeddingWeightsVector->elements()
+                          ->values()
+                          ->asMutable<float>()),
+            ageNumEmbedding,
+            embeddingDims),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "occupation_embedding",
+        Embedding::signatures(),
+        std::make_unique<Embedding>(
+            std::move(occupationEmbeddingWeightsVector->elements()
+                          ->values()
+                          ->asMutable<float>()),
+            occupationNumEmbedding,
+            embeddingDims),
+        {},
+        true,
+        catalog);
+
+    // bottom-mlp
+  }
+
+  void registerMLInterestMovieModelFunctions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+
+    std::string ffnnModelPath =
+        "/home/velox/resources/model/movielens/final/velox/interest_ffnn_model_weights.h5";
+    std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+    std::vector<std::vector<float>> w3 = loadHDF5Array(ffnnModelPath, "w3");
+    std::vector<std::vector<float>> b3 = loadHDF5Array(ffnnModelPath, "b3");
+    std::vector<std::vector<float>> w4 = loadHDF5Array(ffnnModelPath, "w4");
+    std::vector<std::vector<float>> b4 = loadHDF5Array(ffnnModelPath, "b4");
+
+    optimization::registerVectorFunction(
+        "mat_mul9_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w1)), 259, 128),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add9_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b1)), 128),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul9_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w2)), 128, 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add9_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b2)), 2),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul9_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w3)), 128, 64),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add9_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b3)), 64),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul9_7",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w4)), 64, 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add9_8",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b4)), 2),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "softmax",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "argmax",
+        Argmax::signatures(),
+        std::make_unique<Argmax>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "llm_ffnn_interest_scaler",
+        MinMaxScaler::signatures(),
+        std::make_unique<MinMaxScaler>(
+            "/home/velox/resources/model/movielens/final/velox/q2_ffnn_interest_scaler.txt"),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "convert_int_array",
+        ConvertToIntArray::signatures(),
+        std::make_unique<ConvertToIntArray>(),
+        {},
+        true,
+        catalog);
+  }
+
+  void registerMLMovieTagEncoderModelFunctions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+
+    std::string ffnnEncoderModelPath =
+        "/home/velox/resources/model/movielens/final/velox/movie_tag_standalone_encoder_weight.h5";
+    std::vector<std::vector<float>> w1 =
+        loadHDF5Array(ffnnEncoderModelPath, "w1");
+    std::vector<std::vector<float>> b1 =
+        loadHDF5Array(ffnnEncoderModelPath, "b1");
+    std::vector<std::vector<float>> w2 =
+        loadHDF5Array(ffnnEncoderModelPath, "w2");
+    std::vector<std::vector<float>> b2 =
+        loadHDF5Array(ffnnEncoderModelPath, "b2");
+
+    optimization::registerVectorFunction(
+        "mat_mul10_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w1)), 140979, 2048),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add10_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b1)), 2048),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul10_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w2)), 2048, 256),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add10_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b2)), 256),
+        {},
+        true,
+        catalog);
+
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    randomGenerator.setFloatRange(-1, 1);
+    std::vector<std::vector<float>> bottomMLPWeight1 =
+        randomGenerator.genFloat2dVector(256, 128);
+    auto bottomMLPWeight1Vector =
+        maker.arrayVector<float>(bottomMLPWeight1, REAL());
+
+    std::vector<std::vector<float>> bottomMLPBias1 =
+        randomGenerator.genFloat2dVector(128, 1);
+    auto bottomMLPBias1Vector =
+        maker.arrayVector<float>(bottomMLPBias1, REAL());
+
+    optimization::registerVectorFunction(
+        "mat_mul11_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(bottomMLPWeight1Vector->elements()
+                          ->values()
+                          ->asMutable<float>()),
+            256,
+            128),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add11_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                bottomMLPBias1Vector->elements()->values()->asMutable<float>()),
+            128),
+        {},
+        true,
+        catalog);
+
+    std::vector<std::vector<float>> topMLPWeight1 =
+        randomGenerator.genFloat2dVector(512, 256);
+    auto topMLPWeight1Vector =
+        maker.arrayVector<float>(bottomMLPWeight1, REAL());
+
+    std::vector<std::vector<float>> topMLPBias1 =
+        randomGenerator.genFloat2dVector(256, 1);
+    auto topMLPBias1Vector = maker.arrayVector<float>(bottomMLPBias1, REAL());
+
+    std::vector<std::vector<float>> topMLPWeight2 =
+        randomGenerator.genFloat2dVector(256, 128);
+    auto topMLPWeight2Vector =
+        maker.arrayVector<float>(bottomMLPWeight1, REAL());
+
+    std::vector<std::vector<float>> topMLPBias2 =
+        randomGenerator.genFloat2dVector(128, 1);
+    auto topMLPBias2Vector = maker.arrayVector<float>(bottomMLPBias1, REAL());
+
+    std::vector<std::vector<float>> topMLPWeight3 =
+        randomGenerator.genFloat2dVector(128, 1);
+    auto topMLPWeight3Vector =
+        maker.arrayVector<float>(bottomMLPWeight1, REAL());
+
+    std::vector<std::vector<float>> topMLPBias3 =
+        randomGenerator.genFloat2dVector(1, 1);
+    auto topMLPBias3Vector = maker.arrayVector<float>(bottomMLPBias1, REAL());
+
+    optimization::registerVectorFunction(
+        "mat_mul12_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                topMLPWeight1Vector->elements()->values()->asMutable<float>()),
+            512,
+            256),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add12_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                topMLPBias1Vector->elements()->values()->asMutable<float>()),
+            256),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul12_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                topMLPWeight2Vector->elements()->values()->asMutable<float>()),
+            256,
+            128),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add12_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                topMLPBias2Vector->elements()->values()->asMutable<float>()),
+            128),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul12_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                topMLPWeight3Vector->elements()->values()->asMutable<float>()),
+            128,
+            1),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add12_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                topMLPBias3Vector->elements()->values()->asMutable<float>()),
+            1),
+        {},
+        true,
+        catalog);
   }
 
   /**
@@ -1269,49 +2060,47 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
    *
    * @param units1 Number of units in the first layer.
    * @param units2 Number of units in the second layer.
-   * @param input_size1 Size of the input for the first layer.
-   * @param input_size2 Size of the input for the second layer.
-   * @param weightsFile_1 Pointer to the weights for the first layer.
-   * @param weightsFile_2 Pointer to the weights for the second layer.
-   * @param biasFile_1 Pointer to the bias for the first layer.
-   * @param biasFile_2 Pointer to the bias for the second layer.
+   * @param input_size Size of the input for the first layer.
+   * @param weights1 Pointer to the weights for the first layer.
+   * @param weights2 Pointer to the weights for the second layer.
+   * @param bias1 Pointer to the bias for the first layer.
+   * @param bias2 Pointer to the bias for the second layer.
    * @param catalog Reference to a CataLog object to store metadata and
    * information.
    *
    * @return A string representing the composed vector function expression.
    */
-  std::string registerFunctions(
+  std::string registerFFNNFunctions(
       int units1,
       int units2,
-      int input_size1,
-      int input_size2,
-      float* weightsFile_1,
-      float* weightsFile_2,
-      float* biasFile_1,
-      float* biasFile_2,
+      int input_size,
+      float* weights1,
+      float* weights2,
+      float* bias1,
+      float* bias2,
       CataLog& catalog,
       bool isVerticalPartition) {
     // Register matrix multiplication function for the first layer
     optimization::registerVectorFunction(
-        "mat_mul0",
+        "mat_mul0_0",
         MatrixMultiply::signatures(),
         std::make_unique<MatrixMultiply>(
-            std::move(weightsFile_1), input_size1, units1),
+            std::move(weights1), input_size, units1),
         {},
         true,
         catalog,
         isVerticalPartition);
     // Register matrix addition function for the first layer
     optimization::registerVectorFunction(
-        "mat_add0",
+        "mat_add0_0",
         MatrixVectorAddition::signatures(),
-        std::make_unique<MatrixVectorAddition>(std::move(biasFile_1), units1),
+        std::make_unique<MatrixVectorAddition>(std::move(bias1), units1),
         {},
         true,
         catalog);
     // Register ReLU activation function for the first layer
     optimization::registerVectorFunction(
-        "relu0",
+        "relu",
         Relu::signatures(),
         std::make_unique<Relu>(),
         {},
@@ -1319,25 +2108,24 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
     // Register matrix multiplication function for the second layer
     optimization::registerVectorFunction(
-        "mat_mul1",
+        "mat_mul0_1",
         MatrixMultiply::signatures(),
-        std::make_unique<MatrixMultiply>(
-            std::move(weightsFile_2), input_size2, units2),
+        std::make_unique<MatrixMultiply>(std::move(weights2), units1, units2),
         {},
         true,
         catalog,
         isVerticalPartition);
     // Register matrix addition function for the second layer
     optimization::registerVectorFunction(
-        "mat_add1",
+        "mat_add0_1",
         MatrixVectorAddition::signatures(),
-        std::make_unique<MatrixVectorAddition>(std::move(biasFile_2), units2),
+        std::make_unique<MatrixVectorAddition>(std::move(bias2), units2),
         {},
         true,
         catalog);
     // Register softmax activation function for the second layer
     optimization::registerVectorFunction(
-        "softmax0",
+        "softmax",
         Softmax::signatures(),
         std::make_unique<Softmax>(),
         {},
@@ -1345,7 +2133,344 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
     // Compose and return the vector function expression
     // return "mat_mul0({})";
-    return "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0({})))))) as v";
+    return "softmax(mat_add0_1(mat_mul0_1(relu(mat_add0_0(mat_mul0_0({})))))) as v";
+  }
+
+  void registerLLMFunctions(
+      int units1,
+      int units2,
+      int input_size,
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+    std::cout << "[INFO]: Register LLM Function functions" << std::endl;
+
+    std::vector<std::vector<float>> w1 = loadHDF5Array(
+        "/home/velox/resources/model/llm_mr/velox/llm_ffnn.h5", "w1");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(
+        "/home/velox/resources/model/llm_mr/velox/llm_ffnn.h5", "b1");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(
+        "/home/velox/resources/model/llm_mr/velox/llm_ffnn.h5", "w2");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(
+        "/home/velox/resources/model/llm_mr/velox/llm_ffnn.h5", "b2");
+
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    std::vector<std::vector<float>> ffnnWeight1 =
+        randomGenerator.genFloat2dVector(input_size, units1);
+    auto ffnnWeight1Vector = maker.arrayVector<float>(w1, REAL());
+
+    std::vector<std::vector<float>> ffnnBias1 =
+        randomGenerator.genFloat2dVector(units1, 1);
+    auto ffnnBias1Vector = maker.arrayVector<float>(b1, REAL());
+
+    std::vector<std::vector<float>> ffnnWeight2 =
+        randomGenerator.genFloat2dVector(units1, units2);
+    auto ffnnWeight2Vector = maker.arrayVector<float>(w2, REAL());
+
+    std::vector<std::vector<float>> ffnnBias2 =
+        randomGenerator.genFloat2dVector(units2, 1);
+    auto ffnnBias2Vector = maker.arrayVector<float>(b2, REAL());
+
+    optimization::registerVectorFunction(
+        "mat_mul3_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                ffnnWeight1Vector->elements()->values()->asMutable<float>()),
+            input_size,
+            units1),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add3_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                ffnnBias1Vector->elements()->values()->asMutable<float>()),
+            units1),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul3_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                ffnnWeight2Vector->elements()->values()->asMutable<float>()),
+            units1,
+            units2),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add3_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                ffnnBias2Vector->elements()->values()->asMutable<float>()),
+            units2),
+        {},
+        true,
+        catalog);
+
+    // Register ReLU activation function for the first layer
+    optimization::registerVectorFunction(
+        "relu",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog);
+
+    // Register softmax activation function for the second layer
+    optimization::registerVectorFunction(
+        "softmax",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "chatgpt_server",
+        ChatGPT::signatures(),
+        std::make_unique<ChatGPT>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "chatgpt_recommender",
+        ChatGPTRecommender::signatures(),
+        std::make_unique<ChatGPTRecommender>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "argmax",
+        Argmax::signatures(),
+        std::make_unique<Argmax>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "convert_double_array_to_float_array",
+        ConvertDoubleArrayToFloatArray::signatures(),
+        std::make_unique<ConvertDoubleArrayToFloatArray>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "llm_ffnn_minmax_scaler",
+        MinMaxScaler::signatures(),
+        std::make_unique<MinMaxScaler>(
+            "/home/velox/resources/model/llm_mr/velox/llm_mr_minmax_scaler.txt"),
+        {},
+        true,
+        catalog);
+  }
+
+  void registerFraudDetectionFunctions(
+      int numCols,
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    // Register Pre-processing functions
+    optimization::registerVectorFunction(
+        "is_weekday",
+        IsWeekday::signatures(),
+        std::make_unique<IsWeekday>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "date_to_timestamp_1",
+        DateToTimestamp::signatures(),
+        std::make_unique<DateToTimestamp>("%Y-%m-%d"),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "date_to_timestamp_2",
+        DateToTimestamp::signatures(),
+        std::make_unique<DateToTimestamp>("%Y-%m-%dT%H:%M"),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "time_diff_in_days",
+        TimeDiffInDays::signatures(),
+        std::make_unique<TimeDiffInDays>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "get_transaction_features",
+        GetTransactionFeatures::signatures(),
+        std::make_unique<GetTransactionFeatures>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "get_customer_features",
+        GetCustomerFeatures::signatures(),
+        std::make_unique<GetCustomerFeatures>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "get_age",
+        GetAge::signatures(),
+        std::make_unique<GetAge>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "get_binary_class",
+        GetBinaryClass::signatures(),
+        std::make_unique<GetBinaryClass>(),
+        {},
+        true,
+        catalog);
+
+    // Register Random Forest model
+    std::string xgboost_fraud_model_path =
+        "/home/velox/resources/model/fraud_xgboost_9_1600";
+    optimization::registerVectorFunction(
+        "xgboost_fraud_predict",
+        ForestPrediction::signatures(),
+        std::make_unique<ForestPrediction>(xgboost_fraud_model_path, 9, true),
+        {},
+        true,
+        catalog);
+
+    std::string xgboost_fraud_transaction_path =
+        "/home/velox/resources/model/fraud_xgboost_5_16";
+    optimization::registerVectorFunction(
+        "xgboost_fraud_transaction",
+        ForestPrediction::signatures(),
+        std::make_unique<ForestPrediction>(
+            xgboost_fraud_transaction_path, 5, true),
+        {},
+        true,
+        catalog);
+
+    // Register FFNN model
+    std::vector<std::vector<float>> w1 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc1.weight");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc1.bias");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc2.weight");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc2.bias");
+    std::vector<std::vector<float>> w3 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc3.weight");
+    std::vector<std::vector<float>> b3 = loadHDF5Array(
+        "/home/velox/resources/model/fraud_dnn_weights.h5", "fc3.bias");
+
+    auto itemNNweight1Vector = maker.arrayVector<float>(w1, REAL());
+    auto itemNNweight2Vector = maker.arrayVector<float>(w2, REAL());
+    auto itemNNweight3Vector = maker.arrayVector<float>(w3, REAL());
+    auto itemNNBias1Vector = maker.arrayVector<float>(b1, REAL());
+    auto itemNNBias2Vector = maker.arrayVector<float>(b2, REAL());
+    auto itemNNBias3Vector = maker.arrayVector<float>(b3, REAL());
+
+    optimization::registerVectorFunction(
+        "mat_mul1_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                itemNNweight1Vector->elements()->values()->asMutable<float>()),
+            numCols,
+            32),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add1_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                itemNNBias1Vector->elements()->values()->asMutable<float>()),
+            32),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul1_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                itemNNweight2Vector->elements()->values()->asMutable<float>()),
+            32,
+            16),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add1_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                itemNNBias2Vector->elements()->values()->asMutable<float>()),
+            16),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul1_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(
+                itemNNweight3Vector->elements()->values()->asMutable<float>()),
+            16,
+            2),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_vector_add1_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(
+                itemNNBias3Vector->elements()->values()->asMutable<float>()),
+            2),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "relu",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "softmax",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog);
   }
 
   std::vector<std::vector<float>>
@@ -1525,6 +2650,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
    * @param rewrite A boolean value indicating whether to perform a rewrite.
    */
   void testSingleRewrite(
+      std::string model,
       bool rewrite,
       int repeatRun,
       int featureSize,
@@ -1537,8 +2663,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     // Set data source config.
     int input_features_size = featureSize; // 597540
     int num_samples = numSamples;
-    int first_layer_output_size = 1024;
-    int second_layer_output_size = 14588;
+    PlanBuilder myPlan;
     // Set splits number
     // Initialize CataLog
     CataLog cataLog;
@@ -1552,105 +2677,83 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         numSplit = 32;
       }
     }
-    // Generate data source
-    auto data = data_generate(
-        input_features_size,
-        num_samples,
-        first_layer_output_size,
-        second_layer_output_size,
-        numSplit);
-    // Split inputs into many splits and return paths as a std::vector
-    std::vector<std::shared_ptr<TempFilePath>> files = data.feature_paths;
-    RowTypePtr inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
-    //  Check the input size against the blocking threshold in cataLog.
-    //  If yes, preblock the input vector, store it, and add information in
-    //  cataLog. If not, set dataSource in cataLog.
-    if (input_features_size > cataLog.getBlockingThreshold()) {
-      // FIXME: temporary disable the following blocking for vertical partition
-      // since we have deallocate the data.features in data_generate function to
-      // save unnecessary memory usage.
-      /* // If input size is larger than blocking threshold, preblock and store
-      in
-      // cataLog
-      std::vector<std::vector<float>> valuesBlock =
-          optimization::create_input_block(
-              input_features_size * num_samples,
-              data.features,
-              cataLog.getDefaultBlocksNum());
-      optimization::FileStructure values = optimization::block_to_files(
-          valuesBlock, cataLog.getDefaultBlocksNum(), 0);
-      // Set data source blocks in cataLog
-      cataLog.setDataSourceBlocks(values.schema, values.paths); */
-    } else {
-      // If input size is not larger than blocking threshold, set dataSource in
-      // cataLog
-      cataLog.setDataSource(inputRowType, files);
-    }
-    // Set data source statistics in cataLog
-    cataLog.setDataSourceStat({num_samples, input_features_size});
-    cataLog.setUDFSchema("value", inputRowType);
-    // Build two dense layers UDFs using registerFunction in optimization
-    // namespace
-    bool isVerticalPartition = true;
-    if (benchmarkMode.find("mul2joinAggHorizontal") != std::string::npos) {
-      isVerticalPartition = false;
-    }
-    std::string computationStr = registerFunctions(
-        first_layer_output_size,
-        second_layer_output_size,
-        input_features_size,
-        first_layer_output_size,
-        data.weights[0],
-        data.weights[1],
-        data.bias[0],
-        data.bias[1],
-        cataLog,
-        isVerticalPartition);
-    // Initialize planNodeID
-    core::PlanNodeId p0;
-    // Initialize planNodeIdGenerator
+
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    // Create a plan for FFNN using two dense layers UDFs
-    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(inputRowType)
-                      .capturePlanNodeId(p0)
-                      .project({fmt::format(computationStr, "v"), "v as v1"})
-                      .project({"v", "v1"});
+    std::vector<std::string> inputFilePaths;
+    std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
+    std::string computationStr;
 
-    std::cout << "computationStr: " << fmt::format(computationStr, "v")
-              << std::endl;
-    std::cout << "query plan:" << myPlan.planNode()->toString(true, true)
-              << std::endl;
-    // auto myPlan0 = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-    //                   .tableScan(inputRowType)
-    //                   .capturePlanNodeId(p0)
-    //                   .project({fmt::format(computationStr, "v")});
-    // auto myPlan = myPlan0.project({"v", "v"});
+    if (model == "ffnn") {
+      // Set data source config.
+      int input_features_size = featureSize; // 597540
+      int num_samples = numSamples;
+      int first_layer_output_size = 1024;
+      int second_layer_output_size = 14588;
+      cataLog.setDefaultBlocksSize(blockSize);
+      cataLog.setBlockingThreshold(1);
+      // Set splits number
+      // Generate data source
+      auto data = data_generate(
+          input_features_size,
+          num_samples,
+          first_layer_output_size,
+          second_layer_output_size,
+          numSplit);
+      // Split inputs into many splits and return paths as a std::vector
+      inputTempFiles = data.feature_paths;
 
-    // Set original plan nodeId and file address of data source
-    cataLog.setIdAddressMap(p0, files);
-    // Set vector name and nodeId of data source
-    cataLog.setVectorIdMap(p0, "v");
-    // Add source to catalog
-    std::shared_ptr<OutputStat> stat =
-        std::make_shared<OutputStat>(OutputStat(numSamples, featureSize));
-    Source src = Source(p0, Source::Type::FILE, std::move(stat));
-    cataLog.addSource(std::make_shared<Source>(src));
+      bool isVerticalPartition = false;
+      computationStr = registerFFNNFunctions(
+          first_layer_output_size,
+          second_layer_output_size,
+          input_features_size,
+          data.weights[0],
+          data.weights[1],
+          data.bias[0],
+          data.bias[1],
+          cataLog,
+          isVerticalPartition);
 
-    // Get the logical plan
-    auto planNode = myPlan.planNode();
-    // auto planNode = myPlan.planNodeModifiable();
-    // Create ruleManager
+    } else if (model == "df") {
+      // TODO: current the data is load froma file not generated
+      numSamples = 56962;
+      featureSize = 28;
+      registerDecisionForestFunctions();
+
+      std::string dataFilePath =
+          "/home/velox/resources/data/creditcard_test.csv";
+
+      std::vector<std::vector<float>> inputFeatureVectors =
+          loadFeaturesFromCSV(dataFilePath, numSamples, featureSize);
+      inputTempFiles = splitDataToFiles(
+          inputFeatureVectors, 4 /*numSplit*/, true /*createIndex*/);
+      computationStr = "decision_forest_predict({}) as v";
+    } else if (model == "two-tower") {
+      registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+      inputFilePaths = generateTwoTowerQueryData(numSamples, 6040, 3706, 1);
+      featureSize = 2;
+      std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
+    } else if (model == "llm") {
+      registerLLMFunctions(64, 2, 3, cataLog, pool_);
+    } else if (model == "ml-q1") {
+      registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", model));
+    }
+
+    myPlan = setupQueryPlan(
+        model,
+        computationStr,
+        inputFilePaths,
+        inputTempFiles,
+        numSamples,
+        featureSize,
+        cataLog,
+        planNodeIdGenerator);
+
     RuleManager ruleManager;
-    ruleManager.rules.emplace(
-        "TwoLayerUDF2TorchNNRewriteAction",
-        std::make_shared<optimization::TwoLayerUDF2TorchNNRewriteAction>());
-    // std::cout<<"rule size" << ruleManager.rules.size() << std::endl;
-    // auto it = ruleManager.rules.find("TwoLayerUDF2TorchNNRewriteAction");
-    // ruleManager.rules.erase(it);
-    // std::cout<<"rule size" << ruleManager.rules.size() << std::endl;
-    // Create planState
     PlanState planState(ruleManager);
+    auto planNode = myPlan.planNode();
 
     // Run rewriten rule
     if (rewrite) {
@@ -1669,14 +2772,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         testAction = std::make_pair("mat_mul0", "Mul2JoinAggRewriteAction");
       } else if (benchmarkMode == "udf2torchNN") {
         testAction = std::make_pair(
-            "softmax0(mat_add1(mat_mul1(relu0(mat_add0(mat_mul0(ROW[\"v\"]))))))",
+            "softmax(mat_add0_1(mat_mul0_1(relu(mat_add0_0(mat_mul0_0(ROW[\"v\"]))))))",
             "MultiLayerUDF2TorchNNRewriteAction");
       } else if (benchmarkMode == "mul2joinAggHorizontal") {
         testAction =
-            std::make_pair("mat_mul0", "Mul2JoinAggHorizontalRewriteAction");
+            std::make_pair("mat_mul0_0", "Mul2JoinAggHorizontalRewriteAction");
       } else if (benchmarkMode == "mul2joinAggHorizontal1") {
         testAction =
-            std::make_pair("mat_mul1", "Mul2JoinAggHorizontalRewriteAction");
+            std::make_pair("mat_mul0_1", "Mul2JoinAggHorizontalRewriteAction");
       } else {
         throw std::runtime_error(
             fmt::format("Non-supported benchmark mode: {}", benchmarkMode));
@@ -1744,7 +2847,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       CataLog& cataLog,
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
     PlanBuilder myPlan;
-    if (model != "two-tower") {
+    if (model == "ffnn" || model == "df") {
       auto inputRowType = ROW({"idx", "v"}, {INTEGER(), ARRAY(REAL())});
       core::PlanNodeId p0;
       myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
@@ -1757,7 +2860,112 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       Source src = Source(p0, Source::Type::FILE, std::move(stat));
       cataLog.addSource(std::make_shared<Source>(src));
       cataLog.setFileSchema(p0, inputRowType);
-    } else {
+    } else if (model == "llm") {
+      std::vector<std::string> userDataPaths =
+          getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/user");
+      std::vector<std::string> movieDataPaths = getFilePathsFromDir(
+          "/home/velox/resources/data/parquet/llm_mr/movie");
+      auto userDataRowType =
+          ROW({"user_id", "description"}, {INTEGER(), VARCHAR()});
+      auto movieDataRowType =
+          ROW({"id",
+               "description",
+               "popularity",
+               "vote_average",
+               "vote_count",
+               "spoken_languages"},
+              {INTEGER(), VARCHAR(), REAL(), REAL(), INTEGER(), VARCHAR()});
+
+      std::string llmDataStatsFilePath =
+          "/home/velox/resources/data/parquet/llm_mr/llm_mr_statistics.txt";
+      std::ifstream llmStatistics(llmDataStatsFilePath);
+      if (!llmStatistics) {
+        throw std::runtime_error(
+            "Unable to open file: " + llmDataStatsFilePath);
+      }
+      // TODO: need more smart way to do this
+      std::string line1, line2;
+      int numUser, numMovies;
+      std::getline(llmStatistics, line1);
+      std::getline(llmStatistics, line2);
+      numUser = std::stoi(line1);
+      numMovies = std::stoi(line2);
+
+      core::PlanNodeId readUserDataPlanNodeId;
+      core::PlanNodeId readMoviewDataPlanNodeId;
+
+      myPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(userDataRowType, {}, "")
+              .capturePlanNodeId(readUserDataPlanNodeId)
+              .project(
+                  {"CAST(user_id AS VARCHAR) as user_id",
+                   "description AS user_description"})
+              .nestedLoopJoin(
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(movieDataRowType, {}, "")
+                      .capturePlanNodeId(readMoviewDataPlanNodeId)
+                      .project({
+                          "CAST(id AS VARCHAR) AS movie_id",
+                          "description AS movie_description",
+                          "llm_ffnn_minmax_scaler(convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count))) AS movie_description_array",
+                          "spoken_languages",
+                      })
+                      .planNode(),
+                  {"user_id",
+                   "movie_id",
+                   "user_description",
+                   "movie_description",
+                   "spoken_languages",
+                   "movie_description_array"})
+              .project(
+                  {"user_id",
+                   "movie_id",
+                   "spoken_languages",
+                   "movie_description_array",
+                   "CONCAT(user_id, user_description) AS user_description_processed",
+                   "CONCAT(movie_id, movie_description) AS movie_description_processed"})
+              .project(
+                  {"user_id",
+                   "movie_id",
+                   "spoken_languages",
+                   "movie_description_array",
+                   "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
+                   "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
+              .project(
+                  {"user_id",
+                   "movie_id",
+                   "spoken_languages",
+                   "movie_description_array",
+                   "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"})
+              .project({
+                  "user_id",
+                  "movie_id",
+                  "spoken_languages",
+                  "result",
+                  "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(movie_description_array))))))) AS trending_prediction",
+              })
+              .filter("spoken_languages LIKE '\%English\%'")
+              .filter("trending_prediction = 1");
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId,
+          userDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readMoviewDataPlanNodeId,
+          movieDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      std::shared_ptr<OutputStat> userStat =
+          std::make_shared<OutputStat>(OutputStat(numUser, 2));
+      std::shared_ptr<OutputStat> movieStat =
+          std::make_shared<OutputStat>(OutputStat(numMovies, 2));
+      Source userSrc =
+          Source(readUserDataPlanNodeId, Source::Type::FILE, userStat);
+      Source movieSrc =
+          Source(readMoviewDataPlanNodeId, Source::Type::FILE, movieStat);
+      cataLog.addSource(std::make_shared<Source>(userSrc));
+      cataLog.addSource(std::make_shared<Source>(movieSrc));
+    } else if (model == "two-tower") {
       core::PlanNodeId readQueryDataPlanNodeId;
       core::PlanNodeId readUserDataPlanNodeId;
       core::PlanNodeId readRatingDataPlanNodeId1;
@@ -1885,8 +3093,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               .project( // concate embedding vectors
                   {"user_id",
                    "movie_id",
-                   "concat4(concat3(concat2(concat1(user_id_embed,gender),age),occupation), user_mean_rating) as user_tower_features",
-                   "concat2_2(concat2_1(movie_id_embed, genres), movie_mean_rating) as movie_tower_features"})
+                   //  "concat4(concat3(concat2(concat1(user_id_embed,gender),age),occupation),
+                   //  user_mean_rating) as user_tower_features",
+                   "concat(user_id_embed, gender, age, occupation, user_mean_rating) as user_tower_features",
+                   //  "concat2_2(concat2_1(movie_id_embed, genres),
+                   //  movie_mean_rating) as movie_tower_features"
+                   "concat(movie_id_embed, genres, movie_mean_rating) as movie_tower_features"})
               // .project( // user/movie tower inference
               // {"user_torchNN(user_tower_features) as user_nn_out",
               //  "movie_torchNN(movie_tower_features) as movie_nn_out"})
@@ -1961,6 +3173,183 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       cataLog.setFileSchema(readRatingDataPlanNodeId1, ratingDataRowType);
       cataLog.setFileSchema(readRatingDataPlanNodeId1, ratingDataRowType);
       cataLog.setFileSchema(readQueryDataPlanNodeId, queryDataRowType);
+    } else if (model == "fraud") {
+      auto orderDataRowType =
+          ROW({"o_order_id", "o_customer_sk", "o_weekday", "o_date"},
+              {INTEGER(), INTEGER(), VARCHAR(), VARCHAR()});
+
+      auto transactionDataRowType = ROW(
+          {"t_amount", "t_sender", "t_receiver", "transaction_id", "t_time"},
+          {REAL(), INTEGER(), VARCHAR(), BIGINT(), VARCHAR()});
+
+      auto customerDataRowType =
+          ROW({"c_customer_sk",
+               "c_address_num",
+               "c_cust_flag",
+               "c_birth_year",
+               "c_birth_country"},
+              {INTEGER(), INTEGER(), INTEGER(), INTEGER(), INTEGER()});
+      std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+      if (dataDirPrefix == "") {
+        // use default value:
+        dataDirPrefix = "/home/velox/resources/data/parquet/fraud/50_mb/";
+      }
+
+      std::vector<std::string> orderDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "order");
+      std::vector<std::string> transactionDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "financial_transactions");
+      std::vector<std::string> customerDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "customer");
+
+      int orderNumRows, orderNumCols, transactionNumRows, transactionNumCols,
+          customerNumRows, customerNumCols;
+
+      readDataStats(
+          dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
+      readDataStats(
+          dataDirPrefix + "financial_transactions_stats.txt",
+          transactionNumRows,
+          transactionNumCols);
+      readDataStats(
+          dataDirPrefix + "customer_stats.txt",
+          customerNumRows,
+          customerNumCols);
+
+      std::cout << "[INFO] orderNumRows: " << orderNumRows
+                << ", orderNumCols: " << orderNumCols << std::endl;
+      std::cout << "[INFO] transactionNumRows: " << transactionNumRows
+                << ", transactionNumCols: " << transactionNumCols << std::endl;
+      std::cout << "[INFO] customerNumRows: " << customerNumRows
+                << ", customerNumCols: " << customerNumCols << std::endl;
+
+      PlanNodeId readOrderDataPlanNodeId;
+      PlanNodeId readTransactionDataPlanNodeId;
+      PlanNodeId readCustomerDataPlanNodeId;
+
+      myPlan =
+          exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+              // .values({orderRowVector})
+              .tableScan(orderDataRowType)
+              .capturePlanNodeId(readOrderDataPlanNodeId)
+              .project(
+                  {"o_customer_sk",
+                   "o_order_id",
+                   "date_to_timestamp_1(o_date) AS o_timestamp"})
+              .filter("o_timestamp IS NOT NULL")
+              .filter("is_weekday(o_timestamp) = 1")
+              .partialAggregation(
+                  {"o_customer_sk"},
+                  {"count(o_order_id) as total_order",
+                   "max(o_timestamp) as o_last_order_time"})
+              .finalAggregation()
+              .hashJoin(
+                  {"o_customer_sk"},
+                  {"t_sender"},
+                  exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                      // .values({transactionRowVector})
+                      .tableScan(transactionDataRowType)
+                      .capturePlanNodeId(readTransactionDataPlanNodeId)
+                      .project(
+                          {"t_amount",
+                           "t_sender",
+                           "t_receiver",
+                           "transaction_id",
+                           "date_to_timestamp_2(t_time) as t_timestamp"})
+                      .filter("t_timestamp IS NOT NULL")
+                      .planNode(),
+                  "",
+                  {"o_customer_sk",
+                   "total_order",
+                   "o_last_order_time",
+                   "transaction_id",
+                   "t_amount",
+                   "t_timestamp"},
+                  core::JoinType::kInner)
+              .project(
+                  {"o_customer_sk",
+                   "total_order",
+                   "transaction_id",
+                   "t_amount",
+                   "t_timestamp",
+                   "time_diff_in_days(o_last_order_time, t_timestamp) as time_diff"})
+              .filter("time_diff <= 500")
+              .project(
+                  {"o_customer_sk",
+                   "transaction_id",
+                   "get_transaction_features(total_order, t_amount, time_diff, t_timestamp) as transaction_features"})
+              .filter("xgboost_fraud_transaction(transaction_features) >= 0.5")
+              .hashJoin(
+                  {"o_customer_sk"},
+                  {"c_customer_sk"},
+                  exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                      // .values({customerRowVector})
+                      .tableScan(customerDataRowType)
+                      .capturePlanNodeId(readCustomerDataPlanNodeId)
+                      .project(
+                          {"c_customer_sk",
+                           "c_address_num",
+                           "c_cust_flag",
+                           "c_birth_country",
+                           "get_age(c_birth_year) as c_age"})
+                      .project(
+                          {"c_customer_sk",
+                           "get_customer_features(c_address_num, c_cust_flag, c_birth_country, c_age) as customer_features"})
+                      .planNode(),
+                  "",
+                  {"transaction_id",
+                   "transaction_features",
+                   "customer_features"})
+              .project(
+                  {"transaction_id",
+                   "concat(customer_features, transaction_features) AS all_features"})
+              .project(
+                  {"transaction_id",
+                   "all_features",
+                   "softmax(mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(all_features))))))))) AS fraudulent_probs"})
+              .filter("get_binary_class(fraudulent_probs) = 1")
+              .filter("xgboost_fraud_predict(all_features) >= 0.5")
+              .project({"transaction_id"});
+      cataLog.setIdAddressMap(
+          readOrderDataPlanNodeId,
+          orderDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readTransactionDataPlanNodeId,
+          transactionDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readCustomerDataPlanNodeId,
+          customerDataPaths,
+          dwio::common::FileFormat::PARQUET);
+
+      cataLog.setFileSchema(readOrderDataPlanNodeId, orderDataRowType);
+      cataLog.setFileSchema(
+          readTransactionDataPlanNodeId, transactionDataRowType);
+      cataLog.setFileSchema(readCustomerDataPlanNodeId, customerDataRowType);
+
+      std::shared_ptr<OutputStat> orderStat =
+          std::make_shared<OutputStat>(OutputStat(orderNumRows, orderNumCols));
+      Source orderSrc =
+          Source(readOrderDataPlanNodeId, Source::Type::FILE, orderStat);
+      cataLog.addSource(std::make_shared<Source>(orderSrc));
+      std::shared_ptr<OutputStat> transactionStat =
+          std::make_shared<OutputStat>(
+              OutputStat(transactionNumRows, transactionNumCols));
+      Source transactionSrc = Source(
+          readTransactionDataPlanNodeId, Source::Type::FILE, transactionStat);
+      cataLog.addSource(std::make_shared<Source>(transactionSrc));
+      std::shared_ptr<OutputStat> customerStat = std::make_shared<OutputStat>(
+          OutputStat(customerNumRows, customerNumCols));
+      Source customerSrc =
+          Source(readCustomerDataPlanNodeId, Source::Type::FILE, customerStat);
+      cataLog.addSource(std::make_shared<Source>(customerSrc));
+
+    } else if (model == "ml-q1" || model == "ml-q2" || model == "ml-q3") {
+      myPlan =
+          setupMovielensDBQuery(model, cataLog, pool_, planNodeIdGenerator);
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
 
     return myPlan;
@@ -2000,11 +3389,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       inputTempFiles = data.feature_paths;
 
       bool isVerticalPartition = false;
-      computationStr = registerFunctions(
+      computationStr = registerFFNNFunctions(
           first_layer_output_size,
           second_layer_output_size,
           input_features_size,
-          first_layer_output_size,
           data.weights[0],
           data.weights[1],
           data.bias[0],
@@ -2031,6 +3419,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       inputFilePaths = generateTwoTowerQueryData(numSamples, 6040, 3706, 1);
       featureSize = 2;
       std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
+    } else if (model == "llm") {
+      registerLLMFunctions(64, 2, 3, cataLog, pool_);
+    } else if (model == "fraud") {
+      registerFraudDetectionFunctions(9, cataLog, pool_);
+    } else if (model == "ml-q1") {
+      registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+      registerMLTrendingModelFunctions(cataLog, pool_);
+    } else if (model == "ml-q2") {
+      registerMLTrendingModelFunctions(cataLog, pool_);
+      registerMLInterestMovieModelFunctions(cataLog, pool_);
+      registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+      registerMLDLRMModelFunctions(cataLog, pool_);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -2047,12 +3447,195 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     // Get the logical plan
     auto planNode = myPlan.planNode();
+
     // Create ruleManager
     RuleManager ruleManager;
     // Create planState
     PlanState planState(ruleManager);
 
     planState.getPossibleActions(planNode, cataLog);
+
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : planState.actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+    }
+
+    std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
+    std::pair<std::string, std::string> testAction;
+
+    if (queryOptType == "fusion") {
+      testAction = std::make_pair(
+          "relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(ROW[\"user_tower_features\"]))))))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+
+      planNode = myPlan.planNode();
+
+      planState.getPossibleActions(planNode, cataLog);
+
+      // // std::cout << "[INFO] All possible actions:" << std::endl;
+      // // for (auto entry : planState.actionsPair) {
+      // //   std::cout << entry.first << ": " << entry.second << std::endl;
+      // // }
+
+      testAction = std::make_pair(
+          "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(ROW[\"movie_tower_features\"]))))))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+
+      planNode = myPlan.planNode();
+
+      planState.getPossibleActions(planNode, cataLog);
+
+      // testAction =
+      // std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please
+      // summarize the users description. The following are the average ratings
+      // given by users to movies in each genre.\")",
+      // "MLDecompositionPushdownRewriteAction");
+
+      // planState.takeAction(
+      //           planNode,
+      //           nullptr,
+      //           maker,
+      //           myPlan,
+      //           pool_,
+      //           planNodeIdGenerator,
+      //           {testAction},
+      //           cataLog);
+
+      // planState.update(myPlan, cataLog);
+      // planNode = myPlan.planNode();
+    }
+    if (queryOptType == "mlq2-mul2join" || queryOptType == "optimized") {
+      testAction =
+          std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
+
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+    }
+    if (queryOptType == "mlq2-fusion" || queryOptType == "optimized") {
+      testAction = std::make_pair(
+          "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(ROW[\"top_mlp_input\"])))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      // testAction = std::make_pair(
+      //     "argmax(softmax(mat_vector_add9_8(mat_mul9_7(relu(mat_vector_add9_6(mat_mul9_5(relu(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))))))))",
+      //     "MultiLayerUDF2TorchNNRewriteAction");
+      testAction = std::make_pair(
+          "argmax(softmax(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(ROW[\"m_trending_features\"]))))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "relu(mat_vector_add11_2(mat_mul11_1(ROW[\"mt_relevance_score\"])))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+    }
+
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : planState.actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+    }
+
+    std::cout << "[DEBUG] final executed plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+
+    float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 2, verbose);
+
+    std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+    // auto serializedPlan = myPlan.planNode()->serialize();
+
+    // std::cout << "[DEBUG] serialized plan: \n" << serializedPlan <<
+    // std::endl;
+
+    return;
 
     // Set up socket
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -2144,6 +3727,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           }
           jsonMessage["actionSpace"].append(jsonEntry);
         }
+        // cache current state
+        int queryPlanCacheId = cacheQueryPlan(myPlan);
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "takeAction") {
@@ -2168,11 +3754,21 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         LOG(INFO) << "[INFO] current my query plan"
                   << myPlan.planNode()->toString(true, true) << std::endl;
         sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "cacheState") {
+        int queryPlanCacheId = cacheQueryPlan(myPlan);
+        Json::Value jsonMessage;
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "resetState") {
+        int queryPlanCacheId = receivedJsonMessage["queryPlanCacheId"].asInt();
+        resetQueryPlanFromCache(myPlan, queryPlanCacheId);
+        sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
           float executeTime =
-              runPlanWithCataLog(8, 8, myPlan, cataLog, 4, verbose);
+              runPlanWithCataLog(8, 8, myPlan, cataLog, repeatRun, verbose);
           jsonMessage["reward"] = executeTime;
           LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
                     << std::endl;
@@ -2221,12 +3817,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   std::shared_ptr<TempDirectoryPath> tempDirPath_;
 
   VectorMaker maker{pool_.get()};
+  static inline int queryPlanCacheId_ = 0;
+  std::map<int, folly::dynamic> queryPlanCaches_;
 };
 
 DEFINE_string(mode, "mcts", "Mode: mcts or benchmark");
-DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower");
+DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower, llm");
 DEFINE_bool(rewrite, true, "Whether  rewrite");
-DEFINE_int32(num_repeat, 5, "Number of repeat run");
+DEFINE_int32(num_repeat, 1, "Number of repeat run");
 DEFINE_int32(feature_size, 1000, "FFNN Feature size");
 DEFINE_int32(num_sample, 1000, "Number of samples");
 DEFINE_int32(num_driver, 8, "Number of drivers");
@@ -2259,6 +3857,7 @@ int main(int argc, char** argv) {
   } else {
     // Benchmark a single rewrite action
     demo.testSingleRewrite(
+        model,
         rewrite,
         repeatRun,
         featureSize,

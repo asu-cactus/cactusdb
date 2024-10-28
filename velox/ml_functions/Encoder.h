@@ -27,20 +27,42 @@ class IntEncoder : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-    BaseVector::ensureWritable(rows, type, context.pool(), output);
-    auto inputVector = args[0]->as<ArrayVector>()->elements();
-    int* inputValues = inputVector->values()->asMutable<int>();
-    int numInputs = rows.size();
+    BaseVector::ensureWritable(rows, ARRAY(INTEGER()), context.pool(), output);
 
-    auto indicesRowVector = args[0];
+    // Decode the input argument.
+    BaseVector* input = args[0].get();
+    exec::LocalDecodedVector inputHolder(context, *input, rows);
+    auto decodedInputArray = inputHolder.get();
+    auto inputVector = decodedInputArray->base()->as<ArrayVector>()->elements();
 
     auto arrayVector = args[0]->as<ArrayVector>();
+    auto elementsVector = arrayVector->elements()->asFlatVector<int>();
 
-    // TODO: current only consider 1 element case
+    // Map to store result rows.
+    auto numInputs = rows.size();
     std::vector<std::vector<int>> result(numInputs, std::vector<int>(1));
-    for (int i = 0; i < numInputs; i++) {
-      result[i][0] = mapping_.at(inputValues[i]);
-    }
+
+    // auto arrayVector = args[0];
+    exec::LocalDecodedVector arrayHolder(context, *args[0], rows);
+    auto elements = arrayHolder.get()->base()->as<ArrayVector>()->elements();
+    auto inputValues = inputVector->values()->asMutable<int64_t>();
+
+    // Process only the selected rows.
+    rows.applyToSelected([&](int row) {
+      // Decode the array element for this row.
+      auto userIdBeforeEncode = elementsVector->valueAt(row);
+
+      // Check if the userId exists in the mapping.
+      auto it = mapping_.find(userIdBeforeEncode);
+      if (it != mapping_.end()) {
+        // If found, set the result.
+        result[row][0] = it->second;
+      } else {
+        // Handle missing keys if necessary.
+        std::cout << "[ERROR] Missing key: " << userIdBeforeEncode
+                  << " mapping size: " << mapping_.size() << std::endl;
+      }
+    });
 
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<int>(result, INTEGER());
@@ -127,7 +149,7 @@ class StringEncoder : public MLFunction {
 class StringVariadicEncoder : public MLFunction {
  public:
   StringVariadicEncoder(std::unordered_map<std::string, int> mapping) {
-    mapping_ = mapping;
+    mapping_ = std::unordered_map<std::string, int>(mapping);
   }
 
   void apply(
@@ -139,25 +161,35 @@ class StringVariadicEncoder : public MLFunction {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     auto arrayVector = args[0]->as<ArrayVector>();
+    auto elementsVector = arrayVector->elements()->asFlatVector<StringView>();
+    auto numRows = rows.size();
 
-    // Read string input
-    exec::LocalDecodedVector decodedStringHolder(context, *args[0], rows);
-    auto decodedStringInput = decodedStringHolder.get();
-    int numInputs = rows.size();
-
-    StringView* valVector =
-        arrayVector->elements()->values()->asMutable<StringView>();
     std::vector<std::vector<int>> result;
-    for (int i = 0; i < numInputs; i++) {
-      int numSubIndices = arrayVector->sizeAt(i);
-      int indicesOffset = arrayVector->offsetAt(i);
+    result.reserve(numRows);
+
+    rows.applyToSelected([&](vector_size_t row) {
+      int numElements = arrayVector->sizeAt(row);
+      int offset = arrayVector->offsetAt(row);
+
       std::vector<int> indices;
-      for (int j = 0; j < numSubIndices; j++) {
-        StringView val = valVector[indicesOffset + j];
-        indices.push_back(mapping_.at(val.data()));
+      indices.reserve(numElements);
+
+      for (int j = 0; j < numElements; ++j) {
+        // Safely decode each string
+        StringView val = elementsVector->valueAt(offset + j);
+
+        auto it = mapping_.find(val.getString());
+        if (it != mapping_.end()) {
+          indices.push_back(it->second);
+        } else {
+          // Handle missing keys if necessary
+          indices.push_back(0); // Or some default value
+          std::cout << "[ERROR] Missing key: " << val.getString() << std::endl;
+        }
       }
-      result.push_back(indices);
-    }
+      result.push_back(std::move(indices));
+    });
+
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<int>(result, INTEGER());
   }

@@ -18,6 +18,8 @@ class Concat : public MLFunction {
   Concat(int input1Dims, int input2Dims) {
     input1Dims_ = input1Dims;
     input2Dims_ = input2Dims;
+    LOG(ERROR)
+        << "[ERROR UDF-CONCAT] Bug exists in the apply function when decoding the right input arrays of filtered rows. Use built-in concat instead!";
   }
 
   void apply(
@@ -40,10 +42,17 @@ class Concat : public MLFunction {
 
     exec::LocalDecodedVector rightHolder(context, *right, rows);
     auto decodedRightArray = rightHolder.get();
-    auto baseRightArray = rightHolder->base()->as<ArrayVector>()->elements();
+    auto baseRightArray =
+        decodedRightArray->base()->as<ArrayVector>()->elements();
 
     float* input1Values = baseLeftArray->values()->asMutable<float>();
     float* input2Values = baseRightArray->values()->asMutable<float>();
+    // std::cout << "[DEBUG]: rows.size(): " << rows.size()
+    //           << " # selected: " << rows.countSelected() << std::endl;
+    // std::cout << "[DEBUG]: size of Elements: " << baseLeftArray->size() << ", "
+    //           << baseRightArray->size() << std::endl;
+    // std::cout << "[DEBUG] input1Dims_: " << input1Dims_
+    //           << ", input2Dims_: " << input2Dims_ << std::endl;
 
     std::vector<std::vector<float>> results;
 
