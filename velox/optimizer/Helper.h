@@ -15,6 +15,7 @@
  */
 #pragma once
 #include <iostream>
+#include <regex>
 #include <vector>
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
@@ -303,6 +304,15 @@ std::string escapeRegex(const std::string& str) {
   return escapedStr;
 }
 
+std::string replaceDoubleQuotes(std::string str) {
+    for (char& ch : str) {
+        if (ch == '"') {
+            ch = '\'';
+        }
+    }
+    return str;
+}
+
 // Iterate over all files in a directory and return their paths
 std::vector<std::string> getFilePathsFromDir(const std::string& dirPath) {
   std::vector<std::string> filePaths;
@@ -384,6 +394,146 @@ bool containsStrButNotEqual(const std::string& str, const std::string& subStr) {
 
   // Ensure that the substring is found and the two strings are not equal
   return (found != std::string::npos) && (str != subStr);
+}
+
+std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
+  std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+  std::smatch matches;
+  // Object to capture the matched data source
+  std::vector<std::string> matchedDataSources;
+  // Start position for the search
+  std::string::const_iterator searchStart(expr.cbegin());
+
+  // Search out the matched data source and store in matches
+  while (std::regex_search(
+      searchStart, expr.cend(), matches, patternToMatchRawSource)) {
+    // The captured group is in matches[1]
+    matchedDataSources.push_back(matches[1].str());
+    // Update the search start position
+    searchStart = matches.suffix().first;
+  }
+  return matchedDataSources;
+}
+
+std::shared_ptr<const core::PlanNode> findPlanNodeById(
+    const std::shared_ptr<const core::PlanNode>& planNode,
+    const std::string& nodeId) {
+  if (planNode->id() == nodeId) {
+    return planNode;
+  }
+
+  for (const auto& child : planNode->sources()) {
+    auto found = findPlanNodeById(child, nodeId);
+    if (found) {
+      return found;
+    }
+  }
+
+  return nullptr;
+}
+
+std::vector<std::string> findNodeIdsBetweenIds(
+    const std::shared_ptr<const core::PlanNode>& planNode,
+    std::string sourceNodeId,
+    std::string targetNodeId,
+    std::vector<std::string>& nodeIds) {
+  auto planNodeId = planNode->id();
+  if (planNodeId != sourceNodeId && planNodeId != targetNodeId) {
+    nodeIds.push_back(planNodeId);
+  }
+  if (planNodeId == sourceNodeId) {
+    return nodeIds;
+  }
+
+  for (const auto& child : planNode->sources()) {
+    auto childNodeIds =
+        findNodeIdsBetweenIds(child, sourceNodeId, targetNodeId, nodeIds);
+    if (!childNodeIds.empty()) {
+      return childNodeIds;
+    }
+  }
+  if (nodeIds.size() > 0) {
+    nodeIds.pop_back();
+  }
+
+  return {};
+}
+
+void addProjectionFiledInSerializedPlan(
+    folly::dynamic& serializedPlan,
+    folly::dynamic& filedToBeAdded,
+    std::vector<std::string> nodeIds) {
+  if (serializedPlan["sources"].isNull()) {
+    return;
+  }
+
+  std::string currentNodeId = serializedPlan["id"].asString();
+  std::string currentNodeName = serializedPlan["name"].asString();
+  // Use std::find to search for the string in the vector
+  auto it = std::find(nodeIds.begin(), nodeIds.end(), currentNodeId);
+  if (it != nodeIds.end()) {
+    if (currentNodeName.find("Project") != std::string::npos) {
+      // Add the filed to the ProjectNode
+      serializedPlan["projections"].push_back(filedToBeAdded);
+      serializedPlan["names"].push_back(filedToBeAdded["fieldName"]);
+    } else if (currentNodeName.find("Join") != std::string::npos) {
+      // Add the filed to the FilterNode
+      // serializedPlan["filter"] = filedToBeAdded;
+      serializedPlan["outputType"]["cTypes"].push_back(filedToBeAdded["type"]);
+      serializedPlan["outputType"]["names"].push_back(
+          filedToBeAdded["fieldName"]);
+    } else if (currentNodeName.find("Filter") != std::string::npos) {
+      // No need to add the filed to the FilterNode
+    } else {
+      throw std::runtime_error("[Helper] addProjectionFiledInSerializedPlan: Unsupported node type: " + currentNodeName);
+    }
+  }
+
+  for (auto& source : serializedPlan["sources"]) {
+    optimization::addProjectionFiledInSerializedPlan(
+        source, filedToBeAdded, nodeIds);
+  }
+
+  return;
+}
+
+// In Velox, when parsing the cast function, parentheses are omitted in the exprStr output, 
+// making it unusable directly. This function reconstructs the correct cast 
+// expression by adding the necessary parentheses to match the body of the expression.
+// For example:
+// Input: eq(cast argmax(ROW["trending_prediction"]) as BIGINT, 1)
+// Output: eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
+std::string fix_cast_function_parsing(std::string input) {
+  // Use regex to match the pattern "cast" followed by a space and a function call
+  std::regex cast_regex(R"(cast\s+(\w+\(.*?\))\s+as\s+(\w+))");
+  
+  // Use a lambda function for the replacement to insert parentheses
+  std::string result = std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
+  return result;
+}
+
+std::vector<RowVectorPtr> splitRowVectorIntoBatches(
+    RowVectorPtr inputVector, size_t batchSize) {
+    
+    // Total number of rows in the input RowVector
+    size_t totalRows = inputVector->size();
+    
+    // Result vector to hold all the batches
+    std::vector<RowVectorPtr> batches;
+
+    // Split the input RowVector into batches
+    for (size_t start = 0; start < totalRows; start += batchSize) {
+        // Calculate the size of the current batch
+        size_t currentBatchSize = std::min(batchSize, totalRows - start);
+
+        // Slice the RowVector directly
+        RowVectorPtr batch = std::dynamic_pointer_cast<RowVector>(inputVector->slice(start, currentBatchSize));
+
+        // Add the batch to the result
+        batches.push_back(batch);
+    }
+
+    return batches;
 }
 
 } // namespace optimization

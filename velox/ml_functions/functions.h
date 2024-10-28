@@ -4,6 +4,7 @@
 #include <Eigen/Dense>
 #include <cblas.h>
 #include <chrono>
+#include <filesystem>
 #include <torch/torch.h>
 #include "velox/exec/Task.h"
 #include "velox/cost_model/CostEstimate.h"
@@ -763,6 +764,211 @@ public:
     }
 };
 
+class Argmax: public MLFunction {
+public:
+    Argmax() {}
+
+    void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+
+      BaseVector::ensureWritable(rows, type, context.pool(), output);
+      BaseVector* input = args[0].get();
+      exec::LocalDecodedVector inputHolder(context, *input, rows);
+      auto decodedInputArray = inputHolder.get();
+      auto baseInputArray =
+          decodedInputArray->base()->as<ArrayVector>()->elements();
+  
+      float* input_values = baseInputArray->values()->asMutable<float>();
+      int input_size = baseInputArray->size();
+      int num_rows = args[0]->size();
+      int num_cols = input_size / num_rows;
+
+      LOG(INFO) << "[INFO Argmax:] countSelected: " << rows.countSelected() << " numInput: " << num_rows << std::endl;
+      
+      Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
+
+      std::unordered_map<int, int> valueCounts;
+      std::vector<int> result(num_rows);
+      for (int i = 0; i < num_rows; i++) {
+          Eigen::Index maxRow, maxCol;
+          m.row(i).maxCoeff(&maxRow, &maxCol);
+          result[i] = maxCol;
+          valueCounts[maxCol]++;
+      }
+
+      for (const auto& pair : valueCounts) {
+        LOG(INFO) << "[INFO] Label Distributions: Key: " << pair.first << ", Value: " << pair.second << std::endl;
+      }
+
+
+      // There could be a more efficient way to do this
+      // Ref: https://stackoverflow.com/a/41384560
+
+
+
+        VectorMaker maker{context.pool()};
+        // output = maker.flatVector<int>(result);
+        auto localResult = maker.flatVector<int>(result);
+
+        context.moveOrCopyResult(localResult, rows, output);
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("INTEGER")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+
+    std::string getFuncName() {
+        return getName();
+    };
+
+    static std::string getName() {
+        return "argmax";
+    };
+
+    CostEstimate getCost(std::vector<int> inputDims){
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
+};
+
+class MinMaxScaler: public MLFunction {
+public:
+    MinMaxScaler(float* scalerMinValues, float* scalerMaxValues, int numCols) {
+      scalerMinValues_ = new float[numCols];
+      scalerMaxValues_ = new float[numCols];
+      std::memcpy(scalerMinValues_, scalerMinValues, numCols * sizeof(float));
+      std::memcpy(scalerMaxValues_, scalerMaxValues, numCols * sizeof(float));
+      numCols_ = numCols;
+    }
+
+    MinMaxScaler(std::string minMaxScalerDataPath) {
+      std::vector<float> scalerMinVector;
+      std::vector<float> scalerMaxVector;
+
+      if (!std::filesystem::exists(minMaxScalerDataPath)) {
+        throw std::runtime_error("File not found: " + minMaxScalerDataPath);
+      }
+      std::ifstream file(minMaxScalerDataPath);
+      std::string line;
+      // Read each line from the file
+      int lineCount = 0;
+      while (std::getline(file, line)) {
+          std::istringstream iss(line); // Create a string stream from the line
+          float value;
+
+          // Read each value from the line
+          // First line should be min values
+          // Second line should be max values
+          while (iss >> value) {
+            if (lineCount == 0) {
+              scalerMinVector.push_back(value); // Store the value in tempValues
+            } else if (lineCount == 1) {
+              scalerMaxVector.push_back(value); // Store the value in tempValues
+            } else {
+              throw std::runtime_error("Invalid file format, parsed lineCount: " + std::to_string(lineCount));
+            }
+          }
+          lineCount++;
+      }
+      file.close(); // Close the file
+      // the size should be equal
+      assert(scalerMinVector.size() == scalerMaxVector.size());
+      numCols_ = scalerMinVector.size();
+
+      scalerMinValues_ = new float[numCols_];
+      scalerMaxValues_ = new float[numCols_];
+      std::memcpy(scalerMinValues_, scalerMinVector.data(), numCols_ * sizeof(float));
+      std::memcpy(scalerMaxValues_, scalerMaxVector.data(), numCols_ * sizeof(float));
+    }
+
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+        exec::LocalDecodedVector decodedInputHolder(context, *args[0], rows);
+        auto decodedInputArray = decodedInputHolder.get();
+        auto baseInputArray =
+            decodedInputArray->base()->as<ArrayVector>()->elements();
+    
+        float* input_values = baseInputArray->values()->asMutable<float>();
+        int input_size = baseInputArray->size();
+
+        int num_rows = rows.size();
+        int num_cols = numCols_;
+        LOG(INFO) << "[INFO MinMaxScaler:] countSelected: " << rows.countSelected() << " num_rows: " << num_rows << " num_cols: " << num_cols << " num_elements: " << baseInputArray->size() << std::endl;
+
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> minVals(scalerMinValues_, 1, num_cols);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> maxVals(scalerMaxValues_, 1, num_cols);
+        // Note: The result should be stored as a new object instead of modifying the original matrix
+        // since it will modify the original data stored in Velox and will affect the subsequent operations
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> resultMatrix = (m.rowwise() - minVals.row(0)).array().rowwise() / (maxVals.row(0) - minVals.row(0)).array();
+        std::vector<std::vector<float>> result;
+        for (int i = 0; i < num_rows; i++) {
+            std::vector<float> row(
+            resultMatrix.row(i).data(),
+            resultMatrix.row(i).data() + resultMatrix.cols());
+            result.push_back(row);
+        }
+        VectorMaker maker{context.pool()};
+        // output = maker.arrayVector<float>(result, REAL());
+        
+        auto localResult = maker.arrayVector<float>(result, REAL());
+
+        context.moveOrCopyResult(localResult, rows, output);
+    }
+
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                     .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build()};
+    }
+
+    // getters for metadata to be used by optimiser
+    float* getTensor() const override {
+        return new float[0];
+    }
+
+    std::string getFuncName() {
+        return getName();
+    };
+
+    static std::string getName() {
+        return "min_max_scaler";
+    };
+
+    CostEstimate getCost(std::vector<int> inputDims){
+        std::vector<double> coefficientVector = getCoefficientVector(getName()); 
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
+
+    private:
+     float* scalerMinValues_;
+     float* scalerMaxValues_;
+     int numCols_;
+};
+
+
 class TorchDNN2Level: public MLFunction {
 public:
     TorchDNN2Level(float** weights, float** bias, std::vector<int> dimensions) {
@@ -985,7 +1191,8 @@ namespace velox::dl {
     MatAdd,
     ReLU,
     Softmax,
-    BatchNorm
+    BatchNorm,
+    Argmax
       };
 
   std::ostream& operator<<(std::ostream& os, KernelType kernelType) {
@@ -995,10 +1202,21 @@ namespace velox::dl {
         case KernelType::ReLU:     return os << "ReLU";
         case KernelType::Softmax:  return os << "Softmax";
         case KernelType::BatchNorm:return os << "BatchNorm";
+        case KernelType::Argmax:   return os << "Argmax";
         default:                   return os << "Unknown";
     }
 }
 }; // namespace velox::dl::kernel
+
+struct LibTorchArgmaxKernel : torch::nn::Module {
+    int64_t dim;
+
+    LibTorchArgmaxKernel(int64_t dim_) : dim(dim_) {}
+
+    torch::Tensor forward(torch::Tensor x) {
+        return torch::argmax(x, dim);
+    }
+};
 
 
 class TorchDNNV2 : public MLFunction {
@@ -1010,6 +1228,7 @@ public:
         kernelTypes_ = kernelTypes;
         int numLayers = kernelTypes.size();
         int weightIdx = 0;
+        hasArgmax_ = false;
         model_ = torch::nn::Sequential();
         for (int i = 0; i < numLayers; ++i) {
           if (kernelTypes[i] == velox::dl::KernelType::MatMul && kernelTypes[i+1] == velox::dl::KernelType::MatAdd) {
@@ -1017,6 +1236,8 @@ public:
             denseLayer->weight.set_data(torch::from_blob(weights[weightIdx++], {dims[i], dims[i+1]}).t());
             denseLayer->bias.set_data(torch::from_blob(weights[weightIdx++], {dims[i+1]}));
             model_->push_back(denseLayer);
+          } else if (kernelTypes[i] == velox::dl::KernelType::MatAdd) {
+            // Do nothing, which is handled by creating a Dense Layer in the above code
           } else if (kernelTypes[i] == velox::dl::KernelType::BatchNorm) {
             auto batchNormLayer = torch::nn::BatchNorm1d(dims[i]);
             batchNormLayer->weight.set_data(torch::from_blob(weights[weightIdx++], {dims[i+1]}));
@@ -1026,6 +1247,11 @@ public:
             model_->push_back(torch::nn::ReLU());
           } else if (kernelTypes[i] == velox::dl::KernelType::Softmax) {
             model_->push_back(torch::nn::Softmax(1));
+          } else if (kernelTypes[i] == velox::dl::KernelType::Argmax) {
+            model_->push_back(LibTorchArgmaxKernel(1));
+            hasArgmax_ = true;
+          } else {
+            throw std::runtime_error(fmt::format("Unsupported kernel type of TorchDNNV2: {}",kernelTypes[i]));
           }
         }
       // enable evaluation mode, this is required for inference, otherwise some module could 
@@ -1040,6 +1266,7 @@ public:
         const TypePtr& type,
         exec::EvalCtx& context,
         VectorPtr& output) const override {
+        BaseVector::ensureWritable(rows, type, context.pool(), output);
      
         auto input_elements = args[0]->as<ArrayVector>()->elements();
         float* input_values = input_elements->values()->asMutable<float>();
@@ -1047,21 +1274,38 @@ public:
         torch::Tensor output_tensor = input;
 
         output_tensor = const_cast<torch::nn::Sequential&>(model_)->forward(output_tensor);
-        float* data = output_tensor.data_ptr<float>();
-
-        // Prepare results
-        std::vector<std::vector<float>> results;
-        for (int i = 0; i < rows.size(); ++i) {
-            std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
-            results.push_back(result);
-        }
         VectorMaker maker{context.pool()};
-        output = maker.arrayVector<float>(results, REAL());
+        VectorPtr& localResult = output;
+
+        if (hasArgmax_) {
+          // convert to int
+          auto int_tensor = output_tensor.to(torch::kInt);               
+          int* data = int_tensor.data_ptr<int>();
+          std::vector<int> results(data, data + rows.size());
+          output = maker.flatVector<int>(results, INTEGER());
+          // localResult = maker.flatVector<int>(results, INTEGER());
+        } else {
+          float* data = output_tensor.data_ptr<float>();
+          std::vector<std::vector<float>> results;
+          for (int i = 0; i < rows.size(); ++i) {
+              std::vector<float> result(data + i*dims.back(), data+ (i+1)*dims.back());
+              results.push_back(result);
+          }
+          // localResult = maker.arrayVector<float>(results, REAL());
+          output = maker.arrayVector<float>(results, REAL());
+        }
+
+        // context.moveOrCopyResult(localResult, rows, output);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
         return {exec::FunctionSignatureBuilder()
                      .returnType("array(REAL)")
+                     .argumentType("array(REAL)")
+                     .build(),
+                // Output flat vector of int when Argmax is applied
+                exec::FunctionSignatureBuilder()
+                     .returnType("INTEGER")
                      .argumentType("array(REAL)")
                      .build()};
     }
@@ -1100,6 +1344,7 @@ private:
     std::vector<float*> weights;
     std::vector<float*> bias;
     std::vector<velox::dl::KernelType> kernelTypes_;
+    bool hasArgmax_;
     // std::vector<torch::nn::AnyModule> layers_;
 
     torch::nn::Sequential model_;

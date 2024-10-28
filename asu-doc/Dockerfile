@@ -43,10 +43,18 @@ RUN apt-get install -y zip
 RUN apt-get install -y default-jre 
 RUN apt-get install -y kmod
 RUN apt-get install -y nlohmann-json3-dev
+RUN apt-get install -y libhdf5-dev
+RUN apt-get install -y catch2
 RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
 RUN apt-get install -y openjdk-11-jdk
 RUN apt install -y openssh-server openssh-client
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# install aws cli
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+RUN unzip awscliv2.zip
+RUN ./aws/install
+
 
 RUN ln -s /usr/bin/python3 /usr/bin/python
 # install github cli (optional)
@@ -63,7 +71,21 @@ ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 # # install cudnn
 # RUN apt-get install -y libnccl3-dev
 
+# set-up catch2 (required for h5cpp)
+WORKDIR /home
+RUN git clone https://github.com/catchorg/Catch2.git \
+  && cd Catch2 \
+  && cmake -Bbuild -H. -DBUILD_TESTING=OFF \
+  && cmake --build build/ --target install 
 
+# set-up h5cpp
+WORKDIR /home
+RUN git clone https://github.com/ess-dmsc/h5cpp.git \
+  && cd h5cpp \
+  && mkdir build \
+  && cd build \
+  && cmake .. -DH5CPP_CONAN=DISABLE\
+  && make install
 
 # set-up eigen
 WORKDIR /usr/include
@@ -153,6 +175,20 @@ COPY hadoop_conf/hdfs-site.xml /home/hadoop-3.4.0/etc/hadoop/hdfs-site.xml
 COPY hadoop_conf/mapred-site.xml /home/hadoop-3.4.0/etc/hadoop/mapred-site.xml
 COPY hadoop_conf/yarn-site.xml /home/hadoop-3.4.0/etc/hadoop/yarn-site.xml
 RUN /home/hadoop-3.4.0/bin/hdfs namenode -format
+
+# setup madlib
+WORKDIR /home
+RUN apt-get install postgresql-plpython3-14 -y 
+RUN wget https://dist.apache.org/repos/dist/release/madlib/2.1.0/apache-madlib-2.1.0-src.tar.gz
+RUN tar -xvzf apache-madlib-2.1.0-src.tar.gz
+RUN apt-get install postgresql-server-dev-14 -y
+RUN cd apache-madlib-2.1.0-src \
+    && mkdir build \
+    && cd build \
+    && cmake .. \
+    && make \
+    && make install
+ENV PATH=$PATH:/usr/lib/postgresql/14/bin
 
 # set up velox
 WORKDIR /home

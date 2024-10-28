@@ -79,6 +79,24 @@ cd evadb
 pip install ./[ray]
 ```
 
+Madlib
+```bash
+# install madlib if not configured environment thourgh docker
+
+apt-get install libpq-dev
+apt-get install postgresql-plpython3-14
+wget https://dist.apache.org/repos/dist/release/madlib/2.1.0/apache-madlib-2.1.0-src.tar.gz
+tar -zxvf apache-madlib-2.1.0-src.tar.g
+cd apache-madlib-2.1.0-src
+mkdir build
+cmake ..
+# add postgresql 14 to path
+export PATH=$PATH:/usr/lib/postgresql/14/bin
+
+# install madlib to postgres
+/usr/local/madlib/bin/madpack -s madlib -p postgres install -c postgresdb@localhost
+```
+
 ### Develop with Visual Studio Code
 
 It is recommended to code with Visual Studio Code. You can use the following script to start a VS Code Tunnel for remote development. If you want to keep the tunnel alive in the background, you can first launch a `tmux` session and then execute the following command.

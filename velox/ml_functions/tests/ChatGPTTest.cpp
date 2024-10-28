@@ -191,11 +191,11 @@ void ChatGPTTest::LLMWithoutOptimization() {
                           .planNode(),
                           {"user_id", "movie_id", "user_description", "movie_description"}
                           )
-                    .project({"user_id", "movie_id", "CONCAT(movie_id, user_description) AS user_description", "CONCAT(user_id, movie_description) AS movie_description"})
+                    .project({"user_id", "movie_id", "CONCAT(user_id, user_description) AS user_description_processed", "CONCAT(movie_id, movie_description) AS movie_description_processed"})
                     .project({
                       "user_id", "movie_id", 
-                    "chatgpt_server(user_description, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description",
-                    "chatgpt_server(movie_description, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description"})
+                    "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description",
+                    "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description"})
                     .project({"user_id", "movie_id", "chatgpt_recommender(user_description, movie_description, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.')"})
                     ;
 
@@ -330,12 +330,16 @@ void ChatGPTTest::LLMWithOptimization() {
   auto myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                     .tableScan(userDataRowType, {}, "")
                     .capturePlanNodeId(readUserDataPlanNodeId)
-                    .project({"CAST(user_id AS VARCHAR) AS user_id", "chatgpt_server(description, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description"})
+                    .project({"CAST(user_id AS VARCHAR) AS user_id", "description as user_description"})
+                    .project({"user_id", "CONCAT(user_id, user_description) AS user_description_processed"})
+                    .project({"user_id", "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description"})
                     .nestedLoopJoin(
                       PlanBuilder(planNodeIdGenerator, pool_.get())
                           .tableScan(movieDataRowType, {}, "")
                           .capturePlanNodeId(readMoviewDataPlanNodeId)
-                          .project({"CAST(id AS VARCHAR) AS movie_id", "chatgpt_server(description, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description"})
+                          .project({"CAST(id AS VARCHAR) AS movie_id", "description AS movie_description"})
+                          .project({"movie_id", "CONCAT(movie_id, movie_description) AS movie_description_processed"})
+                          .project({"movie_id", "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description"})
                           .planNode(),
                           {"user_id", "movie_id", "user_description", "movie_description"}
                           )
@@ -425,6 +429,10 @@ void ChatGPTTest::LLMWithOptimization() {
                 << std::endl;
 }
 
+/*
+Please use export OPENAI_API_KEY=********  to set-up your openai key before running the test
+and modify the corresponding data path
+*/
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   memory::MemoryManager::initialize({});

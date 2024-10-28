@@ -61,14 +61,18 @@ class PlanState {
       if (rule.check(rootNode, actions, cataLog)) {
         // Create a map to store actions and target UDF names, key is UDF name,
         // value is rule name
+        // Remove duplicate actions: there is a possibility of duplicate actions
+        // for shared DL operators: e.g. relu, softmax, concat
+        sort(actions.begin(), actions.end());
+        actions.erase(unique(actions.begin(), actions.end()), actions.end());
         for (const auto& action : actions) {
           LOG(INFO) << "[INFO] PlanState: pushed Action: " << action
                     << " Rule: " << rulePair.first << std::endl;
           actionsPair[action].push_back(rulePair.first);
         }
         // clear target UDF name, prepare for next rule
-        actions.clear();
       }
+      actions.clear();
     }
   }
 

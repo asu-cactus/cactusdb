@@ -103,8 +103,11 @@ class Tree {
           relationships.push_back(line);
         } else if (line.find("leaf") != string::npos) {
           leafNodes.push_back(line);
-        } else {
+        } else if (line.find("label") != string::npos) {
           innerNodes.push_back(line);
+        } else {
+          // skip the case of empty line, somehow it won't be captured by the
+          // first condition
         }
       }
     }
@@ -131,7 +134,7 @@ class Tree {
       if ((findEndPosition = currentLine.find("[ label")) != string::npos) {
         nodeID = std::stoi(currentLine.substr(4, findEndPosition - 1 - 4));
       } else {
-        std::cout << "Error in extracting inner node nodeID\n";
+        LOG(ERROR) << "[ERROR] Error in extracting inner node nodeID\n";
         exit(1);
       }
 
@@ -141,7 +144,7 @@ class Tree {
         indexID = std::stoi(currentLine.substr(
             findStartPosition + 1, findEndPosition - findStartPosition - 1));
       } else {
-        std::cout << "Error in extracting inner node indexID\n";
+        LOG(ERROR) << "[Error] Error in extracting inner node indexID\n";
         exit(1);
       }
 
@@ -151,7 +154,7 @@ class Tree {
         threshold = std::stod(currentLine.substr(
             findStartPosition + 1, findEndPosition - findStartPosition - 1));
       } else {
-        std::cout << "Error in extracting inner node threshold\n";
+        LOG(ERROR) << "[ERROR] Error in extracting inner node threshold\n";
         exit(1);
       }
       tree[nodeID].isMissTrackLeft =
@@ -182,7 +185,7 @@ class Tree {
       if ((findEndPosition = currentLine.find("[")) != string::npos) {
         nodeID = std::stoi(currentLine.substr(4, findEndPosition - 1 - 4));
       } else {
-        std::cout << "Error in extracting leaf node nodeID\n";
+        LOG(ERROR) << "[ERROR] Error in extracting leaf node nodeID\n";
         exit(1);
       }
 
