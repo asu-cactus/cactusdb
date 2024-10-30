@@ -859,7 +859,7 @@ class MLQ2MovieTagEncoder_EVADB(AbstractFunction):
         self.t_process += self.timer_process.toc()
         self.timer_model_inference.tic()
 
-        X_relevance_score_lr = self.encoder(X_relevance_score, batch_size=2048)
+        X_relevance_score_lr = self.encoder.predict(X_relevance_score, batch_size=2048)
 
 
         self.t_model_inference += self.timer_model_inference.toc()
