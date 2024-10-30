@@ -1061,9 +1061,329 @@ PlanBuilder setupMovielensDBQuery(
     PlanNodeId readUserDataPlanNodeId;
     PlanNodeId readMovieDataPlanNodeId;
     if (queryOptType.empty() || queryOptType == "" ||
-        queryOptType == "mlq2-fusion" || queryOptType == "mlq2-mul2join") {
-          
+        queryOptType == "mlq3-fusion" || queryOptType == "mlq3-mul2join") {
+      auto movieTagQueryPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(movieTagDataRowType, {}, "")
+              .capturePlanNodeId(readMovieTagDataPlanNodeId2)
+              .project(
+                  {"mt_movie_id AS mt_movie_id1",
+                   "relu(mat_vector_add20_4(mat_mul20_3(relu(mat_vector_add20_2(mat_mul20_1(mt_relevance_score)))))) AS mt_relevance_ir1"});
+
+      auto movieQueryPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(movieTagDataRowType, {}, "")
+              .capturePlanNodeId(readMovieTagDataPlanNodeId)
+              .hashJoin(
+                  {"mt_movie_id"},
+                  {"m_movie_id"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(movieDataRowType, {}, "")
+                      .capturePlanNodeId(readMovieDataPlanNodeId)
+                      .limit(0, 1000, false)
+                      .planNode(),
+                  "",
+                  {"m_movie_id",
+                   "mt_movie_id",
+                   "mt_relevance_score",
+                   "m_popularity",
+                   "m_vote_average",
+                   "m_genres"})
+              .filter("m_genres LIKE '\%Adventure\%'");
+      queryPlan =
+          movieQueryPlan
+              .nestedLoopJoin(
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(userDataRowType, {}, "")
+                      .capturePlanNodeId(readUserDataPlanNodeId)
+                      .project(
+                          {"u_user_id", "u_age", "u_gender", "u_occupation"})
+                      .limit(0, 50, false)
+                      .project(
+                          {"u_user_id",
+                           "CAST (u_age AS REAL) AS u_age",
+                           "if (u_gender = 'M', 1.0, 0.0) AS u_gender",
+                           "CAST (u_occupation AS REAL) AS u_occupation"})
+                      .planNode(),
+                  {"u_user_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "m_movie_id",
+                   "mt_movie_id",
+                   "m_genres",
+                   "mt_relevance_score",
+                   "m_popularity",
+                   "m_vote_average"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_movie_id",
+                   "m_genres",
+                   "mt_relevance_score",
+                   "transform(array_constructor(u_age, u_gender, u_occupation, m_popularity, m_vote_average), x->Cast(x AS real))   AS model_features"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_movie_id",
+                   "m_genres",
+                   "model_features",
+                   "mt_relevance_score",
+                   "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(model_features))))))))) AS user_movie_interest_pred"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_movie_id",
+                   "m_genres",
+                   "mt_relevance_score",
+                   "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(model_features))))))))) AS user_movie_rating_pred",
+                   "model_features",
+                   "user_movie_interest_pred"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_movie_id",
+                   "m_genres",
+                   "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_ir",
+                   "user_movie_rating_pred",
+                   "model_features",
+                   "user_movie_interest_pred"})
+              .nestedLoopJoin(
+                  movieTagQueryPlan.planNode(),
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_movie_id1",
+                   "mt_movie_id",
+                   "m_genres",
+                   "mt_relevance_ir",
+                   "mt_movie_id1",
+                   "mt_relevance_ir1",
+                   "user_movie_interest_pred",
+                   "user_movie_rating_pred"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_movie_id1",
+                   "mt_movie_id",
+                   "m_genres",
+                   "cosine_similarity_q3(mt_relevance_ir, mt_relevance_ir1) as cosine_sim",
+                   "user_movie_interest_pred",
+                   "user_movie_rating_pred"})
+              .filter("user_movie_interest_pred = 1")
+              .filter("user_movie_rating_pred = 5");
+
+    } else if (queryOptType.find("mlq3-pushdown") != std::string::npos) {
+      auto movieTagQueryPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(movieTagDataRowType, {}, "")
+              .capturePlanNodeId(readMovieTagDataPlanNodeId2)
+              .project(
+                  {"mt_movie_id AS mt_movie_id1",
+                   "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_ir1"});
+
+      auto movieQueryPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(movieTagDataRowType, {}, "")
+              .capturePlanNodeId(readMovieTagDataPlanNodeId)
+              .hashJoin(
+                  {"mt_movie_id"},
+                  {"m_movie_id"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(movieDataRowType, {}, "")
+                      .capturePlanNodeId(readMovieDataPlanNodeId)
+                      .limit(0, 1000, false)
+                      .filter("m_genres LIKE '\%Adventure\%'")
+                      .planNode(),
+                  "",
+                  {"m_movie_id",
+                   "mt_movie_id",
+                   "mt_relevance_score",
+                   "m_popularity",
+                   "m_vote_average"})
+              .project({
+                  "m_movie_id",
+                  "mt_movie_id",
+                  "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_ir",
+                  "m_popularity",
+                  "m_vote_average",
+              })
+              .project({
+                  "m_movie_id",
+                  "mt_movie_id",
+                  "mt_relevance_ir",
+                  "m_popularity",
+                  "m_vote_average",
+              });
+      queryPlan =
+          movieQueryPlan
+              .nestedLoopJoin(
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(userDataRowType, {}, "")
+                      .capturePlanNodeId(readUserDataPlanNodeId)
+                      .project(
+                          {"u_user_id", "u_age", "u_gender", "u_occupation"})
+                      .limit(0, 50, false)
+                      .project(
+                          {"u_user_id",
+                           "CAST (u_age AS REAL) AS u_age",
+                           "if (u_gender = 'M', 1.0, 0.0) AS u_gender",
+                           "CAST (u_occupation AS REAL) AS u_occupation"})
+                      .planNode(),
+                  {"u_user_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "m_movie_id",
+                   "mt_movie_id",
+                   "mt_relevance_ir",
+                   "m_popularity",
+                   "m_vote_average"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_movie_id",
+                   "mt_relevance_ir",
+                   "transform(array_constructor(u_age, u_gender, u_occupation, m_popularity, m_vote_average), x->Cast(x AS real))   AS model_features"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "model_features",
+                   "mt_relevance_ir",
+                   "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(model_features))))))))) AS user_movie_interest_pred"})
+              .filter("user_movie_interest_pred = 1")
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_relevance_ir",
+                   "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(model_features))))))))) AS user_movie_rating_pred",
+                   "model_features"})
+              .filter("user_movie_rating_pred = 5")
+              .nestedLoopJoin(
+                  movieTagQueryPlan.planNode(),
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_relevance_ir",
+                   "mt_movie_id1",
+                   "mt_relevance_ir1"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "cosine_similarity_q3(mt_relevance_ir, mt_relevance_ir1) as cosine_sim"});
+
+    } else if (queryOptType.find("mlq3-optimized") != std::string::npos) {
+      auto movieTagQueryPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(movieTagDataRowType, {}, "")
+              .capturePlanNodeId(readMovieTagDataPlanNodeId2)
+              .project(
+                  {"mt_movie_id AS mt_movie_id1",
+                   "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_ir1"});
+
+      auto movieQueryPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(movieTagDataRowType, {}, "")
+              .capturePlanNodeId(readMovieTagDataPlanNodeId)
+              .hashJoin(
+                  {"mt_movie_id"},
+                  {"m_movie_id"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(movieDataRowType, {}, "")
+                      .capturePlanNodeId(readMovieDataPlanNodeId)
+                      .limit(0, 1000, false)
+                      .filter("m_genres LIKE '\%Adventure\%'")
+                      .planNode(),
+                  "",
+                  {"m_movie_id",
+                   "mt_movie_id",
+                   "mt_relevance_score",
+                   "m_popularity",
+                   "m_vote_average"})
+              .project({
+                  "m_movie_id",
+                  "mt_movie_id",
+                  "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_ir",
+                  "m_popularity",
+                  "m_vote_average",
+              })
+              .project({
+                  "m_movie_id",
+                  "mt_movie_id",
+                  "mt_relevance_ir",
+                  "m_popularity",
+                  "m_vote_average",
+              });
+      queryPlan =
+          movieQueryPlan
+              .nestedLoopJoin(
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(userDataRowType, {}, "")
+                      .capturePlanNodeId(readUserDataPlanNodeId)
+                      .project(
+                          {"u_user_id", "u_age", "u_gender", "u_occupation"})
+                      .limit(0, 50, false)
+                      .project(
+                          {"u_user_id",
+                           "CAST (u_age AS REAL) AS u_age",
+                           "if (u_gender = 'M', 1.0, 0.0) AS u_gender",
+                           "CAST (u_occupation AS REAL) AS u_occupation"})
+                      .planNode(),
+                  {"u_user_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "m_movie_id",
+                   "mt_movie_id",
+                   "mt_relevance_ir",
+                   "m_popularity",
+                   "m_vote_average"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_movie_id",
+                   "mt_relevance_ir",
+                   "transform(array_constructor(u_age, u_gender, u_occupation, m_popularity, m_vote_average), x->Cast(x AS real))   AS model_features"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "model_features",
+                   "mt_relevance_ir",
+                   "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(model_features))))))))) AS user_movie_interest_pred"})
+              .filter("user_movie_interest_pred = 1")
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_relevance_ir",
+                   "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(model_features))))))))) AS user_movie_rating_pred",
+                   "model_features"})
+              .filter("user_movie_rating_pred = 5")
+              .nestedLoopJoin(
+                  movieTagQueryPlan.planNode(),
+                  {"u_user_id",
+                   "m_movie_id",
+                   "mt_relevance_ir",
+                   "mt_movie_id1",
+                   "mt_relevance_ir1"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "cosine_similarity_q3(mt_relevance_ir, mt_relevance_ir1) as cosine_sim"});
     }
+    cataLog.setIdAddressMap(
+        readMovieTagDataPlanNodeId,
+        movieTagDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readMovieTagDataPlanNodeId2,
+        movieTagDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readMovieDataPlanNodeId,
+        movieDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readUserDataPlanNodeId,
+        userDataPaths,
+        dwio::common::FileFormat::PARQUET);
   }
 
   return queryPlan;
