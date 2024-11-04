@@ -1,0 +1,1050 @@
+#include <boost/interprocess/sync/interprocess_semaphore.hpp>
+#include <fcntl.h>
+#include <folly/init/Init.h>
+#include <unistd.h>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <memory>
+#include <random>
+#include <string>
+
+// Velox headers
+#include <H5Cpp.h>
+#include "velox/common/base/Fs.h"
+#include "velox/common/file/FileSystems.h"
+#include "velox/common/memory/MemoryArbitrator.h"
+#include "velox/dwio/dwrf/reader/DwrfReader.h"
+#include "velox/dwio/parquet/RegisterParquetReader.h"
+#include "velox/dwio/parquet/RegisterParquetWriter.h"
+#include "velox/dwio/parquet/writer/Writer.h"
+#include "velox/exec/FilterProject.h"
+#include "velox/exec/PartitionFunction.h"
+#include "velox/exec/tests/utils/AssertQueryBuilder.h"
+#include "velox/exec/tests/utils/HiveConnectorTestBase.h"
+#include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/exec/tests/utils/TempDirectoryPath.h"
+#include "velox/expression/VectorFunction.h"
+#include "velox/functions/Macros.h"
+#include "velox/functions/Registerer.h"
+#include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
+#include "velox/functions/prestosql/registration/RegistrationFunctions.h"
+#include "velox/ml_functions/BatchNorm.h"
+#include "velox/ml_functions/ChatGPT.h"
+#include "velox/ml_functions/ComplexLayer.h"
+#include "velox/ml_functions/Concat.h"
+#include "velox/ml_functions/CosineSimilarity.h"
+#include "velox/ml_functions/Dropout.h"
+#include "velox/ml_functions/Embedding.h"
+#include "velox/ml_functions/Encoder.h"
+#include "velox/ml_functions/FraudDetectionFunctions.h"
+#include "velox/ml_functions/NNBuilder.h"
+#include "velox/ml_functions/SequencePooling.h"
+#include "velox/ml_functions/UtilFunction.h"
+#include "velox/ml_functions/tests/MLTestUtility.h"
+#include "velox/parse/Expressions.h"
+#include "velox/parse/ExpressionsParser.h"
+#include "velox/parse/TypeResolver.h"
+#include "velox/type/Type.h"
+#include "velox/vector/fuzzer/VectorFuzzer.h"
+#include "velox/vector/tests/utils/VectorMaker.h"
+
+// Custom headers
+#include <json/json.h>
+#include "velox/cost_model/CostEstimator.h"
+#include "velox/optimizer/Helper.h"
+#include "velox/optimizer/Mul2JoinAggRewriteAction.h"
+#include "velox/optimizer/PlanState.h"
+#include "velox/optimizer/Register.h"
+#include "velox/optimizer/RewriteAction.h"
+#include "velox/optimizer/RuleManager.h"
+#include "velox/optimizer/TwoLayerUDF2TorchNNRewriteAction.h"
+#include "velox/optimizer/tests/BenchmarkUtils.h"
+
+using namespace facebook::velox;
+using namespace facebook::velox::exec::test;
+using namespace facebook::velox::test;
+
+#define BUFFER_SIZE 1024
+
+std::vector<std::vector<float>> loadHDF5Array(
+    const std::string& filename,
+    const std::string& datasetName) {
+  if (!std::filesystem::exists(filename)) {
+    throw std::runtime_error("File not found: " + filename);
+  }
+  H5::H5File file(filename, H5F_ACC_RDONLY);
+  H5::DataSet dataset = file.openDataSet(datasetName);
+  H5::DataSpace dataspace = dataset.getSpace();
+
+  // Get the number of dimensions
+  int rank = dataspace.getSimpleExtentNdims();
+  // std::cout << "Rank: " << rank << std::endl;
+
+  // Allocate space for the dimensions
+  std::vector<hsize_t> dims(rank);
+
+  // Get the dataset dimensions
+  dataspace.getSimpleExtentDims(dims.data(), nullptr);
+
+  size_t rows;
+  size_t cols;
+
+  if (rank == 1) {
+    rows = dims[0];
+    cols = 1;
+  } else if (rank == 2) {
+    rows = dims[0];
+    cols = dims[1];
+  } else {
+    throw std::runtime_error("Unsupported rank: " + std::to_string(rank));
+  }
+
+  // Read data into a 1D vector
+  std::vector<float> flatData(rows * cols);
+  dataset.read(flatData.data(), H5::PredType::NATIVE_FLOAT);
+
+  // Convert to 2D vector
+  std::vector<std::vector<float>> result(rows, std::vector<float>(cols));
+  for (size_t i = 0; i < rows; ++i) {
+    for (size_t j = 0; j < cols; ++j) {
+      result[i][j] = flatData[i * cols + j];
+    }
+  }
+
+  // Close the dataset and file
+  dataset.close();
+  file.close();
+
+  return result;
+}
+
+Json::Value receiveJsonFromSocket(int clientSocket) {
+  char messageBuffer[BUFFER_SIZE];
+  memset(messageBuffer, 0, BUFFER_SIZE);
+  recv(clientSocket, messageBuffer, BUFFER_SIZE, 0);
+  Json::CharReaderBuilder jsonReader;
+  Json::Value receivedJsonMessage;
+  std::istringstream jsonStream(messageBuffer);
+  Json::parseFromStream(jsonReader, jsonStream, &receivedJsonMessage, nullptr);
+  return receivedJsonMessage;
+}
+
+void sendJsonBySocket(Json::Value jsonMessage, int clientSocket) {
+  std::string jsonMessageStr = jsonMessage.toStyledString();
+  send(clientSocket, jsonMessageStr.c_str(), jsonMessageStr.length(), 0);
+}
+
+void sendAcknowledgment(int clientSocket) {
+  const char* ack_message = "ACK";
+  send(clientSocket, ack_message, strlen(ack_message), 0);
+}
+
+class IntegratedMCTSTest : public HiveConnectorTestBase {
+ public:
+  IntegratedMCTSTest() {
+    // Register Presto scalar functions.
+    functions::prestosql::registerAllScalarFunctions();
+
+    // Register Presto aggregate functions.
+    aggregate::prestosql::registerAllAggregateFunctions();
+
+    // Register type resolver with DuckDB SQL parser.
+    parse::registerTypeResolver();
+    Type::registerSerDe();
+    common::Filter::registerSerDe();
+    connector::hive::HiveTableHandle::registerSerDe();
+    connector::hive::LocationHandle::registerSerDe();
+    connector::hive::HiveColumnHandle::registerSerDe();
+    connector::hive::HiveInsertTableHandle::registerSerDe();
+    registerPartitionFunctionSerDe();
+    core::PlanNode::registerSerDe();
+    core::ITypedExpr::registerSerDe();
+    parquet::registerParquetReaderFactory();
+    parquet::registerParquetWriterFactory();
+    filesystems::registerLocalFileSystem();
+    // Register hiveconnector for file splits.
+    auto hiveConnector =
+        connector::getConnectorFactory(
+            connector::hive::HiveConnectorFactory::kHiveConnectorName)
+            ->newConnector(
+                kHiveConnectorId, std::make_shared<core::MemConfig>());
+    connector::registerConnector(hiveConnector);
+
+    tempDirPath_ = exec::test::TempDirectoryPath::create();
+  }
+
+  ~IntegratedMCTSTest() {
+    TearDown();
+  }
+
+  void SetUp() override {}
+
+  void TearDown() override {
+    HiveConnectorTestBase::TearDown();
+  }
+
+  void TestBody() override {}
+  // Wait for all drivers to finish work.
+  void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
+    while (!task->isFinished()) {
+      usleep(1000); // 0.01 second.
+    }
+  }
+
+  int cacheQueryPlan(PlanBuilder& planBuilder) {
+    int queryPlanCacheId = queryPlanCacheId_++;
+    auto serializedPlan = planBuilder.planNode()->serialize();
+    // queryPlanCaches_[queryPlanCacheId] = serializedPlan;
+
+    return queryPlanCacheId;
+  }
+
+  void resetQueryPlanFromCache(PlanBuilder& planBuilder, int queryPlanCacheId) {
+    auto it = queryPlanCaches_.find(queryPlanCacheId);
+    if (it != queryPlanCaches_.end()) {
+      auto serializedPlan = it->second;
+      auto deserlizedUpdatedPlanNode =
+          ISerializable::deserialize<core::PlanNode>(
+              serializedPlan, pool_.get());
+      planBuilder.setRoot(deserlizedUpdatedPlanNode);
+    } else {
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+    }
+  }
+
+  // Function from ParquetTestBase.h
+  std::unique_ptr<dwio::common::FileSink> createSink(
+      const std::string& filePath) {
+    auto sink = dwio::common::FileSink::create(
+        fmt::format("file:{}", filePath), {.pool = pool_.get()});
+    return sink;
+  }
+
+  // Function from ParquetTestBase.h
+  std::unique_ptr<facebook::velox::parquet::Writer> createWriter(
+      std::unique_ptr<dwio::common::FileSink> sink,
+      std::function<
+          std::unique_ptr<facebook::velox::parquet::DefaultFlushPolicy>()>
+          flushPolicy,
+      const RowTypePtr& rowType,
+      facebook::velox::common::CompressionKind compressionKind =
+          facebook::velox::common::CompressionKind_NONE) {
+    facebook::velox::parquet::WriterOptions options;
+    options.memoryPool = rootPool_.get();
+    options.flushPolicyFactory = flushPolicy;
+    options.compression = compressionKind;
+    return std::make_unique<facebook::velox::parquet::Writer>(
+        std::move(sink), options, rowType);
+  }
+
+  /**
+   * @brief A function to run logical plan.
+   *
+   * @param numThreads The number of Velox executor threads.
+   * @param numSplits The number of file splits.
+   * @param myPlan The pointer to the planBuilder which builds the logical plan.
+   * @param cataLog A class storing metadata and information related to UDFs and
+   * data sources.
+   */
+  float runPlanWithCataLog(
+      int numThreads,
+      int numSplits,
+      PlanBuilder& myPlan,
+      CataLog& cataLog,
+      int repeatRun = 1,
+      int verbose = 1) {
+    float totalElapsedTime = 0;
+    std::vector<RowVectorPtr> finalResult;
+    int dataIdx;
+    int totalDataNum;
+
+    for (int i = 0; i < repeatRun; i++) {
+      // Initializes executor.
+      std::shared_ptr<folly::Executor> executor_{
+          std::make_shared<folly::CPUThreadPoolExecutor>(
+              std::thread::hardware_concurrency())};
+      // Initializes queryCtx.
+      std::shared_ptr<core::QueryCtx> queryCtx_{
+          std::make_shared<core::QueryCtx>(executor_.get())};
+      // Set queryCtx config.
+      queryCtx_->testingOverrideConfigUnsafe(
+          {{core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
+           {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
+           {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
+
+      // Add hivesplits to the target plan node (data source node).
+      std::chrono::steady_clock::time_point begin =
+          std::chrono::steady_clock::now();
+
+      CursorParameters params;
+      params.maxDrivers = numThreads;
+      params.planNode = myPlan.planNode();
+      params.queryCtx = queryCtx_;
+      bool noMoreSplits = false;
+      auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
+        auto idFileAddrMap = cataLog.getIdAddressMap();
+        std::vector<core::PlanNodeId> ids;
+        if (!noMoreSplits) {
+          for (const auto& entry : idFileAddrMap) {
+            core::PlanNodeId key = entry.first;
+            const std::vector<std::string> fileAddr = entry.second;
+            // check file exists
+            for (const auto& addr : fileAddr) {
+              if (!fs::exists(addr)) {
+                LOG(ERROR) << "[ERROR] File not exists: " << addr << std::endl;
+                return;
+              }
+            }
+            auto fileFormat = cataLog.getIdFileFormat(key);
+            auto hiveSplits = makeHiveConnectorSplits(fileAddr, fileFormat);
+
+            for (auto& split : hiveSplits) {
+              task->addSplit(key, exec::Split(std::move(split)));
+            }
+
+            ids.push_back(key);
+          }
+
+          for (auto id : ids) {
+            task->noMoreSplits(id);
+          }
+        }
+        noMoreSplits = true;
+      };
+      auto [cursor, actualResults] = readCursor(params, addSplits);
+      waitForTaskCompletion(cursor->task().get());
+
+      std::chrono::steady_clock::time_point end =
+          std::chrono::steady_clock::now();
+
+      auto elapsedTime =
+          (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
+               .count()) /
+          1000000.0;
+      totalElapsedTime += elapsedTime;
+
+      if (i == repeatRun - 1) {
+        finalResult = actualResults;
+        dataIdx = 0;
+        totalDataNum = 0;
+        for (auto batchedData : finalResult) {
+          batchedData = std::move(batchedData);
+          int batchSize = batchedData->size();
+          if (verbose == 2) {
+            std::cout << fmt::format(
+                             "[INFO] Batched Data: {}, Batch Size:{} \n",
+                             dataIdx,
+                             batchSize)
+                      << batchedData->toString() << std::endl;
+          } else if (verbose == 3) {
+            std::cout << fmt::format(
+                             "[INFO] Batched Data: {}, Batch Size:{} \n",
+                             dataIdx,
+                             batchSize)
+                      << batchedData->toString() << "\n"
+                      << batchedData->toString(0, batchedData->size())
+                      << std::endl;
+          }
+          dataIdx += 1;
+          totalDataNum += batchSize;
+        }
+        finalResult = std::move(finalResult);
+      }
+    }
+    if (verbose >= 1) {
+      std::cout << fmt::format(
+                       "[INFO] Total # of Batch: {}, Total # of Data: {}",
+                       dataIdx,
+                       totalDataNum)
+                << std::endl;
+    }
+    // finalResult = std::move(finalResult);
+
+    return totalElapsedTime / repeatRun;
+  }
+
+  struct DataFrame {
+    std::vector<std::vector<float>> features;
+    std::vector<float*> weights;
+    std::vector<float*> bias;
+    float* featuresFloat;
+    std::vector<std::shared_ptr<TempFilePath>> feature_paths;
+  };
+
+  /**
+   * @brief Registers a series of vector functions in the optimization
+   * namespace.
+   *
+   * @param units1 Number of units in the first layer.
+   * @param units2 Number of units in the second layer.
+   * @param input_size Size of the input for the first layer.
+   * @param weights1 Pointer to the weights for the first layer.
+   * @param weights2 Pointer to the weights for the second layer.
+   * @param bias1 Pointer to the bias for the first layer.
+   * @param bias2 Pointer to the bias for the second layer.
+   * @param catalog Reference to a CataLog object to store metadata and
+   * information.
+   *
+   * @return A string representing the composed vector function expression.
+   */
+
+  std::vector<std::vector<float>>
+  loadFeaturesFromCSV(std::string filePath, int numSamples, int numFeature) {
+    int size = numSamples * numFeature;
+
+    std::cout << "Loading tensor of size " << size << " from " << filePath
+              << std::endl;
+
+    std::ifstream file(filePath.c_str());
+
+    std::vector<std::vector<float>> inputArrayVector;
+
+    int index = 0;
+
+    std::string line;
+
+    while (numSamples--) { // Read a line from the file
+
+      std::vector<float> curRow(numFeature);
+
+      std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        //
+        float number = std::stof(numberStr); // Convert the string to float
+
+        if (colIndex < numFeature)
+
+          curRow[colIndex] = number;
+
+        colIndex++;
+      }
+
+      inputArrayVector.push_back(std::move(curRow));
+    }
+
+    file.close();
+
+    return inputArrayVector;
+  }
+
+  void registerDecisionForestFunctions() {
+    std::cout << "To register function for TreePrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "decision_tree_predict",
+        TreePrediction::signatures(),
+        std::make_unique<TreePrediction>(
+            0,
+            "/home/velox/resources/model/fraud_xgboost_10_8/0.txt",
+            28,
+            false));
+
+    std::cout << "To register type for Tree" << std::endl;
+
+    registerCustomType("tree_type", std::make_unique<TreeTypeFactories>());
+
+    std::cout << "To register function for VeloxTreePrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "velox_decision_tree_predict",
+        VeloxTreePrediction::signatures(),
+        std::make_unique<VeloxTreePrediction>(28));
+
+    std::cout << "To register function for VeloxTreeConstruction" << std::endl;
+
+    exec::registerVectorFunction(
+        "velox_decision_tree_construct",
+        VeloxTreeConstruction::signatures(),
+        std::make_unique<VeloxTreeConstruction>());
+
+    std::cout << "To register function for ForestPrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "decision_forest_predict",
+        TreePrediction::signatures(),
+        std::make_unique<ForestPrediction>(
+            "/home/velox/resources/model/fraud_xgboost_10_8", 28, true));
+  }
+
+  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(
+      std::vector<std::vector<float>> data,
+      int numSplit = 4,
+      bool createIndex = false) {
+    std::vector<std::shared_ptr<TempFilePath>> paths;
+
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    size_t numSamples = data.size();
+    size_t partitionSize = ceil(numSamples / numSplit);
+    for (size_t i = 0; i < numSplit; i++) {
+      auto startIdx = data.begin() + i * partitionSize;
+      auto endIdx = data.begin() + (i + 1) * partitionSize;
+      endIdx = (endIdx < data.end()) ? endIdx : data.end();
+      size_t numSampleInPartition = (i + 1) * partitionSize <= numSamples
+          ? partitionSize
+          : numSamples - i * partitionSize;
+
+      std::vector<std::vector<float>> partialData(startIdx, endIdx);
+      auto featureArrayVector = maker.arrayVector<float>(partialData, REAL());
+      RowVectorPtr inputRowVector;
+      if (createIndex) {
+        std::vector<int> indexes = randomGenerator.genIntRange(
+            i * partitionSize, i * partitionSize + numSampleInPartition);
+        auto indexFlatVector = maker.flatVector<int>(indexes);
+        inputRowVector = maker.rowVector(
+            {"idx", "v"},
+            {std::move(indexFlatVector), std::move(featureArrayVector)});
+      } else {
+        inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      }
+      auto file = TempFilePath::create();
+      auto config = std::make_shared<facebook::velox::dwrf::Config>();
+      writeToFile(file->path, {inputRowVector}, config);
+      paths.push_back(file);
+    }
+
+    return paths;
+  }
+
+  std::string process_mem_usage() {
+    using std::ifstream;
+    using std::ios_base;
+    using std::string;
+
+    double vm_usage = 0.0;
+    double resident_set = 0.0;
+
+    // Read data from /proc/self/stat
+    ifstream stat_stream("/proc/self/stat", ios_base::in);
+    if (!stat_stream) {
+      std::cerr << "Error opening /proc/self/stat" << std::endl;
+      return "";
+    }
+
+    // Extract relevant fields
+    string pid, comm, state, ppid, pgrp, session, tty_nr;
+    string tpgid, flags, minflt, cminflt, majflt, cmajflt;
+    string utime, stime, cutime, cstime, priority, nice;
+    string O, itrealvalue, starttime;
+    unsigned long vsize;
+    long rss;
+
+    stat_stream >> pid >> comm >> state >> ppid >> pgrp >> session >> tty_nr >>
+        tpgid >> flags >> minflt >> cminflt >> majflt >> cmajflt >> utime >>
+        stime >> cutime >> cstime >> priority >> nice >> O >> itrealvalue >>
+        starttime >> vsize >> rss;
+
+    stat_stream.close();
+
+    // Get page size in KB
+    long page_size_kb = sysconf(_SC_PAGE_SIZE) / 1024 / 1024 / 1024;
+
+    // Calculate memory usage
+    vm_usage = vsize / 1024.0 / 1024.0 / 1024.0;
+    resident_set = rss * page_size_kb;
+    std::cout << fmt::format(
+                     " vm_usage: {:.2f} , resident_set: {:.2f}",
+                     vm_usage,
+                     resident_set)
+              << std::endl;
+    return "";
+  }
+
+  PlanBuilder setupQueryPlan(
+      std::string model,
+      std::string computationStr,
+      std::vector<std::string> inputFilePaths,
+      std::vector<std::shared_ptr<TempFilePath>> inputTempFiles,
+      int numSamples,
+      int numFeatures,
+      CataLog& cataLog,
+      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
+    PlanBuilder myPlan;
+    if (model == "ffnn" || model == "df") {
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", model));
+    }
+
+    return myPlan;
+  }
+
+  void generateDummyData(
+      std::string mode,
+      std::vector<int> numberOfTuples,
+      CataLog& cataLog) {
+    if (mode == "ml") {
+      VectorMaker maker{pool_.get()};
+      // it should contains the numbers: # of users, # of movies, # of relevance
+      // tag
+      assert(numberOfTuples.size() == 3);
+      int numUsers = numberOfTuples[0];
+      int numMovies = numberOfTuples[1];
+      int numRelevanceTags = numberOfTuples[2];
+      RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+      RandomSampler randomSampler = RandomSampler(0);
+      // sample user data
+      std::vector<int> userIDs = randomGenerator.genIntRange(0, numUsers);
+      std::vector<std::string> userGender =
+          randomSampler.sampleFromSets(numUsers, {"M", "F"});
+      std::vector<int> userAge = randomGenerator.genIntRange(10, 70);
+      std::vector<int> userOccupation = randomGenerator.genIntRange(0, 20);
+      std::vector<std::string> userZipcode = randomSampler.sampleFromSets(
+          numUsers,
+          {"94043",
+           "94301",
+           "94305",
+           "94306",
+           "94309",
+           "80212",
+           "80213",
+           "80219",
+           "12301",
+           "40201"});
+
+      auto userDataRowVector = maker.rowVector(
+          {"u_user_id", "u_gender", "u_age", "u_occupation", "u_zipcode"},
+          {maker.flatVector<int>(userIDs, INTEGER()),
+           maker.flatVector<std::string>(userGender, VARCHAR()),
+           maker.flatVector<int>(userAge, INTEGER()),
+           maker.flatVector<int>(userOccupation, INTEGER()),
+           maker.flatVector<std::string>(userZipcode, VARCHAR())});
+
+      MovieTitleGenerator movieTitleGenerator = MovieTitleGenerator(0);
+      std::vector<int> movieIDs = randomGenerator.genIntRange(0, numMovies);
+      std::vector<std::string> movieTitle =
+          movieTitleGenerator.generateBatchRandomTitles(numMovies);
+      std::vector<std::string> movieGenres = randomSampler.sampleFromSets(
+          numMovies,
+          {"Action",
+           "Adventure",
+           "Animation",
+           "Children",
+           "Comedy",
+           "Crime",
+           "Documentary",
+           "Drama",
+           "Fantasy",
+           "Film-Noir",
+           "Horror",
+           "Musical",
+           "Mystery",
+           "Romance",
+           "Sci-Fi",
+           "Thriller",
+           "War",
+           "Western"});
+      std::vector<std::string> movieSpokenLanguage =
+          randomSampler.sampleFromSets(
+              numMovies,
+              {"English",
+               "French",
+               "German",
+               "Italian",
+               "Japanese",
+               "Korean",
+               "Mandarin",
+               "Spanish"});
+      randomGenerator.setFloatRange(0, 10);
+      std::vector<float> moviePopularity =
+          randomGenerator.genFloat1dVector(numMovies);
+      randomGenerator.setFloatRange(0, 5);
+      std::vector<float> movieVoteAverage =
+          randomGenerator.genFloat1dVector(numMovies);
+      std::vector<int> movieVoteCount =
+          randomGenerator.gen1DInt(numMovies, 0, 5000);
+
+      auto movieDataRowVector = maker.rowVector(
+          {"m_movie_id",
+           "m_title",
+           "m_genres",
+           "m_spoken_languages",
+           "m_popularity",
+           "m_vote_average",
+           "m_vote_count"},
+          {maker.flatVector<int>(movieIDs, INTEGER()),
+           maker.flatVector<std::string>(movieTitle, VARCHAR()),
+           maker.flatVector<std::string>(movieGenres, VARCHAR()),
+           maker.flatVector<std::string>(movieSpokenLanguage, VARCHAR()),
+           maker.flatVector<float>(moviePopularity, REAL()),
+           maker.flatVector<float>(movieVoteAverage, REAL()),
+           maker.flatVector<int>(movieVoteCount, INTEGER())});
+
+      randomGenerator.setFloatRange(0, 1);
+      std::vector<std::vector<float>> movieRelevanceTags =
+          randomGenerator.genFloat2dVector(numMovies, numRelevanceTags);
+
+      auto movieRelevanceTagRowVector = maker.rowVector(
+          {"mt_movie_id", "mt_relevance_score"},
+          {maker.flatVector<int>(movieIDs, INTEGER()),
+           maker.arrayVector<float>(movieRelevanceTags, REAL())});
+    }
+  }
+
+  void runProfile(
+      std::string model,
+      int featureSize,
+      int numSamples,
+      int repeatRun,
+      int blockSize,
+      int verbose) {
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    std::vector<std::string> inputFilePaths;
+    std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
+    std::string computationStr;
+
+    generateDummyData(model, {10, 100, 100}, cataLog);
+
+    if (model == "ffnn") {
+    } else if (model == "df") {
+    } else if (model == "two-tower") {
+    } else if (model == "llm") {
+    } else if (model == "fraud") {
+    } else if (model == "ml-q1") {
+    } else if (model == "ml-q2") {
+    } else if (model == "ml-q3") {
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", model));
+    }
+
+    std::cout << "Success" << std::endl;
+
+    return;
+
+    myPlan = setupQueryPlan(
+        model,
+        computationStr,
+        inputFilePaths,
+        inputTempFiles,
+        numSamples,
+        featureSize,
+        cataLog,
+        planNodeIdGenerator);
+
+    // Get the logical plan
+    auto planNode = myPlan.planNode();
+
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
+
+    planState.getPossibleActions(planNode, cataLog);
+
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : planState.actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+    }
+
+    std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
+    std::pair<std::string, std::string> testAction;
+
+    if (queryOptType == "fusion") {
+      testAction = std::make_pair(
+          "relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(ROW[\"user_tower_features\"]))))))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+
+      planNode = myPlan.planNode();
+
+      planState.getPossibleActions(planNode, cataLog);
+
+      // // std::cout << "[INFO] All possible actions:" << std::endl;
+      // // for (auto entry : planState.actionsPair) {
+      // //   std::cout << entry.first << ": " << entry.second << std::endl;
+      // // }
+
+      testAction = std::make_pair(
+          "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(ROW[\"movie_tower_features\"]))))))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+
+      planNode = myPlan.planNode();
+
+      planState.getPossibleActions(planNode, cataLog);
+
+      // testAction =
+      // std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please
+      // summarize the users description. The following are the average ratings
+      // given by users to movies in each genre.\")",
+      // "MLDecompositionPushdownRewriteAction");
+
+      // planState.takeAction(
+      //           planNode,
+      //           nullptr,
+      //           maker,
+      //           myPlan,
+      //           pool_,
+      //           planNodeIdGenerator,
+      //           {testAction},
+      //           cataLog);
+
+      // planState.update(myPlan, cataLog);
+      // planNode = myPlan.planNode();
+    }
+    if (queryOptType == "mlq2-mul2join" || queryOptType == "mlq2-optimized") {
+      testAction =
+          std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
+
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+    }
+    if (queryOptType == "mlq2-fusion" || queryOptType == "mlq2-optimized") {
+      testAction = std::make_pair(
+          "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(ROW[\"top_mlp_input\"])))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      // testAction = std::make_pair(
+      //     "argmax(softmax(mat_vector_add9_8(mat_mul9_7(relu(mat_vector_add9_6(mat_mul9_5(relu(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))))))))",
+      //     "MultiLayerUDF2TorchNNRewriteAction");
+      testAction = std::make_pair(
+          "argmax(softmax(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(ROW[\"m_trending_features\"]))))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "relu(mat_vector_add11_2(mat_mul11_1(ROW[\"mt_relevance_score\"])))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+    }
+
+    if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized") {
+      if (queryOptType == "mlq3-mul2join") {
+        testAction =
+            std::make_pair("mat_mul20_1", "Mul2JoinAggHorizontalRewriteAction");
+      } else if (queryOptType == "mlq3-optimized") {
+        testAction =
+            std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
+      }
+
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+    }
+
+    if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized") {
+      testAction = std::make_pair(
+          "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(ROW[\"model_features\"])))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(ROW[\"model_features\"])))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+    }
+
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : planState.actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+    }
+
+    std::cout << "[DEBUG] final executed plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+
+    float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 2, verbose);
+
+    std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+    // auto serializedPlan = myPlan.planNode()->serialize();
+
+    // std::cout << "[DEBUG] serialized plan: \n" << serializedPlan <<
+    // std::endl;
+
+    return;
+  }
+
+ private:
+  std::shared_ptr<memory::MemoryPool> rootPool_{
+      memory::MemoryManager::getInstance()->addRootPool()};
+  std::shared_ptr<memory::MemoryPool> pool_{
+      memory::MemoryManager::getInstance()->addLeafPool()};
+  std::shared_ptr<TempDirectoryPath> tempDirPath_;
+
+  VectorMaker maker{pool_.get()};
+  static inline int queryPlanCacheId_ = 0;
+  std::map<int, folly::dynamic> queryPlanCaches_;
+};
+
+DEFINE_string(mode, "mcts", "Mode: mcts or benchmark");
+DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower, llm");
+DEFINE_bool(rewrite, true, "Whether  rewrite");
+DEFINE_int32(num_repeat, 1, "Number of repeat run");
+DEFINE_int32(feature_size, 1000, "FFNN Feature size");
+DEFINE_int32(num_sample, 1000, "Number of samples");
+DEFINE_int32(num_driver, 8, "Number of drivers");
+DEFINE_int32(verbose, 2, "Verbose");
+DEFINE_int32(block_size, 256, "Block Size");
+DEFINE_bool(cost, false, "Whether get cost");
+
+int main(int argc, char** argv) {
+  memory::MemoryManager::initialize({});
+  folly::init(&argc, &argv, false);
+  // gflags::ParseCommandLineFlags(&argc, &argv, true);
+  std::string mode = FLAGS_mode;
+  std::string model = FLAGS_model;
+
+  bool rewrite = FLAGS_rewrite;
+  int repeatRun = FLAGS_num_repeat;
+  int featureSize = FLAGS_feature_size;
+  int numSample = FLAGS_num_sample;
+  int numDriver = FLAGS_num_driver;
+  int verbose = FLAGS_verbose;
+  int blockSize = FLAGS_block_size;
+  bool getCost = FLAGS_cost;
+  IntegratedMCTSTest demo;
+
+  // available single benchmark mode: mul2joinAgg, udf2torchNN,
+  // mul2joinAggHorizontal
+  if (mode == "mcts") {
+    demo.runProfile(
+        model, featureSize, numSample, repeatRun, blockSize, verbose);
+  } else {
+    throw std::runtime_error("Unsupported mode: " + mode);
+    // Benchmark a single rewrite action
+    // demo.testSingleRewrite(
+    //     model,
+    //     rewrite,
+    //     repeatRun,
+    //     featureSize,
+    //     numSample,
+    //     numDriver,
+    //     mode,
+    //     blockSize,
+    //     verbose,
+    //     getCost);
+  }
+}
