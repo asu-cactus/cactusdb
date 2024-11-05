@@ -251,7 +251,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
    */
   float runPlanWithCataLog(
       int numThreads,
-      int numSplits,
       PlanBuilder& myPlan,
       CataLog& cataLog,
       int repeatRun = 1,
@@ -561,19 +560,145 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return "";
   }
 
-  PlanBuilder setupQueryPlan(
-      std::string model,
-      std::string computationStr,
-      std::vector<std::string> inputFilePaths,
-      std::vector<std::shared_ptr<TempFilePath>> inputTempFiles,
-      int numSamples,
-      int numFeatures,
+  std::string registerNNModel(std::vector<int> units, CataLog& catalog) {
+    // use input size as random seed
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, units[0]);
+    int modelGroupId = modelGroupId_++;
+    int functionId = 0;
+    int numberOfLayers = units.size() - 1;
+
+    optimization::registerVectorFunction(
+        "relu",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "softmax",
+        Softmax::signatures(),
+        std::make_unique<Softmax>(),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "argmax",
+        Argmax::signatures(),
+        std::make_unique<Argmax>(),
+        {},
+        true,
+        catalog);
+
+    std::string modelComputationStr = "{}";
+    int lastSize = units[0];
+
+    for (int i = 1; i < units.size(); i++) {
+      int layerSize = units[i];
+      std::vector<std::vector<float>> weights =
+          randomGenerator.genFloat2dVector(lastSize, layerSize);
+      std::vector<std::vector<float>> bias = randomGenerator.genFloat2dVector(1, layerSize);
+      std::string matMulName = fmt::format(
+          "mat_mul{}_{}", modelGroupId, functionId++);
+      optimization::registerVectorFunction(
+          matMulName,
+          MatrixMultiply::signatures(),
+          std::make_unique<MatrixMultiply>(
+              std::move(flattenVectorToPointer(weights)), lastSize, layerSize),
+          {},
+          true,
+          catalog);
+      std::string matVectorAddName = fmt::format(
+          "mat_vector_add{}_{}", modelGroupId, functionId++);
+      optimization::registerVectorFunction(
+          matVectorAddName,
+          MatrixVectorAddition::signatures(),
+          std::make_unique<MatrixVectorAddition>(
+              std::move(flattenVectorToPointer(bias)), layerSize),
+          {},
+          true,
+          catalog);
+      modelComputationStr = matVectorAddName + "(" + matMulName + "(" + modelComputationStr + "))";
+      if (i != units.size() - 1) {
+        modelComputationStr = "relu(" + modelComputationStr + ")";
+      } else {
+        modelComputationStr = "softmax(" + modelComputationStr + ")";
+      }
+      lastSize = layerSize;
+    }
+    return modelComputationStr;
+  }
+
+  PlanBuilder setupProfileQueryPlan(
+      std::string mode,
+      std::string queryTemplate,
       CataLog& cataLog,
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
     PlanBuilder myPlan;
-    if (model == "ffnn" || model == "df") {
+    if (mode == "ml") {
+      RowTypePtr userDataRowType = cataLog.getRegisteredDataSrcSchema("user");
+      RowTypePtr movieDataRowType = cataLog.getRegisteredDataSrcSchema("movie");
+      RowTypePtr movieRelevanceTagRowType =
+          cataLog.getRegisteredDataSrcSchema("movie_relevance_tag");
+
+      dwio::common::FileFormat userFileFormat =
+          cataLog.getRegisteredDataSrcFormat("user");
+      dwio::common::FileFormat movieFileFormat =
+          cataLog.getRegisteredDataSrcFormat("movie");
+      dwio::common::FileFormat movieRelevanceTagFileFormat =
+          cataLog.getRegisteredDataSrcFormat("movie_relevance_tag");
+
+      std::vector<std::string> userFilePaths =
+          cataLog.getRegisteredDataSrcFiles("user");
+      std::vector<std::string> movieFilePaths =
+          cataLog.getRegisteredDataSrcFiles("movie");
+      std::vector<std::string> movieRelevanceTagFilePaths =
+          cataLog.getRegisteredDataSrcFiles("movie_relevance_tag");
+
+      if (queryTemplate == "" || queryTemplate == "userQuery") {
+        core::PlanNodeId readUserDataPlanNodeId;
+        myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                     .tableScan(userDataRowType, {}, "")
+                     .capturePlanNodeId(readUserDataPlanNodeId);
+
+        cataLog.setIdAddressMap(
+            readUserDataPlanNodeId,
+            userFilePaths,
+            dwio::common::FileFormat::DWRF);
+      } else if (queryTemplate == "movie") {
+        core::PlanNodeId readMovieDataPlanNodeId;
+        myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                     .tableScan(movieDataRowType, {}, "")
+                     .capturePlanNodeId(readMovieDataPlanNodeId);
+
+        cataLog.setIdAddressMap(
+            readMovieDataPlanNodeId,
+            movieFilePaths,
+            dwio::common::FileFormat::DWRF);
+      } else if (queryTemplate == "movie_relevance_tag") {
+        core::PlanNodeId readMovieRelevanceTagDataPlanNodeId;
+        myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                     .tableScan(movieRelevanceTagRowType, {}, "")
+                     .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId);
+
+        cataLog.setIdAddressMap(
+            readMovieRelevanceTagDataPlanNodeId,
+            movieRelevanceTagFilePaths,
+            dwio::common::FileFormat::DWRF);
+      } else {
+        throw std::runtime_error(fmt::format("Non-supported queryTemplate: {}", queryTemplate));
+      }
+      // PlanNodeId readUserDataPlanNodeId;
+
+      // myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+      //              .tableScan(userDataRowType, {}, "")
+      //              .capturePlanNodeId(readUserDataPlanNodeId);
+
+      // cataLog.setIdAddressMap(
+      //     readUserDataPlanNodeId,
+      //     userFilePaths,
+      //     dwio::common::FileFormat::DWRF);
     } else {
-      throw std::runtime_error(fmt::format("Non-supported model: {}", model));
+      throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
 
     return myPlan;
@@ -582,6 +707,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   void generateDummyData(
       std::string mode,
       std::vector<int> numberOfTuples,
+      std::vector<int> dummyFeatureSizes,
       CataLog& cataLog) {
     if (mode == "ml") {
       VectorMaker maker{pool_.get()};
@@ -688,15 +814,35 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           {"mt_movie_id", "mt_relevance_score"},
           {maker.flatVector<int>(movieIDs, INTEGER()),
            maker.arrayVector<float>(movieRelevanceTags, REAL())});
+
+      std::vector<std::shared_ptr<TempFilePath>> userFilePaths =
+          splitRowVectorIntoBatchFiles(userDataRowVector, 1024);
+      cataLog.registerDataSrc(
+          "user", userFilePaths, asRowType(userDataRowVector->type()));
+
+      std::vector<std::shared_ptr<TempFilePath>> movieFilePaths =
+          splitRowVectorIntoBatchFiles(movieDataRowVector, 1024);
+      cataLog.registerDataSrc(
+          "movie", movieFilePaths, asRowType(movieDataRowVector->type()));
+
+      std::vector<std::shared_ptr<TempFilePath>> movieRelevanceTagFilePaths =
+          splitRowVectorIntoBatchFiles(movieRelevanceTagRowVector, 1024);
+      cataLog.registerDataSrc(
+          "movie_relevance_tag",
+          movieRelevanceTagFilePaths,
+          asRowType(movieRelevanceTagRowVector->type()));
     }
   }
 
   void runProfile(
-      std::string model,
-      int featureSize,
-      int numSamples,
+      std::string mode,
+      std::vector<int> numberOfTuples,
+      std::vector<int> dummyFeatureSizes,
+      // int featureSize,
+      // int numSamples,
+      int numThreads,
       int repeatRun,
-      int blockSize,
+      // int blockSize,
       int verbose) {
     PlanBuilder myPlan;
     CataLog cataLog;
@@ -706,279 +852,293 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
     std::string computationStr;
 
-    generateDummyData(model, {10, 100, 100}, cataLog);
+    generateDummyData(mode, numberOfTuples, dummyFeatureSizes, cataLog);
 
-    if (model == "ffnn") {
-    } else if (model == "df") {
-    } else if (model == "two-tower") {
-    } else if (model == "llm") {
-    } else if (model == "fraud") {
-    } else if (model == "ml-q1") {
-    } else if (model == "ml-q2") {
-    } else if (model == "ml-q3") {
+    if (mode == "ml") {
+      myPlan = setupProfileQueryPlan(mode, "", cataLog, planNodeIdGenerator);
+
+      // } else if (model == "df") {
+      // } else if (model == "two-tower") {
+      // } else if (model == "llm") {
+      // } else if (model == "fraud") {
+      // } else if (model == "ml-q1") {
+      // } else if (model == "ml-q2") {
+      // } else if (model == "ml-q3") {
     } else {
-      throw std::runtime_error(fmt::format("Non-supported model: {}", model));
+      throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
+
+    float executeTime =
+        runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+
+    std::cout << "[INFO] Execution time: " << executeTime << std::endl;
 
     std::cout << "Success" << std::endl;
 
     return;
 
-    myPlan = setupQueryPlan(
-        model,
-        computationStr,
-        inputFilePaths,
-        inputTempFiles,
-        numSamples,
-        featureSize,
-        cataLog,
-        planNodeIdGenerator);
+    // myPlan = setupProfileQueryPlan(
+    //     model,
+    //     computationStr,
+    //     inputFilePaths,
+    //     inputTempFiles,
+    //     numSamples,
+    //     featureSize,
+    //     cataLog,
+    //     planNodeIdGenerator);
 
-    // Get the logical plan
-    auto planNode = myPlan.planNode();
+    // // Get the logical plan
+    // auto planNode = myPlan.planNode();
 
-    // Create ruleManager
-    RuleManager ruleManager;
-    // Create planState
-    PlanState planState(ruleManager);
+    // // Create ruleManager
+    // RuleManager ruleManager;
+    // // Create planState
+    // PlanState planState(ruleManager);
 
-    planState.getPossibleActions(planNode, cataLog);
+    // planState.getPossibleActions(planNode, cataLog);
 
-    std::cout << "[INFO] All possible actions:" << std::endl;
-    for (auto entry : planState.actionsPair) {
-      std::cout << entry.first << ": " << entry.second << std::endl;
-    }
+    // std::cout << "[INFO] All possible actions:" << std::endl;
+    // for (auto entry : planState.actionsPair) {
+    //   std::cout << entry.first << ": " << entry.second << std::endl;
+    // }
 
-    std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
-    std::pair<std::string, std::string> testAction;
+    // std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
+    // std::pair<std::string, std::string> testAction;
 
-    if (queryOptType == "fusion") {
-      testAction = std::make_pair(
-          "relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(ROW[\"user_tower_features\"]))))))))))))",
-          "MultiLayerUDF2TorchNNRewriteAction");
+    // if (queryOptType == "fusion") {
+    //   testAction = std::make_pair(
+    //       "relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(ROW[\"user_tower_features\"]))))))))))))",
+    //       "MultiLayerUDF2TorchNNRewriteAction");
 
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
+    //   planState.update(myPlan, cataLog);
 
-      planNode = myPlan.planNode();
+    //   planNode = myPlan.planNode();
 
-      planState.getPossibleActions(planNode, cataLog);
+    //   planState.getPossibleActions(planNode, cataLog);
 
-      // // std::cout << "[INFO] All possible actions:" << std::endl;
-      // // for (auto entry : planState.actionsPair) {
-      // //   std::cout << entry.first << ": " << entry.second << std::endl;
-      // // }
+    //   // // std::cout << "[INFO] All possible actions:" << std::endl;
+    //   // // for (auto entry : planState.actionsPair) {
+    //   // //   std::cout << entry.first << ": " << entry.second << std::endl;
+    //   // // }
 
-      testAction = std::make_pair(
-          "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(ROW[\"movie_tower_features\"]))))))))))))",
-          "MultiLayerUDF2TorchNNRewriteAction");
+    //   testAction = std::make_pair(
+    //       "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(ROW[\"movie_tower_features\"]))))))))))))",
+    //       "MultiLayerUDF2TorchNNRewriteAction");
 
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
+    //   planState.update(myPlan, cataLog);
 
-      planNode = myPlan.planNode();
+    //   planNode = myPlan.planNode();
 
-      planState.getPossibleActions(planNode, cataLog);
+    //   planState.getPossibleActions(planNode, cataLog);
 
-      // testAction =
-      // std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please
-      // summarize the users description. The following are the average ratings
-      // given by users to movies in each genre.\")",
-      // "MLDecompositionPushdownRewriteAction");
+    // testAction =
+    // std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please
+    // summarize the users description. The following are the average ratings
+    // given by users to movies in each genre.\")",
+    // "MLDecompositionPushdownRewriteAction");
 
-      // planState.takeAction(
-      //           planNode,
-      //           nullptr,
-      //           maker,
-      //           myPlan,
-      //           pool_,
-      //           planNodeIdGenerator,
-      //           {testAction},
-      //           cataLog);
+    // planState.takeAction(
+    //           planNode,
+    //           nullptr,
+    //           maker,
+    //           myPlan,
+    //           pool_,
+    //           planNodeIdGenerator,
+    //           {testAction},
+    //           cataLog);
 
-      // planState.update(myPlan, cataLog);
-      // planNode = myPlan.planNode();
-    }
-    if (queryOptType == "mlq2-mul2join" || queryOptType == "mlq2-optimized") {
-      testAction =
-          std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
+    // planState.update(myPlan, cataLog);
+    // planNode = myPlan.planNode();
+    // }
+    // if (queryOptType == "mlq2-mul2join" || queryOptType == "mlq2-optimized")
+    // {
+    //   testAction =
+    //       std::make_pair("mat_mul10_1",
+    //       "Mul2JoinAggHorizontalRewriteAction");
 
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
-      planNode = myPlan.planNode();
-      planState.getPossibleActions(planNode, cataLog);
-    }
-    if (queryOptType == "mlq2-fusion" || queryOptType == "mlq2-optimized") {
-      testAction = std::make_pair(
-          "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(ROW[\"top_mlp_input\"])))))))))",
-          "MultiLayerUDF2TorchNNRewriteAction");
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    //   planState.update(myPlan, cataLog);
+    //   planNode = myPlan.planNode();
+    //   planState.getPossibleActions(planNode, cataLog);
+    // }
+    // if (queryOptType == "mlq2-fusion" || queryOptType == "mlq2-optimized") {
+    //   testAction = std::make_pair(
+    //       "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(ROW[\"top_mlp_input\"])))))))))",
+    //       "MultiLayerUDF2TorchNNRewriteAction");
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
-      planNode = myPlan.planNode();
-      planState.getPossibleActions(planNode, cataLog);
+    //   planState.update(myPlan, cataLog);
+    //   planNode = myPlan.planNode();
+    //   planState.getPossibleActions(planNode, cataLog);
 
-      // testAction = std::make_pair(
-      //     "argmax(softmax(mat_vector_add9_8(mat_mul9_7(relu(mat_vector_add9_6(mat_mul9_5(relu(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))))))))",
-      //     "MultiLayerUDF2TorchNNRewriteAction");
-      testAction = std::make_pair(
-          "argmax(softmax(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))",
-          "MultiLayerUDF2TorchNNRewriteAction");
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    //   // testAction = std::make_pair(
+    //   //
+    //   "argmax(softmax(mat_vector_add9_8(mat_mul9_7(relu(mat_vector_add9_6(mat_mul9_5(relu(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))))))))",
+    //   //     "MultiLayerUDF2TorchNNRewriteAction");
+    //   testAction = std::make_pair(
+    //       "argmax(softmax(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))",
+    //       "MultiLayerUDF2TorchNNRewriteAction");
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
-      planNode = myPlan.planNode();
-      planState.getPossibleActions(planNode, cataLog);
+    //   planState.update(myPlan, cataLog);
+    //   planNode = myPlan.planNode();
+    //   planState.getPossibleActions(planNode, cataLog);
 
-      testAction = std::make_pair(
-          "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(ROW[\"m_trending_features\"]))))))))))",
-          "MultiLayerUDF2TorchNNRewriteAction");
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    //   testAction = std::make_pair(
+    //       "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(ROW[\"m_trending_features\"]))))))))))",
+    //       "MultiLayerUDF2TorchNNRewriteAction");
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
-      planNode = myPlan.planNode();
-      planState.getPossibleActions(planNode, cataLog);
+    //   planState.update(myPlan, cataLog);
+    //   planNode = myPlan.planNode();
+    //   planState.getPossibleActions(planNode, cataLog);
 
-      testAction = std::make_pair(
-          "relu(mat_vector_add11_2(mat_mul11_1(ROW[\"mt_relevance_score\"])))",
-          "MultiLayerUDF2TorchNNRewriteAction");
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    //   testAction = std::make_pair(
+    //       "relu(mat_vector_add11_2(mat_mul11_1(ROW[\"mt_relevance_score\"])))",
+    //       "MultiLayerUDF2TorchNNRewriteAction");
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
-      planNode = myPlan.planNode();
-      planState.getPossibleActions(planNode, cataLog);
-    }
+    //   planState.update(myPlan, cataLog);
+    //   planNode = myPlan.planNode();
+    //   planState.getPossibleActions(planNode, cataLog);
+    // }
 
-    if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized") {
-      if (queryOptType == "mlq3-mul2join") {
-        testAction =
-            std::make_pair("mat_mul20_1", "Mul2JoinAggHorizontalRewriteAction");
-      } else if (queryOptType == "mlq3-optimized") {
-        testAction =
-            std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
-      }
+    // if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized")
+    // {
+    //   if (queryOptType == "mlq3-mul2join") {
+    //     testAction =
+    //         std::make_pair("mat_mul20_1",
+    //         "Mul2JoinAggHorizontalRewriteAction");
+    //   } else if (queryOptType == "mlq3-optimized") {
+    //     testAction =
+    //         std::make_pair("mat_mul10_1",
+    //         "Mul2JoinAggHorizontalRewriteAction");
+    //   }
 
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
-      planNode = myPlan.planNode();
-      planState.getPossibleActions(planNode, cataLog);
-    }
+    //   planState.update(myPlan, cataLog);
+    //   planNode = myPlan.planNode();
+    //   planState.getPossibleActions(planNode, cataLog);
+    // }
 
-    if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized") {
-      testAction = std::make_pair(
-          "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(ROW[\"model_features\"])))))))))",
-          "MultiLayerUDF2TorchNNRewriteAction");
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    // if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized") {
+    //   testAction = std::make_pair(
+    //       "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(ROW[\"model_features\"])))))))))",
+    //       "MultiLayerUDF2TorchNNRewriteAction");
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
-      planNode = myPlan.planNode();
-      planState.getPossibleActions(planNode, cataLog);
+    //   planState.update(myPlan, cataLog);
+    //   planNode = myPlan.planNode();
+    //   planState.getPossibleActions(planNode, cataLog);
 
-      testAction = std::make_pair(
-          "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(ROW[\"model_features\"])))))))))",
-          "MultiLayerUDF2TorchNNRewriteAction");
-      planState.takeAction(
-          planNode,
-          nullptr,
-          maker,
-          myPlan,
-          pool_,
-          planNodeIdGenerator,
-          {testAction},
-          cataLog);
+    //   testAction = std::make_pair(
+    //       "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(ROW[\"model_features\"])))))))))",
+    //       "MultiLayerUDF2TorchNNRewriteAction");
+    //   planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       myPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
 
-      planState.update(myPlan, cataLog);
-      planNode = myPlan.planNode();
-      planState.getPossibleActions(planNode, cataLog);
-    }
+    //   planState.update(myPlan, cataLog);
+    //   planNode = myPlan.planNode();
+    //   planState.getPossibleActions(planNode, cataLog);
+    // }
 
-    std::cout << "[INFO] All possible actions:" << std::endl;
-    for (auto entry : planState.actionsPair) {
-      std::cout << entry.first << ": " << entry.second << std::endl;
-    }
+    // std::cout << "[INFO] All possible actions:" << std::endl;
+    // for (auto entry : planState.actionsPair) {
+    //   std::cout << entry.first << ": " << entry.second << std::endl;
+    // }
 
-    std::cout << "[DEBUG] final executed plan: \n"
-              << myPlan.planNode()->toString(true, true) << std::endl;
+    // std::cout << "[DEBUG] final executed plan: \n"
+    //           << myPlan.planNode()->toString(true, true) << std::endl;
 
-    float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 2, verbose);
+    // float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 2,
+    // verbose);
 
-    std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+    // std::cout << "[INFO] Execution time: " << executeTime << std::endl;
     // auto serializedPlan = myPlan.planNode()->serialize();
 
     // std::cout << "[DEBUG] serialized plan: \n" << serializedPlan <<
@@ -997,54 +1157,48 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
   static inline int queryPlanCacheId_ = 0;
   std::map<int, folly::dynamic> queryPlanCaches_;
+  static inline int modelGroupId_ = 0;
 };
 
-DEFINE_string(mode, "mcts", "Mode: mcts or benchmark");
+DEFINE_string(mode, "ml", "Mode: ml");
 DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower, llm");
 DEFINE_bool(rewrite, true, "Whether  rewrite");
 DEFINE_int32(num_repeat, 1, "Number of repeat run");
-DEFINE_int32(feature_size, 1000, "FFNN Feature size");
-DEFINE_int32(num_sample, 1000, "Number of samples");
+DEFINE_int32(user_feature_size, 256, "User ffnn feature size");
+DEFINE_int32(movie_feature_size, 256, "Movie ffnn feature size");
+DEFINE_int32(num_user, 1000, "Number of user");
+DEFINE_int32(num_movie, 1000, "Number of movie");
+DEFINE_int32(num_tag, 1000, "Number of tag");
 DEFINE_int32(num_driver, 8, "Number of drivers");
 DEFINE_int32(verbose, 2, "Verbose");
-DEFINE_int32(block_size, 256, "Block Size");
-DEFINE_bool(cost, false, "Whether get cost");
 
 int main(int argc, char** argv) {
   memory::MemoryManager::initialize({});
   folly::init(&argc, &argv, false);
-  // gflags::ParseCommandLineFlags(&argc, &argv, true);
   std::string mode = FLAGS_mode;
   std::string model = FLAGS_model;
 
   bool rewrite = FLAGS_rewrite;
   int repeatRun = FLAGS_num_repeat;
-  int featureSize = FLAGS_feature_size;
-  int numSample = FLAGS_num_sample;
+  int userFeatureSize = FLAGS_user_feature_size;
+  int movieFeatureSize = FLAGS_movie_feature_size;
+  int numUser = FLAGS_num_user;
+  int numMovie = FLAGS_num_movie;
+  int numTag = FLAGS_num_tag;
   int numDriver = FLAGS_num_driver;
   int verbose = FLAGS_verbose;
-  int blockSize = FLAGS_block_size;
-  bool getCost = FLAGS_cost;
   IntegratedMCTSTest demo;
 
-  // available single benchmark mode: mul2joinAgg, udf2torchNN,
-  // mul2joinAggHorizontal
-  if (mode == "mcts") {
-    demo.runProfile(
-        model, featureSize, numSample, repeatRun, blockSize, verbose);
-  } else {
-    throw std::runtime_error("Unsupported mode: " + mode);
-    // Benchmark a single rewrite action
-    // demo.testSingleRewrite(
-    //     model,
-    //     rewrite,
-    //     repeatRun,
-    //     featureSize,
-    //     numSample,
-    //     numDriver,
-    //     mode,
-    //     blockSize,
-    //     verbose,
-    //     getCost);
+  std::vector<int> numberOfTuples;
+  std::vector<int> dummyFeatureSizes;
+
+  if (model == "ml") {
+    numberOfTuples.push_back(numUser);
+    numberOfTuples.push_back(numMovie);
+    numberOfTuples.push_back(numTag);
+    dummyFeatureSizes.push_back(userFeatureSize);
+    dummyFeatureSizes.push_back(movieFeatureSize);
   }
+
+  demo.runProfile(mode, numberOfTuples, dummyFeatureSizes, numDriver, repeatRun, verbose);
 }

@@ -196,7 +196,7 @@ class CataLog {
   void setFileSchema(core::PlanNodeId p, RowTypePtr schema) {
     fileSchemaMap[p] = schema;
   }
-  
+
   // Get the schema for a given PlanNodeId
   RowTypePtr getFileSchema(core::PlanNodeId p) {
     auto it = fileSchemaMap.find(p);
@@ -206,7 +206,7 @@ class CataLog {
       return nullptr;
     }
   }
-  
+
   // Get the map of PlanNodeId to schema
   std::map<core::PlanNodeId, RowTypePtr> getFileSchemaMap() {
     return fileSchemaMap;
@@ -301,6 +301,79 @@ class CataLog {
     sourceMap.erase(name);
   }
 
+  void registerDataSrc(
+      std::string name,
+      std::vector<std::shared_ptr<TempFilePath>> filePath,
+      RowTypePtr schema) {
+    auto it = registeredDataSrcFiles.find(name);
+    if (it != registeredDataSrcFiles.end()) {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] name: {} already exists in registeredDataSrcFiles", name);
+    } else {
+      std::vector<std::string> files;
+      for (auto& path : filePath) {
+        preserveTempFilePaths.push_back(path);
+        files.push_back(path->path);
+      }
+      registeredDataSrcFiles[name] = files;
+      registeredDataSrcFormat[name] = dwio::common::FileFormat::DWRF;
+      registeredDataSrcSchema[name] = schema;
+    }
+  }
+
+  void registerDataSrc(std::string name, std::vector<std::string> filePath,
+                              dwio::common::FileFormat format,
+                              RowTypePtr schema) {
+    auto it = registeredDataSrcFiles.find(name);
+    if (it != registeredDataSrcFiles.end()) {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] name: {} already exists in registeredDataSrcFiles", name);
+    } else {
+      registeredDataSrcFiles[name] = filePath;
+      registeredDataSrcFormat[name] = format;
+      registeredDataSrcSchema[name] = schema;
+    }
+  }
+  
+  std::vector<std::string> getRegisteredDataSrcFiles(std::string name) {
+    auto it = registeredDataSrcFiles.find(name);
+    if (it != registeredDataSrcFiles.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] name: {} not exist in registeredDataSrcFiles", name);
+      return {};
+    }
+  }
+
+  dwio::common::FileFormat getRegisteredDataSrcFormat(std::string name) {
+    auto it = registeredDataSrcFormat.find(name);
+    if (it != registeredDataSrcFormat.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] name: {} not exist in registeredDataSrcFormat", name);
+      return dwio::common::FileFormat::DWRF;
+    }
+  }
+
+  RowTypePtr getRegisteredDataSrcSchema(std::string name) {
+    auto it = registeredDataSrcSchema.find(name);
+    if (it != registeredDataSrcSchema.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] name: {} not exist in registeredDataSrcSchema", name);
+      return nullptr;
+    }
+  }
+
+  void clearRegisteredDataSrc() {
+    registeredDataSrcFiles.clear();
+    registeredDataSrcFormat.clear();
+    registeredDataSrcSchema.clear();
+  }
+
   std::shared_ptr<Source> getSource(std::string srcName) {
     auto it = sourceMap.find(srcName);
     if (it != sourceMap.end()) {
@@ -340,6 +413,11 @@ class CataLog {
   std::map<core::PlanNodeId, RowTypePtr> fileSchemaMap;
   std::unordered_map<std::string, std::shared_ptr<Source>> sourceMap;
   std::vector<std::shared_ptr<TempFilePath>> preserveTempFilePaths;
+  std::unordered_map<std::string, std::vector<std::string>>
+      registeredDataSrcFiles;
+  std::unordered_map<std::string, dwio::common::FileFormat>
+      registeredDataSrcFormat;
+  std::unordered_map<std::string, RowTypePtr> registeredDataSrcSchema;
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(
