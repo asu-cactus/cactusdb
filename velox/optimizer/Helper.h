@@ -536,4 +536,24 @@ std::vector<RowVectorPtr> splitRowVectorIntoBatches(
     return batches;
 }
 
+std::vector<std::shared_ptr<TempFilePath>> splitRowVectorIntoBatchFiles(
+    RowVectorPtr inputVector, size_t batchSize) {
+
+    optimization::MyFileTest myFile;
+    
+    // Split the input RowVector into batches
+    auto batches = splitRowVectorIntoBatches(inputVector, batchSize);
+
+    // Result vector to hold all the batch file paths
+    std::vector<std::shared_ptr<TempFilePath>> batchFiles;
+
+    // Write each batch to a temporary file
+    for (size_t i = 0; i < batches.size(); ++i) {
+        auto file = TempFilePath::create();
+        myFile.writeToFile(file->path, {batches[i]});
+        batchFiles.push_back(file);
+    }
+    return batchFiles;
+}
+
 } // namespace optimization
