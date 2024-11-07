@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include "velox/ml_functions/tests/MLTestUtility.h"
 
 PlanBuilder setupMovielensDBQuery(
     std::string queryType,
@@ -1387,4 +1388,156 @@ PlanBuilder setupMovielensDBQuery(
   }
 
   return queryPlan;
+};
+
+std::string sampleUserMovieFilterExpr(std::string filterTable) {
+  unsigned timestampSeed =
+      std::chrono::system_clock::now().time_since_epoch().count();
+  RandomSampler randomSampler = RandomSampler(timestampSeed);
+  std::vector<std::string> predefinedUserFilterExprs = {
+      "u_gender = 'M'",
+      "u_gender = 'F'",
+      "u_age > 25",
+      "u_age <= 40",
+      "u_age > 20 AND u_age < 35",
+      "u_age >= 50 AND u_gender = 'M'",
+      "u_gender = 'F' AND u_occupation < 10",
+      "u_occupation > 15",
+      "u_occupation >= 5 AND u_occupation <= 10 AND u_gender = 'M'",
+      "u_zipcode = '94043'",
+      "u_zipcode = '80213'",
+      "u_zipcode = '94306' AND u_age < 30",
+      "u_age > 30 AND u_gender = 'F' AND u_zipcode = '80212'",
+      "u_gender = 'M' AND u_occupation = 1",
+      "u_age > 40 AND u_occupation = 10",
+      "u_gender = 'F' AND u_age < 50 AND u_occupation >= 5",
+      "u_age > 20 AND u_age < 60 AND (u_zipcode = '94043' OR u_zipcode = '94305' OR u_zipcode = '12301')",
+      "u_occupation = 3 AND u_gender = 'M'",
+      "u_age < 25 AND u_zipcode = '94309'",
+      "u_age >= 35 AND u_occupation < 8 AND u_gender = 'F'",
+      "u_zipcode = '80212' AND u_occupation >= 0 AND u_occupation <= 5",
+      "u_age > 18 AND u_age < 25 AND (u_zipcode = '94301' OR u_zipcode = '80213')",
+      "u_gender = 'M' AND u_age > 60 AND u_occupation > 15",
+      "u_zipcode = '94043' AND u_occupation = 0",
+      "u_age >= 30 AND u_age <= 40 AND u_gender = 'F' AND u_zipcode = '94306'"};
+  std::vector<std::string> predefinedMovieFilterExprs = {
+      "m_genres = 'Action'",
+      "m_genres = 'Drama' AND m_vote_average > 4.0",
+      "m_spoken_language = 'English'",
+      "m_spoken_language = 'Japanese' AND m_popularity > 7.5",
+      "m_popularity > 5.0",
+      "m_popularity < 3.0 AND m_genres = 'Horror'",
+      "m_vote_average >= 3.5",
+      "m_vote_average <= 2.0 AND m_genres = 'Comedy'",
+      "m_vote_count > 500",
+      "m_vote_count < 100 AND m_spoken_language = 'French'",
+      "m_genres = 'Sci-Fi' AND m_popularity > 6.0",
+      "m_genres = 'Romance' AND m_vote_average >= 4.5",
+      "m_spoken_language = 'Spanish' AND m_vote_count >= 300",
+      "m_popularity >= 8.0 AND m_vote_average >= 4.0",
+      "m_genres = 'Animation' AND m_vote_count < 200",
+      "m_spoken_language = 'Mandarin' AND m_popularity > 4.5",
+      "m_vote_average > 3.0 AND m_spoken_language = 'German'",
+      "m_genres = 'Western' AND m_vote_count >= 400",
+      "m_genres = 'Thriller' AND m_popularity < 5.0",
+      "m_genres = 'Fantasy' AND m_vote_average < 2.5",
+      "m_vote_average > 4.0 AND m_spoken_language = 'Italian'",
+      "m_genres = 'Film-Noir' AND m_vote_count < 300",
+      "m_popularity > 9.0 AND m_vote_count > 900",
+      "m_genres = 'Adventure' AND m_spoken_language = 'English'",
+      "m_popularity < 1.0 AND m_genres = 'Documentary'",
+      "m_vote_count >= 100 AND m_vote_average < 1.5",
+      "m_genres = 'Musical' AND m_vote_count > 150 AND m_popularity > 6.0",
+      "m_spoken_language = 'Korean' AND m_popularity > 7.0 AND m_vote_average >= 3.5",
+      "m_genres = 'War' AND m_vote_average <= 2.0 AND m_vote_count > 200",
+      "m_spoken_language = 'French' AND m_vote_average > 4.0",
+      "m_vote_average = 5.0 AND m_popularity >= 9.0",
+      "m_vote_count = 1000 AND m_spoken_language = 'English'"};
+  std::vector<std::string> sampleFilterExprs;
+  if (filterTable == "user") {
+    sampleFilterExprs = predefinedUserFilterExprs;
+  } else if (filterTable == "movie") {
+    sampleFilterExprs = predefinedMovieFilterExprs;
+  } else if (filterTable == "movie_user") {
+    sampleFilterExprs = predefinedUserFilterExprs;
+    sampleFilterExprs.insert(
+        sampleFilterExprs.end(), predefinedMovieFilterExprs.begin(),
+        predefinedMovieFilterExprs.end());
+  } else {
+    throw std::invalid_argument("Invalid table for sampling filter expression: " + filterTable);
+  }
+  return randomSampler.sampleFromSets(1, sampleFilterExprs)[0];
+}
+
+std::string sampleUserFilterExpr() {
+  unsigned timestampSeed =
+      std::chrono::system_clock::now().time_since_epoch().count();
+  RandomSampler randomSampler = RandomSampler(timestampSeed);
+  std::vector<std::string> predefinedUserFilterExprs = {
+      "u_gender = 'M'",
+      "u_gender = 'F'",
+      "u_age > 25",
+      "u_age <= 40",
+      "u_age > 20 AND u_age < 35",
+      "u_age >= 50 AND u_gender = 'M'",
+      "u_gender = 'F' AND u_occupation < 10",
+      "u_occupation > 15",
+      "u_occupation >= 5 AND u_occupation <= 10 AND u_gender = 'M'",
+      "u_zipcode = '94043'",
+      "u_zipcode = '80213'",
+      "u_zipcode = '94306' AND u_age < 30",
+      "u_age > 30 AND u_gender = 'F' AND u_zipcode = '80212'",
+      "u_gender = 'M' AND u_occupation = 1",
+      "u_age > 40 AND u_occupation = 10",
+      "u_gender = 'F' AND u_age < 50 AND u_occupation >= 5",
+      "u_age > 20 AND u_age < 60 AND (u_zipcode = '94043' OR u_zipcode = '94305' OR u_zipcode = '12301')",
+      "u_occupation = 3 AND u_gender = 'M'",
+      "u_age < 25 AND u_zipcode = '94309'",
+      "u_age >= 35 AND u_occupation < 8 AND u_gender = 'F'",
+      "u_zipcode = '80212' AND u_occupation >= 0 AND u_occupation <= 5",
+      "u_age > 18 AND u_age < 25 AND (u_zipcode = '94301' OR u_zipcode = '80213')",
+      "u_gender = 'M' AND u_age > 60 AND u_occupation > 15",
+      "u_zipcode = '94043' AND u_occupation = 0",
+      "u_age >= 30 AND u_age <= 40 AND u_gender = 'F' AND u_zipcode = '94306'"};
+  return randomSampler.sampleFromSets(1, predefinedUserFilterExprs)[0];
+};
+
+std::string sampleMovieFilterExpr() {
+  unsigned timestampSeed =
+      std::chrono::system_clock::now().time_since_epoch().count();
+  RandomSampler randomSampler = RandomSampler(timestampSeed);
+  std::vector<std::string> predefinedMovieFilterExprs = {
+      "m_genres = 'Action'",
+      "m_genres = 'Drama' AND m_vote_average > 4.0",
+      "m_spoken_language = 'English'",
+      "m_spoken_language = 'Japanese' AND m_popularity > 7.5",
+      "m_popularity > 5.0",
+      "m_popularity < 3.0 AND m_genres = 'Horror'",
+      "m_vote_average >= 3.5",
+      "m_vote_average <= 2.0 AND m_genres = 'Comedy'",
+      "m_vote_count > 500",
+      "m_vote_count < 100 AND m_spoken_language = 'French'",
+      "m_genres = 'Sci-Fi' AND m_popularity > 6.0",
+      "m_genres = 'Romance' AND m_vote_average >= 4.5",
+      "m_spoken_language = 'Spanish' AND m_vote_count >= 300",
+      "m_popularity >= 8.0 AND m_vote_average >= 4.0",
+      "m_genres = 'Animation' AND m_vote_count < 200",
+      "m_spoken_language = 'Mandarin' AND m_popularity > 4.5",
+      "m_vote_average > 3.0 AND m_spoken_language = 'German'",
+      "m_genres = 'Western' AND m_vote_count >= 400",
+      "m_genres = 'Thriller' AND m_popularity < 5.0",
+      "m_genres = 'Fantasy' AND m_vote_average < 2.5",
+      "m_vote_average > 4.0 AND m_spoken_language = 'Italian'",
+      "m_genres = 'Film-Noir' AND m_vote_count < 300",
+      "m_popularity > 9.0 AND m_vote_count > 900",
+      "m_genres = 'Adventure' AND m_spoken_language = 'English'",
+      "m_popularity < 1.0 AND m_genres = 'Documentary'",
+      "m_vote_count >= 100 AND m_vote_average < 1.5",
+      "m_genres = 'Musical' AND m_vote_count > 150 AND m_popularity > 6.0",
+      "m_spoken_language = 'Korean' AND m_popularity > 7.0 AND m_vote_average >= 3.5",
+      "m_genres = 'War' AND m_vote_average <= 2.0 AND m_vote_count > 200",
+      "m_spoken_language = 'French' AND m_vote_average > 4.0",
+      "m_vote_average = 5.0 AND m_popularity >= 9.0",
+      "m_vote_count = 1000 AND m_spoken_language = 'English'"};
+  return randomSampler.sampleFromSets(1, predefinedMovieFilterExprs)[0];
 };

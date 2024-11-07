@@ -438,43 +438,33 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return inputArrayVector;
   }
 
-  void registerDecisionForestFunctions() {
-    std::cout << "To register function for TreePrediction" << std::endl;
+  std::vector<std::vector<int>> readModelStructureFromFile(
+      const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file) {
+      std::cerr << "Error opening file!" << std::endl;
+      return {};
+    }
 
-    exec::registerVectorFunction(
-        "decision_tree_predict",
-        TreePrediction::signatures(),
-        std::make_unique<TreePrediction>(
-            0,
-            "/home/velox/resources/model/fraud_xgboost_10_8/0.txt",
-            28,
-            false));
+    std::vector<std::vector<int>> all_lines;
+    std::string line;
 
-    std::cout << "To register type for Tree" << std::endl;
+    while (std::getline(file, line)) {
+      std::istringstream iss(line);
+      std::vector<int> values;
+      int num;
 
-    registerCustomType("tree_type", std::make_unique<TreeTypeFactories>());
+      // Read each integer in the line
+      while (iss >> num) {
+        values.push_back(num);
+      }
 
-    std::cout << "To register function for VeloxTreePrediction" << std::endl;
+      // Store the line of integers in the main vector
+      all_lines.push_back(values);
+    }
 
-    exec::registerVectorFunction(
-        "velox_decision_tree_predict",
-        VeloxTreePrediction::signatures(),
-        std::make_unique<VeloxTreePrediction>(28));
-
-    std::cout << "To register function for VeloxTreeConstruction" << std::endl;
-
-    exec::registerVectorFunction(
-        "velox_decision_tree_construct",
-        VeloxTreeConstruction::signatures(),
-        std::make_unique<VeloxTreeConstruction>());
-
-    std::cout << "To register function for ForestPrediction" << std::endl;
-
-    exec::registerVectorFunction(
-        "decision_forest_predict",
-        TreePrediction::signatures(),
-        std::make_unique<ForestPrediction>(
-            "/home/velox/resources/model/fraud_xgboost_10_8", 28, true));
+    file.close();
+    return all_lines;
   }
 
   std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(
@@ -560,7 +550,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return "";
   }
 
-  std::string registerNNModel(std::vector<int> units, CataLog& catalog) {
+  std::string registerNNModel(
+      std::vector<int> units,
+      CataLog& catalog,
+      bool hasArgmax = false) {
     // use input size as random seed
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, units[0]);
     int modelGroupId = modelGroupId_++;
@@ -596,9 +589,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int layerSize = units[i];
       std::vector<std::vector<float>> weights =
           randomGenerator.genFloat2dVector(lastSize, layerSize);
-      std::vector<std::vector<float>> bias = randomGenerator.genFloat2dVector(1, layerSize);
-      std::string matMulName = fmt::format(
-          "mat_mul{}_{}", modelGroupId, functionId++);
+      std::vector<std::vector<float>> bias =
+          randomGenerator.genFloat2dVector(1, layerSize);
+      std::string matMulName =
+          fmt::format("mat_mul{}_{}", modelGroupId, functionId++);
       optimization::registerVectorFunction(
           matMulName,
           MatrixMultiply::signatures(),
@@ -607,8 +601,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           {},
           true,
           catalog);
-      std::string matVectorAddName = fmt::format(
-          "mat_vector_add{}_{}", modelGroupId, functionId++);
+      std::string matVectorAddName =
+          fmt::format("mat_vector_add{}_{}", modelGroupId, functionId++);
       optimization::registerVectorFunction(
           matVectorAddName,
           MatrixVectorAddition::signatures(),
@@ -617,7 +611,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           {},
           true,
           catalog);
-      modelComputationStr = matVectorAddName + "(" + matMulName + "(" + modelComputationStr + "))";
+      modelComputationStr = matVectorAddName + "(" + matMulName + "(" +
+          modelComputationStr + "))";
       if (i != units.size() - 1) {
         modelComputationStr = "relu(" + modelComputationStr + ")";
       } else {
@@ -625,7 +620,27 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       }
       lastSize = layerSize;
     }
+    if (hasArgmax) {
+      modelComputationStr = "argmax(" + modelComputationStr + ")";
+    }
     return modelComputationStr;
+  }
+
+  // Function to write a string to a file
+  void writeStringToFile(const std::string& str, const std::string& filename) {
+    // Open the file in write mode
+    std::ofstream outfile(filename);
+
+    // Check if the file opened successfully
+    if (outfile.is_open()) {
+      // Write the string to the file
+      outfile << str;
+
+      // Close the file
+      outfile.close();
+    } else {
+      std::cerr << "Error: Could not open the file for writing." << std::endl;
+    }
   }
 
   PlanBuilder setupProfileQueryPlan(
@@ -633,7 +648,24 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::string queryTemplate,
       CataLog& cataLog,
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
+    bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
+
+    unsigned timestampSeed =
+        std::chrono::system_clock::now().time_since_epoch().count();
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
+    randomGenerator.setIntRange(0, 1);
     PlanBuilder myPlan;
+
+    std::vector<std::vector<int>> userModelStructures =
+        readModelStructureFromFile(
+            "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+    std::vector<std::vector<int>> movieModelStructures =
+        readModelStructureFromFile(
+            "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
+    std::vector<std::vector<int>> tagModelStructures =
+        readModelStructureFromFile(
+            "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
+
     if (mode == "ml") {
       RowTypePtr userDataRowType = cataLog.getRegisteredDataSrcSchema("user");
       RowTypePtr movieDataRowType = cataLog.getRegisteredDataSrcSchema("movie");
@@ -654,49 +686,176 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::vector<std::string> movieRelevanceTagFilePaths =
           cataLog.getRegisteredDataSrcFiles("movie_relevance_tag");
 
-      if (queryTemplate == "" || queryTemplate == "userQuery") {
+      if (queryTemplate == "" || queryTemplate == "user") {
+        std::string userModel1ComputExpr = registerNNModel(
+            userModelStructures[0],
+            cataLog,
+            randomGenerator.genRandomIntValue());
+
         core::PlanNodeId readUserDataPlanNodeId;
         myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                      .tableScan(userDataRowType, {}, "")
-                     .capturePlanNodeId(readUserDataPlanNodeId);
+                     .capturePlanNodeId(readUserDataPlanNodeId)
+                     .project(
+                         {"u_user_id",
+                          "u_age",
+                          "u_gender",
+                          "u_occupation",
+                          "u_zipcode",
+                          fmt::format(userModel1ComputExpr, "u_features")});
+        if (generateFilter) {
+          std::string filterExpr = sampleUserMovieFilterExpr("user");
+          myPlan = myPlan.filter(filterExpr);
+        }
 
         cataLog.setIdAddressMap(
             readUserDataPlanNodeId,
             userFilePaths,
             dwio::common::FileFormat::DWRF);
       } else if (queryTemplate == "movie") {
+        std::string movieModel1ComputExpr = registerNNModel(
+            movieModelStructures[0],
+            cataLog,
+            randomGenerator.genRandomIntValue());
+
         core::PlanNodeId readMovieDataPlanNodeId;
         myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                      .tableScan(movieDataRowType, {}, "")
-                     .capturePlanNodeId(readMovieDataPlanNodeId);
+                     .capturePlanNodeId(readMovieDataPlanNodeId)
+                     .project(
+                         {"m_movie_id",
+                          "m_title",
+                          "m_genres",
+                          "m_spoken_languages",
+                          "m_popularity",
+                          "m_vote_average",
+                          "m_vote_count",
+                          "m_features",
+                          fmt::format(movieModel1ComputExpr, "m_features")});
+
+        if (generateFilter) {
+          std::string filterExpr = sampleUserMovieFilterExpr("movie");
+          myPlan = myPlan.filter(filterExpr);
+        }
 
         cataLog.setIdAddressMap(
             readMovieDataPlanNodeId,
             movieFilePaths,
             dwio::common::FileFormat::DWRF);
-      } else if (queryTemplate == "movie_relevance_tag") {
+      } else if (queryTemplate == "movie_tag") {
+        std::string tagModel1ComputExpr = registerNNModel(
+            tagModelStructures[0],
+            cataLog,
+            randomGenerator.genRandomIntValue());
+
         core::PlanNodeId readMovieRelevanceTagDataPlanNodeId;
-        myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                     .tableScan(movieRelevanceTagRowType, {}, "")
-                     .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId);
+        myPlan =
+            PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(movieRelevanceTagRowType, {}, "")
+                .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId)
+                .project(
+                    {"mt_movie_id",
+                     "mt_relevance_score",
+                     fmt::format(tagModel1ComputExpr, "mt_relevance_score")});
 
         cataLog.setIdAddressMap(
             readMovieRelevanceTagDataPlanNodeId,
             movieRelevanceTagFilePaths,
             dwio::common::FileFormat::DWRF);
+      } else if (queryTemplate == "movie_user") {
+        std::string userModel1ComputExpr = registerNNModel(
+            userModelStructures[0],
+            cataLog,
+            randomGenerator.genRandomIntValue());
+
+        core::PlanNodeId readUserDataPlanNodeId;
+        auto userPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                            .tableScan(userDataRowType, {}, "")
+                            .capturePlanNodeId(readUserDataPlanNodeId);
+
+        std::string movieModel1ComputExpr = registerNNModel(
+            movieModelStructures[0],
+            cataLog,
+            randomGenerator.genRandomIntValue());
+
+        core::PlanNodeId readMovieDataPlanNodeId;
+        auto moviePlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                             .tableScan(movieDataRowType, {}, "")
+                             .capturePlanNodeId(readMovieDataPlanNodeId);
+        RandomGenerator numModelGenerator = RandomGenerator(-1, 1, 0);
+        numModelGenerator.setIntRange(0, 2);
+        int numModel = numModelGenerator.genRandomIntValue();
+        myPlan = userPlan.nestedLoopJoin(
+            moviePlan.planNode(),
+            {"u_user_id",
+             "u_age",
+             "u_gender",
+             "u_occupation",
+             "u_zipcode",
+             "u_features",
+             "m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features"});
+
+        if (numModel == 1) {
+          myPlan = myPlan.project(
+              {"u_user_id",
+             "u_age",
+             "u_gender",
+             "u_occupation",
+             "u_zipcode",
+             "u_features",
+             "m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features",
+              fmt::format(userModel1ComputExpr, "u_features")});
+        } else if (numModel == 2) {
+          myPlan = myPlan.project(
+              {"u_user_id",
+               "u_age",
+               "u_gender",
+               "u_occupation",
+               "u_zipcode",
+               "u_features",
+               "m_movie_id",
+               "m_title",
+               "m_genres",
+               "m_spoken_languages",
+               "m_popularity",
+               "m_vote_average",
+               "m_vote_count",
+               "m_features",
+               fmt::format(userModel1ComputExpr, "u_features"),
+               fmt::format(movieModel1ComputExpr, "m_features")});
+        }
+
+        if (generateFilter) {
+          std::string filterExpr = sampleUserMovieFilterExpr("movie_user");
+          myPlan = myPlan.filter(filterExpr);
+        }
+
+        cataLog.setIdAddressMap(
+            readUserDataPlanNodeId,
+            userFilePaths,
+            dwio::common::FileFormat::DWRF);
+        cataLog.setIdAddressMap(
+            readMovieDataPlanNodeId,
+            movieFilePaths,
+            dwio::common::FileFormat::DWRF);
       } else {
-        throw std::runtime_error(fmt::format("Non-supported queryTemplate: {}", queryTemplate));
+        throw std::runtime_error(
+            fmt::format("Non-supported queryTemplate: {}", queryTemplate));
       }
-      // PlanNodeId readUserDataPlanNodeId;
-
-      // myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-      //              .tableScan(userDataRowType, {}, "")
-      //              .capturePlanNodeId(readUserDataPlanNodeId);
-
-      // cataLog.setIdAddressMap(
-      //     readUserDataPlanNodeId,
-      //     userFilePaths,
-      //     dwio::common::FileFormat::DWRF);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
@@ -713,10 +872,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       VectorMaker maker{pool_.get()};
       // it should contains the numbers: # of users, # of movies, # of relevance
       // tag
-      assert(numberOfTuples.size() == 3);
+      assert(numberOfTuples.size() == 3 && dummyFeatureSizes.size() == 2);
       int numUsers = numberOfTuples[0];
       int numMovies = numberOfTuples[1];
       int numRelevanceTags = numberOfTuples[2];
+      int userFeatureSize = dummyFeatureSizes[0];
+      int movieFeatureSize = dummyFeatureSizes[1];
       RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
       RandomSampler randomSampler = RandomSampler(0);
       // sample user data
@@ -737,14 +898,22 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
            "80219",
            "12301",
            "40201"});
+      std::vector<std::vector<float>> userFeatures =
+          randomGenerator.genFloat2dVector(numUsers, userFeatureSize);
 
       auto userDataRowVector = maker.rowVector(
-          {"u_user_id", "u_gender", "u_age", "u_occupation", "u_zipcode"},
+          {"u_user_id",
+           "u_gender",
+           "u_age",
+           "u_occupation",
+           "u_zipcode",
+           "u_features"},
           {maker.flatVector<int>(userIDs, INTEGER()),
            maker.flatVector<std::string>(userGender, VARCHAR()),
            maker.flatVector<int>(userAge, INTEGER()),
            maker.flatVector<int>(userOccupation, INTEGER()),
-           maker.flatVector<std::string>(userZipcode, VARCHAR())});
+           maker.flatVector<std::string>(userZipcode, VARCHAR()),
+           maker.arrayVector<float>(userFeatures, REAL())});
 
       MovieTitleGenerator movieTitleGenerator = MovieTitleGenerator(0);
       std::vector<int> movieIDs = randomGenerator.genIntRange(0, numMovies);
@@ -789,6 +958,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           randomGenerator.genFloat1dVector(numMovies);
       std::vector<int> movieVoteCount =
           randomGenerator.gen1DInt(numMovies, 0, 5000);
+      std::vector<std::vector<float>> movieFeatures =
+          randomGenerator.genFloat2dVector(numMovies, movieFeatureSize);
 
       auto movieDataRowVector = maker.rowVector(
           {"m_movie_id",
@@ -797,14 +968,16 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
            "m_spoken_languages",
            "m_popularity",
            "m_vote_average",
-           "m_vote_count"},
+           "m_vote_count",
+           "m_features"},
           {maker.flatVector<int>(movieIDs, INTEGER()),
            maker.flatVector<std::string>(movieTitle, VARCHAR()),
            maker.flatVector<std::string>(movieGenres, VARCHAR()),
            maker.flatVector<std::string>(movieSpokenLanguage, VARCHAR()),
            maker.flatVector<float>(moviePopularity, REAL()),
            maker.flatVector<float>(movieVoteAverage, REAL()),
-           maker.flatVector<int>(movieVoteCount, INTEGER())});
+           maker.flatVector<int>(movieVoteCount, INTEGER()),
+           maker.arrayVector<float>(movieFeatures, REAL())});
 
       randomGenerator.setFloatRange(0, 1);
       std::vector<std::vector<float>> movieRelevanceTags =
@@ -836,6 +1009,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
   void runProfile(
       std::string mode,
+      std::string queryTemplate,
       std::vector<int> numberOfTuples,
       std::vector<int> dummyFeatureSizes,
       // int featureSize,
@@ -855,7 +1029,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     generateDummyData(mode, numberOfTuples, dummyFeatureSizes, cataLog);
 
     if (mode == "ml") {
-      myPlan = setupProfileQueryPlan(mode, "", cataLog, planNodeIdGenerator);
+      myPlan = setupProfileQueryPlan(
+          mode, queryTemplate, cataLog, planNodeIdGenerator);
 
       // } else if (model == "df") {
       // } else if (model == "two-tower") {
@@ -868,8 +1043,20 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
 
+    std::cout << "[INFO] Executed Query Plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+
+    auto serializedPlan = myPlan.planNode()->serialize();
+    std::string queryOutPutPath =
+        "/home/velox/velox/optimizer/tests/serializedQueryPlan.txt";
+    writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
+
     float executeTime =
         runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+
+    std::string latencyOutPutPath =
+        "/home/velox/velox/optimizer/tests/executionLatency.txt";
+    writeStringToFile(std::to_string(executeTime), latencyOutPutPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
 
@@ -1161,6 +1348,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 };
 
 DEFINE_string(mode, "ml", "Mode: ml");
+DEFINE_string(
+    query_template,
+    "user",
+    "Query template: user, movie, movie_relevance_tag");
 DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower, llm");
 DEFINE_bool(rewrite, true, "Whether  rewrite");
 DEFINE_int32(num_repeat, 1, "Number of repeat run");
@@ -1176,6 +1367,7 @@ int main(int argc, char** argv) {
   memory::MemoryManager::initialize({});
   folly::init(&argc, &argv, false);
   std::string mode = FLAGS_mode;
+  std::string queryTemplate = FLAGS_query_template;
   std::string model = FLAGS_model;
 
   bool rewrite = FLAGS_rewrite;
@@ -1200,5 +1392,12 @@ int main(int argc, char** argv) {
     dummyFeatureSizes.push_back(movieFeatureSize);
   }
 
-  demo.runProfile(mode, numberOfTuples, dummyFeatureSizes, numDriver, repeatRun, verbose);
+  demo.runProfile(
+      mode,
+      queryTemplate,
+      numberOfTuples,
+      dummyFeatureSizes,
+      numDriver,
+      repeatRun,
+      verbose);
 }

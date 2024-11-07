@@ -349,6 +349,12 @@ std::string LoadBytesFromFile(const std::string& path) {
   return data;
 }
 
+bool stringToBool(const std::string& str) {
+    std::string lowerStr = str;
+    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
+    return (lowerStr == "true");
+}
+
 std::string getEnvVar(std::string const& key) {
   char const* val = getenv(key.c_str());
   return val == NULL ? std::string() : std::string(val);
