@@ -852,6 +852,149 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             readMovieDataPlanNodeId,
             movieFilePaths,
             dwio::common::FileFormat::DWRF);
+      } else if (queryTemplate == "movie_user_tag") {
+        std::string userModel1ComputExpr = registerNNModel(
+            userModelStructures[0],
+            cataLog,
+            randomGenerator.genRandomIntValue());
+
+        core::PlanNodeId readUserDataPlanNodeId;
+        auto userPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                            .tableScan(userDataRowType, {}, "")
+                            .capturePlanNodeId(readUserDataPlanNodeId);
+
+        std::string movieModel1ComputExpr = registerNNModel(
+            movieModelStructures[0],
+            cataLog,
+            randomGenerator.genRandomIntValue());
+
+        core::PlanNodeId readMovieDataPlanNodeId;
+        auto moviePlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                             .tableScan(movieDataRowType, {}, "")
+                             .capturePlanNodeId(readMovieDataPlanNodeId);
+
+        std::string tagModel1ComputExpr = registerNNModel(tagModelStructures[0],
+                                                          cataLog,
+                                                          randomGenerator.genRandomIntValue());
+
+        core::PlanNodeId readMovieRelevanceTagDataPlanNodeId;
+        auto tagPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                           .tableScan(movieRelevanceTagRowType, {}, "")
+                           .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId);
+
+        auto movieTagPlan = tagPlan.hashJoin(
+          {"mt_movie_id"}, 
+          {"m_movie_id"},
+          moviePlan.planNode(),
+          "",
+          {"m_movie_id",
+               "m_title",
+               "m_genres",
+               "m_spoken_languages",
+               "m_popularity",
+               "m_vote_average",
+               "m_vote_count",
+               "m_features",
+               "mt_relevance_score"}
+        );
+        
+        RandomGenerator numModelGenerator = RandomGenerator(-1, 1, 0);
+        numModelGenerator.setIntRange(0, 3);
+        int numModel = numModelGenerator.genRandomIntValue();
+        myPlan = userPlan.nestedLoopJoin(
+            movieTagPlan.planNode(),
+            {"u_user_id",
+             "u_age",
+             "u_gender",
+             "u_occupation",
+             "u_zipcode",
+             "u_features",
+             "m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features",
+             "mt_relevance_score"});
+
+        if (numModel == 1) {
+          myPlan = myPlan.project(
+              {"u_user_id",
+             "u_age",
+             "u_gender",
+             "u_occupation",
+             "u_zipcode",
+             "u_features",
+             "m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features",
+             "mt_relevance_score",
+              fmt::format(userModel1ComputExpr, "u_features")});
+        } else if (numModel == 2) {
+          myPlan = myPlan.project(
+              {"u_user_id",
+               "u_age",
+               "u_gender",
+               "u_occupation",
+               "u_zipcode",
+               "u_features",
+               "m_movie_id",
+               "m_title",
+               "m_genres",
+               "m_spoken_languages",
+               "m_popularity",
+               "m_vote_average",
+               "m_vote_count",
+               "m_features",
+               "mt_relevance_score",
+               fmt::format(userModel1ComputExpr, "u_features"),
+               fmt::format(movieModel1ComputExpr, "m_features")});
+        } else if (numModel == 3) {
+          myPlan = myPlan.project(
+              {"u_user_id",
+               "u_age",
+               "u_gender",
+               "u_occupation",
+               "u_zipcode",
+               "u_features",
+               "m_movie_id",
+               "m_title",
+               "m_genres",
+               "m_spoken_languages",
+               "m_popularity",
+               "m_vote_average",
+               "m_vote_count",
+               "m_features",
+               "mt_relevance_score",
+               fmt::format(userModel1ComputExpr, "u_features"),
+               fmt::format(movieModel1ComputExpr, "m_features"),
+               fmt::format(tagModel1ComputExpr, "mt_relevance_score")});
+        } 
+
+        if (generateFilter) {
+          std::string filterExpr = sampleUserMovieFilterExpr("movie_user");
+          myPlan = myPlan.filter(filterExpr);
+        }
+
+        cataLog.setIdAddressMap(
+            readUserDataPlanNodeId,
+            userFilePaths,
+            dwio::common::FileFormat::DWRF);
+        cataLog.setIdAddressMap(
+            readMovieDataPlanNodeId,
+            movieFilePaths,
+            dwio::common::FileFormat::DWRF);
+        cataLog.setIdAddressMap(
+            readMovieRelevanceTagDataPlanNodeId,
+            movieRelevanceTagFilePaths,
+            dwio::common::FileFormat::DWRF);
       } else {
         throw std::runtime_error(
             fmt::format("Non-supported queryTemplate: {}", queryTemplate));
@@ -1384,7 +1527,7 @@ int main(int argc, char** argv) {
   std::vector<int> numberOfTuples;
   std::vector<int> dummyFeatureSizes;
 
-  if (model == "ml") {
+  if (mode == "ml") {
     numberOfTuples.push_back(numUser);
     numberOfTuples.push_back(numMovie);
     numberOfTuples.push_back(numTag);
