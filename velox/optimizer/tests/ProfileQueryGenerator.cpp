@@ -53,6 +53,7 @@
 // Custom headers
 #include <json/json.h>
 #include "velox/cost_model/CostEstimator.h"
+#include "velox/cost_model/Stat.h"
 #include "velox/optimizer/Helper.h"
 #include "velox/optimizer/Mul2JoinAggRewriteAction.h"
 #include "velox/optimizer/PlanState.h"
@@ -686,6 +687,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::vector<std::string> movieRelevanceTagFilePaths =
           cataLog.getRegisteredDataSrcFiles("movie_relevance_tag");
 
+      std::pair<int, int> userStats = cataLog.getRegisteredDataSrcStats("user");
+      int userNumRows = userStats.first;
+      int userNumCols = userStats.second;
+      std::pair<int, int> movieStats =
+          cataLog.getRegisteredDataSrcStats("movie");
+      int movieNumRows = movieStats.first;
+      int movieNumCols = movieStats.second;
+      std::pair<int, int> movieRelevanceTagStats =
+          cataLog.getRegisteredDataSrcStats("movie_relevance_tag");
+      int movieRelevanceTagNumRows = movieRelevanceTagStats.first;
+      int movieRelevanceTagNumCols = movieRelevanceTagStats.second;
+
       if (queryTemplate == "" || queryTemplate == "user") {
         std::string userModel1ComputExpr = registerNNModel(
             userModelStructures[0],
@@ -712,6 +725,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             readUserDataPlanNodeId,
             userFilePaths,
             dwio::common::FileFormat::DWRF);
+        std::shared_ptr<OutputStat> userStats =
+            std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+        Source userSrc =
+            Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+        cataLog.addSource(std::make_shared<Source>(userSrc));
       } else if (queryTemplate == "movie") {
         std::string movieModel1ComputExpr = registerNNModel(
             movieModelStructures[0],
@@ -742,6 +760,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             readMovieDataPlanNodeId,
             movieFilePaths,
             dwio::common::FileFormat::DWRF);
+
+        std::shared_ptr<OutputStat> movieStats = std::make_shared<OutputStat>(
+            OutputStat(movieNumRows, movieNumCols));
+        Source movieSrc =
+            Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
+        cataLog.addSource(std::make_shared<Source>(movieSrc));
       } else if (queryTemplate == "movie_tag") {
         std::string tagModel1ComputExpr = registerNNModel(
             tagModelStructures[0],
@@ -762,6 +786,15 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             readMovieRelevanceTagDataPlanNodeId,
             movieRelevanceTagFilePaths,
             dwio::common::FileFormat::DWRF);
+
+        std::shared_ptr<OutputStat> movieRelevanceTagStats =
+            std::make_shared<OutputStat>(
+                OutputStat(movieRelevanceTagNumRows, movieRelevanceTagNumCols));
+        Source movieRelevanceTagSrc = Source(
+            readMovieRelevanceTagDataPlanNodeId,
+            Source::Type::FILE,
+            movieRelevanceTagStats);
+        cataLog.addSource(std::make_shared<Source>(movieRelevanceTagSrc));
       } else if (queryTemplate == "movie_user") {
         std::string userModel1ComputExpr = registerNNModel(
             userModelStructures[0],
@@ -805,20 +838,20 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         if (numModel == 1) {
           myPlan = myPlan.project(
               {"u_user_id",
-             "u_age",
-             "u_gender",
-             "u_occupation",
-             "u_zipcode",
-             "u_features",
-             "m_movie_id",
-             "m_title",
-             "m_genres",
-             "m_spoken_languages",
-             "m_popularity",
-             "m_vote_average",
-             "m_vote_count",
-             "m_features",
-              fmt::format(userModel1ComputExpr, "u_features")});
+               "u_age",
+               "u_gender",
+               "u_occupation",
+               "u_zipcode",
+               "u_features",
+               "m_movie_id",
+               "m_title",
+               "m_genres",
+               "m_spoken_languages",
+               "m_popularity",
+               "m_vote_average",
+               "m_vote_count",
+               "m_features",
+               fmt::format(userModel1ComputExpr, "u_features")});
         } else if (numModel == 2) {
           myPlan = myPlan.project(
               {"u_user_id",
@@ -852,6 +885,17 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             readMovieDataPlanNodeId,
             movieFilePaths,
             dwio::common::FileFormat::DWRF);
+
+        std::shared_ptr<OutputStat> userStats =
+            std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+        Source userSrc =
+            Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+        cataLog.addSource(std::make_shared<Source>(userSrc));
+        std::shared_ptr<OutputStat> movieStats = std::make_shared<OutputStat>(
+            OutputStat(movieNumRows, movieNumCols));
+        Source movieSrc =
+            Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
+        cataLog.addSource(std::make_shared<Source>(movieSrc));
       } else if (queryTemplate == "movie_user_tag") {
         std::string userModel1ComputExpr = registerNNModel(
             userModelStructures[0],
@@ -873,31 +917,32 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                              .tableScan(movieDataRowType, {}, "")
                              .capturePlanNodeId(readMovieDataPlanNodeId);
 
-        std::string tagModel1ComputExpr = registerNNModel(tagModelStructures[0],
-                                                          cataLog,
-                                                          randomGenerator.genRandomIntValue());
+        std::string tagModel1ComputExpr = registerNNModel(
+            tagModelStructures[0],
+            cataLog,
+            randomGenerator.genRandomIntValue());
 
         core::PlanNodeId readMovieRelevanceTagDataPlanNodeId;
-        auto tagPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                           .tableScan(movieRelevanceTagRowType, {}, "")
-                           .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId);
+        auto tagPlan =
+            PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(movieRelevanceTagRowType, {}, "")
+                .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId);
 
         auto movieTagPlan = tagPlan.hashJoin(
-          {"mt_movie_id"}, 
-          {"m_movie_id"},
-          moviePlan.planNode(),
-          "",
-          {"m_movie_id",
-               "m_title",
-               "m_genres",
-               "m_spoken_languages",
-               "m_popularity",
-               "m_vote_average",
-               "m_vote_count",
-               "m_features",
-               "mt_relevance_score"}
-        );
-        
+            {"mt_movie_id"},
+            {"m_movie_id"},
+            moviePlan.planNode(),
+            "",
+            {"m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features",
+             "mt_relevance_score"});
+
         RandomGenerator numModelGenerator = RandomGenerator(-1, 1, 0);
         numModelGenerator.setIntRange(0, 3);
         int numModel = numModelGenerator.genRandomIntValue();
@@ -922,21 +967,21 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         if (numModel == 1) {
           myPlan = myPlan.project(
               {"u_user_id",
-             "u_age",
-             "u_gender",
-             "u_occupation",
-             "u_zipcode",
-             "u_features",
-             "m_movie_id",
-             "m_title",
-             "m_genres",
-             "m_spoken_languages",
-             "m_popularity",
-             "m_vote_average",
-             "m_vote_count",
-             "m_features",
-             "mt_relevance_score",
-              fmt::format(userModel1ComputExpr, "u_features")});
+               "u_age",
+               "u_gender",
+               "u_occupation",
+               "u_zipcode",
+               "u_features",
+               "m_movie_id",
+               "m_title",
+               "m_genres",
+               "m_spoken_languages",
+               "m_popularity",
+               "m_vote_average",
+               "m_vote_count",
+               "m_features",
+               "mt_relevance_score",
+               fmt::format(userModel1ComputExpr, "u_features")});
         } else if (numModel == 2) {
           myPlan = myPlan.project(
               {"u_user_id",
@@ -976,7 +1021,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                fmt::format(userModel1ComputExpr, "u_features"),
                fmt::format(movieModel1ComputExpr, "m_features"),
                fmt::format(tagModel1ComputExpr, "mt_relevance_score")});
-        } 
+        }
 
         if (generateFilter) {
           std::string filterExpr = sampleUserMovieFilterExpr("movie_user");
@@ -995,6 +1040,25 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             readMovieRelevanceTagDataPlanNodeId,
             movieRelevanceTagFilePaths,
             dwio::common::FileFormat::DWRF);
+
+        std::shared_ptr<OutputStat> userStats =
+            std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+        Source userSrc =
+            Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+        cataLog.addSource(std::make_shared<Source>(userSrc));
+        std::shared_ptr<OutputStat> movieStats = std::make_shared<OutputStat>(
+            OutputStat(movieNumRows, movieNumCols));
+        Source movieSrc =
+            Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
+        cataLog.addSource(std::make_shared<Source>(movieSrc));
+        std::shared_ptr<OutputStat> movieRelevanceTagStats =
+            std::make_shared<OutputStat>(
+                OutputStat(movieRelevanceTagNumRows, movieRelevanceTagNumCols));
+        Source movieRelevanceTagSrc = Source(
+            readMovieRelevanceTagDataPlanNodeId,
+            Source::Type::FILE,
+            movieRelevanceTagStats);
+        cataLog.addSource(std::make_shared<Source>(movieRelevanceTagSrc));
       } else {
         throw std::runtime_error(
             fmt::format("Non-supported queryTemplate: {}", queryTemplate));
@@ -1133,20 +1197,33 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
       std::vector<std::shared_ptr<TempFilePath>> userFilePaths =
           splitRowVectorIntoBatchFiles(userDataRowVector, 1024);
+      std::pair<int, int> userStats =
+          std::make_pair(numUsers, userDataRowVector->childrenSize());
       cataLog.registerDataSrc(
-          "user", userFilePaths, asRowType(userDataRowVector->type()));
+          "user",
+          userFilePaths,
+          asRowType(userDataRowVector->type()),
+          userStats);
 
       std::vector<std::shared_ptr<TempFilePath>> movieFilePaths =
           splitRowVectorIntoBatchFiles(movieDataRowVector, 1024);
+      std::pair<int, int> movieStats =
+          std::make_pair(numMovies, movieDataRowVector->childrenSize());
       cataLog.registerDataSrc(
-          "movie", movieFilePaths, asRowType(movieDataRowVector->type()));
+          "movie",
+          movieFilePaths,
+          asRowType(movieDataRowVector->type()),
+          movieStats);
 
       std::vector<std::shared_ptr<TempFilePath>> movieRelevanceTagFilePaths =
           splitRowVectorIntoBatchFiles(movieRelevanceTagRowVector, 1024);
+      std::pair<int, int> movieRelevanceTagStats =
+          std::make_pair(numMovies, movieRelevanceTagRowVector->childrenSize());
       cataLog.registerDataSrc(
           "movie_relevance_tag",
           movieRelevanceTagFilePaths,
-          asRowType(movieRelevanceTagRowVector->type()));
+          asRowType(movieRelevanceTagRowVector->type()),
+          movieRelevanceTagStats);
     }
   }
 
@@ -1191,7 +1268,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     auto serializedPlan = myPlan.planNode()->serialize();
     std::string queryOutPutPath =
-        "/home/velox/velox/optimizer/tests/serializedQueryPlan.txt";
+        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+
+    augmentSerializedPlan(serializedPlan, cataLog);
     writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
     float executeTime =
@@ -1204,6 +1283,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
 
     std::cout << "Success" << std::endl;
+
+    std::cout << cataLog.getIdAddressMap() << std::endl;
 
     return;
 
