@@ -304,7 +304,8 @@ class CataLog {
   void registerDataSrc(
       std::string name,
       std::vector<std::shared_ptr<TempFilePath>> filePath,
-      RowTypePtr schema) {
+      RowTypePtr schema,
+      std::pair<int, int> stats) {
     auto it = registeredDataSrcFiles.find(name);
     if (it != registeredDataSrcFiles.end()) {
       LOG(FATAL) << fmt::format(
@@ -318,12 +319,14 @@ class CataLog {
       registeredDataSrcFiles[name] = files;
       registeredDataSrcFormat[name] = dwio::common::FileFormat::DWRF;
       registeredDataSrcSchema[name] = schema;
+      registeredDataSrcStats[name] = stats;
     }
   }
 
   void registerDataSrc(std::string name, std::vector<std::string> filePath,
                               dwio::common::FileFormat format,
-                              RowTypePtr schema) {
+                              RowTypePtr schema,
+                              std::pair<int, int> stats) {
     auto it = registeredDataSrcFiles.find(name);
     if (it != registeredDataSrcFiles.end()) {
       LOG(FATAL) << fmt::format(
@@ -332,6 +335,7 @@ class CataLog {
       registeredDataSrcFiles[name] = filePath;
       registeredDataSrcFormat[name] = format;
       registeredDataSrcSchema[name] = schema;
+      registeredDataSrcStats[name] = stats;
     }
   }
   
@@ -368,10 +372,22 @@ class CataLog {
     }
   }
 
+  std::pair<int, int> getRegisteredDataSrcStats(std::string name) {
+    auto it = registeredDataSrcStats.find(name);
+    if (it != registeredDataSrcStats.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] name: {} not exist in registeredDataSrcStats", name);
+      return std::make_pair(0, 0);
+    }
+  }
+
   void clearRegisteredDataSrc() {
     registeredDataSrcFiles.clear();
     registeredDataSrcFormat.clear();
     registeredDataSrcSchema.clear();
+    registeredDataSrcStats.clear();
   }
 
   std::shared_ptr<Source> getSource(std::string srcName) {
@@ -418,6 +434,8 @@ class CataLog {
   std::unordered_map<std::string, dwio::common::FileFormat>
       registeredDataSrcFormat;
   std::unordered_map<std::string, RowTypePtr> registeredDataSrcSchema;
+  std::unordered_map<std::string, std::pair<int, int>> registeredDataSrcStats;
+
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(

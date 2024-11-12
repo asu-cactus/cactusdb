@@ -17,10 +17,13 @@
 #include <iostream>
 #include <regex>
 #include <vector>
+#include "CataLog.h"
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
+
+using namespace facebook::velox::exec;
 
 namespace optimization {
 // Structure to represent the file structure with paths and schema
@@ -266,6 +269,81 @@ void replaceSourceWithIdInSerializedPlan(
   }
 }
 
+std::vector<int> extractUDFDimension(std::string udfName) {
+  core::QueryConfig config({});
+  std::shared_ptr<VectorFunction> myUDF =
+      getVectorFunction(udfName, {ARRAY(REAL())}, {}, config);
+  if (udfName.find("mat_mul") != std::string::npos) {
+    std::shared_ptr<MatrixMultiply> myMulUDF =
+        std::dynamic_pointer_cast<MatrixMultiply>(myUDF);
+    return myMulUDF->getDims();
+  } else if (udfName.find("mat_vector_add") != std::string::npos) {
+    std::shared_ptr<MatrixVectorAddition> myAddUDF =
+        std::dynamic_pointer_cast<MatrixVectorAddition>(myUDF);
+    return myAddUDF->getDims();
+  } else {
+    return {};
+  }
+}
+
+void augmentFunctionExpression(folly::dynamic& functionInputs) {
+  if (functionInputs["functionName"].isNull()) {
+    return;
+  }
+  std::string functionName = functionInputs["functionName"].asString();
+  // std::cout << "functionName: " << functionName << std::endl;
+  std::vector<int> dims = extractUDFDimension(functionName);
+  if (dims.size() > 0) {
+    folly::dynamic jsonArray = folly::dynamic::array;
+    for (int value : dims) {
+      jsonArray.push_back(value);
+    }
+    functionInputs["dims"] = jsonArray;
+  }
+  // std::cout << "dims: " << dims << std::endl;
+  if (!functionInputs["inputs"].isNull()) {
+    for (auto& input : functionInputs["inputs"]) {
+      augmentFunctionExpression(input);
+    }
+  }
+}
+
+void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
+  if (serializedPlan["name"].asString() == "TableScanNode") {
+    std::string nodeId = serializedPlan["id"].asString();
+    std::shared_ptr<Source> tableSource = cataLog.getSource(nodeId);
+    std::shared_ptr<OutputStat> tableStats = std::static_pointer_cast<OutputStat>(tableSource->getStats());
+    // std::pair<int, int> tableStat = cataLog.getRegisteredDataSrcStats(nodeId);
+    int numRows = tableStats->getRows();
+    int numCols = tableStats->getCols();
+
+    folly::dynamic jsonArray = folly::dynamic::array;
+    jsonArray.push_back(numRows);
+    jsonArray.push_back(numCols);
+    serializedPlan["tableStats"] = jsonArray;
+    return;
+  }
+}
+
+void augmentSerializedPlan(folly::dynamic& serializedPlan, CataLog& cataLog) {
+  // std::cout << serializedPlan << std::endl;
+  if (serializedPlan["projections"].isNull()) {
+    return;
+  }
+  for (auto& project : serializedPlan["projections"]) {
+    if (project.count("functionName") > 0) {
+      augmentFunctionExpression(project);
+      // std::cout << "functionName: " << source["functionName"].asString() <<
+      // std::endl;
+    }
+  }
+
+  for (auto& source : serializedPlan["sources"]) {
+    augmentTableScanNode(source, cataLog);
+    augmentSerializedPlan(source, cataLog);
+  }
+}
+
 std::string extractExprWithinTarget(
     const std::string& source,
     const std::string& target) {
@@ -305,12 +383,12 @@ std::string escapeRegex(const std::string& str) {
 }
 
 std::string replaceDoubleQuotes(std::string str) {
-    for (char& ch : str) {
-        if (ch == '"') {
-            ch = '\'';
-        }
+  for (char& ch : str) {
+    if (ch == '"') {
+      ch = '\'';
     }
-    return str;
+  }
+  return str;
 }
 
 // Iterate over all files in a directory and return their paths
@@ -485,7 +563,9 @@ void addProjectionFiledInSerializedPlan(
     } else if (currentNodeName.find("Filter") != std::string::npos) {
       // No need to add the filed to the FilterNode
     } else {
-      throw std::runtime_error("[Helper] addProjectionFiledInSerializedPlan: Unsupported node type: " + currentNodeName);
+      throw std::runtime_error(
+          "[Helper] addProjectionFiledInSerializedPlan: Unsupported node type: " +
+          currentNodeName);
     }
   }
 
@@ -497,63 +577,66 @@ void addProjectionFiledInSerializedPlan(
   return;
 }
 
-// In Velox, when parsing the cast function, parentheses are omitted in the exprStr output, 
-// making it unusable directly. This function reconstructs the correct cast 
-// expression by adding the necessary parentheses to match the body of the expression.
-// For example:
-// Input: eq(cast argmax(ROW["trending_prediction"]) as BIGINT, 1)
-// Output: eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
+// In Velox, when parsing the cast function, parentheses are omitted in the
+// exprStr output, making it unusable directly. This function reconstructs the
+// correct cast expression by adding the necessary parentheses to match the body
+// of the expression. For example: Input: eq(cast
+// argmax(ROW["trending_prediction"]) as BIGINT, 1) Output:
+// eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
 std::string fix_cast_function_parsing(std::string input) {
-  // Use regex to match the pattern "cast" followed by a space and a function call
+  // Use regex to match the pattern "cast" followed by a space and a function
+  // call
   std::regex cast_regex(R"(cast\s+(\w+\(.*?\))\s+as\s+(\w+))");
-  
+
   // Use a lambda function for the replacement to insert parentheses
-  std::string result = std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
+  std::string result =
+      std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
   return result;
 }
 
 std::vector<RowVectorPtr> splitRowVectorIntoBatches(
-    RowVectorPtr inputVector, size_t batchSize) {
-    
-    // Total number of rows in the input RowVector
-    size_t totalRows = inputVector->size();
-    
-    // Result vector to hold all the batches
-    std::vector<RowVectorPtr> batches;
+    RowVectorPtr inputVector,
+    size_t batchSize) {
+  // Total number of rows in the input RowVector
+  size_t totalRows = inputVector->size();
 
-    // Split the input RowVector into batches
-    for (size_t start = 0; start < totalRows; start += batchSize) {
-        // Calculate the size of the current batch
-        size_t currentBatchSize = std::min(batchSize, totalRows - start);
+  // Result vector to hold all the batches
+  std::vector<RowVectorPtr> batches;
 
-        // Slice the RowVector directly
-        RowVectorPtr batch = std::dynamic_pointer_cast<RowVector>(inputVector->slice(start, currentBatchSize));
+  // Split the input RowVector into batches
+  for (size_t start = 0; start < totalRows; start += batchSize) {
+    // Calculate the size of the current batch
+    size_t currentBatchSize = std::min(batchSize, totalRows - start);
 
-        // Add the batch to the result
-        batches.push_back(batch);
-    }
+    // Slice the RowVector directly
+    RowVectorPtr batch = std::dynamic_pointer_cast<RowVector>(
+        inputVector->slice(start, currentBatchSize));
 
-    return batches;
+    // Add the batch to the result
+    batches.push_back(batch);
+  }
+
+  return batches;
 }
 
 std::vector<std::shared_ptr<TempFilePath>> splitRowVectorIntoBatchFiles(
-    RowVectorPtr inputVector, size_t batchSize) {
+    RowVectorPtr inputVector,
+    size_t batchSize) {
+  optimization::MyFileTest myFile;
 
-    optimization::MyFileTest myFile;
-    
-    // Split the input RowVector into batches
-    auto batches = splitRowVectorIntoBatches(inputVector, batchSize);
+  // Split the input RowVector into batches
+  auto batches = splitRowVectorIntoBatches(inputVector, batchSize);
 
-    // Result vector to hold all the batch file paths
-    std::vector<std::shared_ptr<TempFilePath>> batchFiles;
+  // Result vector to hold all the batch file paths
+  std::vector<std::shared_ptr<TempFilePath>> batchFiles;
 
-    // Write each batch to a temporary file
-    for (size_t i = 0; i < batches.size(); ++i) {
-        auto file = TempFilePath::create();
-        myFile.writeToFile(file->path, {batches[i]});
-        batchFiles.push_back(file);
-    }
-    return batchFiles;
+  // Write each batch to a temporary file
+  for (size_t i = 0; i < batches.size(); ++i) {
+    auto file = TempFilePath::create();
+    myFile.writeToFile(file->path, {batches[i]});
+    batchFiles.push_back(file);
+  }
+  return batchFiles;
 }
 
 } // namespace optimization
