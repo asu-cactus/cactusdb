@@ -255,7 +255,7 @@ void replaceSourceWithIdInSerializedPlan(
     folly::dynamic& serializedPlan,
     folly::dynamic& serializedNewSource,
     std::string nodeId) {
-  if (serializedPlan["sources"].isNull()) {
+  if (!serializedPlan.count("sources")) {
     return;
   }
   for (auto& source : serializedPlan["sources"]) {
@@ -286,24 +286,21 @@ std::vector<int> extractUDFDimension(std::string udfName) {
   }
 }
 
-void augmentFunctionExpression(folly::dynamic& functionInputs) {
-  if (functionInputs["functionName"].isNull()) {
-    return;
-  }
-  std::string functionName = functionInputs["functionName"].asString();
-  // std::cout << "functionName: " << functionName << std::endl;
-  std::vector<int> dims = extractUDFDimension(functionName);
-  if (dims.size() > 0) {
-    folly::dynamic jsonArray = folly::dynamic::array;
-    for (int value : dims) {
-      jsonArray.push_back(value);
+void augmentFunctionExpression(folly::dynamic& serializedPlan) {
+  if (serializedPlan.count("functionName")) {
+    std::string functionName = serializedPlan["functionName"].asString();
+    std::vector<int> dims = extractUDFDimension(functionName);
+    if (dims.size() > 0) {
+      folly::dynamic jsonArray = folly::dynamic::array;
+      for (int value : dims) {
+        jsonArray.push_back(value);
+      }
+      serializedPlan["dims"] = jsonArray;
     }
-    functionInputs["dims"] = jsonArray;
-  }
-  // std::cout << "dims: " << dims << std::endl;
-  if (!functionInputs["inputs"].isNull()) {
-    for (auto& input : functionInputs["inputs"]) {
-      augmentFunctionExpression(input);
+    if (serializedPlan.count("inputs")) {
+      for (auto& input : serializedPlan["inputs"]) {
+        augmentFunctionExpression(input);
+      }
     }
   }
 }
@@ -313,7 +310,6 @@ void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
     std::string nodeId = serializedPlan["id"].asString();
     std::shared_ptr<Source> tableSource = cataLog.getSource(nodeId);
     std::shared_ptr<OutputStat> tableStats = std::static_pointer_cast<OutputStat>(tableSource->getStats());
-    // std::pair<int, int> tableStat = cataLog.getRegisteredDataSrcStats(nodeId);
     int numRows = tableStats->getRows();
     int numCols = tableStats->getCols();
 
@@ -321,26 +317,24 @@ void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
     jsonArray.push_back(numRows);
     jsonArray.push_back(numCols);
     serializedPlan["tableStats"] = jsonArray;
-    return;
   }
 }
 
 void augmentSerializedPlan(folly::dynamic& serializedPlan, CataLog& cataLog) {
-  // std::cout << serializedPlan << std::endl;
-  if (serializedPlan["projections"].isNull()) {
-    return;
-  }
-  for (auto& project : serializedPlan["projections"]) {
-    if (project.count("functionName") > 0) {
-      augmentFunctionExpression(project);
-      // std::cout << "functionName: " << source["functionName"].asString() <<
-      // std::endl;
+  if (serializedPlan.count("projections")) {
+    for (auto& project : serializedPlan["projections"]) {
+      if (project.count("functionName")) {
+        augmentFunctionExpression(project);
+      }
     }
   }
 
-  for (auto& source : serializedPlan["sources"]) {
-    augmentTableScanNode(source, cataLog);
-    augmentSerializedPlan(source, cataLog);
+  augmentTableScanNode(serializedPlan, cataLog);
+
+  if (serializedPlan.count("sources")) {
+    for (auto& source : serializedPlan["sources"]) {
+      augmentSerializedPlan(source, cataLog);
+    }
   }
 }
 
@@ -541,7 +535,7 @@ void addProjectionFiledInSerializedPlan(
     folly::dynamic& serializedPlan,
     folly::dynamic& filedToBeAdded,
     std::vector<std::string> nodeIds) {
-  if (serializedPlan["sources"].isNull()) {
+  if (!serializedPlan.count("sources")) {
     return;
   }
 

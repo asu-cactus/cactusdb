@@ -717,8 +717,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                           "u_zipcode",
                           fmt::format(userModel1ComputExpr, "u_features")});
         if (generateFilter) {
-          std::string filterExpr = sampleUserMovieFilterExpr("user");
-          myPlan = myPlan.filter(filterExpr);
+          std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("user");
+          for (auto expr : filterExpr) {
+            myPlan = myPlan.filter(expr);
+          }
+          // myPlan = myPlan.filter(filterExpr);
         }
 
         cataLog.setIdAddressMap(
@@ -752,8 +755,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                           fmt::format(movieModel1ComputExpr, "m_features")});
 
         if (generateFilter) {
-          std::string filterExpr = sampleUserMovieFilterExpr("movie");
-          myPlan = myPlan.filter(filterExpr);
+          std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("movie");
+          for (auto expr : filterExpr) {
+            myPlan = myPlan.filter(expr);
+          }
+          // myPlan = myPlan.filter(filterExpr);
         }
 
         cataLog.setIdAddressMap(
@@ -873,8 +879,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         }
 
         if (generateFilter) {
-          std::string filterExpr = sampleUserMovieFilterExpr("movie_user");
-          myPlan = myPlan.filter(filterExpr);
+          std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("movie_user");
+          for (auto expr : filterExpr) {
+            myPlan = myPlan.filter(expr);
+          }
+          // myPlan = myPlan.filter(filterExpr);
         }
 
         cataLog.setIdAddressMap(
@@ -1024,8 +1033,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         }
 
         if (generateFilter) {
-          std::string filterExpr = sampleUserMovieFilterExpr("movie_user");
-          myPlan = myPlan.filter(filterExpr);
+          std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("movie_user");
+          for (auto expr : filterExpr) {
+            myPlan = myPlan.filter(expr);
+          }
+          // myPlan = myPlan.filter(filterExpr);
         }
 
         cataLog.setIdAddressMap(
@@ -1090,10 +1102,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // sample user data
       std::vector<int> userIDs = randomGenerator.genIntRange(0, numUsers);
       std::vector<std::string> userGender =
-          randomSampler.sampleFromSets(numUsers, {"M", "F"});
+          randomSampler.sampleFromSets<std::string>(numUsers, {"M", "F"});
       std::vector<int> userAge = randomGenerator.genIntRange(10, 70);
       std::vector<int> userOccupation = randomGenerator.genIntRange(0, 20);
-      std::vector<std::string> userZipcode = randomSampler.sampleFromSets(
+      std::vector<std::string> userZipcode = randomSampler.sampleFromSets<std::string>(
           numUsers,
           {"94043",
            "94301",
@@ -1126,7 +1138,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::vector<int> movieIDs = randomGenerator.genIntRange(0, numMovies);
       std::vector<std::string> movieTitle =
           movieTitleGenerator.generateBatchRandomTitles(numMovies);
-      std::vector<std::string> movieGenres = randomSampler.sampleFromSets(
+      std::vector<std::string> movieGenres = randomSampler.sampleFromSets<std::string>(
           numMovies,
           {"Action",
            "Adventure",
@@ -1147,7 +1159,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
            "War",
            "Western"});
       std::vector<std::string> movieSpokenLanguage =
-          randomSampler.sampleFromSets(
+          randomSampler.sampleFromSets<std::string>(
               numMovies,
               {"English",
                "French",
@@ -1615,6 +1627,9 @@ int main(int argc, char** argv) {
     dummyFeatureSizes.push_back(userFeatureSize);
     dummyFeatureSizes.push_back(movieFeatureSize);
   }
+
+  std::cout << "numberOfTuples: " << numberOfTuples << std::endl; 
+  std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
 
   demo.runProfile(
       mode,

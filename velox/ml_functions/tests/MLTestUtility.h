@@ -146,10 +146,9 @@ class RandomSampler {
     gen_ = std::mt19937(randomSeed);
   }
 
-  std::vector<std::string> sampleFromSets(
-      int numSamples,
-      const std::vector<std::string>& set) {
-    std::vector<std::string> result;
+  template <typename T>
+  std::vector<T> sampleFromSets(int numSamples, const std::vector<T>& set) {
+    std::vector<T> result;
     std::uniform_int_distribution<int> dist(0, set.size() - 1);
     for (int i = 0; i < numSamples; i++) {
       result.push_back(set[dist(gen_)]);
