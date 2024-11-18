@@ -293,6 +293,24 @@ class CataLog {
     return defaultSplits;
   }
 
+  void addNodeIdRelationName(core::PlanNodeId p, std::string relationName) {
+    nodeIdRelationNameMap[p] = relationName;
+  }
+
+  std::string getNodeIdRelationName(core::PlanNodeId p) {
+    auto it = nodeIdRelationNameMap.find(p);
+    if (it != nodeIdRelationNameMap.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] PlanNodeId: {} not exist in nodeIdRelationNameMap", p);
+    }
+  }
+
+  void clearNodeIdRelationNameMap() {
+    nodeIdRelationNameMap.clear();
+  }
+
   void addSource(std::shared_ptr<Source> src) {
     sourceMap.insert({src->getName(), src});
   }
@@ -323,10 +341,12 @@ class CataLog {
     }
   }
 
-  void registerDataSrc(std::string name, std::vector<std::string> filePath,
-                              dwio::common::FileFormat format,
-                              RowTypePtr schema,
-                              std::pair<int, int> stats) {
+  void registerDataSrc(
+      std::string name,
+      std::vector<std::string> filePath,
+      dwio::common::FileFormat format,
+      RowTypePtr schema,
+      std::pair<int, int> stats) {
     auto it = registeredDataSrcFiles.find(name);
     if (it != registeredDataSrcFiles.end()) {
       LOG(FATAL) << fmt::format(
@@ -338,7 +358,7 @@ class CataLog {
       registeredDataSrcStats[name] = stats;
     }
   }
-  
+
   std::vector<std::string> getRegisteredDataSrcFiles(std::string name) {
     auto it = registeredDataSrcFiles.find(name);
     if (it != registeredDataSrcFiles.end()) {
@@ -405,6 +425,152 @@ class CataLog {
     sourceMap.clear();
   }
 
+  template <typename T>
+  void processNumericColumn(
+      facebook::velox::FlatVector<T>* numericVector,
+      size_t numRows,
+      int numBins,
+      std::vector<double>& frequencies,
+      std::vector<std::string>& bins) {
+    T minValue = std::numeric_limits<T>::max();
+    T maxValue = std::numeric_limits<T>::lowest();
+
+    // Compute min and max for binning
+    for (size_t j = 0; j < numRows; ++j) {
+      if (!numericVector->isNullAt(j)) {
+        T value = numericVector->valueAt(j);
+        minValue = std::min(minValue, value);
+        maxValue = std::max(maxValue, value);
+      }
+    }
+
+    if (minValue == maxValue) {
+      bins[0] = std::to_string(minValue);
+      frequencies[0] = 1.0; // All values fall into one bin
+      return;
+    }
+
+    double binSize = static_cast<double>(maxValue - minValue) / numBins;
+    for (int b = 0; b < numBins; ++b) {
+      double binValue = static_cast<double>(minValue) + b * binSize;
+      bins[b] = std::to_string(binValue);
+    }
+
+    for (size_t j = 0; j < numRows; ++j) {
+      if (!numericVector->isNullAt(j)) {
+        T value = numericVector->valueAt(j);
+        int binIndex = static_cast<int>((value - minValue) / binSize);
+        if (binIndex >= 0 && binIndex < numBins) {
+          ++frequencies[binIndex];
+        }
+      }
+    }
+
+    // Normalize frequencies
+    for (auto& freq : frequencies) {
+      freq /= numRows;
+    }
+  }
+
+  void processCategoricalColumn(
+      facebook::velox::FlatVector<StringView>* stringVector,
+      size_t numRows,
+      std::vector<double>& frequencies,
+      std::vector<std::string>& bins) {
+    std::unordered_map<std::string, double> categoryCounts;
+    double totalCount = 0;
+
+    for (size_t j = 0; j < numRows; ++j) {
+      if (!stringVector->isNullAt(j)) {
+        std::string value = stringVector->valueAt(j).str();
+        categoryCounts[value]++;
+        totalCount++;
+      }
+    }
+    size_t index = 0;
+    for (const auto& [category, count] : categoryCounts) {
+      bins[index] = category; // Category names directly as strings
+      frequencies[index] = count / totalCount;
+      index += 1;
+    }
+  }
+
+  void outputHistogramForData(
+      const std::shared_ptr<RowVector>& rowVector,
+      const std::string& tableName,
+      int numBins,
+      const std::string& outputFilePath) {
+    std::ofstream outFile(outputFilePath, std::ios::app);
+    if (!outFile.is_open()) {
+      throw std::runtime_error("Failed to open the output file.");
+    }
+
+    const auto& children = rowVector->children();
+    const auto& type = rowVector->type()->asRow();
+    size_t numRows = rowVector->size();
+    for (size_t i = 0; i < children.size(); i++) {
+      bool isCategorical = false;
+      const auto& child = children[i];
+      const std::string& columnName = type.nameOf(i);
+
+      // initialize the bins
+      std::vector<double> frequencies(numBins, 0);
+      std::vector<std::string> bins(numBins);
+      if (child->typeKind() == TypeKind::INTEGER) {
+        // Handle INTEGER type
+        auto numericVector = child->asFlatVector<int32_t>();
+        // std::dynamic_pointer_cast<FlatVector<T>>(out)
+        processNumericColumn<int32_t>(
+            numericVector, numRows, numBins, frequencies, bins);
+      } else if (child->typeKind() == TypeKind::BIGINT) {
+        // Handle BIGINT type
+        auto numericVector = child->asFlatVector<int64_t>();
+        processNumericColumn<int64_t>(
+            numericVector, numRows, numBins, frequencies, bins);
+      } else if (child->typeKind() == TypeKind::REAL) {
+        // Handle REAL type
+        auto numericVector = child->asFlatVector<float>();
+        processNumericColumn<float>(
+            numericVector, numRows, numBins, frequencies, bins);
+      } else if (child->typeKind() == TypeKind::DOUBLE) {
+        // Handle DOUBLE type
+        auto numericVector = child->asFlatVector<double>();
+        processNumericColumn<double>(
+            numericVector, numRows, numBins, frequencies, bins);
+      } else if (child->typeKind() == TypeKind::VARCHAR) {
+        // Handle VARCHAR type
+        if (columnName.find("title") == std::string::npos) {
+          // skip title columns
+          auto stringVector = child->asFlatVector<StringView>();
+          processCategoricalColumn(stringVector, numRows, frequencies, bins);
+          isCategorical = true;
+        }
+      } else {
+        // unsupported column type
+      }
+
+      // Output format: table_name|column_name|frequencies list|bins list|
+      // table_name_table_column|is_categorical
+      outFile << tableName << "|" << columnName << "|" << tableName << "."
+              << columnName << "|" << isCategorical << "|[";
+      for (size_t j = 0; j < frequencies.size(); ++j) {
+        outFile << frequencies[j];
+        if (j < frequencies.size() - 1) {
+          outFile << ",";
+        }
+      }
+      outFile << "]|[";
+      for (size_t j = 0; j < bins.size(); ++j) {
+        outFile << "\"" << bins[j] << "\""; // Quoting string bins for safety
+        if (j < bins.size() - 1) {
+          outFile << ",";
+        }
+      }
+      outFile << "]" << "\n";
+    }
+    outFile.close();
+  }
+
  private:
   std::string name;
   // Default values
@@ -435,7 +601,7 @@ class CataLog {
       registeredDataSrcFormat;
   std::unordered_map<std::string, RowTypePtr> registeredDataSrcSchema;
   std::unordered_map<std::string, std::pair<int, int>> registeredDataSrcStats;
-
+  std::unordered_map<core::PlanNodeId, std::string> nodeIdRelationNameMap;
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(
