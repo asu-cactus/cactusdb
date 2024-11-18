@@ -7,6 +7,7 @@ import uuid
 import os
 import time
 import json
+import shutil
 from tqdm.auto import tqdm
 
 
@@ -88,8 +89,10 @@ def sample_model_structure(num_layer, model_scale):
         model_structure.append(num_node)
     return model_structure
 
+
 def sample_model_num_layer():
     return 4 if random.random() < 0.6 else 3
+
 
 def sample_model_scale(query_template):
     if query_template == "user":
@@ -107,45 +110,57 @@ def sample_model_scale(query_template):
     else:
         raise ValueError("Invalid query_template: ", query_template)
 
+
 def write_model_structure_to_file(model_structure, table):
-  if table == "user":
-      path = "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt"
-  elif table == "movie":
-      path = "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt"
-  elif table == "tag":
-      path = "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt"
-  else:
-      raise ValueError("Invalid table: ", table)
-  with open(path, "w") as file:
-    file.write(" ".join(map(str, model_structure)))
+    if table == "user":
+        path = "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt"
+    elif table == "movie":
+        path = "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt"
+    elif table == "tag":
+        path = "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt"
+    else:
+        raise ValueError("Invalid table: ", table)
+    with open(path, "w") as file:
+        file.write(" ".join(map(str, model_structure)))
+
 
 def configure_model_params(query_template, params_base, num_tag):
     if "user" in query_template:
-        user_model_structure = sample_model_structure(sample_model_num_layer(), sample_model_scale("user"))
+        user_model_structure = sample_model_structure(
+            sample_model_num_layer(), sample_model_scale("user")
+        )
         num_user_dummy_features = user_model_structure[0]
-        params = "{} -user_feature_size={}".format(params_base, num_user_dummy_features)
+        params_base = "{} -user_feature_size={}".format(
+            params_base, num_user_dummy_features
+        )
         write_model_structure_to_file(user_model_structure, "user")
     if "movie" in query_template:
-        movie_model_structure = sample_model_structure(sample_model_num_layer(), sample_model_scale("movie"))
+        movie_model_structure = sample_model_structure(
+            sample_model_num_layer(), sample_model_scale("movie")
+        )
         num_movie_dummy_features = movie_model_structure[0]
-        params = "{} -movie_feature_size={}".format(params_base, num_movie_dummy_features)
+        params_base = "{} -movie_feature_size={}".format(
+            params_base, num_movie_dummy_features
+        )
         write_model_structure_to_file(movie_model_structure, "movie")
     if "tag" in query_template:
-        movie_tag_model_structure = sample_model_structure(sample_model_num_layer(), sample_model_scale("movie_tag"))
+        movie_tag_model_structure = sample_model_structure(
+            sample_model_num_layer(), sample_model_scale("movie_tag")
+        )
         movie_tag_model_structure[0] = num_tag
-        params = "{} -movie_feature_size={} -num_tag={}".format(params_base, num_tag)
+        params_base = "{} -num_tag={}".format(params_base, num_tag)
         write_model_structure_to_file(movie_tag_model_structure, "tag")
-    return params
+    return params_base
+
 
 if __name__ == "__main__":
     # list_num_user = [100, 500, 1000]
     # list_num_movie = [100, 500, 1000]
     # list_num_tag = [25, 50, 100, 1000, 5000]
-    # list_query_template = ["user", "movie", "movie_user", "movie_user_tag"]
+    list_query_template = ["user", "movie", "movie_user", "movie_user_tag"]
     list_num_user = [100]
     list_num_movie = [50]
     list_num_tag = [25]
-    list_query_template = ["user"]
 
     num_repeat = 4
     run_configs = list(
@@ -158,10 +173,18 @@ if __name__ == "__main__":
     )
     result_df = None
 
+    # TODO: clean up for development
+    shutil.rmtree("./generatedQueryPlan")
     time_stamp = get_current_time()
     output_dir = os.path.join("generatedQueryPlan", time_stamp)
     create_path(output_dir)
-    result_df_name = "result_optimizer_profile_{}.csv".format(time_stamp)
+    create_path(os.path.join(output_dir, "query"))
+    create_path(os.path.join(output_dir, "stats"))
+
+    # TODO: use time_stamp to name the result file after finalizing the code
+
+    # result_df_name = "result_optimizer_profile_{}.csv".format(time_stamp)
+    result_df_name = "result_optimizer_profile.csv"
 
     for config in tqdm(run_configs):
         query_template, num_user, num_movie, num_tag = config
@@ -175,18 +198,32 @@ if __name__ == "__main__":
         try:
             print("[DEBUG] params: ", params_base)
             latency = run_cpp_program("/", params_base)
+
+            # generate uuid for the current one
+            uuid_str = str(uuid.uuid4())
+
+            # process serialized plan
             serializedPlan = read_file(
                 "/home/velox/velox/optimizer/tests/serializedQueryPlan.json"
             )
             serializedPlan = json.loads(serializedPlan)
             remove_type_attribute(serializedPlan)
             serializedPlan = json.dumps(serializedPlan)
-            uuid_str = str(uuid.uuid4())
-            serializedPlanPath = os.path.join(output_dir, "{}.json".format(uuid_str))
+            serializedPlanPath = os.path.join(
+                output_dir, "query", "{}.json".format(uuid_str)
+            )
             with open(serializedPlanPath, "w") as file:
                 file.write(serializedPlan)
 
-            # print(serializedPlan)
+            # process query table statistics
+            tableStats = read_file("/home/velox/velox/optimizer/tests/tableStats.txt")
+            tableStatsPath = os.path.join(
+                output_dir, "stats", "{}.txt".format(uuid_str)
+            )
+            with open(tableStatsPath, "w") as file:
+                file.write(tableStats)
+
+            # read execution time
             executionTime = float(
                 read_file("/home/velox/velox/optimizer/tests/executionLatency.txt")
             )
@@ -197,6 +234,7 @@ if __name__ == "__main__":
                     "num_movie": num_movie,
                     "num_tag": num_tag,
                     "serializedPlanPath": serializedPlanPath,
+                    "tableStatsPath": tableStatsPath,
                     "executionTime": executionTime,
                     "error": "",
                 },
@@ -208,7 +246,8 @@ if __name__ == "__main__":
                     "num_user": num_user,
                     "num_movie": num_movie,
                     "num_tag": num_tag,
-                    "serializedPlanPath": serializedPlanPath,
+                    "serializedPlanPath": "",
+                    "tableStatsPath": "",
                     "executionTime": "",
                     "error": e,
                 },

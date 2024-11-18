@@ -3,6 +3,7 @@
 #include <folly/init/Init.h>
 #include <unistd.h>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -717,7 +718,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                           "u_zipcode",
                           fmt::format(userModel1ComputExpr, "u_features")});
         if (generateFilter) {
-          std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("user");
+          std::vector<std::string> filterExpr =
+              sampleUserMovieFilterExpr("user");
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -728,6 +730,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             readUserDataPlanNodeId,
             userFilePaths,
             dwio::common::FileFormat::DWRF);
+        cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
         std::shared_ptr<OutputStat> userStats =
             std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
         Source userSrc =
@@ -755,7 +758,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                           fmt::format(movieModel1ComputExpr, "m_features")});
 
         if (generateFilter) {
-          std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("movie");
+          std::vector<std::string> filterExpr =
+              sampleUserMovieFilterExpr("movie");
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -767,6 +771,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             movieFilePaths,
             dwio::common::FileFormat::DWRF);
 
+        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
         std::shared_ptr<OutputStat> movieStats = std::make_shared<OutputStat>(
             OutputStat(movieNumRows, movieNumCols));
         Source movieSrc =
@@ -793,6 +798,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             movieRelevanceTagFilePaths,
             dwio::common::FileFormat::DWRF);
 
+        cataLog.addNodeIdRelationName(
+            readMovieRelevanceTagDataPlanNodeId, "movie_relevance_tag");
         std::shared_ptr<OutputStat> movieRelevanceTagStats =
             std::make_shared<OutputStat>(
                 OutputStat(movieRelevanceTagNumRows, movieRelevanceTagNumCols));
@@ -879,7 +886,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         }
 
         if (generateFilter) {
-          std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("movie_user");
+          std::vector<std::string> filterExpr =
+              sampleUserMovieFilterExpr("movie_user");
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -894,6 +902,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             readMovieDataPlanNodeId,
             movieFilePaths,
             dwio::common::FileFormat::DWRF);
+        cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
 
         std::shared_ptr<OutputStat> userStats =
             std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
@@ -1033,7 +1043,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         }
 
         if (generateFilter) {
-          std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("movie_user");
+          std::vector<std::string> filterExpr =
+              sampleUserMovieFilterExpr("movie_user");
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -1053,6 +1064,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             movieRelevanceTagFilePaths,
             dwio::common::FileFormat::DWRF);
 
+        cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+        cataLog.addNodeIdRelationName(
+            readMovieRelevanceTagDataPlanNodeId, "movie_relevance_tag");
         std::shared_ptr<OutputStat> userStats =
             std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
         Source userSrc =
@@ -1097,26 +1112,47 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int numRelevanceTags = numberOfTuples[2];
       int userFeatureSize = dummyFeatureSizes[0];
       int movieFeatureSize = dummyFeatureSizes[1];
+
+      std::string tableStatsPath =
+          "/home/velox/velox/optimizer/tests/tableStats.txt";
+      remove(tableStatsPath.c_str());
+
+      std::vector<std::vector<int>> userModelStructures =
+          readModelStructureFromFile(
+              "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+      std::vector<std::vector<int>> movieModelStructures =
+          readModelStructureFromFile(
+              "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
+      std::vector<std::vector<int>> tagModelStructures =
+          readModelStructureFromFile(
+              "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
+      // Check: dummy feature size equals the input size of the model
+      assert(userFeatureSize == userModelStructures[0][0]);
+      assert(movieFeatureSize == movieModelStructures[0][0]);
+      assert(numRelevanceTags == tagModelStructures[0][0]);
+
       RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
       RandomSampler randomSampler = RandomSampler(0);
       // sample user data
       std::vector<int> userIDs = randomGenerator.genIntRange(0, numUsers);
       std::vector<std::string> userGender =
           randomSampler.sampleFromSets<std::string>(numUsers, {"M", "F"});
-      std::vector<int> userAge = randomGenerator.genIntRange(10, 70);
-      std::vector<int> userOccupation = randomGenerator.genIntRange(0, 20);
-      std::vector<std::string> userZipcode = randomSampler.sampleFromSets<std::string>(
-          numUsers,
-          {"94043",
-           "94301",
-           "94305",
-           "94306",
-           "94309",
-           "80212",
-           "80213",
-           "80219",
-           "12301",
-           "40201"});
+      std::vector<int> userAge = randomGenerator.gen1DInt(numUsers, 10, 70);
+      std::vector<int> userOccupation =
+          randomGenerator.gen1DInt(numUsers, 0, 20);
+      std::vector<std::string> userZipcode =
+          randomSampler.sampleFromSets<std::string>(
+              numUsers,
+              {"94043",
+               "94301",
+               "94305",
+               "94306",
+               "94309",
+               "80212",
+               "80213",
+               "80219",
+               "12301",
+               "40201"});
       std::vector<std::vector<float>> userFeatures =
           randomGenerator.genFloat2dVector(numUsers, userFeatureSize);
 
@@ -1134,30 +1170,35 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
            maker.flatVector<std::string>(userZipcode, VARCHAR()),
            maker.arrayVector<float>(userFeatures, REAL())});
 
+      // output the histogram for the user data
+      cataLog.outputHistogramForData(
+          userDataRowVector, "user", 50, tableStatsPath);
+          
       MovieTitleGenerator movieTitleGenerator = MovieTitleGenerator(0);
       std::vector<int> movieIDs = randomGenerator.genIntRange(0, numMovies);
       std::vector<std::string> movieTitle =
           movieTitleGenerator.generateBatchRandomTitles(numMovies);
-      std::vector<std::string> movieGenres = randomSampler.sampleFromSets<std::string>(
-          numMovies,
-          {"Action",
-           "Adventure",
-           "Animation",
-           "Children",
-           "Comedy",
-           "Crime",
-           "Documentary",
-           "Drama",
-           "Fantasy",
-           "Film-Noir",
-           "Horror",
-           "Musical",
-           "Mystery",
-           "Romance",
-           "Sci-Fi",
-           "Thriller",
-           "War",
-           "Western"});
+      std::vector<std::string> movieGenres =
+          randomSampler.sampleFromSets<std::string>(
+              numMovies,
+              {"Action",
+               "Adventure",
+               "Animation",
+               "Children",
+               "Comedy",
+               "Crime",
+               "Documentary",
+               "Drama",
+               "Fantasy",
+               "Film-Noir",
+               "Horror",
+               "Musical",
+               "Mystery",
+               "Romance",
+               "Sci-Fi",
+               "Thriller",
+               "War",
+               "Western"});
       std::vector<std::string> movieSpokenLanguage =
           randomSampler.sampleFromSets<std::string>(
               numMovies,
@@ -1198,6 +1239,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
            maker.flatVector<int>(movieVoteCount, INTEGER()),
            maker.arrayVector<float>(movieFeatures, REAL())});
 
+      // output the histogram for the movie data
+      cataLog.outputHistogramForData(
+          movieDataRowVector, "movie", 50, tableStatsPath);
+
       randomGenerator.setFloatRange(0, 1);
       std::vector<std::vector<float>> movieRelevanceTags =
           randomGenerator.genFloat2dVector(numMovies, numRelevanceTags);
@@ -1206,6 +1251,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           {"mt_movie_id", "mt_relevance_score"},
           {maker.flatVector<int>(movieIDs, INTEGER()),
            maker.arrayVector<float>(movieRelevanceTags, REAL())});
+
+      // output the histogram for the movie relevance tag data
+      cataLog.outputHistogramForData(
+          movieRelevanceTagRowVector,
+          "movie_relevance_tag",
+          50,
+          tableStatsPath);
 
       std::vector<std::shared_ptr<TempFilePath>> userFilePaths =
           splitRowVectorIntoBatchFiles(userDataRowVector, 1024);
@@ -1628,7 +1680,7 @@ int main(int argc, char** argv) {
     dummyFeatureSizes.push_back(movieFeatureSize);
   }
 
-  std::cout << "numberOfTuples: " << numberOfTuples << std::endl; 
+  std::cout << "numberOfTuples: " << numberOfTuples << std::endl;
   std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
 
   demo.runProfile(

@@ -313,10 +313,15 @@ void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
     int numRows = tableStats->getRows();
     int numCols = tableStats->getCols();
 
+    // Set number of rows and columns
     folly::dynamic jsonArray = folly::dynamic::array;
     jsonArray.push_back(numRows);
     jsonArray.push_back(numCols);
     serializedPlan["tableStats"] = jsonArray;
+
+    // Set tableName 
+    std::string tableName = cataLog.getNodeIdRelationName(nodeId);
+    serializedPlan["tableName"] = tableName;
   }
 }
 
