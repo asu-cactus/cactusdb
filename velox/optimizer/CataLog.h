@@ -425,8 +425,49 @@ class CataLog {
     sourceMap.clear();
   }
 
+  void addNumericalColMinMax(std::string colName, double min, double max) {
+    numericalColMinMaxs[colName] = std::make_pair(min, max);
+  }
+
+  std::pair<int, int> getNumericalColMinMax(std::string colName) {
+    auto it = numericalColMinMaxs.find(colName);
+    if (it != numericalColMinMaxs.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] colName: {} not exist in numericalColMinMaxs", colName);
+      return std::make_pair(0, 0);
+    }
+  }
+
+  void clearNumericalColMinMax() {
+    numericalColMinMaxs.clear();
+  }
+
+  void addCategoricalColVals(
+      std::string colName,
+      std::vector<std::string> uniqueValues) {
+    categoricalColVals[colName] = uniqueValues;
+  }
+
+  std::vector<std::string> getCategoricalColVals(std::string colName) {
+    auto it = categoricalColVals.find(colName);
+    if (it != categoricalColVals.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] colName: {} not exist in categoricalColVals", colName);
+      return {};
+    }
+  }
+
+  void clearCategoricalColVals() {
+    categoricalColVals.clear();
+  }
+
   template <typename T>
   void processNumericColumn(
+      std::string colName,
       facebook::velox::FlatVector<T>* numericVector,
       size_t numRows,
       int numBins,
@@ -435,12 +476,18 @@ class CataLog {
     T minValue = std::numeric_limits<T>::max();
     T maxValue = std::numeric_limits<T>::lowest();
 
-    // Compute min and max for binning
-    for (size_t j = 0; j < numRows; ++j) {
-      if (!numericVector->isNullAt(j)) {
-        T value = numericVector->valueAt(j);
-        minValue = std::min(minValue, value);
-        maxValue = std::max(maxValue, value);
+    if (numericalColMinMaxs.find(colName) != numericalColMinMaxs.end()) {
+      auto [min, max] = numericalColMinMaxs[colName];
+      minValue = min;
+      maxValue = max;
+    } else {
+      // Compute min and max for binning
+      for (size_t j = 0; j < numRows; ++j) {
+        if (!numericVector->isNullAt(j)) {
+          T value = numericVector->valueAt(j);
+          minValue = std::min(minValue, value);
+          maxValue = std::max(maxValue, value);
+        }
       }
     }
 
@@ -473,11 +520,13 @@ class CataLog {
   }
 
   void processCategoricalColumn(
+      std::string colName,
       facebook::velox::FlatVector<StringView>* stringVector,
       size_t numRows,
       std::vector<double>& frequencies,
       std::vector<std::string>& bins) {
-    std::unordered_map<std::string, double> categoryCounts;
+    std::map<std::string, double> categoryCounts;
+    std::set<std::string> uniqueCategories;
     double totalCount = 0;
 
     for (size_t j = 0; j < numRows; ++j) {
@@ -485,12 +534,27 @@ class CataLog {
         std::string value = stringVector->valueAt(j).str();
         categoryCounts[value]++;
         totalCount++;
+        uniqueCategories.insert(value);
       }
     }
+
+    std::vector<std::string> categoricalValsToIterate;
+    if (categoricalColVals.find(colName) != categoricalColVals.end()) {
+      // Use the unique values from the categoricalColVals map if exists
+      categoricalValsToIterate = categoricalColVals[colName];
+    } else {
+      categoricalValsToIterate = std::vector<std::string>(
+          uniqueCategories.begin(), uniqueCategories.end());
+    }
+
     size_t index = 0;
-    for (const auto& [category, count] : categoryCounts) {
-      bins[index] = category; // Category names directly as strings
-      frequencies[index] = count / totalCount;
+    for (const auto& category : categoricalValsToIterate) {
+      bins[index] = category;
+      if (categoryCounts.find(category) == categoryCounts.end()) {
+        frequencies[index] = 0;
+      } else {
+        frequencies[index] = categoryCounts[category] / totalCount;
+      }
       index += 1;
     }
   }
@@ -509,7 +573,7 @@ class CataLog {
     const auto& type = rowVector->type()->asRow();
     size_t numRows = rowVector->size();
     for (size_t i = 0; i < children.size(); i++) {
-      bool isCategorical = false;
+      std::string columnType;
       const auto& child = children[i];
       const std::string& columnName = type.nameOf(i);
 
@@ -521,38 +585,46 @@ class CataLog {
         auto numericVector = child->asFlatVector<int32_t>();
         // std::dynamic_pointer_cast<FlatVector<T>>(out)
         processNumericColumn<int32_t>(
-            numericVector, numRows, numBins, frequencies, bins);
+            columnName, numericVector, numRows, numBins, frequencies, bins);
+        columnType = "Numerical";
       } else if (child->typeKind() == TypeKind::BIGINT) {
         // Handle BIGINT type
         auto numericVector = child->asFlatVector<int64_t>();
         processNumericColumn<int64_t>(
-            numericVector, numRows, numBins, frequencies, bins);
+            columnName, numericVector, numRows, numBins, frequencies, bins);
+        columnType = "Numerical";
       } else if (child->typeKind() == TypeKind::REAL) {
         // Handle REAL type
         auto numericVector = child->asFlatVector<float>();
         processNumericColumn<float>(
-            numericVector, numRows, numBins, frequencies, bins);
+            columnName, numericVector, numRows, numBins, frequencies, bins);
+        columnType = "Numerical";
       } else if (child->typeKind() == TypeKind::DOUBLE) {
         // Handle DOUBLE type
         auto numericVector = child->asFlatVector<double>();
         processNumericColumn<double>(
-            numericVector, numRows, numBins, frequencies, bins);
+            columnName, numericVector, numRows, numBins, frequencies, bins);
+        columnType = "Numerical";
       } else if (child->typeKind() == TypeKind::VARCHAR) {
         // Handle VARCHAR type
         if (columnName.find("title") == std::string::npos) {
           // skip title columns
           auto stringVector = child->asFlatVector<StringView>();
-          processCategoricalColumn(stringVector, numRows, frequencies, bins);
-          isCategorical = true;
+          processCategoricalColumn(
+              columnName, stringVector, numRows, frequencies, bins);
+          columnType = "Categorical";
+        } else {
+          columnType = "Varchar";
         }
       } else {
-        // unsupported column type
+        // other types
+        columnType = mapTypeKindToName(child->typeKind());
       }
 
       // Output format: table_name|column_name|frequencies list|bins list|
       // table_name_table_column|is_categorical
       outFile << tableName << "|" << columnName << "|" << tableName << "."
-              << columnName << "|" << isCategorical << "|[";
+              << columnName << "|" << columnType << "|[";
       for (size_t j = 0; j < frequencies.size(); ++j) {
         outFile << frequencies[j];
         if (j < frequencies.size() - 1) {
@@ -602,6 +674,9 @@ class CataLog {
   std::unordered_map<std::string, RowTypePtr> registeredDataSrcSchema;
   std::unordered_map<std::string, std::pair<int, int>> registeredDataSrcStats;
   std::unordered_map<core::PlanNodeId, std::string> nodeIdRelationNameMap;
+  // vars to store per-column statistics
+  std::unordered_map<std::string, std::pair<int, int>> numericalColMinMaxs;
+  std::unordered_map<std::string, std::vector<std::string>> categoricalColVals;
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(
