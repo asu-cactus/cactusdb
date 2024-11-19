@@ -1140,21 +1140,26 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::vector<int> userAge = randomGenerator.gen1DInt(numUsers, 10, 70);
       std::vector<int> userOccupation =
           randomGenerator.gen1DInt(numUsers, 0, 20);
+      std::vector<std::string> zipCode = {
+          "94043",
+          "94301",
+          "94305",
+          "94306",
+          "94309",
+          "80212",
+          "80213",
+          "80219",
+          "12301",
+          "40201"};
       std::vector<std::string> userZipcode =
-          randomSampler.sampleFromSets<std::string>(
-              numUsers,
-              {"94043",
-               "94301",
-               "94305",
-               "94306",
-               "94309",
-               "80212",
-               "80213",
-               "80219",
-               "12301",
-               "40201"});
+          randomSampler.sampleFromSets<std::string>(numUsers, zipCode);
       std::vector<std::vector<float>> userFeatures =
           randomGenerator.genFloat2dVector(numUsers, userFeatureSize);
+
+      cataLog.addNumericalColMinMax("u_user_id", 0, numUsers);
+      cataLog.addNumericalColMinMax("u_age", 10, 70);
+      cataLog.addNumericalColMinMax("u_occupation", 0, 20);
+      cataLog.addCategoricalColVals("u_zipcode", zipCode);
 
       auto userDataRowVector = maker.rowVector(
           {"u_user_id",
@@ -1173,43 +1178,43 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // output the histogram for the user data
       cataLog.outputHistogramForData(
           userDataRowVector, "user", 50, tableStatsPath);
-          
+
       MovieTitleGenerator movieTitleGenerator = MovieTitleGenerator(0);
       std::vector<int> movieIDs = randomGenerator.genIntRange(0, numMovies);
       std::vector<std::string> movieTitle =
           movieTitleGenerator.generateBatchRandomTitles(numMovies);
+      std::vector<std::string> genres = {
+          "Action",
+          "Adventure",
+          "Animation",
+          "Children",
+          "Comedy",
+          "Crime",
+          "Documentary",
+          "Drama",
+          "Fantasy",
+          "Film-Noir",
+          "Horror",
+          "Musical",
+          "Mystery",
+          "Romance",
+          "Sci-Fi",
+          "Thriller",
+          "War",
+          "Western"};
       std::vector<std::string> movieGenres =
-          randomSampler.sampleFromSets<std::string>(
-              numMovies,
-              {"Action",
-               "Adventure",
-               "Animation",
-               "Children",
-               "Comedy",
-               "Crime",
-               "Documentary",
-               "Drama",
-               "Fantasy",
-               "Film-Noir",
-               "Horror",
-               "Musical",
-               "Mystery",
-               "Romance",
-               "Sci-Fi",
-               "Thriller",
-               "War",
-               "Western"});
+          randomSampler.sampleFromSets<std::string>(numMovies, genres);
+      std::vector<std::string> spokenLanguage = {
+          "English",
+          "French",
+          "German",
+          "Italian",
+          "Japanese",
+          "Korean",
+          "Mandarin",
+          "Spanish"};
       std::vector<std::string> movieSpokenLanguage =
-          randomSampler.sampleFromSets<std::string>(
-              numMovies,
-              {"English",
-               "French",
-               "German",
-               "Italian",
-               "Japanese",
-               "Korean",
-               "Mandarin",
-               "Spanish"});
+          randomSampler.sampleFromSets<std::string>(numMovies, spokenLanguage);
       randomGenerator.setFloatRange(0, 10);
       std::vector<float> moviePopularity =
           randomGenerator.genFloat1dVector(numMovies);
@@ -1220,6 +1225,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           randomGenerator.gen1DInt(numMovies, 0, 5000);
       std::vector<std::vector<float>> movieFeatures =
           randomGenerator.genFloat2dVector(numMovies, movieFeatureSize);
+
+      cataLog.addNumericalColMinMax("m_movie_id", 0, numMovies);
+      cataLog.addNumericalColMinMax("m_popularity", 0, 10);
+      cataLog.addNumericalColMinMax("m_vote_average", 0, 5);
+      cataLog.addNumericalColMinMax("m_vote_count", 0, 5000);
+      cataLog.addCategoricalColVals("m_genres", genres);
+      cataLog.addCategoricalColVals("m_spoken_languages", spokenLanguage);
 
       auto movieDataRowVector = maker.rowVector(
           {"m_movie_id",
@@ -1246,6 +1258,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       randomGenerator.setFloatRange(0, 1);
       std::vector<std::vector<float>> movieRelevanceTags =
           randomGenerator.genFloat2dVector(numMovies, numRelevanceTags);
+      
+      cataLog.addNumericalColMinMax("mt_movie_id", 0, numMovies);
 
       auto movieRelevanceTagRowVector = maker.rowVector(
           {"mt_movie_id", "mt_relevance_score"},
