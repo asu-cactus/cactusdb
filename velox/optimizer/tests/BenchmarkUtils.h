@@ -1522,7 +1522,7 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
     randomGenerator.setIntRange(1, 3);
     sampleFilterPool = predefinedMovieFilterExprs;
   } else if (filterTable == "movie_user") {
-    randomGenerator.setIntRange(1, 5);
+    randomGenerator.setIntRange(1, 3);
     combinedFilterExprSets.insert(
         combinedFilterExprSets.end(),
         predefinedUserFilterExprs.begin(),

@@ -502,6 +502,8 @@ class CataLog {
       double binValue = static_cast<double>(minValue) + b * binSize;
       bins[b] = std::to_string(binValue);
     }
+    
+    bins[numBins] = std::to_string(maxValue);
 
     for (size_t j = 0; j < numRows; ++j) {
       if (!numericVector->isNullAt(j)) {
@@ -579,7 +581,7 @@ class CataLog {
 
       // initialize the bins
       std::vector<double> frequencies(numBins, 0);
-      std::vector<std::string> bins(numBins);
+      std::vector<std::string> bins(numBins+1); // bins store the bin edges
       if (child->typeKind() == TypeKind::INTEGER) {
         // Handle INTEGER type
         auto numericVector = child->asFlatVector<int32_t>();
