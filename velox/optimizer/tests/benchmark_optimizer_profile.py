@@ -154,13 +154,13 @@ def configure_model_params(query_template, params_base, num_tag):
 
 
 if __name__ == "__main__":
-    # list_num_user = [100, 500, 1000]
-    # list_num_movie = [100, 500, 1000]
-    # list_num_tag = [25, 50, 100, 1000, 5000]
+    list_num_user = [100, 500, 1000]
+    list_num_movie = [100, 500, 1000]
+    list_num_tag = [25, 50, 100, 1000, 5000]
     list_query_template = ["user", "movie", "movie_user", "movie_user_tag"]
-    list_num_user = [100]
-    list_num_movie = [50]
-    list_num_tag = [25]
+    # list_num_user = [100]
+    # list_num_movie = [50]
+    # list_num_tag = [25]
 
     num_repeat = 4
     run_configs = list(
