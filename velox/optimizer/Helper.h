@@ -17,10 +17,13 @@
 #include <iostream>
 #include <regex>
 #include <vector>
+#include "CataLog.h"
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
+
+using namespace facebook::velox::exec;
 
 namespace optimization {
 // Structure to represent the file structure with paths and schema
@@ -252,7 +255,7 @@ void replaceSourceWithIdInSerializedPlan(
     folly::dynamic& serializedPlan,
     folly::dynamic& serializedNewSource,
     std::string nodeId) {
-  if (serializedPlan["sources"].isNull()) {
+  if (!serializedPlan.count("sources")) {
     return;
   }
   for (auto& source : serializedPlan["sources"]) {
@@ -262,6 +265,81 @@ void replaceSourceWithIdInSerializedPlan(
     } else {
       optimization::replaceSourceWithIdInSerializedPlan(
           source, serializedNewSource, nodeId);
+    }
+  }
+}
+
+std::vector<int> extractUDFDimension(std::string udfName) {
+  core::QueryConfig config({});
+  std::shared_ptr<VectorFunction> myUDF =
+      getVectorFunction(udfName, {ARRAY(REAL())}, {}, config);
+  if (udfName.find("mat_mul") != std::string::npos) {
+    std::shared_ptr<MatrixMultiply> myMulUDF =
+        std::dynamic_pointer_cast<MatrixMultiply>(myUDF);
+    return myMulUDF->getDims();
+  } else if (udfName.find("mat_vector_add") != std::string::npos) {
+    std::shared_ptr<MatrixVectorAddition> myAddUDF =
+        std::dynamic_pointer_cast<MatrixVectorAddition>(myUDF);
+    return myAddUDF->getDims();
+  } else {
+    return {};
+  }
+}
+
+void augmentFunctionExpression(folly::dynamic& serializedPlan) {
+  if (serializedPlan.count("functionName")) {
+    std::string functionName = serializedPlan["functionName"].asString();
+    std::vector<int> dims = extractUDFDimension(functionName);
+    if (dims.size() > 0) {
+      folly::dynamic jsonArray = folly::dynamic::array;
+      for (int value : dims) {
+        jsonArray.push_back(value);
+      }
+      serializedPlan["dims"] = jsonArray;
+    }
+    if (serializedPlan.count("inputs")) {
+      for (auto& input : serializedPlan["inputs"]) {
+        augmentFunctionExpression(input);
+      }
+    }
+  }
+}
+
+void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
+  if (serializedPlan["name"].asString() == "TableScanNode") {
+    std::string nodeId = serializedPlan["id"].asString();
+    std::shared_ptr<Source> tableSource = cataLog.getSource(nodeId);
+    std::shared_ptr<OutputStat> tableStats =
+        std::static_pointer_cast<OutputStat>(tableSource->getStats());
+    int numRows = tableStats->getRows();
+    int numCols = tableStats->getCols();
+
+    // Set number of rows and columns
+    folly::dynamic jsonArray = folly::dynamic::array;
+    jsonArray.push_back(numRows);
+    jsonArray.push_back(numCols);
+    serializedPlan["tableStats"] = jsonArray;
+
+    // Set tableName
+    std::string tableName = cataLog.getNodeIdRelationName(nodeId);
+    serializedPlan["tableName"] = tableName;
+  }
+}
+
+void augmentSerializedPlan(folly::dynamic& serializedPlan, CataLog& cataLog) {
+  if (serializedPlan.count("projections")) {
+    for (auto& project : serializedPlan["projections"]) {
+      if (project.count("functionName")) {
+        augmentFunctionExpression(project);
+      }
+    }
+  }
+
+  augmentTableScanNode(serializedPlan, cataLog);
+
+  if (serializedPlan.count("sources")) {
+    for (auto& source : serializedPlan["sources"]) {
+      augmentSerializedPlan(source, cataLog);
     }
   }
 }
@@ -303,14 +381,19 @@ std::string escapeRegex(const std::string& str) {
   }
   return escapedStr;
 }
-
+/**
+ * @brief Function to replace double quotes with single quotes in a string
+ *
+ * @param str The input string
+ * @return std::string The string with double quotes replaced by single quotes
+ */
 std::string replaceDoubleQuotes(std::string str) {
-    for (char& ch : str) {
-        if (ch == '"') {
-            ch = '\'';
-        }
+  for (char& ch : str) {
+    if (ch == '"') {
+      ch = '\'';
     }
-    return str;
+  }
+  return str;
 }
 
 // Iterate over all files in a directory and return their paths
@@ -396,6 +479,14 @@ bool containsStrButNotEqual(const std::string& str, const std::string& subStr) {
   return (found != std::string::npos) && (str != subStr);
 }
 
+/**
+ * @brief Function to find the data sources from the expression and return a
+ * vector of data sources
+ *
+ * @param expr The expression string to search for data sources
+ * @return std::vector<std::string> A vector of data sources found in the
+ * expression
+ */
 std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
   std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
   std::smatch matches;
@@ -415,6 +506,13 @@ std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
   return matchedDataSources;
 }
 
+/**
+ * @brief Function to find the pushdown planNode based on the nodeId
+ *
+ * @param planNode The current planNode to search for the pushdown planNode
+ * @param nodeId The nodeId to search for the pushdown planNode
+ * @return std::shared_ptr<const core::PlanNode> The pushdown planNode
+ */
 std::shared_ptr<const core::PlanNode> findPlanNodeById(
     const std::shared_ptr<const core::PlanNode>& planNode,
     const std::string& nodeId) {
@@ -431,6 +529,15 @@ std::shared_ptr<const core::PlanNode> findPlanNodeById(
 
   return nullptr;
 }
+
+/**
+ * @brief Function to find the nodeIds between two nodeId
+ * 
+ * @param planNode The current planNode to search for the nodeIds
+ * @param sourceNodeId The source nodeId
+ * @param targetNodeId The target nodeId
+ * @return std::vector<std::string> The nodeIds between the source and target nodeId 
+ */
 
 std::vector<std::string> findNodeIdsBetweenIds(
     const std::shared_ptr<const core::PlanNode>& planNode,
@@ -459,11 +566,18 @@ std::vector<std::string> findNodeIdsBetweenIds(
   return {};
 }
 
+/**
+ * @brief Function to add the projection field in the serialized plan
+ * 
+ * @param serializedPlan The serialized plan to add the projection field
+ * @param filedToBeAdded The field to be added in the projection
+ * @param nodeIds The nodeIds to add the projection field
+ */
 void addProjectionFiledInSerializedPlan(
     folly::dynamic& serializedPlan,
     folly::dynamic& filedToBeAdded,
     std::vector<std::string> nodeIds) {
-  if (serializedPlan["sources"].isNull()) {
+  if (!serializedPlan.count("sources")) {
     return;
   }
 
@@ -478,14 +592,15 @@ void addProjectionFiledInSerializedPlan(
       serializedPlan["names"].push_back(filedToBeAdded["fieldName"]);
     } else if (currentNodeName.find("Join") != std::string::npos) {
       // Add the filed to the FilterNode
-      // serializedPlan["filter"] = filedToBeAdded;
       serializedPlan["outputType"]["cTypes"].push_back(filedToBeAdded["type"]);
       serializedPlan["outputType"]["names"].push_back(
           filedToBeAdded["fieldName"]);
     } else if (currentNodeName.find("Filter") != std::string::npos) {
       // No need to add the filed to the FilterNode
     } else {
-      throw std::runtime_error("[Helper] addProjectionFiledInSerializedPlan: Unsupported node type: " + currentNodeName);
+      throw std::runtime_error(
+          "[Helper] addProjectionFiledInSerializedPlan: Unsupported node type: " +
+          currentNodeName);
     }
   }
 
@@ -497,43 +612,66 @@ void addProjectionFiledInSerializedPlan(
   return;
 }
 
-// In Velox, when parsing the cast function, parentheses are omitted in the exprStr output, 
-// making it unusable directly. This function reconstructs the correct cast 
-// expression by adding the necessary parentheses to match the body of the expression.
-// For example:
-// Input: eq(cast argmax(ROW["trending_prediction"]) as BIGINT, 1)
-// Output: eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
+// In Velox, when parsing the cast function, parentheses are omitted in the
+// exprStr output, making it unusable directly. This function reconstructs the
+// correct cast expression by adding the necessary parentheses to match the body
+// of the expression. For example: Input: eq(cast
+// argmax(ROW["trending_prediction"]) as BIGINT, 1) Output:
+// eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
 std::string fix_cast_function_parsing(std::string input) {
-  // Use regex to match the pattern "cast" followed by a space and a function call
+  // Use regex to match the pattern "cast" followed by a space and a function
+  // call
   std::regex cast_regex(R"(cast\s+(\w+\(.*?\))\s+as\s+(\w+))");
-  
+
   // Use a lambda function for the replacement to insert parentheses
-  std::string result = std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
+  std::string result =
+      std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
   return result;
 }
 
 std::vector<RowVectorPtr> splitRowVectorIntoBatches(
-    RowVectorPtr inputVector, size_t batchSize) {
-    
-    // Total number of rows in the input RowVector
-    size_t totalRows = inputVector->size();
-    
-    // Result vector to hold all the batches
-    std::vector<RowVectorPtr> batches;
+    RowVectorPtr inputVector,
+    size_t batchSize) {
+  // Total number of rows in the input RowVector
+  size_t totalRows = inputVector->size();
 
-    // Split the input RowVector into batches
-    for (size_t start = 0; start < totalRows; start += batchSize) {
-        // Calculate the size of the current batch
-        size_t currentBatchSize = std::min(batchSize, totalRows - start);
+  // Result vector to hold all the batches
+  std::vector<RowVectorPtr> batches;
 
-        // Slice the RowVector directly
-        RowVectorPtr batch = std::dynamic_pointer_cast<RowVector>(inputVector->slice(start, currentBatchSize));
+  // Split the input RowVector into batches
+  for (size_t start = 0; start < totalRows; start += batchSize) {
+    // Calculate the size of the current batch
+    size_t currentBatchSize = std::min(batchSize, totalRows - start);
 
-        // Add the batch to the result
-        batches.push_back(batch);
-    }
+    // Slice the RowVector directly
+    RowVectorPtr batch = std::dynamic_pointer_cast<RowVector>(
+        inputVector->slice(start, currentBatchSize));
 
-    return batches;
+    // Add the batch to the result
+    batches.push_back(batch);
+  }
+
+  return batches;
+}
+
+std::vector<std::shared_ptr<TempFilePath>> splitRowVectorIntoBatchFiles(
+    RowVectorPtr inputVector,
+    size_t batchSize) {
+  optimization::MyFileTest myFile;
+
+  // Split the input RowVector into batches
+  auto batches = splitRowVectorIntoBatches(inputVector, batchSize);
+
+  // Result vector to hold all the batch file paths
+  std::vector<std::shared_ptr<TempFilePath>> batchFiles;
+
+  // Write each batch to a temporary file
+  for (size_t i = 0; i < batches.size(); ++i) {
+    auto file = TempFilePath::create();
+    myFile.writeToFile(file->path, {batches[i]});
+    batchFiles.push_back(file);
+  }
+  return batchFiles;
 }
 
 } // namespace optimization
