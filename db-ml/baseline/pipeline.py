@@ -1970,10 +1970,11 @@ class MovielensQ3PipelineSparkHadoop(Pipeline):
         df_movie_tag.createOrReplaceTempView("movie_tag")
         
         movielens_q3_spark_sql = """
-        SELECT u_user_id, m_movie_id, m_popularity, m_vote_average, m_vote_count, u_age, u_gender, u_occupation, mt_relevance_score
+        SELECT u_user_id, m_movie_id, m_popularity, m_vote_average, m_vote_count, u_age, u_gender, u_occupation, mt_relevance_score, m_genres
             from movie m join movie_tag mt
             on mt.mt_movie_id = m.m_movie_id
             cross join user u
+            where m_genres LIKE '\%Adventure\%'
         """
         data = self.spark.sql(movielens_q3_spark_sql)
 

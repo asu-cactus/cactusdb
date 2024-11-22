@@ -6,6 +6,8 @@
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
+#include "velox/functions/lib/RowsTranslationUtil.h"
+#include "velox/functions/lib/LambdaFunctionUtil.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -49,7 +51,6 @@ class CosineSimilarity : public MLFunction {
     auto decodedRightArray = rightHolder.get();
     auto baseRightArray =
         decodedRightArray->base()->as<ArrayVector>()->elements();
-    
     float* input1Values = baseLeftArray->values()->asMutable<float>();
     float* input2Values = baseRightArray->values()->asMutable<float>();
 
@@ -62,28 +63,33 @@ class CosineSimilarity : public MLFunction {
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
         input2Matrix(input2Values, numInput, dims[0]);
 
-    std::vector<std::vector<float>> results;
+    std::vector<float> resultVector;
 
-    // TODO more efficient way?
-    for (int i = 0; i < numInput; i++) {
-      std::vector<float> r;
-      float dotProduct = input1Matrix.row(i).dot(input2Matrix.row(i));
-      float norm1 = input1Matrix.row(i).norm();
-      float norm2 = input2Matrix.row(i).norm();
-      float cs = dotProduct / (norm1 * norm2 + 1e-8);
-      r.push_back(cs);
-      results.push_back(r);
-    }
+    rows.applyToSelected([&](vector_size_t i) {
+      // Map the input values into Eigen vectors
+      Eigen::Map<Eigen::VectorXf> vec1(input1Values + i * dims[0], dims[0]);
+      Eigen::Map<Eigen::VectorXf> vec2(input2Values + i * dims[0], dims[0]);
+
+      // Compute cosine similarity
+      float dotProduct = vec1.dot(vec2);
+      float norm1 = vec1.norm();
+      float norm2 = vec2.norm();
+      float cosineSim = dotProduct / (norm1 * norm2 + 1e-8);
+
+      // Store the result
+      // resultVector.push_back(1.0);
+      resultVector.push_back(cosineSim);
+    });
 
     VectorMaker maker{context.pool()};
-    output = maker.arrayVector<float>(results, REAL());
+    output = maker.flatVector<float>(resultVector, REAL());
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("array(REAL)")
                 .argumentType("array(REAL)")
-                .returnType("array(REAL)")
+                .returnType("REAL")
                 .build()};
   }
 

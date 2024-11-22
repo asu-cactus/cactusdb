@@ -1624,6 +1624,212 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
   }
 
+  void registerMLQ3UserMovieInterestModelFunctions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+
+    std::string ffnnModelPath =
+        "/home/velox/resources/model/movielens/final/velox/q3_user_movie_interest_ffnn_weight.h5";
+    std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+    std::vector<std::vector<float>> w3 = loadHDF5Array(ffnnModelPath, "w3");
+    std::vector<std::vector<float>> b3 = loadHDF5Array(ffnnModelPath, "b3");
+
+    optimization::registerVectorFunction(
+        "mat_mul15_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w1)), 5, 1024),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add15_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b1)), 1024),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul15_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w2)), 1024, 512),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add15_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b2)), 512),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul15_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w3)), 512, 2),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add15_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b3)), 2),
+        {},
+        true,
+        catalog);
+  }
+
+  void registerMLQ3UserMovieRatingModelFunctions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+
+    std::string ffnnModelPath =
+        "/home/velox/resources/model/movielens/final/velox/q3_user_movie_rating_ffnn_weight.h5";
+    std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+    std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+    std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+    std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+    std::vector<std::vector<float>> w3 = loadHDF5Array(ffnnModelPath, "w3");
+    std::vector<std::vector<float>> b3 = loadHDF5Array(ffnnModelPath, "b3");
+
+    optimization::registerVectorFunction(
+        "mat_mul16_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w1)), 5, 512),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add16_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b1)), 512),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul16_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w2)), 512, 1024),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add16_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b2)), 1024),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "mat_mul16_5",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w3)), 1024, 6),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add16_6",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b3)), 6),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "cosine_similarity_q3",
+        CosineSimilarity::signatures(),
+        std::make_unique<CosineSimilarity>(256),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "relu",
+        Relu::signatures(),
+        std::make_unique<Relu>(),
+        {},
+        true,
+        catalog);
+
+    optimization::registerVectorFunction(
+        "argmax",
+        Argmax::signatures(),
+        std::make_unique<Argmax>(),
+        {},
+        true,
+        catalog);
+  }
+
+  void registerMLMovieTagEncoderModelFunctions1(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+
+        VectorMaker maker{pool_.get()};
+
+    std::string ffnnEncoderModelPath =
+        "/home/velox/resources/model/movielens/final/velox/movie_tag_standalone_encoder_weight.h5";
+    std::vector<std::vector<float>> w1 =
+        loadHDF5Array(ffnnEncoderModelPath, "w1");
+    std::vector<std::vector<float>> b1 =
+        loadHDF5Array(ffnnEncoderModelPath, "b1");
+    std::vector<std::vector<float>> w2 =
+        loadHDF5Array(ffnnEncoderModelPath, "w2");
+    std::vector<std::vector<float>> b2 =
+        loadHDF5Array(ffnnEncoderModelPath, "b2");
+
+    optimization::registerVectorFunction(
+        "mat_mul20_1",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w1)), 140979, 2048),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add20_2",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b1)), 2048),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_mul20_3",
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(w2)), 2048, 256),
+        {},
+        true,
+        catalog);
+    optimization::registerVectorFunction(
+        "mat_vector_add20_4",
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(b2)), 256),
+        {},
+        true,
+        catalog);
+
+      }
+
   void registerMLMovieTagEncoderModelFunctions(
       CataLog& catalog,
       std::shared_ptr<memory::MemoryPool> pool_) {
@@ -3431,6 +3637,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       registerMLInterestMovieModelFunctions(cataLog, pool_);
       registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
       registerMLDLRMModelFunctions(cataLog, pool_);
+    } else if (model == "ml-q3") {
+      registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
+      registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
+      registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+      registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -3528,7 +3739,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       // planState.update(myPlan, cataLog);
       // planNode = myPlan.planNode();
     }
-    if (queryOptType == "mlq2-mul2join" || queryOptType == "optimized") {
+    if (queryOptType == "mlq2-mul2join" || queryOptType == "mlq2-optimized") {
       testAction =
           std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
 
@@ -3546,7 +3757,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       planNode = myPlan.planNode();
       planState.getPossibleActions(planNode, cataLog);
     }
-    if (queryOptType == "mlq2-fusion" || queryOptType == "optimized") {
+    if (queryOptType == "mlq2-fusion" || queryOptType == "mlq2-optimized") {
       testAction = std::make_pair(
           "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(ROW[\"top_mlp_input\"])))))))))",
           "MultiLayerUDF2TorchNNRewriteAction");
@@ -3603,6 +3814,66 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
       testAction = std::make_pair(
           "relu(mat_vector_add11_2(mat_mul11_1(ROW[\"mt_relevance_score\"])))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+    }
+
+    if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized") {
+
+      if (queryOptType == "mlq3-mul2join") {
+        testAction =
+            std::make_pair("mat_mul20_1", "Mul2JoinAggHorizontalRewriteAction");
+      } else if (queryOptType == "mlq3-optimized"){
+        testAction = std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
+      }
+
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+    }
+
+    if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized") {
+      testAction = std::make_pair(
+          "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(ROW[\"model_features\"])))))))))",
+          "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(ROW[\"model_features\"])))))))))",
           "MultiLayerUDF2TorchNNRewriteAction");
       planState.takeAction(
           planNode,
