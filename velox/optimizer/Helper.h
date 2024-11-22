@@ -309,7 +309,8 @@ void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
   if (serializedPlan["name"].asString() == "TableScanNode") {
     std::string nodeId = serializedPlan["id"].asString();
     std::shared_ptr<Source> tableSource = cataLog.getSource(nodeId);
-    std::shared_ptr<OutputStat> tableStats = std::static_pointer_cast<OutputStat>(tableSource->getStats());
+    std::shared_ptr<OutputStat> tableStats =
+        std::static_pointer_cast<OutputStat>(tableSource->getStats());
     int numRows = tableStats->getRows();
     int numCols = tableStats->getCols();
 
@@ -319,7 +320,7 @@ void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
     jsonArray.push_back(numCols);
     serializedPlan["tableStats"] = jsonArray;
 
-    // Set tableName 
+    // Set tableName
     std::string tableName = cataLog.getNodeIdRelationName(nodeId);
     serializedPlan["tableName"] = tableName;
   }
@@ -380,7 +381,12 @@ std::string escapeRegex(const std::string& str) {
   }
   return escapedStr;
 }
-
+/**
+ * @brief Function to replace double quotes with single quotes in a string
+ *
+ * @param str The input string
+ * @return std::string The string with double quotes replaced by single quotes
+ */
 std::string replaceDoubleQuotes(std::string str) {
   for (char& ch : str) {
     if (ch == '"') {
@@ -473,6 +479,14 @@ bool containsStrButNotEqual(const std::string& str, const std::string& subStr) {
   return (found != std::string::npos) && (str != subStr);
 }
 
+/**
+ * @brief Function to find the data sources from the expression and return a
+ * vector of data sources
+ *
+ * @param expr The expression string to search for data sources
+ * @return std::vector<std::string> A vector of data sources found in the
+ * expression
+ */
 std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
   std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
   std::smatch matches;
@@ -492,6 +506,13 @@ std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
   return matchedDataSources;
 }
 
+/**
+ * @brief Function to find the pushdown planNode based on the nodeId
+ *
+ * @param planNode The current planNode to search for the pushdown planNode
+ * @param nodeId The nodeId to search for the pushdown planNode
+ * @return std::shared_ptr<const core::PlanNode> The pushdown planNode
+ */
 std::shared_ptr<const core::PlanNode> findPlanNodeById(
     const std::shared_ptr<const core::PlanNode>& planNode,
     const std::string& nodeId) {
@@ -508,6 +529,15 @@ std::shared_ptr<const core::PlanNode> findPlanNodeById(
 
   return nullptr;
 }
+
+/**
+ * @brief Function to find the nodeIds between two nodeId
+ * 
+ * @param planNode The current planNode to search for the nodeIds
+ * @param sourceNodeId The source nodeId
+ * @param targetNodeId The target nodeId
+ * @return std::vector<std::string> The nodeIds between the source and target nodeId 
+ */
 
 std::vector<std::string> findNodeIdsBetweenIds(
     const std::shared_ptr<const core::PlanNode>& planNode,
@@ -536,6 +566,13 @@ std::vector<std::string> findNodeIdsBetweenIds(
   return {};
 }
 
+/**
+ * @brief Function to add the projection field in the serialized plan
+ * 
+ * @param serializedPlan The serialized plan to add the projection field
+ * @param filedToBeAdded The field to be added in the projection
+ * @param nodeIds The nodeIds to add the projection field
+ */
 void addProjectionFiledInSerializedPlan(
     folly::dynamic& serializedPlan,
     folly::dynamic& filedToBeAdded,
@@ -555,7 +592,6 @@ void addProjectionFiledInSerializedPlan(
       serializedPlan["names"].push_back(filedToBeAdded["fieldName"]);
     } else if (currentNodeName.find("Join") != std::string::npos) {
       // Add the filed to the FilterNode
-      // serializedPlan["filter"] = filedToBeAdded;
       serializedPlan["outputType"]["cTypes"].push_back(filedToBeAdded["type"]);
       serializedPlan["outputType"]["names"].push_back(
           filedToBeAdded["fieldName"]);

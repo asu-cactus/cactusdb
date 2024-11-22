@@ -174,7 +174,8 @@ if __name__ == "__main__":
     result_df = None
 
     # TODO: clean up for development
-    shutil.rmtree("./generatedQueryPlan")
+    if os.path.exists("./generatedQueryPlan"):
+      shutil.rmtree("./generatedQueryPlan")
     time_stamp = get_current_time()
     output_dir = os.path.join("generatedQueryPlan", time_stamp)
     create_path(output_dir)
