@@ -1304,9 +1304,16 @@ public:
                      .argumentType("array(REAL)")
                      .build(),
                 // Output flat vector of int when Argmax is applied
+                // Add an un-used argument to distinguish the signature
                 exec::FunctionSignatureBuilder()
                      .returnType("INTEGER")
                      .argumentType("array(REAL)")
+                     .argumentType("INTEGER")
+                     .build(),
+                exec::FunctionSignatureBuilder()
+                     .returnType("INTEGER")
+                     .argumentType("array(REAL)")
+                     .argumentType("BIGINT")
                      .build()};
     }
 
