@@ -41,6 +41,10 @@ class CataLog {
       auto fileAddrIt = UDFFileAddrMap.find(key);
       auto schemaIt = UDFSchemaMap.find(key);
 
+      for (auto& path : filePath) {
+        preserveTempFilePaths.push_back(path);
+      }
+
       if (fileAddrIt != UDFFileAddrMap.end() &&
           schemaIt != UDFSchemaMap.end()) {
         // Key exists, update values
@@ -502,7 +506,6 @@ class CataLog {
       double binValue = static_cast<double>(minValue) + b * binSize;
       bins[b] = std::to_string(binValue);
     }
-    
     bins[numBins] = std::to_string(maxValue);
 
     for (size_t j = 0; j < numRows; ++j) {
@@ -581,7 +584,7 @@ class CataLog {
 
       // initialize the bins
       std::vector<double> frequencies(numBins, 0);
-      std::vector<std::string> bins(numBins+1); // bins store the bin edges
+      std::vector<std::string> bins(numBins + 1); // bins store the bin edges
       if (child->typeKind() == TypeKind::INTEGER) {
         // Handle INTEGER type
         auto numericVector = child->asFlatVector<int32_t>();

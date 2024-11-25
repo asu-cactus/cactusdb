@@ -274,9 +274,20 @@ std::vector<int> extractUDFDimension(std::string udfName) {
   std::shared_ptr<VectorFunction> myUDF =
       getVectorFunction(udfName, {ARRAY(REAL())}, {}, config);
   if (udfName.find("mat_mul") != std::string::npos) {
-    std::shared_ptr<MatrixMultiply> myMulUDF =
-        std::dynamic_pointer_cast<MatrixMultiply>(myUDF);
-    return myMulUDF->getDims();
+    if (udfName.find("_h") != std::string::npos) {
+      // block based MatrixMultiply
+      myUDF = getVectorFunction(
+          udfName, {ARRAY(REAL()), ARRAY(REAL())}, {}, config);
+      std::shared_ptr<MatrixMultiply_h> myMulUDF =
+          std::dynamic_pointer_cast<MatrixMultiply_h>(myUDF);
+      std::vector<int> dims = myMulUDF->getDims();
+      return {dims[2] /*block size */, dims[1]};
+    } else {
+      // non-block based MatrixMultiply
+      std::shared_ptr<MatrixMultiply> myMulUDF =
+          std::dynamic_pointer_cast<MatrixMultiply>(myUDF);
+      return myMulUDF->getDims();
+    }
   } else if (udfName.find("mat_vector_add") != std::string::npos) {
     std::shared_ptr<MatrixVectorAddition> myAddUDF =
         std::dynamic_pointer_cast<MatrixVectorAddition>(myUDF);
@@ -289,13 +300,18 @@ std::vector<int> extractUDFDimension(std::string udfName) {
 void augmentFunctionExpression(folly::dynamic& serializedPlan) {
   if (serializedPlan.count("functionName")) {
     std::string functionName = serializedPlan["functionName"].asString();
-    std::vector<int> dims = extractUDFDimension(functionName);
-    if (dims.size() > 0) {
-      folly::dynamic jsonArray = folly::dynamic::array;
-      for (int value : dims) {
-        jsonArray.push_back(value);
+    try {
+      std::vector<int> dims = extractUDFDimension(functionName);
+      if (dims.size() > 0) {
+        folly::dynamic jsonArray = folly::dynamic::array;
+        for (int value : dims) {
+          jsonArray.push_back(value);
+        }
+        serializedPlan["dims"] = jsonArray;
       }
-      serializedPlan["dims"] = jsonArray;
+    } catch (const std::exception& e) {
+      std::cout << "Error: extractUDFDimension: " << functionName << " "
+                << e.what() << std::endl;
     }
     if (serializedPlan.count("inputs")) {
       for (auto& input : serializedPlan["inputs"]) {
@@ -532,11 +548,12 @@ std::shared_ptr<const core::PlanNode> findPlanNodeById(
 
 /**
  * @brief Function to find the nodeIds between two nodeId
- * 
+ *
  * @param planNode The current planNode to search for the nodeIds
  * @param sourceNodeId The source nodeId
  * @param targetNodeId The target nodeId
- * @return std::vector<std::string> The nodeIds between the source and target nodeId 
+ * @return std::vector<std::string> The nodeIds between the source and target
+ * nodeId
  */
 
 std::vector<std::string> findNodeIdsBetweenIds(
@@ -568,7 +585,7 @@ std::vector<std::string> findNodeIdsBetweenIds(
 
 /**
  * @brief Function to add the projection field in the serialized plan
- * 
+ *
  * @param serializedPlan The serialized plan to add the projection field
  * @param filedToBeAdded The field to be added in the projection
  * @param nodeIds The nodeIds to add the projection field

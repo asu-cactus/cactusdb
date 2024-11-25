@@ -199,6 +199,7 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                     preComputeExprSets.insert(target + "_wb_row");
                     preComputeExprSets.insert(target + "_wb_col");
                     mulProjectExprSets.insert(target + "_wb_col");
+                    mulProjectExprSets.insert(target + "_wb_row");
 
                     nestedLoopProjectExprSets.insert(matchedDataSrc);
                     nestedLoopProjectExprSets.insert(weightBlockName);
@@ -403,12 +404,6 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                   p2, cataLog.getUDFFileAddr(target + "_weights_vertical"));
               int blockSize = cataLog.getDefaultBlocksSize();
               int numBlocks = ceil(dims[1] / blockSize);
-              // std::shared_ptr<OutputStat> inputStat =
-              //     std::make_shared<OutputStat>(
-              //         OutputStat(numSamples, numFeatures));
-              // Source inputSource = Source(p1, Source::Type::FILE,
-              // std::move(inputStat));
-              // cataLog.addSource(std::make_shared<Source>(inputSource));
 
               std::shared_ptr<OutputStat> weightStat =
                   std::make_shared<OutputStat>(
@@ -416,6 +411,7 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
               Source weightSource =
                   Source(p2, Source::Type::FILE, std::move(weightStat));
               cataLog.addSource(std::make_shared<Source>(weightSource));
+              cataLog.addNodeIdRelationName(p2, target + "_weights_vertical");
 
               LOG(INFO)
                   << "[Rewrite] mul2joinAggHorizontal rewrite updated catalog: "
@@ -459,88 +455,92 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
           if (auto call = std::dynamic_pointer_cast<const core::CallTypedExpr>(
                   filterExpr)) {
             if (targetExprStr.find(target) != std::string::npos) {
-              core::QueryConfig config({});
-              // Search for UDF functions by names
-              std::shared_ptr<VectorFunction> myMul =
-                  getVectorFunction(target, {ARRAY(REAL())}, {}, config);
+              std::cout << "[WARNING] Not supported yet" << std::endl;
+              // core::QueryConfig config({});
+              // // Search for UDF functions by names
+              // std::shared_ptr<VectorFunction> myMul =
+              //     getVectorFunction(target, {ARRAY(REAL())}, {}, config);
 
-              if (myMul) {
-                // Get the specific MatrixMultiply UDF
-                std::shared_ptr<MatrixMultiply> myMulUDF =
-                    std::dynamic_pointer_cast<MatrixMultiply>(myMul);
+              // if (myMul) {
+              //   // Get the specific MatrixMultiply UDF
+              //   std::shared_ptr<MatrixMultiply> myMulUDF =
+              //       std::dynamic_pointer_cast<MatrixMultiply>(myMul);
 
-                if (myMulUDF) {
-                  // Get the dimensions, weights from this MatrixMultiply UDF
-                  dims = myMulUDF->getDims();
-                  weights = myMulUDF->getTensor();
-                  // Get information (defaultBlocksnumber, number of samples)
-                  // from cataLog
-                  int blocks = cataLog.getDefaultBlocksNum();
-                  int blockSize = cataLog.getDefaultBlocksSize();
+              //   if (myMulUDF) {
+              //     // Get the dimensions, weights from this MatrixMultiply UDF
+              //     dims = myMulUDF->getDims();
+              //     weights = myMulUDF->getTensor();
+              //     // Get information (defaultBlocksnumber, number of samples)
+              //     // from cataLog
+              //     int blocks = cataLog.getDefaultBlocksNum();
+              //     int blockSize = cataLog.getDefaultBlocksSize();
 
-                  // Register matrix blocks multiply function
-                  registerVectorFunction(
-                      "mat_mul_h",
-                      MatrixMultiply_h::signatures(),
-                      // std::make_unique<MatrixMultiply_h>(dims[0]/blocks,
-                      // dims[1], samples, weights, blocks)
-                      std::make_unique<MatrixMultiply_h>(
-                          dims[0], dims[1], cataLog.getDefaultBlocksSize()));
-                  // Add UDF associate information (UDF with input values) to
-                  // cataLog Should blocking source here catalog source will
-                  // invoke a intern function to blocking itself, then return
-                  // schema and address in here cataLog.add(target,
-                  // cataLog.getDataSourceBlocksSchema("values"),
-                  // cataLog.getDataSourceBlocksFileAddr("values"), 0);
-                }
-              }
-              if (curNode->sources().size() > 0) {
-                // Initial PlanNode Id for splits
-                core::PlanNodeId p1;
-                core::PlanNodeId p2;
-                // Get schema of values and weights from cataLog
-                valueSchema = cataLog.getUDFSchema(target + "_values");
-                weightSchema =
-                    cataLog.getUDFSchema(target + "_weights_vertical");
-                // Regular expression match
-                std::regex pattern(target + R"(\([^)]+\))");
-                targetExprStr =
-                    std::regex_replace(targetExprStr, pattern, "R1");
+              //     // Register matrix blocks multiply function
+              //     registerVectorFunction(
+              //         "mat_mul_h",
+              //         MatrixMultiply_h::signatures(),
+              //         // std::make_unique<MatrixMultiply_h>(dims[0]/blocks,
+              //         // dims[1], samples, weights, blocks)
+              //         std::make_unique<MatrixMultiply_h>(
+              //             dims[0], dims[1], cataLog.getDefaultBlocksSize()));
+              //     // Add UDF associate information (UDF with input values) to
+              //     // cataLog Should blocking source here catalog source will
+              //     // invoke a intern function to blocking itself, then return
+              //     // schema and address in here cataLog.add(target,
+              //     // cataLog.getDataSourceBlocksSchema("values"),
+              //     // cataLog.getDataSourceBlocksFileAddr("values"), 0);
+              //   }
+              // }
+              // if (curNode->sources().size() > 0) {
+              //   // Initial PlanNode Id for splits
+              //   core::PlanNodeId p1;
+              //   core::PlanNodeId p2;
+              //   // Get schema of values and weights from cataLog
+              //   valueSchema = cataLog.getUDFSchema(target + "_values");
+              //   weightSchema =
+              //       cataLog.getUDFSchema(target + "_weights_vertical");
+              //   // Regular expression match
+              //   std::regex pattern(target + R"(\([^)]+\))");
+              //   targetExprStr =
+              //       std::regex_replace(targetExprStr, pattern, "R1");
 
-                // Build new plan
-                planBuilder =
-                    exec::test::PlanBuilder(planNodeIdGenerator)
-                        .tableScan(weightSchema)
-                        .capturePlanNodeId(p2)
-                        // automatically generate row number for input values
-                        .nestedLoopJoin(
-                            PlanBuilder(planNodeIdGenerator)
-                                .tableScan(valueSchema)
-                                .capturePlanNodeId(p1)
-                                .planNode(),
-                            {"idx", "v", "w", "w_row", "w_col"})
-                        .project({"mat_mul_h(v, w) AS t", "idx", "w_col"})
-                        // .localPartition({"idx"})
-                        // .singleAggregation({"idx"}, {"array_cat(t, w_col) AS
-                        // v"})
-                        .partialAggregation(
-                            {"idx"}, {"array_cat(t, w_col) AS v"})
-                        .localPartition({"idx"})
-                        .intermediateAggregation()
-                        .finalAggregation()
-                        .project({targetExprStr});
+              //   // Build new plan
+              //   planBuilder =
+              //       exec::test::PlanBuilder(planNodeIdGenerator)
+              //           .tableScan(weightSchema)
+              //           .capturePlanNodeId(p2)
+              //           // automatically generate row number for input values
+              //           .nestedLoopJoin(
+              //               PlanBuilder(planNodeIdGenerator)
+              //                   .tableScan(valueSchema)
+              //                   .capturePlanNodeId(p1)
+              //                   .planNode(),
+              //               {"idx", "v", "w", "w_row", "w_col"})
+              //           .project({"mat_mul_h(v, w) AS t", "idx", "w_col"})
+              //           // .localPartition({"idx"})
+              //           // .singleAggregation({"idx"}, {"array_cat(t, w_col)
+              //           AS
+              //           // v"})
+              //           .partialAggregation(
+              //               {"idx"}, {"array_cat(t, w_col) AS v"})
+              //           .localPartition({"idx"})
+              //           .intermediateAggregation()
+              //           .finalAggregation()
+              //           .project({targetExprStr})
+              //           ;
 
-                // Delete old nodeId-fileAddress map
-                auto valueFileAddr =
-                    cataLog.getFileAddress(cataLog.getVectorIdMap("v"));
-                cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
-                // Insert new nodeId-fileAddress maps
-                cataLog.setIdAddressMap(p1, valueFileAddr);
-                cataLog.setIdAddressMap(
-                    p2, cataLog.getUDFFileAddr(target + "_weights_vertical"));
+              //   // Delete old nodeId-fileAddress map
+              //   auto valueFileAddr =
+              //       cataLog.getFileAddress(cataLog.getVectorIdMap("v"));
+              //   cataLog.deleteIdAddressMap(cataLog.getVectorIdMap("v"));
+              //   // Insert new nodeId-fileAddress maps
+              //   cataLog.setIdAddressMap(p1, valueFileAddr);
+              //   cataLog.setIdAddressMap(
+              //       p2, cataLog.getUDFFileAddr(target +
+              //       "_weights_vertical"));
 
-                transformationApplied = true;
-              }
+              //   transformationApplied = true;
+              // }
             }
           }
         }
@@ -625,7 +625,8 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                     functionName + "_weights_vertical")) {
               targetActions.push_back(functionName);
             } else {
-              LOG(ERROR) << "[ERROR]: " << functionName + "_weights_vertical" << "does not exist in catalog" << std::endl;
+              LOG(ERROR) << "[ERROR]: " << functionName + "_weights_vertical"
+                         << "does not exist in catalog" << std::endl;
             }
           }
         }
