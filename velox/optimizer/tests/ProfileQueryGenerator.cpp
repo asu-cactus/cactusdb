@@ -334,13 +334,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         for (auto batchedData : finalResult) {
           batchedData = std::move(batchedData);
           int batchSize = batchedData->size();
-          if (verbose == 2) {
+          if (verbose == 3) {
             std::cout << fmt::format(
                              "[INFO] Batched Data: {}, Batch Size:{} \n",
                              dataIdx,
                              batchSize)
                       << batchedData->toString() << std::endl;
-          } else if (verbose == 3) {
+          } else if (verbose == 4) {
             std::cout << fmt::format(
                              "[INFO] Batched Data: {}, Batch Size:{} \n",
                              dataIdx,
@@ -716,6 +716,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                           "u_gender",
                           "u_occupation",
                           "u_zipcode",
+                          "u_features"})
+                     .project(
+                         {"u_user_id",
+                          "u_age",
+                          "u_gender",
+                          "u_occupation",
+                          "u_zipcode",
                           fmt::format(userModel1ComputExpr, "u_features")});
         if (generateFilter) {
           std::vector<std::string> filterExpr =
@@ -746,6 +753,15 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                      .tableScan(movieDataRowType, {}, "")
                      .capturePlanNodeId(readMovieDataPlanNodeId)
+                     .project(
+                         {"m_movie_id",
+                          "m_title",
+                          "m_genres",
+                          "m_spoken_languages",
+                          "m_popularity",
+                          "m_vote_average",
+                          "m_vote_count",
+                          "m_features"})
                      .project(
                          {"m_movie_id",
                           "m_title",
@@ -817,7 +833,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         core::PlanNodeId readUserDataPlanNodeId;
         auto userPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                             .tableScan(userDataRowType, {}, "")
-                            .capturePlanNodeId(readUserDataPlanNodeId);
+                            .capturePlanNodeId(readUserDataPlanNodeId)
+                            .project(
+                                {"u_user_id",
+                                 "u_age",
+                                 "u_gender",
+                                 "u_occupation",
+                                 "u_zipcode",
+                                 "u_features"});
 
         std::string movieModel1ComputExpr = registerNNModel(
             movieModelStructures[0],
@@ -827,7 +850,16 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         core::PlanNodeId readMovieDataPlanNodeId;
         auto moviePlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                              .tableScan(movieDataRowType, {}, "")
-                             .capturePlanNodeId(readMovieDataPlanNodeId);
+                             .capturePlanNodeId(readMovieDataPlanNodeId)
+                             .project(
+                                 {"m_movie_id",
+                                  "m_title",
+                                  "m_genres",
+                                  "m_spoken_languages",
+                                  "m_popularity",
+                                  "m_vote_average",
+                                  "m_vote_count",
+                                  "m_features"});
         RandomGenerator numModelGenerator = RandomGenerator(-1, 1, 0);
         numModelGenerator.setIntRange(0, 2);
         int numModel = numModelGenerator.genRandomIntValue();
@@ -924,7 +956,14 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         core::PlanNodeId readUserDataPlanNodeId;
         auto userPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                             .tableScan(userDataRowType, {}, "")
-                            .capturePlanNodeId(readUserDataPlanNodeId);
+                            .capturePlanNodeId(readUserDataPlanNodeId)
+                            .project(
+                                {"u_user_id",
+                                 "u_age",
+                                 "u_gender",
+                                 "u_occupation",
+                                 "u_zipcode",
+                                 "u_features"});
 
         std::string movieModel1ComputExpr = registerNNModel(
             movieModelStructures[0],
@@ -934,7 +973,17 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         core::PlanNodeId readMovieDataPlanNodeId;
         auto moviePlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                              .tableScan(movieDataRowType, {}, "")
-                             .capturePlanNodeId(readMovieDataPlanNodeId);
+                             .capturePlanNodeId(readMovieDataPlanNodeId)
+                             .project({
+                                 "m_movie_id",
+                                 "m_title",
+                                 "m_genres",
+                                 "m_spoken_languages",
+                                 "m_popularity",
+                                 "m_vote_average",
+                                 "m_vote_count",
+                                 "m_features",
+                             });
 
         std::string tagModel1ComputExpr = registerNNModel(
             tagModelStructures[0],
@@ -945,7 +994,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         auto tagPlan =
             PlanBuilder(planNodeIdGenerator, pool_.get())
                 .tableScan(movieRelevanceTagRowType, {}, "")
-                .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId);
+                .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId)
+                .project({
+                    "mt_movie_id",
+                    "mt_relevance_score",
+                });
 
         auto movieTagPlan = tagPlan.hashJoin(
             {"mt_movie_id"},
@@ -1101,7 +1154,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::string mode,
       std::vector<int> numberOfTuples,
       std::vector<int> dummyFeatureSizes,
-      CataLog& cataLog) {
+      CataLog& cataLog,
+      int dataBatchSize = 256) {
     if (mode == "ml") {
       VectorMaker maker{pool_.get()};
       // it should contains the numbers: # of users, # of movies, # of relevance
@@ -1258,7 +1312,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       randomGenerator.setFloatRange(0, 1);
       std::vector<std::vector<float>> movieRelevanceTags =
           randomGenerator.genFloat2dVector(numMovies, numRelevanceTags);
-      
+
       cataLog.addNumericalColMinMax("mt_movie_id", 0, numMovies);
 
       auto movieRelevanceTagRowVector = maker.rowVector(
@@ -1274,7 +1328,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           tableStatsPath);
 
       std::vector<std::shared_ptr<TempFilePath>> userFilePaths =
-          splitRowVectorIntoBatchFiles(userDataRowVector, 1024);
+          splitRowVectorIntoBatchFiles(userDataRowVector, dataBatchSize);
       std::pair<int, int> userStats =
           std::make_pair(numUsers, userDataRowVector->childrenSize());
       cataLog.registerDataSrc(
@@ -1284,7 +1338,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           userStats);
 
       std::vector<std::shared_ptr<TempFilePath>> movieFilePaths =
-          splitRowVectorIntoBatchFiles(movieDataRowVector, 1024);
+          splitRowVectorIntoBatchFiles(movieDataRowVector, dataBatchSize);
       std::pair<int, int> movieStats =
           std::make_pair(numMovies, movieDataRowVector->childrenSize());
       cataLog.registerDataSrc(
@@ -1294,7 +1348,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           movieStats);
 
       std::vector<std::shared_ptr<TempFilePath>> movieRelevanceTagFilePaths =
-          splitRowVectorIntoBatchFiles(movieRelevanceTagRowVector, 1024);
+          splitRowVectorIntoBatchFiles(
+              movieRelevanceTagRowVector, dataBatchSize);
       std::pair<int, int> movieRelevanceTagStats =
           std::make_pair(numMovies, movieRelevanceTagRowVector->childrenSize());
       cataLog.registerDataSrc(
@@ -1303,6 +1358,99 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           asRowType(movieRelevanceTagRowVector->type()),
           movieRelevanceTagStats);
     }
+  }
+
+  PlanBuilder rewriteQuery(
+      CataLog& cataLog,
+      PlanBuilder& plan,
+      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+      int verbose) {
+    unsigned timestampSeed =
+        std::chrono::system_clock::now().time_since_epoch().count();
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
+
+    RandomGenerator randomGenerator = RandomGenerator(0, 1, timestampSeed);
+    RandomSampler randomSampler = RandomSampler(timestampSeed);
+    // randomly apple 1 to 3 actions
+    randomGenerator.setIntRange(1, 3);
+
+    auto planNode = plan.planNode();
+    planState.getPossibleActions(planNode, cataLog);
+
+    std::pair<std::string, std::string> selectedAction;
+
+    if (verbose >= 2) {
+      std::cout << "[INFO] All possible actions:" << std::endl;
+      for (auto entry : planState.actionsPair) {
+        std::cout << entry.first << ": " << entry.second << std::endl;
+        // if (entry.first.find("softmax") != std::string::npos) {
+        //   selectedAction = std::make_pair(entry.first,
+        // "MultiLayerUDF2TorchNNRewriteAction");
+        // }
+      }
+    }
+    // std::cout << "[INFO] All possible actions:" << std::endl;
+
+    // selectedAction = std::make_pair(
+    //     "mat_mul0_0",
+    //     "Mul2JoinAggHorizontalRewriteAction");
+
+    // planState.takeAction(
+    //     planNode,
+    //     nullptr,
+    //     maker,
+    //     plan,
+    //     pool_,
+    //     planNodeIdGenerator,
+    //     {selectedAction},
+    //     cataLog);
+
+    // std::cout << "[INFO] Selected action: " << selectedAction.first
+    //           << ": " << selectedAction.second << std::endl;
+
+    // return plan;
+
+    for (int i = 0; i < randomGenerator.genRandomIntValue(); i++) {
+      if (randomGenerator.genRandomFloatValue() > 0.5) {
+        // Get the logical plan
+        auto planNode = plan.planNode();
+        planState.getPossibleActions(planNode, cataLog);
+        std::vector<std::pair<std::string, std::string>> availableActions;
+        if (verbose >= 2) {
+          std::cout << "[INFO] All possible actions:" << std::endl;
+        }
+        for (auto entry : planState.actionsPair) {
+          if (verbose >= 2) {
+            std::cout << entry.first << ": " << entry.second << std::endl;
+          }
+          for (auto action : entry.second) {
+            availableActions.push_back(std::make_pair(entry.first, action));
+          }
+        }
+        std::pair<std::string, std::string> selectedAction =
+            randomSampler.sampleFromSets<std::pair<std::string, std::string>>(
+                1, availableActions)[0];
+        if (verbose >= 2) {
+          std::cout << "[INFO] Selected action: " << selectedAction.first
+                    << ": " << selectedAction.second << std::endl;
+        }
+        planState.takeAction(
+            planNode,
+            nullptr,
+            maker,
+            plan,
+            pool_,
+            planNodeIdGenerator,
+            {selectedAction},
+            cataLog);
+      } else {
+        break;
+      }
+    }
+    return plan;
   }
 
   void runProfile(
@@ -1315,7 +1463,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       int numThreads,
       int repeatRun,
       // int blockSize,
-      int verbose) {
+      int verbose,
+      bool rewrite,
+      int dataBatchSize = 256) {
     PlanBuilder myPlan;
     CataLog cataLog;
     // Initialize planNodeIdGenerator
@@ -1324,7 +1474,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
     std::string computationStr;
 
-    generateDummyData(mode, numberOfTuples, dummyFeatureSizes, cataLog);
+    generateDummyData(
+        mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
 
     if (mode == "ml") {
       myPlan = setupProfileQueryPlan(
@@ -1341,15 +1492,33 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
 
-    std::cout << "[INFO] Executed Query Plan: \n"
+    std::cout << "[INFO] Original Query Plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
 
+    if (rewrite) {
+      myPlan = rewriteQuery(cataLog, myPlan, planNodeIdGenerator, verbose);
+    }
+
+    // auto idAddressMap = cataLog.getIdAddressMap();
+    // std::cout << "[INFO] Id Address Map: \n";
+    // for (auto entry : idAddressMap) {
+    //   std::cout << entry.first << ": " << entry.second.size() << " Files" <<
+    //   std::endl;
+    // }
+
+    std::cout << "[INFO] Executed Query Plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
     auto serializedPlan = myPlan.planNode()->serialize();
     std::string queryOutPutPath =
         "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
-
     augmentSerializedPlan(serializedPlan, cataLog);
     writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
+
+    std::cout << "[INFO] IdAddressMap: \n";
+    for (auto entry : cataLog.getIdAddressMap()) {
+      std::cout << entry.first << ": # Files: " << entry.second.size() << " "
+                << entry.second << std::endl;
+    }
 
     float executeTime =
         runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
@@ -1361,8 +1530,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
 
     std::cout << "Success" << std::endl;
-
-    std::cout << cataLog.getIdAddressMap() << std::endl;
 
     return;
 
@@ -1655,7 +1822,7 @@ DEFINE_string(
     "user",
     "Query template: user, movie, movie_relevance_tag");
 DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower, llm");
-DEFINE_bool(rewrite, true, "Whether  rewrite");
+DEFINE_bool(rewrite, true, "Whether randomly rewrite the query");
 DEFINE_int32(num_repeat, 1, "Number of repeat run");
 DEFINE_int32(user_feature_size, 256, "User ffnn feature size");
 DEFINE_int32(movie_feature_size, 256, "Movie ffnn feature size");
@@ -1664,6 +1831,7 @@ DEFINE_int32(num_movie, 1000, "Number of movie");
 DEFINE_int32(num_tag, 1000, "Number of tag");
 DEFINE_int32(num_driver, 8, "Number of drivers");
 DEFINE_int32(verbose, 2, "Verbose");
+DEFINE_int32(data_batch_size, 256, "Data batch size");
 
 int main(int argc, char** argv) {
   memory::MemoryManager::initialize({});
@@ -1681,6 +1849,7 @@ int main(int argc, char** argv) {
   int numTag = FLAGS_num_tag;
   int numDriver = FLAGS_num_driver;
   int verbose = FLAGS_verbose;
+  int dataBatchSize = FLAGS_data_batch_size;
   IntegratedMCTSTest demo;
 
   std::vector<int> numberOfTuples;
@@ -1704,5 +1873,7 @@ int main(int argc, char** argv) {
       dummyFeatureSizes,
       numDriver,
       repeatRun,
-      verbose);
+      verbose,
+      rewrite,
+      dataBatchSize);
 }

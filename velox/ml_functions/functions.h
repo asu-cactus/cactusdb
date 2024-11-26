@@ -1,4 +1,5 @@
 #pragma once
+#include "velox/expression/Expr.h"
 #include "velox/expression/VectorFunction.h"
 #include "velox/vector/DictionaryVector.h"
 #include <Eigen/Dense>
@@ -286,6 +287,51 @@ public:
     void apply(
         const SelectivityVector& rows,
         std::vector<VectorPtr>& args,
+        const TypePtr& outputType,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
+    BaseVector::ensureWritable(rows, outputType, context.pool(), output);
+    VectorMaker maker{context.pool()};
+    // Validate input arguments
+    VELOX_CHECK_EQ(args.size(), 2, "Blocked-based matrix multiply requires 2 inputs");
+
+    exec::DecodedArgs decodedArgs(rows, args, context);
+    auto decodedInput1 = decodedArgs.at(0);
+    auto decodedInput2 = decodedArgs.at(1);
+
+    auto input1Array = decodedInput1->base()->as<ArrayVector>();
+    auto input2Array = decodedInput2->base()->as<ArrayVector>();
+
+    auto input1Elements = input1Array->elements();
+    auto input2Elements = input2Array->elements();
+
+    float* input1Values = input1Elements->values()->asMutable<float>();
+    float* input2Values = input2Elements->values()->asMutable<float>();
+
+    int currentBlockSize = (input2Elements->size() < (dims[0] * dims[2])) ? input2Elements->size() / dims[0] : dims[2];
+    int input1MatrixNumRow = input1Elements->size() / dims[0];
+
+    Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input1Values, input1MatrixNumRow, dims[0]);
+    Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input2Values, dims[0], currentBlockSize);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m = m1 * m2;
+    std::vector<std::vector<float>> result;
+
+    for (size_t rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
+      size_t mappedIndexInRowData = decodedInput1->index(rowIdx);
+      std::vector<float> row(
+            m.row(mappedIndexInRowData).data(),
+            m.row(mappedIndexInRowData).data() + m.cols());
+            result.push_back(row);
+      // std::cout << "rowIdx mapping: " << rowIdx << " mapped Index in raw data: " << decodedInput1->index(rowIdx) <<  std::endl;
+    }
+
+    output = maker.arrayVector<float>(result, REAL());
+    
+  }
+
+    /*void  apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
         const TypePtr& type,
         exec::EvalCtx& context,
         VectorPtr& output) const override {
@@ -324,7 +370,7 @@ public:
         }
 
         output = maker.arrayVector<float>(result, REAL());
-    }
+    } */
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
         return {exec::FunctionSignatureBuilder()

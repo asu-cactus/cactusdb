@@ -35,15 +35,14 @@ class CataLog {
       int flag,
       std::string nameSuffix = "") {
     // TODO: better naming convention for the flag variable
+    for (auto& path : filePath) {
+      preserveTempFilePaths.push_back(path);
+    }
     if (flag == 1) {
       std::string key = name + "_weights" + nameSuffix;
 
       auto fileAddrIt = UDFFileAddrMap.find(key);
       auto schemaIt = UDFSchemaMap.find(key);
-
-      for (auto& path : filePath) {
-        preserveTempFilePaths.push_back(path);
-      }
 
       if (fileAddrIt != UDFFileAddrMap.end() &&
           schemaIt != UDFSchemaMap.end()) {
@@ -653,7 +652,7 @@ class CataLog {
   // Default values
   int defaultBlocksNum = 4;
   int defaultBlocksSize = 256;
-  int blockingThreshold = 1;
+  int blockingThreshold = 256;
   int defaultSplits = 392;
   // Maps for storing data
   std::map<std::string, std::vector<int>> dataSourceStatMap;
