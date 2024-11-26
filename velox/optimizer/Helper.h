@@ -134,8 +134,8 @@ create_weight_block(int total_size, float* values, int block_numbers) {
 
 std::vector<std::vector<float>>
 create_blocks(int row, int col, float* values, int block_size) {
-  int num_blocks = (col + block_size - 1) /
-      block_size; // Calculate the number of blocks needed
+  int num_blocks =
+      static_cast<int>(std::ceil(static_cast<float>(col) / block_size));
   std::vector<std::vector<float>> blocks(
       num_blocks); // Initialize vector of blocks
   int current_col = 0; // Current column index in the values array

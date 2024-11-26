@@ -214,12 +214,8 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                         "{}_partial_agg{}",
                         parsedDataSrc,
                         rewriteMatMulCounter++);
-                    mulProjectExprSets.insert(fmt::format(
-                        "{}({}, {}) AS {}",
-                        blockMatMulName,
-                        matchedDataSrc,
-                        weightBlockName,
-                        intermediateAggregationName));
+                    // set block-based matrix multiply input name
+                    std::string blockMatMulInputName = matchedDataSrc;
 
                     // exprsWithinTarget starts with ROW, if so, there is no
                     // other UDFs before the target UDF
@@ -230,12 +226,22 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                               exprsWithinTarget,
                               patternToMatchRawSource,
                               matchedDataSrc);
+                      // if has precompute project, we need to have a new name for
+                      // its results and used in the block-based matrix multiply
+                      blockMatMulInputName = matchedDataSrc + "_block_input";
                       preComputeExprSets.insert(
                           exprsWithinTargetWithRewriteSrc + " AS " +
-                          matchedDataSrc);
+                          blockMatMulInputName);
                       // set the flag to true
                       hasPrecomputeProject = true;
                     }
+
+                     mulProjectExprSets.insert(fmt::format(
+                        "{}({}, {}) AS {}",
+                        blockMatMulName,
+                        blockMatMulInputName,
+                        weightBlockName,
+                        intermediateAggregationName));
 
                     // Add UDF associate information (UDF with input values) to
                     // cataLog std::string nameSuffix = "_vertical";

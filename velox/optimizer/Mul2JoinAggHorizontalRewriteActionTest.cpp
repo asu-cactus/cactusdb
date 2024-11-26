@@ -511,13 +511,21 @@ class Mul2JoinAggRewriteActionTest : public HiveConnectorTestBase {
       // Update the planState (getPossibleAction after apply one action)
       planState.update(myPlan, cataLog);
 
-      // planNode = myPlan.planNode();
-      // planState.getPossibleActions(planNode, cataLog);
-      // testAction = std::make_pair("mat_mul0_2",
-      // "Mul2JoinAggHorizontalRewriteAction"); std::cout << "[INFO] Taken
-      // action: " << testAction << std::endl; planState.takeAction(planNode,
-      // nullptr, maker, myPlan, pool_, planNodeIdGenerator, {testAction},
-      // cataLog); planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+      testAction =
+          std::make_pair("mat_mul0_2", "Mul2JoinAggHorizontalRewriteAction");
+      std::cout << "[INFO] Takenaction: " << testAction << std::endl;
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+      planState.update(myPlan, cataLog);
     }
 
     auto IdAdDrMap = cataLog.getIdAddressMap();
