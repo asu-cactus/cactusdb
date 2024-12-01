@@ -632,18 +632,71 @@ void addProjectionFiledInSerializedPlan(
 // In Velox, when parsing the cast function, parentheses are omitted in the
 // exprStr output, making it unusable directly. This function reconstructs the
 // correct cast expression by adding the necessary parentheses to match the body
-// of the expression. For example: Input: eq(cast
-// argmax(ROW["trending_prediction"]) as BIGINT, 1) Output:
-// eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
+// of the expression. For example:
+// Input: eq(cast argmax(ROW["trending_prediction"]) as BIGINT, 1)
+// Output: eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
 std::string fix_cast_function_parsing(std::string input) {
   // Use regex to match the pattern "cast" followed by a space and a function
   // call
-  std::regex cast_regex(R"(cast\s+(\w+\(.*?\))\s+as\s+(\w+))");
+  std::regex cast_regex(R"(cast\s+(\w+.*?)\s+as\s+(\w+))");
 
   // Use a lambda function for the replacement to insert parentheses
   std::string result =
       std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
   return result;
+}
+
+/**
+ * @brief Function to reformat the comparison expression to a standard format,
+ * the input following the format:
+ * [Operator](cast [Expression] as [DataType], [CompareValue])
+ * The output format: [Expression] [Operator] [CompareValue]
+ *
+ *
+ * @param exprStr The input comparison expression string
+ * @return std::string The reformatted comparison expression
+ */
+
+std::string reformatComparisonExpr(std::string exprStr) {
+  std::regex pattern(R"((\w+)\(cast\s+(.*?)\s+as\s+(\w+),\s*(.*?)\s*\))");
+  // Match the exprStr string against the pattern
+  std::smatch match;
+  if (std::regex_search(exprStr, match, pattern)) {
+    // Extract the matched groups
+    std::string operatorStr = match[1]; // Operator
+    std::string expression = match[2]; // Expression
+    std::string dataType = match[3]; // Expression
+    std::string compareValue = match[4]; // CompareValue
+
+    if (operatorStr == "eq") {
+      operatorStr = "=";
+    } else if (operatorStr == "neq") {
+      operatorStr = "!=";
+    } else if (operatorStr == "lt") {
+      operatorStr = "<";
+    } else if (operatorStr == "lte") {
+      operatorStr = "<=";
+    } else if (operatorStr == "gt") {
+      operatorStr = ">";
+    } else if (operatorStr == "gte") {
+      operatorStr = ">=";
+    } else {
+      throw std::runtime_error(
+          "Unsupported operator in the expression: " + exprStr);
+    }
+
+    if (dataType == "DOUBLE" || dataType == "REAL") {
+      compareValue = std::to_string(std::stod(compareValue));
+    } 
+    
+    // Return the reformatted expression
+    return expression + " " + operatorStr + " " + compareValue;
+  } else {
+    throw std::runtime_error("Failed to match the pattern: " + exprStr);
+  }
+
+  // If no match, return an empty optional
+  return "";
 }
 
 std::vector<RowVectorPtr> splitRowVectorIntoBatches(

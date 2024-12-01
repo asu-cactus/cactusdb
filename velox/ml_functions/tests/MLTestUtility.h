@@ -148,6 +148,10 @@ class RandomSampler {
 
   template <typename T>
   std::vector<T> sampleFromSets(int numSamples, const std::vector<T>& set) {
+    if (set.size() == 0) {
+      throw std::invalid_argument(
+          "[sampleFromSets] The input set is empty, please provide a non-empty set");
+    }
     std::vector<T> result;
     std::uniform_int_distribution<int> dist(0, set.size() - 1);
     for (int i = 0; i < numSamples; i++) {

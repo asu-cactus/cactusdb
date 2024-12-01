@@ -226,8 +226,9 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                               exprsWithinTarget,
                               patternToMatchRawSource,
                               matchedDataSrc);
-                      // if has precompute project, we need to have a new name for
-                      // its results and used in the block-based matrix multiply
+                      // if has precompute project, we need to have a new name
+                      // for its results and used in the block-based matrix
+                      // multiply
                       blockMatMulInputName = matchedDataSrc + "_block_input";
                       preComputeExprSets.insert(
                           exprsWithinTargetWithRewriteSrc + " AS " +
@@ -236,7 +237,7 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                       hasPrecomputeProject = true;
                     }
 
-                     mulProjectExprSets.insert(fmt::format(
+                    mulProjectExprSets.insert(fmt::format(
                         "{}({}, {}) AS {}",
                         blockMatMulName,
                         blockMatMulInputName,
@@ -631,8 +632,10 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                     functionName + "_weights_vertical")) {
               targetActions.push_back(functionName);
             } else {
-              LOG(ERROR) << "[ERROR]: " << functionName + "_weights_vertical"
-                         << "does not exist in catalog" << std::endl;
+              // The case where it is not larger than the blocking threshold, do
+              // not convert it to relational approach LOG(ERROR) << "[ERROR]: "
+              // << functionName + "_weights_vertical"
+              //            << "does not exist in catalog" << std::endl;
             }
           }
         }
