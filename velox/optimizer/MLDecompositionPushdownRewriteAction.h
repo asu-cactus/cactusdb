@@ -436,7 +436,6 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
             LOG(INFO) << "[INFO] nodeIdsBetweenSourceAndTarget: "
                       << nodeIdsBetweenSourceAndTarget << std::endl;
-
             addProjectionFiledInSerializedPlan(
                 serializedPlan,
                 pushdownExprFiled,
@@ -521,8 +520,12 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
             // Invoke the cast function to fix the parsing issue
             if (pushDownExpression.find("cast") != std::string::npos) {
-              pushDownExpression =
-                  fix_cast_function_parsing(pushDownExpression);
+              // pushDownExpression =
+              //     fix_cast_function_parsing(pushDownExpression);
+              // Reformat filter expression
+              pushDownExpression = reformatComparisonExpr(pushDownExpression);
+              // std::cout << "[DEBUG] pushDownExpression: " << pushDownExpression
+              //           << std::endl;
             }
             pushDownExpression = replaceDoubleQuotes(pushDownExpression);
 
