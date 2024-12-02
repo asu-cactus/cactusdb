@@ -1,6 +1,83 @@
+#pragma once
 #include <iostream>
 #include <string>
 #include "velox/ml_functions/tests/MLTestUtility.h"
+
+#define BUFFER_SIZE 1024
+
+
+Json::Value receiveJsonFromSocket(int clientSocket) {
+  char messageBuffer[BUFFER_SIZE];
+  memset(messageBuffer, 0, BUFFER_SIZE);
+  recv(clientSocket, messageBuffer, BUFFER_SIZE, 0);
+  Json::CharReaderBuilder jsonReader;
+  Json::Value receivedJsonMessage;
+  std::istringstream jsonStream(messageBuffer);
+  Json::parseFromStream(jsonReader, jsonStream, &receivedJsonMessage, nullptr);
+  return receivedJsonMessage;
+}
+
+void sendJsonBySocket(Json::Value jsonMessage, int clientSocket) {
+  std::string jsonMessageStr = jsonMessage.toStyledString();
+  send(clientSocket, jsonMessageStr.c_str(), jsonMessageStr.length(), 0);
+}
+
+void sendAcknowledgment(int clientSocket) {
+  const char* ack_message = "ACK";
+  send(clientSocket, ack_message, strlen(ack_message), 0);
+}
+
+std::vector<std::vector<float>> loadHDF5Array(
+    const std::string& filename,
+    const std::string& datasetName) {
+  if (!std::filesystem::exists(filename)) {
+    throw std::runtime_error("File not found: " + filename);
+  }
+  H5::H5File file(filename, H5F_ACC_RDONLY);
+  H5::DataSet dataset = file.openDataSet(datasetName);
+  H5::DataSpace dataspace = dataset.getSpace();
+
+  // Get the number of dimensions
+  int rank = dataspace.getSimpleExtentNdims();
+  // std::cout << "Rank: " << rank << std::endl;
+
+  // Allocate space for the dimensions
+  std::vector<hsize_t> dims(rank);
+
+  // Get the dataset dimensions
+  dataspace.getSimpleExtentDims(dims.data(), nullptr);
+
+  size_t rows;
+  size_t cols;
+
+  if (rank == 1) {
+    rows = dims[0];
+    cols = 1;
+  } else if (rank == 2) {
+    rows = dims[0];
+    cols = dims[1];
+  } else {
+    throw std::runtime_error("Unsupported rank: " + std::to_string(rank));
+  }
+
+  // Read data into a 1D vector
+  std::vector<float> flatData(rows * cols);
+  dataset.read(flatData.data(), H5::PredType::NATIVE_FLOAT);
+
+  // Convert to 2D vector
+  std::vector<std::vector<float>> result(rows, std::vector<float>(cols));
+  for (size_t i = 0; i < rows; ++i) {
+    for (size_t j = 0; j < cols; ++j) {
+      result[i][j] = flatData[i * cols + j];
+    }
+  }
+
+  // Close the dataset and file
+  dataset.close();
+  file.close();
+
+  return result;
+};
 
 PlanBuilder setupMovielensDBQuery(
     std::string queryType,

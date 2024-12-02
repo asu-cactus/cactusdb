@@ -68,10 +68,9 @@ using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
-
-class IntegratedMCTSTest : public HiveConnectorTestBase {
+class ReusableMCTSTest : public HiveConnectorTestBase {
  public:
-  IntegratedMCTSTest() {
+  ReusableMCTSTest() {
     // Register Presto scalar functions.
     functions::prestosql::registerAllScalarFunctions();
 
@@ -103,7 +102,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     tempDirPath_ = exec::test::TempDirectoryPath::create();
   }
 
-  ~IntegratedMCTSTest() {
+  ~ReusableMCTSTest() {
     TearDown();
   }
 
@@ -121,25 +120,35 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
   }
 
-  int cacheQueryPlan(PlanBuilder& planBuilder) {
+  int cacheQueryPlanAndCateLog(PlanBuilder& planBuilder, CataLog& cataLog) {
     int queryPlanCacheId = queryPlanCacheId_++;
     auto serializedPlan = planBuilder.planNode()->serialize();
-    // queryPlanCaches_[queryPlanCacheId] = serializedPlan;
+    queryPlanCaches_[queryPlanCacheId] = serializedPlan;
+    cataLogIdAddressMapCaches_[queryPlanCacheId] = cataLog.getIdAddressMap();
+
 
     return queryPlanCacheId;
   }
 
-  void resetQueryPlanFromCache(PlanBuilder& planBuilder, int queryPlanCacheId) {
-    auto it = queryPlanCaches_.find(queryPlanCacheId);
-    if (it != queryPlanCaches_.end()) {
-      auto serializedPlan = it->second;
+  void resetQueryPlanAndQueryPlanFromCache(PlanBuilder& planBuilder , CataLog& cataLog, int queryPlanCacheId) {
+    auto it1 = queryPlanCaches_.find(queryPlanCacheId);
+    if (it1 != queryPlanCaches_.end()) {
+      auto serializedPlan = it1->second;
       auto deserlizedUpdatedPlanNode =
           ISerializable::deserialize<core::PlanNode>(
               serializedPlan, pool_.get());
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
       throw std::runtime_error(fmt::format(
-          "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+          "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.", queryPlanCacheId));
+    }
+
+    auto it2 = cataLogIdAddressMapCaches_.find(queryPlanCacheId);
+    if (it2 != cataLogIdAddressMapCaches_.end()) {
+      cataLog.setIdAddressMap(it2->second);
+    } else {
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.", queryPlanCacheId));
     }
   }
 
@@ -576,7 +585,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::string queryTemplate,
       CataLog& cataLog,
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
-    bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
+    // bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
+    bool generateFilter = true;
 
     unsigned timestampSeed =
         std::chrono::system_clock::now().time_since_epoch().count();
@@ -1312,34 +1322,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::cout << "[INFO] All possible actions:" << std::endl;
       for (auto entry : planState.actionsPair) {
         std::cout << entry.first << ": " << entry.second << std::endl;
-        // if (entry.first.find("softmax") != std::string::npos) {
-        //   selectedAction = std::make_pair(entry.first,
-        // "MultiLayerUDF2TorchNNRewriteAction");
-        // }
       }
     }
-    // std::cout << "[INFO] All possible actions:" << std::endl;
-
-    // selectedAction = std::make_pair(
-    //     "mat_mul0_0",
-    //     "Mul2JoinAggHorizontalRewriteAction");
-
-    // planState.takeAction(
-    //     planNode,
-    //     nullptr,
-    //     maker,
-    //     plan,
-    //     pool_,
-    //     planNodeIdGenerator,
-    //     {selectedAction},
-    //     cataLog);
-
-    // std::cout << "[INFO] Selected action: " << selectedAction.first
-    //           << ": " << selectedAction.second << std::endl;
-
-    // return plan;
 
     for (int i = 0; i < randomGenerator.genRandomIntValue(); i++) {
+      // if (true) {
       if (randomGenerator.genRandomFloatValue() > 0.5) {
         // Get the logical plan
         auto planNode = plan.planNode();
@@ -1356,6 +1343,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             availableActions.push_back(std::make_pair(entry.first, action));
           }
         }
+
+        if (availableActions.size() == 0) {
+          // if no available actions, break
+          break;
+        }
+
         std::pair<std::string, std::string> selectedAction =
             randomSampler.sampleFromSets<std::pair<std::string, std::string>>(
                 1, availableActions)[0];
@@ -1421,43 +1414,28 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << "[INFO] Original Query Plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
 
-    if (rewrite) {
+    /* if (rewrite) {
       myPlan = rewriteQuery(cataLog, myPlan, planNodeIdGenerator, verbose);
-    }
+    } */
 
-    // auto idAddressMap = cataLog.getIdAddressMap();
-    // std::cout << "[INFO] Id Address Map: \n";
-    // for (auto entry : idAddressMap) {
-    //   std::cout << entry.first << ": " << entry.second.size() << " Files" <<
-    //   std::endl;
-    // }
+    // std::cout << "[INFO] Executed Query Plan: \n"
+    //           << myPlan.planNode()->toString(true, true) << std::endl;
+    // auto serializedPlan = myPlan.planNode()->serialize();
+    // std::string queryOutPutPath =
+    //     "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+    // augmentSerializedPlan(serializedPlan, cataLog);
+    // writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
-    std::cout << "[INFO] Executed Query Plan: \n"
-              << myPlan.planNode()->toString(true, true) << std::endl;
-    auto serializedPlan = myPlan.planNode()->serialize();
-    std::string queryOutPutPath =
-        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
-    augmentSerializedPlan(serializedPlan, cataLog);
-    writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
+    // float executeTime =
+    //     runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
 
-    std::cout << "[INFO] IdAddressMap: \n";
-    for (auto entry : cataLog.getIdAddressMap()) {
-      std::cout << entry.first << ": # Files: " << entry.second.size() << " "
-                << entry.second << std::endl;
-    }
+    // std::string latencyOutPutPath =
+    //     "/home/velox/velox/optimizer/tests/executionLatency.txt";
+    // writeStringToFile(std::to_string(executeTime), latencyOutPutPath);
 
-    float executeTime =
-        runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+    // std::cout << "[INFO] Execution time: " << executeTime << std::endl;
 
-    std::string latencyOutPutPath =
-        "/home/velox/velox/optimizer/tests/executionLatency.txt";
-    writeStringToFile(std::to_string(executeTime), latencyOutPutPath);
-
-    std::cout << "[INFO] Execution time: " << executeTime << std::endl;
-
-    std::cout << "Success" << std::endl;
-
-    return;
+    // std::cout << "Success" << std::endl;
 
     // myPlan = setupProfileQueryPlan(
     //     model,
@@ -1469,262 +1447,190 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     //     cataLog,
     //     planNodeIdGenerator);
 
-    // // Get the logical plan
-    // auto planNode = myPlan.planNode();
+    // Get the logical plan
+    auto planNode = myPlan.planNode();
 
-    // // Create ruleManager
-    // RuleManager ruleManager;
-    // // Create planState
-    // PlanState planState(ruleManager);
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
 
-    // planState.getPossibleActions(planNode, cataLog);
-
-    // std::cout << "[INFO] All possible actions:" << std::endl;
-    // for (auto entry : planState.actionsPair) {
-    //   std::cout << entry.first << ": " << entry.second << std::endl;
-    // }
-
-    // std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
-    // std::pair<std::string, std::string> testAction;
-
-    // if (queryOptType == "fusion") {
-    //   testAction = std::make_pair(
-    //       "relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(ROW[\"user_tower_features\"]))))))))))))",
-    //       "MultiLayerUDF2TorchNNRewriteAction");
-
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-
-    //   planNode = myPlan.planNode();
-
-    //   planState.getPossibleActions(planNode, cataLog);
-
-    //   // // std::cout << "[INFO] All possible actions:" << std::endl;
-    //   // // for (auto entry : planState.actionsPair) {
-    //   // //   std::cout << entry.first << ": " << entry.second << std::endl;
-    //   // // }
-
-    //   testAction = std::make_pair(
-    //       "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(ROW[\"movie_tower_features\"]))))))))))))",
-    //       "MultiLayerUDF2TorchNNRewriteAction");
-
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-
-    //   planNode = myPlan.planNode();
-
-    //   planState.getPossibleActions(planNode, cataLog);
-
-    // testAction =
-    // std::make_pair("chatgpt_server1(ROW[\"user_description_processed\"],\"Please
-    // summarize the users description. The following are the average ratings
-    // given by users to movies in each genre.\")",
-    // "MLDecompositionPushdownRewriteAction");
-
-    // planState.takeAction(
-    //           planNode,
-    //           nullptr,
-    //           maker,
-    //           myPlan,
-    //           pool_,
-    //           planNodeIdGenerator,
-    //           {testAction},
-    //           cataLog);
-
-    // planState.update(myPlan, cataLog);
-    // planNode = myPlan.planNode();
-    // }
-    // if (queryOptType == "mlq2-mul2join" || queryOptType == "mlq2-optimized")
-    // {
-    //   testAction =
-    //       std::make_pair("mat_mul10_1",
-    //       "Mul2JoinAggHorizontalRewriteAction");
-
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-    //   planNode = myPlan.planNode();
-    //   planState.getPossibleActions(planNode, cataLog);
-    // }
-    // if (queryOptType == "mlq2-fusion" || queryOptType == "mlq2-optimized") {
-    //   testAction = std::make_pair(
-    //       "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(ROW[\"top_mlp_input\"])))))))))",
-    //       "MultiLayerUDF2TorchNNRewriteAction");
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-    //   planNode = myPlan.planNode();
-    //   planState.getPossibleActions(planNode, cataLog);
-
-    //   // testAction = std::make_pair(
-    //   //
-    //   "argmax(softmax(mat_vector_add9_8(mat_mul9_7(relu(mat_vector_add9_6(mat_mul9_5(relu(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))))))))",
-    //   //     "MultiLayerUDF2TorchNNRewriteAction");
-    //   testAction = std::make_pair(
-    //       "argmax(softmax(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(ROW[\"u_final_interest_features\"])))))))",
-    //       "MultiLayerUDF2TorchNNRewriteAction");
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-    //   planNode = myPlan.planNode();
-    //   planState.getPossibleActions(planNode, cataLog);
-
-    //   testAction = std::make_pair(
-    //       "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(ROW[\"m_trending_features\"]))))))))))",
-    //       "MultiLayerUDF2TorchNNRewriteAction");
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-    //   planNode = myPlan.planNode();
-    //   planState.getPossibleActions(planNode, cataLog);
-
-    //   testAction = std::make_pair(
-    //       "relu(mat_vector_add11_2(mat_mul11_1(ROW[\"mt_relevance_score\"])))",
-    //       "MultiLayerUDF2TorchNNRewriteAction");
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-    //   planNode = myPlan.planNode();
-    //   planState.getPossibleActions(planNode, cataLog);
-    // }
-
-    // if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized")
-    // {
-    //   if (queryOptType == "mlq3-mul2join") {
-    //     testAction =
-    //         std::make_pair("mat_mul20_1",
-    //         "Mul2JoinAggHorizontalRewriteAction");
-    //   } else if (queryOptType == "mlq3-optimized") {
-    //     testAction =
-    //         std::make_pair("mat_mul10_1",
-    //         "Mul2JoinAggHorizontalRewriteAction");
-    //   }
-
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-    //   planNode = myPlan.planNode();
-    //   planState.getPossibleActions(planNode, cataLog);
-    // }
-
-    // if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized") {
-    //   testAction = std::make_pair(
-    //       "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(ROW[\"model_features\"])))))))))",
-    //       "MultiLayerUDF2TorchNNRewriteAction");
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-    //   planNode = myPlan.planNode();
-    //   planState.getPossibleActions(planNode, cataLog);
-
-    //   testAction = std::make_pair(
-    //       "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(ROW[\"model_features\"])))))))))",
-    //       "MultiLayerUDF2TorchNNRewriteAction");
-    //   planState.takeAction(
-    //       planNode,
-    //       nullptr,
-    //       maker,
-    //       myPlan,
-    //       pool_,
-    //       planNodeIdGenerator,
-    //       {testAction},
-    //       cataLog);
-
-    //   planState.update(myPlan, cataLog);
-    //   planNode = myPlan.planNode();
-    //   planState.getPossibleActions(planNode, cataLog);
-    // }
+    planState.getPossibleActions(planNode, cataLog);
 
     // std::cout << "[INFO] All possible actions:" << std::endl;
     // for (auto entry : planState.actionsPair) {
     //   std::cout << entry.first << ": " << entry.second << std::endl;
     // }
 
-    // std::cout << "[DEBUG] final executed plan: \n"
-    //           << myPlan.planNode()->toString(true, true) << std::endl;
+    // Set up socket
+    int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (clientSocket == -1) {
+      std::cerr << "Error creating socket\n";
+    }
 
-    // float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 2,
-    // verbose);
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    serverAddr.sin_port = htons(12345);
 
-    // std::cout << "[INFO] Execution time: " << executeTime << std::endl;
-    // auto serializedPlan = myPlan.planNode()->serialize();
+    if (connect(
+            clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) ==
+        -1) {
+      std::cerr << "Error connecting to server\n";
+      close(clientSocket);
+    }
 
-    // std::cout << "[DEBUG] serialized plan: \n" << serializedPlan <<
-    // std::endl;
+    std::cout << "Start optimization." << std::endl;
+    // cache initial query plan and catalog
+    int initQueryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+    // send start message to start MCTS optimization
+    // start flag and initial query plan
+    Json::Value startJsonMessage;
+    startJsonMessage["mctsAction"] = "start";
+    startJsonMessage["queryPlan"] = planNode->toString(true, true);
+    std::cout << "json message: " << startJsonMessage << std::endl;
+    sendJsonBySocket(startJsonMessage, clientSocket);
+    bool optimizationIsFinished = false;
+
+    while (!optimizationIsFinished) {
+      planNode = myPlan.planNode();
+      // received json message from MCTS
+      Json::Value receivedJsonMessage = receiveJsonFromSocket(clientSocket);
+      std::string mctsAction = receivedJsonMessage["mctsAction"].asString();
+      LOG(INFO) << "===================================" << std::endl;
+      LOG(INFO) << "Received message with mcts action: " << mctsAction
+                << std::endl;
+      if (mctsAction == "") {
+        LOG(INFO) << "Un-captured error happened" << std::endl;
+        return;
+      }
+      LOG(INFO) << "JSON Message: " << receivedJsonMessage << std::endl;
+      if (mctsAction == "resetPlan") {
+        // if it is root node, it needs to start with original plan
+        // the p0 will be increased after capturePlanNodeId is called
+        // so it is required to clean the old IdAddressMap and VectorIdMap
+        // before reset the myPlan
+
+        resetQueryPlanAndQueryPlanFromCache(myPlan, cataLog, initQueryPlanCacheId);
+        // cataLog.clearIdAddressMap();
+        // cataLog.clearVectorIdMap();
+        // cataLog.clearSourceMap();
+        // TODO
+        // myPlan = setupQueryPlan(
+        //     model,
+        //     computationStr,
+        //     inputFilePaths,
+        //     inputTempFiles,
+        //     numSamples,
+        //     featureSize,
+        //     cataLog,
+        //     planNodeIdGenerator);
+        planNode = myPlan.planNode();
+        planState.clearTransformedExpr();
+        planState.getPossibleActions(planNode, cataLog);
+        // std::cout << "[INFO] All possible actions:" << std::endl;
+        // for (auto entry : planState.actionsPair) {
+        //   std::cout << entry.first << ": " << entry.second << std::endl;
+        // }
+        // send acknowledgement for synchronization
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getQueryPlan") {
+        Json::Value jsonMessage;
+        jsonMessage["communicateFlag"] = true;
+        jsonMessage["mctsAction"] = "recQueryPlan";
+        jsonMessage["queryPlan"] =
+            "\"" + myPlan.planNode()->toString(true, true) + "\"";
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "getActionSpace") {
+        planState.getPossibleActions(planNode, cataLog);
+        Json::Value jsonMessage;
+        jsonMessage["actionSpace"] = Json::arrayValue;
+        for (const auto& entry : planState.actionsPair) {
+          // LOG(INFO) << "[ACTION SBACE] " << entry.first << s't'd
+          // entry.second << std::endl;
+          Json::Value jsonEntry;
+          jsonEntry["expression"] = entry.first;
+          jsonEntry["action"] = Json::arrayValue;
+          for (auto action : entry.second) {
+            jsonEntry["action"].append(Json::Value(action));
+          }
+          jsonMessage["actionSpace"].append(jsonEntry);
+        }
+        // cache current state
+        int queryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "takeAction") {
+        std::pair<std::string, std::string> targetAction;
+        targetAction.first = receivedJsonMessage["targetString"].asString();
+        targetAction.second = receivedJsonMessage["targetAction"].asString();
+
+        LOG(INFO) << "[INFO] take action: " << targetAction << std::endl;
+        if (targetAction.first != "None") {
+          // None action is selected
+          planState.takeAction(
+              planNode,
+              nullptr,
+              maker,
+              myPlan,
+              pool_,
+              planNodeIdGenerator,
+              {targetAction},
+              cataLog);
+          planState.update(myPlan, cataLog);
+        }
+        LOG(INFO) << "[INFO] current my query plan"
+                  << myPlan.planNode()->toString(true, true) << std::endl;
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "cacheState") {
+        int queryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+        Json::Value jsonMessage;
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "resetState") {
+        int queryPlanCacheId = receivedJsonMessage["queryPlanCacheId"].asInt();
+        resetQueryPlanAndQueryPlanFromCache(myPlan, cataLog, queryPlanCacheId);
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getCost") {
+        Json::Value jsonMessage;
+        if (receivedJsonMessage["costMode"] == "offline") {
+          float executeTime =
+              runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+          jsonMessage["reward"] = executeTime;
+          LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
+                    << std::endl;
+        } else if (receivedJsonMessage["costMode"] == "online") {
+          CostModel* cm = new SimpleCostModel(cataLog);
+          CostEstimator* ce =
+              new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+
+          planNode = myPlan.planNode();
+          CostEstimate cost = ce->estimateCost(planNode);
+          jsonMessage["reward"] = cost.cost;
+          LOG(INFO) << "[INFO] get Cost(online): " << cost.cost << std::endl;
+        }
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+
+      } else if (mctsAction == "runPlan") {
+        auto latency = runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+        Json::Value jsonMessage;
+        jsonMessage["latency"] = latency;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "finished") {
+        // finished
+        // nothing to do
+      }
+
+      optimizationIsFinished =
+          receivedJsonMessage["optimizationIsFinished"].asBool();
+      LOG(INFO) << "[INFO] reached end of the loop, current opt flag: "
+                << optimizationIsFinished << std::endl;
+    };
 
     return;
   }
@@ -1739,6 +1645,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
   static inline int queryPlanCacheId_ = 0;
   std::map<int, folly::dynamic> queryPlanCaches_;
+  std::map<int, std::map<core::PlanNodeId, std::vector<std::string>>> cataLogIdAddressMapCaches_;
   static inline int modelGroupId_ = 0;
 };
 
@@ -1776,7 +1683,7 @@ int main(int argc, char** argv) {
   int numDriver = FLAGS_num_driver;
   int verbose = FLAGS_verbose;
   int dataBatchSize = FLAGS_data_batch_size;
-  IntegratedMCTSTest demo;
+  ReusableMCTSTest demo;
 
   std::vector<int> numberOfTuples;
   std::vector<int> dummyFeatureSizes;
