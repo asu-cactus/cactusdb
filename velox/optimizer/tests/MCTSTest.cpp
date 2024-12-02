@@ -3968,6 +3968,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             cataLog,
             planNodeIdGenerator);
         planNode = myPlan.planNode();
+        planState.clearTransformedExpr();
         planState.getPossibleActions(planNode, cataLog);
         // std::cout << "[INFO] All possible actions:" << std::endl;
         // for (auto entry : planState.actionsPair) {

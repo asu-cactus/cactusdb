@@ -524,7 +524,8 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
               //     fix_cast_function_parsing(pushDownExpression);
               // Reformat filter expression
               pushDownExpression = reformatComparisonExpr(pushDownExpression);
-              // std::cout << "[DEBUG] pushDownExpression: " << pushDownExpression
+              // std::cout << "[DEBUG] pushDownExpression: " <<
+              // pushDownExpression
               //           << std::endl;
             }
             pushDownExpression = replaceDoubleQuotes(pushDownExpression);
@@ -665,6 +666,14 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
         for (int i = 0; i < parsedSingleExprs.size(); i++) {
           targetExprStr = matchedExprs[i];
+          if (targetExprStr.find("_partial_agg") != std::string::npos) {
+            // Edge case: when converting  the MatMul to relational approach,
+            // its intermediate aggregation name is following the pattern
+            // "[Table_Source]_partial_agg[Number]", and it will later be used
+            // in the following computation, actually it is not a pushdown
+            // target, so we need to skip it.
+            continue;
+          }
           if (mayPushdown(
                   rootNode, targetExprStr, matchedDataSources, curNodeId)) {
             targetActions.push_back(targetExprStr);
