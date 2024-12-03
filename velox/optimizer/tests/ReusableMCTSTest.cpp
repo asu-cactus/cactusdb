@@ -126,11 +126,13 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     queryPlanCaches_[queryPlanCacheId] = serializedPlan;
     cataLogIdAddressMapCaches_[queryPlanCacheId] = cataLog.getIdAddressMap();
 
-
     return queryPlanCacheId;
   }
 
-  void resetQueryPlanAndQueryPlanFromCache(PlanBuilder& planBuilder , CataLog& cataLog, int queryPlanCacheId) {
+  void resetQueryPlanAndQueryPlanFromCache(
+      PlanBuilder& planBuilder,
+      CataLog& cataLog,
+      int queryPlanCacheId) {
     auto it1 = queryPlanCaches_.find(queryPlanCacheId);
     if (it1 != queryPlanCaches_.end()) {
       auto serializedPlan = it1->second;
@@ -140,7 +142,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
       throw std::runtime_error(fmt::format(
-          "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.", queryPlanCacheId));
+          "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
+          queryPlanCacheId));
     }
 
     auto it2 = cataLogIdAddressMapCaches_.find(queryPlanCacheId);
@@ -148,7 +151,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       cataLog.setIdAddressMap(it2->second);
     } else {
       throw std::runtime_error(fmt::format(
-          "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.", queryPlanCacheId));
+          "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
+          queryPlanCacheId));
     }
   }
 
@@ -1414,6 +1418,11 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     std::cout << "[INFO] Original Query Plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
 
+    float unOptimizedExecutionTime =
+        runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+    std::cout << "[INFO] Unoptimized Execution time: "
+              << unOptimizedExecutionTime << std::endl;
+
     /* if (rewrite) {
       myPlan = rewriteQuery(cataLog, myPlan, planNodeIdGenerator, verbose);
     } */
@@ -1511,20 +1520,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         // so it is required to clean the old IdAddressMap and VectorIdMap
         // before reset the myPlan
 
-        resetQueryPlanAndQueryPlanFromCache(myPlan, cataLog, initQueryPlanCacheId);
-        // cataLog.clearIdAddressMap();
-        // cataLog.clearVectorIdMap();
-        // cataLog.clearSourceMap();
-        // TODO
-        // myPlan = setupQueryPlan(
-        //     model,
-        //     computationStr,
-        //     inputFilePaths,
-        //     inputTempFiles,
-        //     numSamples,
-        //     featureSize,
-        //     cataLog,
-        //     planNodeIdGenerator);
+        resetQueryPlanAndQueryPlanFromCache(
+            myPlan, cataLog, initQueryPlanCacheId);
         planNode = myPlan.planNode();
         planState.clearTransformedExpr();
         planState.getPossibleActions(planNode, cataLog);
@@ -1563,12 +1560,36 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "takeAction") {
-        std::pair<std::string, std::string> targetAction;
-        targetAction.first = receivedJsonMessage["targetString"].asString();
-        targetAction.second = receivedJsonMessage["targetAction"].asString();
+        std::string selectedHighLevelOptRule =
+            receivedJsonMessage["targetAction"].asString();
 
-        LOG(INFO) << "[INFO] take action: " << targetAction << std::endl;
-        if (targetAction.first != "None") {
+        LOG(INFO) << "[INFO] selectedHighLevelOptRule: "
+                  << selectedHighLevelOptRule << std::endl;
+        if (selectedHighLevelOptRule != "None") {
+          std::pair<std::string, std::string> targetAction;
+          std::vector<std::string> applicableTargetExprs;
+
+          for (const auto& entry : planState.actionsPair) {
+            for (auto action : entry.second) {
+              if (action == selectedHighLevelOptRule) {
+                // add all applicable target expressions falling into the
+                // selected high level optimization rule
+                applicableTargetExprs.push_back(entry.first);
+              }
+            }
+          }
+
+          if (applicableTargetExprs.size() == 0) {
+            throw std::runtime_error(
+                "[INFO] No applicable target expressions found for the "
+                "selected high level optimization rule: " +
+                selectedHighLevelOptRule);
+          }
+
+          targetAction.first = applicableTargetExprs[0];
+          targetAction.second = selectedHighLevelOptRule;
+
+          LOG(INFO) << "[INFO] take action: " << targetAction << std::endl;
           // None action is selected
           planState.takeAction(
               planNode,
@@ -1597,8 +1618,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
-          float executeTime =
-              runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+          float executeTime = runPlanWithCataLog(
+              numThreads, myPlan, cataLog, repeatRun, verbose);
           jsonMessage["reward"] = executeTime;
           LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
                     << std::endl;
@@ -1616,7 +1637,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         sendJsonBySocket(jsonMessage, clientSocket);
 
       } else if (mctsAction == "runPlan") {
-        auto latency = runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+        auto latency =
+            runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
         Json::Value jsonMessage;
         jsonMessage["latency"] = latency;
         sendAcknowledgment(clientSocket);
@@ -1645,7 +1667,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
   static inline int queryPlanCacheId_ = 0;
   std::map<int, folly::dynamic> queryPlanCaches_;
-  std::map<int, std::map<core::PlanNodeId, std::vector<std::string>>> cataLogIdAddressMapCaches_;
+  std::map<int, std::map<core::PlanNodeId, std::vector<std::string>>>
+      cataLogIdAddressMapCaches_;
   static inline int modelGroupId_ = 0;
 };
 
