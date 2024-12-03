@@ -1376,7 +1376,219 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     return plan;
   }
 
-  void runProfile(
+  void vanillaMCTS(
+      std::string mode,
+      std::string queryTemplate,
+      std::vector<int> numberOfTuples,
+      std::vector<int> dummyFeatureSizes,
+      int numThreads,
+      int repeatRun,
+      int verbose,
+      bool rewrite,
+      int dataBatchSize = 256) {
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    std::vector<std::string> inputFilePaths;
+    std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
+    std::string computationStr;
+
+    generateDummyData(
+        mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+
+    if (mode == "ml") {
+      myPlan = setupProfileQueryPlan(
+          mode, queryTemplate, cataLog, planNodeIdGenerator);
+
+      // } else if (model == "df") {
+      // } else if (model == "two-tower") {
+      // } else if (model == "llm") {
+      // } else if (model == "fraud") {
+      // } else if (model == "ml-q1") {
+      // } else if (model == "ml-q2") {
+      // } else if (model == "ml-q3") {
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
+    }
+
+    std::cout << "[INFO] Original Query Plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+
+    float unOptimizedExecutionTime =
+        runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+    std::cout << "[INFO] Unoptimized Execution time: "
+              << unOptimizedExecutionTime << std::endl;
+
+    // Get the logical plan
+    auto planNode = myPlan.planNode();
+
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
+
+    planState.getPossibleActions(planNode, cataLog);
+
+    // Set up socket
+    int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (clientSocket == -1) {
+      std::cerr << "Error creating socket\n";
+    }
+
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    serverAddr.sin_port = htons(12345);
+
+    if (connect(
+            clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) ==
+        -1) {
+      std::cerr << "Error connecting to server\n";
+      close(clientSocket);
+    }
+
+    std::cout << "Start optimization." << std::endl;
+    // cache initial query plan and catalog
+    int initQueryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+    // send start message to start MCTS optimization
+    // start flag and initial query plan
+    Json::Value startJsonMessage;
+    startJsonMessage["mctsAction"] = "start";
+    startJsonMessage["queryPlan"] = planNode->toString(true, true);
+    std::cout << "json message: " << startJsonMessage << std::endl;
+    sendJsonBySocket(startJsonMessage, clientSocket);
+    bool optimizationIsFinished = false;
+
+    while (!optimizationIsFinished) {
+      planNode = myPlan.planNode();
+      // received json message from MCTS
+      Json::Value receivedJsonMessage = receiveJsonFromSocket(clientSocket);
+      std::string mctsAction = receivedJsonMessage["mctsAction"].asString();
+      LOG(INFO) << "===================================" << std::endl;
+      LOG(INFO) << "Received message with mcts action: " << mctsAction
+                << std::endl;
+      if (mctsAction == "") {
+        LOG(INFO) << "Un-captured error happened" << std::endl;
+        return;
+      }
+      LOG(INFO) << "JSON Message: " << receivedJsonMessage << std::endl;
+      if (mctsAction == "resetPlan") {
+        // if it is root node, it needs to start with original plan
+        // the p0 will be increased after capturePlanNodeId is called
+        // so it is required to clean the old IdAddressMap and VectorIdMap
+        // before reset the myPlan
+
+        resetQueryPlanAndQueryPlanFromCache(
+            myPlan, cataLog, initQueryPlanCacheId);
+        planNode = myPlan.planNode();
+        planState.clearTransformedExpr();
+        planState.getPossibleActions(planNode, cataLog);
+        // send acknowledgement for synchronization
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getQueryPlan") {
+        Json::Value jsonMessage;
+        jsonMessage["communicateFlag"] = true;
+        jsonMessage["mctsAction"] = "recQueryPlan";
+        jsonMessage["queryPlan"] =
+            "\"" + myPlan.planNode()->toString(true, true) + "\"";
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "getActionSpace") {
+        planState.getPossibleActions(planNode, cataLog);
+        Json::Value jsonMessage;
+        jsonMessage["actionSpace"] = Json::arrayValue;
+        for (const auto& entry : planState.actionsPair) {
+          // LOG(INFO) << "[ACTION SPACE] " << entry.first << s't'd
+          // entry.second << std::endl;
+          Json::Value jsonEntry;
+          jsonEntry["expression"] = entry.first;
+          jsonEntry["action"] = Json::arrayValue;
+          for (auto action : entry.second) {
+            jsonEntry["action"].append(Json::Value(action));
+          }
+          jsonMessage["actionSpace"].append(jsonEntry);
+        }
+        // cache current state
+        int queryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "takeAction") {
+        std::pair<std::string, std::string> targetAction;
+        targetAction.first = receivedJsonMessage["targetString"].asString();
+        targetAction.second = receivedJsonMessage["targetAction"].asString();
+
+        LOG(INFO) << "[INFO] take action: " << targetAction << std::endl;
+        if (targetAction.first != "None") {
+          // None action is selected
+          planState.takeAction(
+              planNode,
+              nullptr,
+              maker,
+              myPlan,
+              pool_,
+              planNodeIdGenerator,
+              {targetAction},
+              cataLog);
+          planState.update(myPlan, cataLog);
+        }
+        LOG(INFO) << "[INFO] current my query plan"
+                  << myPlan.planNode()->toString(true, true) << std::endl;
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "cacheState") {
+        int queryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+        Json::Value jsonMessage;
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "resetState") {
+        int queryPlanCacheId = receivedJsonMessage["queryPlanCacheId"].asInt();
+        resetQueryPlanAndQueryPlanFromCache(myPlan, cataLog, queryPlanCacheId);
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getCost") {
+        Json::Value jsonMessage;
+        if (receivedJsonMessage["costMode"] == "offline") {
+          float executeTime = runPlanWithCataLog(
+              numThreads, myPlan, cataLog, repeatRun, verbose);
+          jsonMessage["reward"] = executeTime;
+          LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
+                    << std::endl;
+        } else if (receivedJsonMessage["costMode"] == "online") {
+          CostModel* cm = new SimpleCostModel(cataLog);
+          CostEstimator* ce =
+              new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+
+          planNode = myPlan.planNode();
+          CostEstimate cost = ce->estimateCost(planNode);
+          jsonMessage["reward"] = cost.cost;
+          LOG(INFO) << "[INFO] get Cost(online): " << cost.cost << std::endl;
+        }
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+
+      } else if (mctsAction == "runPlan") {
+        auto latency =
+            runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+        Json::Value jsonMessage;
+        jsonMessage["latency"] = latency;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "finished") {
+        // finished
+        // nothing to do
+      }
+
+      optimizationIsFinished =
+          receivedJsonMessage["optimizationIsFinished"].asBool();
+      LOG(INFO) << "[INFO] reached end of the loop, current opt flag: "
+                << optimizationIsFinished << std::endl;
+    };
+
+    return;
+  }
+
+  void reusableMCTS(
       std::string mode,
       std::string queryTemplate,
       std::vector<int> numberOfTuples,
@@ -1544,7 +1756,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
         for (const auto& entry : planState.actionsPair) {
-          // LOG(INFO) << "[ACTION SBACE] " << entry.first << s't'd
+          // LOG(INFO) << "[ACTION SPACE] " << entry.first << s't'd
           // entry.second << std::endl;
           Json::Value jsonEntry;
           jsonEntry["expression"] = entry.first;
@@ -1672,6 +1884,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
   static inline int modelGroupId_ = 0;
 };
 
+DEFINE_string(mcts, "reusable", "MCTS type: reusable, vanilla");
 DEFINE_string(mode, "ml", "Mode: ml");
 DEFINE_string(
     query_template,
@@ -1695,6 +1908,7 @@ int main(int argc, char** argv) {
   std::string mode = FLAGS_mode;
   std::string queryTemplate = FLAGS_query_template;
   std::string model = FLAGS_model;
+  std::string mctsType = FLAGS_mcts;
 
   bool rewrite = FLAGS_rewrite;
   int repeatRun = FLAGS_num_repeat;
@@ -1722,14 +1936,30 @@ int main(int argc, char** argv) {
   std::cout << "numberOfTuples: " << numberOfTuples << std::endl;
   std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
 
-  demo.runProfile(
-      mode,
-      queryTemplate,
-      numberOfTuples,
-      dummyFeatureSizes,
-      numDriver,
-      repeatRun,
-      verbose,
-      rewrite,
-      dataBatchSize);
+  if (mctsType == "vanilla") {
+    demo.vanillaMCTS(
+        mode,
+        queryTemplate,
+        numberOfTuples,
+        dummyFeatureSizes,
+        numDriver,
+        repeatRun,
+        verbose,
+        rewrite,
+        dataBatchSize);
+  } else if (mctsType == "reusable") {
+    demo.reusableMCTS(
+        mode,
+        queryTemplate,
+        numberOfTuples,
+        dummyFeatureSizes,
+        numDriver,
+        repeatRun,
+        verbose,
+        rewrite,
+        dataBatchSize);
+  } else {
+    throw std::runtime_error(
+        fmt::format("Non-supported MCTS type: {}", mctsType));
+  }
 }
