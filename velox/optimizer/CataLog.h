@@ -195,6 +195,10 @@ class CataLog {
     return idFileAddrMap;
   }
 
+  void setIdAddressMap(std::map<core::PlanNodeId, std::vector<std::string>> map) {
+    idFileAddrMap = map;
+  }
+
   // Set the schema for a given PlanNodeId
   void setFileSchema(core::PlanNodeId p, RowTypePtr schema) {
     fileSchemaMap[p] = schema;
