@@ -1,0 +1,5 @@
+R"([
+	{"ID":"0","Left":"table_1","Right":"table_2","Pred":"table_1.join_key1 = table_2.join_key2","ProbeKeys":"join_key1","BuildKeys":"join_key2","Projection":["join_key1","f_table_1","join_key2","f_table_2"],"NumTuplesLeft":1000,"NumDimLeft":20,"NumTuplesRight":300,"NumDimRight":39,"NumTuplesOutput":300,"NumDimOutput":59},
+	{"ID":"1","Left":"0","Right":"table_3","Pred":"table_2.join_key2 = table_3.join_key3","ProbeKeys":"join_key2","BuildKeys":"join_key3","Projection":["join_key1","f_table_1","join_key2","f_table_2","join_key3","f_table_3"],"NumTuplesLeft":300,"NumDimLeft":59,"NumTuplesRight":12000,"NumDimRight":31,"NumTuplesOutput":12000,"NumDimOutput":90},
+	{"ID":"2","Left":"1","Right":"table_4","Pred":"table_3.join_key3 = table_4.join_key4","ProbeKeys":"join_key3","BuildKeys":"join_key4","Projection":["join_key1","f_table_1","join_key2","f_table_2","join_key3","f_table_3","join_key4","f_table_4"],"NumTuplesLeft":12000,"NumDimLeft":90,"NumTuplesRight":120000,"NumDimRight":19,"NumTuplesOutput":120000,"NumDimOutput":109}
+])"
