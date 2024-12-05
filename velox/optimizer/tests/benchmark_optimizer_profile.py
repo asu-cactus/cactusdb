@@ -11,8 +11,9 @@ import shutil
 from tqdm.auto import tqdm
 
 
-def get_current_time():
-    return time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
+def get_current_time(timeshift=0):
+    current_time = time.localtime(time.time() + timeshift)
+    return time.strftime("%Y-%m-%d-%H-%M-%S", current_time)
 
 
 def create_path(path):
@@ -28,7 +29,10 @@ def run_cpp_program(path, params):
         )
     ]
     result = subprocess.run(
-        execution_command, stdout=subprocess.PIPE, shell=True
+        execution_command,
+        stdout=subprocess.PIPE,
+        shell=True,
+        timeout=60 * 30,  # 30 minutes
     ).stdout
 
     # print("result", result)
@@ -162,7 +166,7 @@ if __name__ == "__main__":
     # list_num_movie = [50]
     # list_num_tag = [25]
 
-    num_repeat = 4
+    num_repeat = 2
     run_configs = list(
         itertools.product(
             list_query_template,
@@ -174,8 +178,8 @@ if __name__ == "__main__":
     result_df = None
 
     # TODO: clean up for development
-    if os.path.exists("./generatedQueryPlan"):
-      shutil.rmtree("./generatedQueryPlan")
+    # if os.path.exists("./generatedQueryPlan"):
+    #   shutil.rmtree("./generatedQueryPlan")
     time_stamp = get_current_time()
     output_dir = os.path.join("generatedQueryPlan", time_stamp)
     create_path(output_dir)
@@ -184,8 +188,14 @@ if __name__ == "__main__":
 
     # TODO: use time_stamp to name the result file after finalizing the code
 
-    # result_df_name = "result_optimizer_profile_{}.csv".format(time_stamp)
-    result_df_name = "result_optimizer_profile.csv"
+    result_df_name1 = "./generatedQueryPlan/result_optimizer_profile_{}.csv".format(
+        time_stamp
+    )
+    result_df_name2 = "result_optimizer_profile.csv"
+
+    # if os.path.exists(result_df_name):
+    #   new_result_df_name = "result_optimizer_profile_{}.csv".format(get_current_time(-3600))
+    #   os.rename(result_df_name, new_result_df_name)
 
     for config in tqdm(run_configs):
         query_template, num_user, num_movie, num_tag = config
@@ -228,6 +238,8 @@ if __name__ == "__main__":
             executionTime = float(
                 read_file("/home/velox/velox/optimizer/tests/executionLatency.txt")
             )
+            os.remove("/home/velox/velox/optimizer/tests/executionLatency.txt")
+
             # print(executionTime)
             df = pd.DataFrame(
                 {
@@ -237,6 +249,7 @@ if __name__ == "__main__":
                     "serializedPlanPath": serializedPlanPath,
                     "tableStatsPath": tableStatsPath,
                     "executionTime": executionTime,
+                    "params": params_base,
                     "error": "",
                 },
                 index=[0],
@@ -247,9 +260,10 @@ if __name__ == "__main__":
                     "num_user": num_user,
                     "num_movie": num_movie,
                     "num_tag": num_tag,
-                    "serializedPlanPath": "",
-                    "tableStatsPath": "",
+                    "serializedPlanPath": serializedPlanPath,
+                    "tableStatsPath": tableStatsPath,
                     "executionTime": "",
+                    "params": params_base,
                     "error": e,
                 },
                 index=[0],
@@ -259,7 +273,8 @@ if __name__ == "__main__":
         else:
             result_df = pd.concat([result_df, df], axis=0)
 
-        result_df.to_csv(result_df_name, index=False, sep="|")
+        result_df.to_csv(result_df_name1, index=False, sep="|")
+        result_df.to_csv(result_df_name2, index=False, sep="|")
 
     pd.set_option("display.max_rows", None)
     pd.set_option("display.max_columns", None)

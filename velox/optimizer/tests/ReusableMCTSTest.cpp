@@ -567,23 +567,6 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     return modelComputationStr;
   }
 
-  // Function to write a string to a file
-  void writeStringToFile(const std::string& str, const std::string& filename) {
-    // Open the file in write mode
-    std::ofstream outfile(filename);
-
-    // Check if the file opened successfully
-    if (outfile.is_open()) {
-      // Write the string to the file
-      outfile << str;
-
-      // Close the file
-      outfile.close();
-    } else {
-      std::cerr << "Error: Could not open the file for writing." << std::endl;
-    }
-  }
-
   PlanBuilder setupProfileQueryPlan(
       std::string mode,
       std::string queryTemplate,
@@ -1634,6 +1617,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
     std::cout << "[INFO] Unoptimized Execution time: "
               << unOptimizedExecutionTime << std::endl;
+    outputAugmentedQueryPlan(cataLog, myPlan);
 
     /* if (rewrite) {
       myPlan = rewriteQuery(cataLog, myPlan, planNodeIdGenerator, verbose);
@@ -1708,7 +1692,6 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     // start flag and initial query plan
     Json::Value startJsonMessage;
     startJsonMessage["mctsAction"] = "start";
-    startJsonMessage["queryPlan"] = planNode->toString(true, true);
     std::cout << "json message: " << startJsonMessage << std::endl;
     sendJsonBySocket(startJsonMessage, clientSocket);
     bool optimizationIsFinished = false;
@@ -1744,11 +1727,13 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         // send acknowledgement for synchronization
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getQueryPlan") {
+        // Dump structured query plan to disk
+        // default path: /home/velox/velox/optimizer/tests/structuredQueryPlan.txt
         Json::Value jsonMessage;
         jsonMessage["communicateFlag"] = true;
         jsonMessage["mctsAction"] = "recQueryPlan";
-        jsonMessage["queryPlan"] =
-            "\"" + myPlan.planNode()->toString(true, true) + "\"";
+        outputAugmentedQueryPlan(cataLog, myPlan);
+        outputStructuredQueryPlan(myPlan);
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "getActionSpace") {
@@ -1813,6 +1798,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
               {targetAction},
               cataLog);
           planState.update(myPlan, cataLog);
+          outputAugmentedQueryPlan(cataLog, myPlan);
         }
         LOG(INFO) << "[INFO] current my query plan"
                   << myPlan.planNode()->toString(true, true) << std::endl;
@@ -1824,8 +1810,10 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "resetState") {
+        // reset the query plan and catalog to the cached state
         int queryPlanCacheId = receivedJsonMessage["queryPlanCacheId"].asInt();
         resetQueryPlanAndQueryPlanFromCache(myPlan, cataLog, queryPlanCacheId);
+        outputAugmentedQueryPlan(cataLog, myPlan);
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getCost") {
         Json::Value jsonMessage;

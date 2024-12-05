@@ -554,23 +554,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return modelComputationStr;
   }
 
-  // Function to write a string to a file
-  void writeStringToFile(const std::string& str, const std::string& filename) {
-    // Open the file in write mode
-    std::ofstream outfile(filename);
-
-    // Check if the file opened successfully
-    if (outfile.is_open()) {
-      // Write the string to the file
-      outfile << str;
-
-      // Close the file
-      outfile.close();
-    } else {
-      std::cerr << "Error: Could not open the file for writing." << std::endl;
-    }
-  }
-
   PlanBuilder setupProfileQueryPlan(
       std::string mode,
       std::string queryTemplate,
