@@ -5,7 +5,6 @@
 
 #define BUFFER_SIZE 1024
 
-
 Json::Value receiveJsonFromSocket(int clientSocket) {
   char messageBuffer[BUFFER_SIZE];
   memset(messageBuffer, 0, BUFFER_SIZE);
@@ -1474,7 +1473,8 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
 
   std::vector<std::string> userGenderFilterExprs = {
       "u_gender = 'M'",
-      "u_gender = 'F'",};
+      "u_gender = 'F'",
+  };
 
   std::vector<std::string> userAgeFilterExprs = {
       "u_age > 30",
@@ -1486,7 +1486,8 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
       "u_age < 25",
       "u_age >= 55",
       "u_age <= 35",
-      "u_age = 65",};
+      "u_age = 65",
+  };
 
   std::vector<std::string> userOccupationFilterExprs = {
       "u_occupation = 10",
@@ -1498,7 +1499,8 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
       "u_occupation = 12",
       "u_occupation < 20",
       "u_occupation > 8",
-      "u_occupation = 18",};
+      "u_occupation = 18",
+  };
 
   std::vector<std::string> userZipCodeFilterExprs = {
       "u_zipcode = '94043'",
@@ -1510,7 +1512,8 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
       "u_zipcode = '80213'",
       "u_zipcode = '80219'",
       "u_zipcode = '12301'",
-      "u_zipcode = '40201'",};
+      "u_zipcode = '40201'",
+  };
 
   std::vector<std::string> movieGenresFilterExprs = {
       "m_genres = 'Action'",
@@ -1522,7 +1525,8 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
       "m_genres = 'Adventure'",
       "m_genres = 'Thriller'",
       "m_genres = 'Fantasy'",
-      "m_genres = 'Documentary'",};
+      "m_genres = 'Documentary'",
+  };
 
   std::vector<std::string> movieSpokenLanguageFilterExprs = {
       "m_spoken_languages = 'English'",
@@ -1532,7 +1536,8 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
       "m_spoken_languages = 'Spanish'",
       "m_spoken_languages = 'Italian'",
       "m_spoken_languages = 'Korean'",
-      "m_spoken_languages = 'Mandarin'",};
+      "m_spoken_languages = 'Mandarin'",
+  };
 
   std::vector<std::string> moviePopularityFilterExprs = {
       "m_popularity > 5.0",
@@ -1558,7 +1563,8 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
       "m_vote_average < 4.0",
       "m_vote_average >= 2.5",
       "m_vote_average <= 3.5",
-      "m_vote_average = 3.0",};
+      "m_vote_average = 3.0",
+  };
 
   std::vector<std::string> movieVoteCountFilterExprs = {
       "m_vote_count > 500",
@@ -1570,7 +1576,8 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
       "m_vote_count < 600",
       "m_vote_count >= 1000",
       "m_vote_count <= 50",
-      "m_vote_count = 150",};
+      "m_vote_count = 150",
+  };
 
   std::vector<std::vector<std::string>> predefinedUserFilterExprs = {
       userGenderFilterExprs,
@@ -1627,3 +1634,39 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
 
   return sampledFilterExprs;
 };
+
+// Function to write a string to a file
+void writeStringToFile(const std::string& str, const std::string& filename) {
+  // Open the file in write mode
+  std::ofstream outfile(filename);
+
+  // Check if the file opened successfully
+  if (outfile.is_open()) {
+    // Write the string to the file
+    outfile << str;
+
+    // Close the file
+    outfile.close();
+  } else {
+    std::cerr << "Error: Could not open the file for writing." << std::endl;
+  }
+};
+
+void outputAugmentedQueryPlan(
+    CataLog& cataLog,
+    PlanBuilder& plan,
+    std::string outputPath = "") {
+  auto serializedPlan = plan.planNode()->serialize();
+  if (outputPath == "") {
+    outputPath = "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+  }
+  augmentSerializedPlan(serializedPlan, cataLog);
+  writeStringToFile(folly::toJson(serializedPlan), outputPath);
+};
+
+void outputStructuredQueryPlan(PlanBuilder& plan) {
+  auto structuredPlan = plan.planNode()->toString(true, true);
+  writeStringToFile(
+      structuredPlan,
+      "/home/velox/velox/optimizer/tests/structuredQueryPlan.txt");
+}
