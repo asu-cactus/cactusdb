@@ -66,7 +66,6 @@ using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
-
 class IntegratedMCTSTest : public HiveConnectorTestBase {
  public:
   IntegratedMCTSTest() {
@@ -1707,8 +1706,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   void registerMLMovieTagEncoderModelFunctions1(
       CataLog& catalog,
       std::shared_ptr<memory::MemoryPool> pool_) {
-
-        VectorMaker maker{pool_.get()};
+    VectorMaker maker{pool_.get()};
 
     std::string ffnnEncoderModelPath =
         "/home/velox/resources/model/movielens/final/velox/movie_tag_standalone_encoder_weight.h5";
@@ -1753,8 +1751,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         {},
         true,
         catalog);
-
-      }
+  }
 
   void registerMLMovieTagEncoderModelFunctions(
       CataLog& catalog,
@@ -1936,132 +1933,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         {},
         true,
         catalog);
-  }
-
-  /**
-   * @brief A function to run logical plan.
-   *
-   * @param numThreads The number of Velox executor threads.
-   * @param numSplits The number of file splits.
-   * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param cataLog A class storing metadata and information related to UDFs and
-   * data sources.
-   */
-  float runPlanWithCataLog(
-      int numThreads,
-      int numSplits,
-      PlanBuilder& myPlan,
-      CataLog& cataLog,
-      int repeatRun = 1,
-      int verbose = 1) {
-    float totalElapsedTime = 0;
-    std::vector<RowVectorPtr> finalResult;
-    int dataIdx;
-    int totalDataNum;
-
-    for (int i = 0; i < repeatRun; i++) {
-      // Initializes executor.
-      std::shared_ptr<folly::Executor> executor_{
-          std::make_shared<folly::CPUThreadPoolExecutor>(
-              std::thread::hardware_concurrency())};
-      // Initializes queryCtx.
-      std::shared_ptr<core::QueryCtx> queryCtx_{
-          std::make_shared<core::QueryCtx>(executor_.get())};
-      // Set queryCtx config.
-      queryCtx_->testingOverrideConfigUnsafe(
-          {{core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
-           {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
-           {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
-
-      // Add hivesplits to the target plan node (data source node).
-      std::chrono::steady_clock::time_point begin =
-          std::chrono::steady_clock::now();
-
-      CursorParameters params;
-      params.maxDrivers = numThreads;
-      params.planNode = myPlan.planNode();
-      params.queryCtx = queryCtx_;
-      bool noMoreSplits = false;
-      auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
-        auto idFileAddrMap = cataLog.getIdAddressMap();
-        std::vector<core::PlanNodeId> ids;
-        if (!noMoreSplits) {
-          for (const auto& entry : idFileAddrMap) {
-            core::PlanNodeId key = entry.first;
-            const std::vector<std::string> fileAddr = entry.second;
-            // check file exists
-            for (const auto& addr : fileAddr) {
-              if (!fs::exists(addr)) {
-                LOG(ERROR) << "[ERROR] File not exists: " << addr << std::endl;
-                return;
-              }
-            }
-            auto fileFormat = cataLog.getIdFileFormat(key);
-            auto hiveSplits = makeHiveConnectorSplits(fileAddr, fileFormat);
-
-            for (auto& split : hiveSplits) {
-              task->addSplit(key, exec::Split(std::move(split)));
-            }
-
-            ids.push_back(key);
-          }
-
-          for (auto id : ids) {
-            task->noMoreSplits(id);
-          }
-        }
-        noMoreSplits = true;
-      };
-      auto [cursor, actualResults] = readCursor(params, addSplits);
-      waitForTaskCompletion(cursor->task().get());
-
-      std::chrono::steady_clock::time_point end =
-          std::chrono::steady_clock::now();
-
-      auto elapsedTime =
-          (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
-               .count()) /
-          1000000.0;
-      totalElapsedTime += elapsedTime;
-
-      if (i == repeatRun - 1) {
-        finalResult = actualResults;
-        dataIdx = 0;
-        totalDataNum = 0;
-        for (auto batchedData : finalResult) {
-          batchedData = std::move(batchedData);
-          int batchSize = batchedData->size();
-          if (verbose == 2) {
-            std::cout << fmt::format(
-                             "[INFO] Batched Data: {}, Batch Size:{} \n",
-                             dataIdx,
-                             batchSize)
-                      << batchedData->toString() << std::endl;
-          } else if (verbose == 3) {
-            std::cout << fmt::format(
-                             "[INFO] Batched Data: {}, Batch Size:{} \n",
-                             dataIdx,
-                             batchSize)
-                      << batchedData->toString() << "\n"
-                      << batchedData->toString(0, batchedData->size())
-                      << std::endl;
-          }
-          dataIdx += 1;
-          totalDataNum += batchSize;
-        }
-        finalResult = std::move(finalResult);
-      }
-    }
-    if (verbose >= 1) {
-      std::cout << fmt::format(
-                       "[INFO] Total # of Batch: {}, Total # of Data: {}",
-                       dataIdx,
-                       totalDataNum)
-                << std::endl;
-    }
-    // finalResult = std::move(finalResult);
-
-    return totalElapsedTime / repeatRun;
   }
 
   struct DataFrame {
@@ -2965,7 +2836,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
 
     float averageExectuionTime = runPlanWithCataLog(
-        numDriver, numDriver, myPlan, cataLog, repeatRun, verbose);
+        pool_, numDriver, myPlan, cataLog, repeatRun, verbose);
     std::cout << averageExectuionTime << std::endl;
   }
 
@@ -3757,12 +3628,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
 
     if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized") {
-
       if (queryOptType == "mlq3-mul2join") {
         testAction =
             std::make_pair("mat_mul20_1", "Mul2JoinAggHorizontalRewriteAction");
-      } else if (queryOptType == "mlq3-optimized"){
-        testAction = std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
+      } else if (queryOptType == "mlq3-optimized") {
+        testAction =
+            std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
       }
 
       planState.takeAction(
@@ -3824,7 +3695,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << "[DEBUG] final executed plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
 
-    float executeTime = runPlanWithCataLog(8, 8, myPlan, cataLog, 2, verbose);
+    float executeTime =
+        runPlanWithCataLog(pool_, 8, myPlan, cataLog, 2, verbose);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
     // auto serializedPlan = myPlan.planNode()->serialize();
@@ -3966,7 +3838,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Json::Value jsonMessage;
         if (receivedJsonMessage["costMode"] == "offline") {
           float executeTime =
-              runPlanWithCataLog(8, 8, myPlan, cataLog, repeatRun, verbose);
+              runPlanWithCataLog(pool_, 8, myPlan, cataLog, repeatRun, verbose);
           jsonMessage["reward"] = executeTime;
           LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
                     << std::endl;
@@ -3984,7 +3856,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         sendJsonBySocket(jsonMessage, clientSocket);
 
       } else if (mctsAction == "runPlan") {
-        auto latency = runPlanWithCataLog(8, 8, myPlan, cataLog, 4, verbose);
+        auto latency =
+            runPlanWithCataLog(pool_, 8, myPlan, cataLog, 4, verbose);
         Json::Value jsonMessage;
         jsonMessage["latency"] = latency;
         sendAcknowledgment(clientSocket);

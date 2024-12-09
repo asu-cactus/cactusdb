@@ -195,7 +195,8 @@ class CataLog {
     return idFileAddrMap;
   }
 
-  void setIdAddressMap(std::map<core::PlanNodeId, std::vector<std::string>> map) {
+  void setIdAddressMap(
+      std::map<core::PlanNodeId, std::vector<std::string>> map) {
     idFileAddrMap = map;
   }
 
@@ -545,7 +546,6 @@ class CataLog {
         uniqueCategories.insert(value);
       }
     }
-
     std::vector<std::string> categoricalValsToIterate;
     if (categoricalColVals.find(colName) != categoricalColVals.end()) {
       // Use the unique values from the categoricalColVals map if exists
@@ -557,6 +557,9 @@ class CataLog {
 
     size_t index = 0;
     for (const auto& category : categoricalValsToIterate) {
+      if (index >= bins.size()) {
+        break;
+      }
       bins[index] = category;
       if (categoryCounts.find(category) == categoryCounts.end()) {
         frequencies[index] = 0;

@@ -1,9 +1,194 @@
 #pragma once
 #include <iostream>
 #include <string>
+#include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 
 #define BUFFER_SIZE 1024
+
+using namespace facebook::velox;
+using namespace facebook::velox::exec::test;
+using namespace facebook::velox::test;
+
+facebook::velox::RowVectorPtr copyRowVector(
+    const facebook::velox::RowVectorPtr& rowVector,
+    std::shared_ptr<memory::MemoryPool>& pool) {
+  // Vector to hold the deep copies of child vectors.
+  std::vector<facebook::velox::VectorPtr> childCopies;
+
+  // Iterate through the children of the RowVector.
+  for (const auto& child : rowVector->children()) {
+    if (child) {
+      // Allocate a new vector and copy the data into it.
+      auto childCopy = facebook::velox::BaseVector::create(
+          child->type(), child->size(), pool.get());
+
+      // Copy the data from the source vector to the new vector.
+      childCopy->copy(child.get(), 0, 0, child->size());
+
+      childCopies.push_back(childCopy);
+    } else {
+      // If the child is null, push a null vector.
+      childCopies.push_back(nullptr);
+    }
+  }
+
+  // Create a new RowVector with the copied children.
+  return std::make_shared<facebook::velox::RowVector>(
+      pool.get(), // Memory pool for allocation.
+      rowVector->type(), // The RowType of the original RowVector.
+      nullptr, // Nulls buffer (nullptr for no nulls).
+      rowVector->size(), // Number of rows in the RowVector.
+      std::move(childCopies)); // Null count (if available).
+};
+
+/**
+ * @brief A function to run logical plan.
+ *  
+ * @param pool The memory pool for the Velox executor.
+ * @param numThreads The number of Velox executor threads.
+ * @param numSplits The number of file splits.
+ * @param myPlan The pointer to the planBuilder which builds the logical plan.
+ * @param cataLog A class storing metadata and information related to UDFs and
+ * data sources.
+ */
+float runPlanWithCataLog(
+    std::shared_ptr<memory::MemoryPool>& pool,
+    int numThreads,
+    PlanBuilder& myPlan,
+    CataLog& cataLog,
+    std::vector<RowVectorPtr>& finalResult,
+    int repeatRun = 1,
+    int verbose = 1,
+    bool copyResult = false) {
+  float totalElapsedTime = 0;
+  int dataIdx;
+  int totalDataNum;
+
+  for (int i = 0; i < repeatRun; i++) {
+    // Initializes executor.
+    std::shared_ptr<folly::Executor> executor_{
+        std::make_shared<folly::CPUThreadPoolExecutor>(
+            std::thread::hardware_concurrency())};
+    // Initializes queryCtx.
+    std::shared_ptr<core::QueryCtx> queryCtx_{
+        std::make_shared<core::QueryCtx>(executor_.get())};
+    // Set queryCtx config.
+    queryCtx_->testingOverrideConfigUnsafe(
+        {{core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
+         {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
+         {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
+
+    // Add hivesplits to the target plan node (data source node).
+    std::chrono::steady_clock::time_point begin =
+        std::chrono::steady_clock::now();
+
+    CursorParameters params;
+    params.maxDrivers = numThreads;
+    params.planNode = myPlan.planNode();
+    params.queryCtx = queryCtx_;
+    bool noMoreSplits = false;
+    auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
+      auto idFileAddrMap = cataLog.getIdAddressMap();
+      std::vector<core::PlanNodeId> ids;
+      if (!noMoreSplits) {
+        for (const auto& entry : idFileAddrMap) {
+          core::PlanNodeId key = entry.first;
+          const std::vector<std::string> fileAddr = entry.second;
+          // check file exists
+          for (const auto& addr : fileAddr) {
+            if (!fs::exists(addr)) {
+              LOG(ERROR) << "[ERROR] File not exists: " << addr << std::endl;
+              return;
+            }
+          }
+          auto fileFormat = cataLog.getIdFileFormat(key);
+          auto hiveSplits = HiveConnectorTestBase::makeHiveConnectorSplits(
+              fileAddr, fileFormat);
+
+          for (auto& split : hiveSplits) {
+            task->addSplit(key, exec::Split(std::move(split)));
+          }
+
+          ids.push_back(key);
+        }
+
+        for (auto id : ids) {
+          task->noMoreSplits(id);
+        }
+      }
+      noMoreSplits = true;
+    };
+    auto [cursor, actualResults] = readCursor(params, addSplits);
+    waitForTaskCompletion(cursor->task().get());
+
+    std::chrono::steady_clock::time_point end =
+        std::chrono::steady_clock::now();
+
+    auto elapsedTime =
+        (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
+             .count()) /
+        1000000.0;
+    totalElapsedTime += elapsedTime;
+
+    if (i == repeatRun - 1) {
+      dataIdx = 0;
+      totalDataNum = 0;
+      for (auto batchedData : actualResults) {
+        int batchSize = batchedData->size();
+        if (verbose == 3) {
+          std::cout << fmt::format(
+                           "[INFO] Batched Data: {}, Batch Size:{} \n",
+                           dataIdx,
+                           batchSize)
+                    << batchedData->toString() << std::endl;
+        } else if (verbose == 4) {
+          std::cout << fmt::format(
+                           "[INFO] Batched Data: {}, Batch Size:{} \n",
+                           dataIdx,
+                           batchSize)
+                    << batchedData->toString() << "\n"
+                    << batchedData->toString(0, batchedData->size())
+                    << std::endl;
+        }
+        dataIdx += 1;
+        totalDataNum += batchSize;
+        // finalResult.push_back(batchedData);
+        if (copyResult) {
+          finalResult.push_back(copyRowVector(batchedData, pool));
+        }
+      }
+    }
+  }
+  if (verbose >= 1) {
+    std::cout << fmt::format(
+                     "[INFO] Total # of Batch: {}, Total # of Data: {}",
+                     dataIdx,
+                     totalDataNum)
+              << std::endl;
+  }
+
+  return totalElapsedTime / repeatRun;
+}
+
+float runPlanWithCataLog(
+    std::shared_ptr<memory::MemoryPool>& pool,
+    int numThreads,
+    PlanBuilder& myPlan,
+    CataLog& cataLog,
+    int repeatRun = 1,
+    int verbose = 1) {
+  std::vector<RowVectorPtr> finalResult;
+  return runPlanWithCataLog(
+      pool,
+      numThreads,
+      myPlan,
+      cataLog,
+      finalResult,
+      repeatRun,
+      verbose,
+      false /* copyResult */);
+}
 
 Json::Value receiveJsonFromSocket(int clientSocket) {
   char messageBuffer[BUFFER_SIZE];
@@ -141,8 +326,61 @@ PlanBuilder setupMovielensDBQuery(
   readDataStats(dataDirPrefix + "user_stats.txt", userNumRows, userNumCols);
   readDataStats(
       dataDirPrefix + "rating_stats.txt", ratingNumRows, ratingNumCols);
-
-  if (queryType.find("q1") != std::string::npos) {
+  if (queryType.find("user_only") != std::string::npos) {
+    PlanNodeId readUserDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(userDataRowType, {}, "")
+                    .capturePlanNodeId(readUserDataPlanNodeId)
+                    .project(
+                        {"u_user_id",
+                         "u_gender",
+                         "u_age",
+                         "u_occupation",
+                         "u_zipcode"});
+    cataLog.setIdAddressMap(
+        readUserDataPlanNodeId,
+        userDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType.find("movie_only") != std::string::npos) {
+    PlanNodeId readMovieDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(movieDataRowType, {}, "")
+                    .capturePlanNodeId(readMovieDataPlanNodeId)
+                    .project(
+                        {"m_movie_id",
+                         "m_title",
+                         "m_genres",
+                         "m_spoken_languages",
+                         "m_popularity",
+                         "m_vote_average",
+                         "m_vote_count",
+                         "m_overview"});
+    cataLog.setIdAddressMap(
+        readMovieDataPlanNodeId,
+        movieDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType.find("movie_rating_only") != std::string::npos) {
+    PlanNodeId readRatingDataPlanNodeId;
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(ratingDataRowType, {}, "")
+            .capturePlanNodeId(readRatingDataPlanNodeId)
+            .project({"r_user_id", "r_movie_id", "r_rating", "r_timestamp"});
+    cataLog.setIdAddressMap(
+        readRatingDataPlanNodeId,
+        ratingDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType.find("movie_tag_only") != std::string::npos) {
+    PlanNodeId readMovieTagDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(movieTagDataRowType, {}, "")
+                    .capturePlanNodeId(readMovieTagDataPlanNodeId)
+                    .project({"mt_movie_id", "mt_relevance_score"});
+    cataLog.setIdAddressMap(
+        readMovieTagDataPlanNodeId,
+        movieTagDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType.find("q1") != std::string::npos) {
     PlanNodeId readMovieTagDataPlanNodeId;
     PlanNodeId readUserDataPlanNodeId;
     PlanNodeId readMovieDataPlanNodeId;
@@ -1672,22 +1910,72 @@ void outputStructuredQueryPlan(PlanBuilder& plan) {
 }
 
 void deleteFilesInFolder(const std::string& folderPath) {
-    try {
-        // Check if the folder exists and is a directory
-        if (!fs::exists(folderPath) || !fs::is_directory(folderPath)) {
-            std::cerr << "Error: Folder does not exist or is not a directory." << std::endl;
-            return;
-        }
-
-        // Iterate through the files in the folder
-        for (const auto& entry : fs::directory_iterator(folderPath)) {
-            if (fs::is_regular_file(entry.path())) {
-                // Delete the file
-                fs::remove(entry.path());
-                // std::cout << "Deleted file: " << entry.path() << std::endl;
-            }
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Exception occurred: " << e.what() << std::endl;
+  try {
+    // Check if the folder exists and is a directory
+    if (!fs::exists(folderPath) || !fs::is_directory(folderPath)) {
+      std::cerr << "Error: Folder does not exist or is not a directory."
+                << std::endl;
+      return;
     }
+
+    // Iterate through the files in the folder
+    for (const auto& entry : fs::directory_iterator(folderPath)) {
+      if (fs::is_regular_file(entry.path())) {
+        // Delete the file
+        fs::remove(entry.path());
+        // std::cout << "Deleted file: " << entry.path() << std::endl;
+      }
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "Exception occurred: " << e.what() << std::endl;
+  }
 };
+RowVectorPtr mergeRowVectors(
+    const std::vector<RowVectorPtr>& rowVectors,
+    std::shared_ptr<memory::MemoryPool>& pool) {
+  if (rowVectors.empty()) {
+    return nullptr; // Nothing to merge
+  }
+
+  // Check schema consistency and get the number of columns.
+  size_t numColumns = rowVectors[0]->childrenSize();
+  for (const auto& rowVector : rowVectors) {
+    VELOX_CHECK_EQ(rowVector->childrenSize(), numColumns, "Schema mismatch.");
+  }
+
+  // Total number of rows in the merged RowVector.
+  vector_size_t totalRows = 0;
+  for (const auto& rowVector : rowVectors) {
+    totalRows += rowVector->size();
+  }
+
+  // Prepare new child vectors for the merged RowVector.
+  std::vector<VectorPtr> mergedColumns(numColumns);
+  for (size_t colIdx = 0; colIdx < numColumns; ++colIdx) {
+    // Determine the type of the column.
+    auto columnType = rowVectors[0]->childAt(colIdx)->type();
+
+    // Create a new FlatVector to hold all data for this column.
+    auto flatVector = BaseVector::create(columnType, totalRows, pool.get());
+
+    // Fill the new FlatVector with data from each RowVector.
+    vector_size_t offset = 0;
+    for (const auto& rowVector : rowVectors) {
+      auto sourceColumn = rowVector->childAt(colIdx);
+      auto numRows = sourceColumn->size();
+
+      flatVector->copy(sourceColumn.get(), offset, 0, numRows);
+      offset += numRows;
+    }
+
+    mergedColumns[colIdx] = flatVector;
+  }
+
+  // Create the merged RowVector.
+  return std::make_shared<RowVector>(
+      pool.get(),
+      rowVectors[0]->type(), // Use the type of the first RowVector.
+      BufferPtr(nullptr), // No nulls buffer for the whole RowVector.
+      totalRows,
+      std::move(mergedColumns));
+}
