@@ -747,7 +747,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
             Source::Type::FILE,
             movieRelevanceTagStats);
         cataLog.addSource(std::make_shared<Source>(movieRelevanceTagSrc));
-      } else if (queryTemplate == "movie_user") {
+      } else if (queryTemplate == "movie_user" || queryTemplate == "user_movie") {
         std::string userModel1ComputExpr = registerNNModel(
             userModelStructures[0],
             cataLog,
@@ -870,7 +870,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         Source movieSrc =
             Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
         cataLog.addSource(std::make_shared<Source>(movieSrc));
-      } else if (queryTemplate == "movie_user_tag") {
+      } else if (queryTemplate == "movie_user_tag" || queryTemplate == "user_movie_tag") {
         std::string userModel1ComputExpr = registerNNModel(
             userModelStructures[0],
             cataLog,
@@ -1728,14 +1728,11 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getQueryPlan") {
         // Dump structured query plan to disk
-        // default path: /home/velox/velox/optimizer/tests/structuredQueryPlan.txt
-        Json::Value jsonMessage;
-        jsonMessage["communicateFlag"] = true;
-        jsonMessage["mctsAction"] = "recQueryPlan";
+        // default path:
+        // /home/velox/velox/optimizer/tests/structuredQueryPlan.txt Json::Value
         outputAugmentedQueryPlan(cataLog, myPlan);
         outputStructuredQueryPlan(myPlan);
         sendAcknowledgment(clientSocket);
-        sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "getActionSpace") {
         planState.getPossibleActions(planNode, cataLog);
         Json::Value jsonMessage;
@@ -1763,6 +1760,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         LOG(INFO) << "[INFO] selectedHighLevelOptRule: "
                   << selectedHighLevelOptRule << std::endl;
         if (selectedHighLevelOptRule != "None") {
+          // Take action
           std::pair<std::string, std::string> targetAction;
           std::vector<std::string> applicableTargetExprs;
 
@@ -1782,12 +1780,54 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
                 "selected high level optimization rule: " +
                 selectedHighLevelOptRule);
           }
-
-          targetAction.first = applicableTargetExprs[0];
+          // cache current state
+          int cachedQueryPlanCacheId =
+              cacheQueryPlanAndCateLog(myPlan, cataLog);
+          // enumerate plan
           targetAction.second = selectedHighLevelOptRule;
 
-          LOG(INFO) << "[INFO] take action: " << targetAction << std::endl;
-          // None action is selected
+          std::string tempEnumeratePlanPaths =
+              "/home/velox/velox/optimizer/tests/_tempOptimization";
+          deleteFilesInFolder(tempEnumeratePlanPaths);
+
+          for (int i = 0; i < applicableTargetExprs.size(); i++) {
+            targetAction.first = applicableTargetExprs[i];
+            planNode = myPlan.planNode();
+            planState.takeAction(
+                planNode,
+                nullptr,
+                maker,
+                myPlan,
+                pool_,
+                planNodeIdGenerator,
+                {targetAction},
+                cataLog);
+            std::string queryPlanOutputPath =
+                fmt::format("{}/{}.json", tempEnumeratePlanPaths, i);
+            outputAugmentedQueryPlan(cataLog, myPlan, queryPlanOutputPath);
+            // std::cout << "[debug] Enumerated plan: " << i << std::endl
+            //           << "path: " << queryPlanOutputPath << std::endl;
+            // reset the plan
+            resetQueryPlanAndQueryPlanFromCache(
+                myPlan, cataLog, cachedQueryPlanCacheId);
+          }
+
+          sendAcknowledgment(clientSocket);
+          // wait to receive another message indicating the cost estimation is
+          // done
+          Json::Value queryEstimationMessage =
+              receiveJsonFromSocket(clientSocket);
+          int selectedTargetExprIndex =
+              queryEstimationMessage["selectedPlanIdx"].asInt();
+          
+          auto listPlanIds = queryEstimationMessage["listPlanIds"];
+          auto listPlanLatencies = queryEstimationMessage["listPlanLatencies"];
+          // reset the plan
+          resetQueryPlanAndQueryPlanFromCache(
+              myPlan, cataLog, cachedQueryPlanCacheId);
+
+          targetAction.first = applicableTargetExprs[selectedTargetExprIndex];
+          planNode = myPlan.planNode();
           planState.takeAction(
               planNode,
               nullptr,

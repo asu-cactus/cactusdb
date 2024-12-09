@@ -219,7 +219,6 @@ class PlanState {
       }
     }
 
-    actionsPair.clear();
   }
 
   /**
