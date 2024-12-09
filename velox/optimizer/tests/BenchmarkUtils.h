@@ -1670,3 +1670,24 @@ void outputStructuredQueryPlan(PlanBuilder& plan) {
       structuredPlan,
       "/home/velox/velox/optimizer/tests/structuredQueryPlan.txt");
 }
+
+void deleteFilesInFolder(const std::string& folderPath) {
+    try {
+        // Check if the folder exists and is a directory
+        if (!fs::exists(folderPath) || !fs::is_directory(folderPath)) {
+            std::cerr << "Error: Folder does not exist or is not a directory." << std::endl;
+            return;
+        }
+
+        // Iterate through the files in the folder
+        for (const auto& entry : fs::directory_iterator(folderPath)) {
+            if (fs::is_regular_file(entry.path())) {
+                // Delete the file
+                fs::remove(entry.path());
+                // std::cout << "Deleted file: " << entry.path() << std::endl;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Exception occurred: " << e.what() << std::endl;
+    }
+};

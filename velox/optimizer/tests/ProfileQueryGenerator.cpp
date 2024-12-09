@@ -68,7 +68,6 @@ using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
-
 class IntegratedMCTSTest : public HiveConnectorTestBase {
  public:
   IntegratedMCTSTest() {
@@ -1303,9 +1302,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
     // std::cout << "[INFO] All possible actions:" << std::endl;
 
-    // selectedAction = std::make_pair(
-    //     "mat_mul0_0",
-    //     "Mul2JoinAggHorizontalRewriteAction");
+    // selectedAction =
+    //     std::make_pair("mat_mul0_0", "Mul2JoinAggHorizontalRewriteAction");
 
     // planState.takeAction(
     //     planNode,
@@ -1317,12 +1315,58 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     //     {selectedAction},
     //     cataLog);
 
-    // std::cout << "[INFO] Selected action: " << selectedAction.first
-    //           << ": " << selectedAction.second << std::endl;
+    // planNode = plan.planNode();
+    // planState.getPossibleActions(planNode, cataLog);
+
+    // selectedAction =
+    //     std::make_pair("mat_mul0_2", "Mul2JoinAggHorizontalRewriteAction");
+
+    // planState.takeAction(
+    //     planNode,
+    //     nullptr,
+    //     maker,
+    //     plan,
+    //     pool_,
+    //     planNodeIdGenerator,
+    //     {selectedAction},
+    //     cataLog);
+
+    // planNode = plan.planNode();
+    // planState.getPossibleActions(planNode, cataLog);
+
+    // return plan;
+    // if (verbose >= 2) {
+    //   std::cout << "[INFO] All possible actions:" << std::endl;
+    //   for (auto entry : planState.actionsPair) {
+    //     std::cout << entry.first << ": " << entry.second << std::endl;
+    //     // if (entry.first.find("softmax") != std::string::npos) {
+    //     //   selectedAction = std::make_pair(entry.first,
+    //     // "MultiLayerUDF2TorchNNRewriteAction");
+    //     // }
+    //   }
+    // }
+
+    // selectedAction =
+    //     std::make_pair("gte(cast ROW[\"u_age\"] as BIGINT,20)",
+    //     "MLDecompositionPushdownRewriteAction");
+
+    // planState.takeAction(
+    //     planNode,
+    //     nullptr,
+    //     maker,
+    //     plan,
+    //     pool_,
+    //     planNodeIdGenerator,
+    //     {selectedAction},
+    //     cataLog);
+
+    // // std::cout << "[INFO] Selected action: " << selectedAction.first
+    // //           << ": " << selectedAction.second << std::endl;
 
     // return plan;
 
     for (int i = 0; i < randomGenerator.genRandomIntValue(); i++) {
+      // if (true) {
       if (randomGenerator.genRandomFloatValue() > 0.5) {
         // Get the logical plan
         auto planNode = plan.planNode();
@@ -1339,6 +1383,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             availableActions.push_back(std::make_pair(entry.first, action));
           }
         }
+
+        if (availableActions.size() == 0) {
+          // if no available actions, break
+          break;
+        }
+
         std::pair<std::string, std::string> selectedAction =
             randomSampler.sampleFromSets<std::pair<std::string, std::string>>(
                 1, availableActions)[0];
