@@ -167,131 +167,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         std::move(sink), options, rowType);
   }
 
-  /**
-   * @brief A function to run logical plan.
-   *
-   * @param numThreads The number of Velox executor threads.
-   * @param numSplits The number of file splits.
-   * @param myPlan The pointer to the planBuilder which builds the logical plan.
-   * @param cataLog A class storing metadata and information related to UDFs and
-   * data sources.
-   */
-  float runPlanWithCataLog(
-      int numThreads,
-      PlanBuilder& myPlan,
-      CataLog& cataLog,
-      int repeatRun = 1,
-      int verbose = 1) {
-    float totalElapsedTime = 0;
-    std::vector<RowVectorPtr> finalResult;
-    int dataIdx;
-    int totalDataNum;
-
-    for (int i = 0; i < repeatRun; i++) {
-      // Initializes executor.
-      std::shared_ptr<folly::Executor> executor_{
-          std::make_shared<folly::CPUThreadPoolExecutor>(
-              std::thread::hardware_concurrency())};
-      // Initializes queryCtx.
-      std::shared_ptr<core::QueryCtx> queryCtx_{
-          std::make_shared<core::QueryCtx>(executor_.get())};
-      // Set queryCtx config.
-      queryCtx_->testingOverrideConfigUnsafe(
-          {{core::QueryConfig::kPreferredOutputBatchBytes, "10000000"},
-           {core::QueryConfig::kMaxOutputBatchRows, "1000000"},
-           {core::QueryConfig::kPreferredOutputBatchRows, "1000"}});
-
-      // Add hivesplits to the target plan node (data source node).
-      std::chrono::steady_clock::time_point begin =
-          std::chrono::steady_clock::now();
-
-      CursorParameters params;
-      params.maxDrivers = numThreads;
-      params.planNode = myPlan.planNode();
-      params.queryCtx = queryCtx_;
-      bool noMoreSplits = false;
-      auto addSplits = [&noMoreSplits, &cataLog](exec::Task* task) {
-        auto idFileAddrMap = cataLog.getIdAddressMap();
-        std::vector<core::PlanNodeId> ids;
-        if (!noMoreSplits) {
-          for (const auto& entry : idFileAddrMap) {
-            core::PlanNodeId key = entry.first;
-            const std::vector<std::string> fileAddr = entry.second;
-            // check file exists
-            for (const auto& addr : fileAddr) {
-              if (!fs::exists(addr)) {
-                LOG(ERROR) << "[ERROR] File not exists: " << addr << std::endl;
-                return;
-              }
-            }
-            auto fileFormat = cataLog.getIdFileFormat(key);
-            auto hiveSplits = makeHiveConnectorSplits(fileAddr, fileFormat);
-
-            for (auto& split : hiveSplits) {
-              task->addSplit(key, exec::Split(std::move(split)));
-            }
-
-            ids.push_back(key);
-          }
-
-          for (auto id : ids) {
-            task->noMoreSplits(id);
-          }
-        }
-        noMoreSplits = true;
-      };
-      auto [cursor, actualResults] = readCursor(params, addSplits);
-      waitForTaskCompletion(cursor->task().get());
-
-      std::chrono::steady_clock::time_point end =
-          std::chrono::steady_clock::now();
-
-      auto elapsedTime =
-          (std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
-               .count()) /
-          1000000.0;
-      totalElapsedTime += elapsedTime;
-
-      if (i == repeatRun - 1) {
-        finalResult = actualResults;
-        dataIdx = 0;
-        totalDataNum = 0;
-        for (auto batchedData : finalResult) {
-          batchedData = std::move(batchedData);
-          int batchSize = batchedData->size();
-          if (verbose == 3) {
-            std::cout << fmt::format(
-                             "[INFO] Batched Data: {}, Batch Size:{} \n",
-                             dataIdx,
-                             batchSize)
-                      << batchedData->toString() << std::endl;
-          } else if (verbose == 4) {
-            std::cout << fmt::format(
-                             "[INFO] Batched Data: {}, Batch Size:{} \n",
-                             dataIdx,
-                             batchSize)
-                      << batchedData->toString() << "\n"
-                      << batchedData->toString(0, batchedData->size())
-                      << std::endl;
-          }
-          dataIdx += 1;
-          totalDataNum += batchSize;
-        }
-        finalResult = std::move(finalResult);
-      }
-    }
-    if (verbose >= 1) {
-      std::cout << fmt::format(
-                       "[INFO] Total # of Batch: {}, Total # of Data: {}",
-                       dataIdx,
-                       totalDataNum)
-                << std::endl;
-    }
-    // finalResult = std::move(finalResult);
-
-    return totalElapsedTime / repeatRun;
-  }
-
   struct DataFrame {
     std::vector<std::vector<float>> features;
     std::vector<float*> weights;
@@ -1479,8 +1354,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
                 << entry.second << std::endl;
     }
 
-    float executeTime =
-        runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+    float executeTime = runPlanWithCataLog(
+        pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
 
     std::string latencyOutPutPath =
         "/home/velox/velox/optimizer/tests/executionLatency.txt";
