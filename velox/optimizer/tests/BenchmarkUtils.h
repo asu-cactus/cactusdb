@@ -44,7 +44,7 @@ facebook::velox::RowVectorPtr copyRowVector(
 
 /**
  * @brief A function to run logical plan.
- *  
+ *
  * @param pool The memory pool for the Velox executor.
  * @param numThreads The number of Velox executor threads.
  * @param numSplits The number of file splits.
@@ -978,6 +978,31 @@ PlanBuilder setupMovielensDBQuery(
         readRatingDataPlanNodeId2,
         ratingDataPaths,
         dwio::common::FileFormat::PARQUET);
+
+    cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+    std::shared_ptr<OutputStat> userStats =
+        std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+    Source userSrc =
+        Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+    cataLog.addSource(std::make_shared<Source>(userSrc));
+
+    cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+    std::shared_ptr<OutputStat> movieStats =
+        std::make_shared<OutputStat>(OutputStat(movieNumRows, movieNumCols));
+    Source movieSrc =
+        Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
+    cataLog.addSource(std::make_shared<Source>(movieSrc));
+
+    cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "movie_rating");
+    cataLog.addNodeIdRelationName(readRatingDataPlanNodeId2, "movie_rating");
+    std::shared_ptr<OutputStat> ratingStats =
+        std::make_shared<OutputStat>(OutputStat(ratingNumRows, ratingNumCols));
+    Source ratingSrc1 =
+        Source(readRatingDataPlanNodeId1, Source::Type::FILE, ratingStats);
+    cataLog.addSource(std::make_shared<Source>(ratingSrc1));
+    Source ratingSrc2 =
+        Source(readRatingDataPlanNodeId2, Source::Type::FILE, ratingStats);
+    cataLog.addSource(std::make_shared<Source>(ratingSrc2));
   } else if (queryType.find("q2") != std::string::npos) {
     PlanNodeId readMovieTagDataPlanNodeId;
     PlanNodeId readUserDataPlanNodeId;
@@ -1370,6 +1395,29 @@ PlanBuilder setupMovielensDBQuery(
         readUserDataPlanNodeId,
         userDataPaths,
         dwio::common::FileFormat::PARQUET);
+
+    cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+    std::shared_ptr<OutputStat> userStats =
+        std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+    Source userSrc =
+        Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+    cataLog.addSource(std::make_shared<Source>(userSrc));
+
+    cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+    std::shared_ptr<OutputStat> movieStats =
+        std::make_shared<OutputStat>(OutputStat(movieNumRows, movieNumCols));
+    Source movieSrc =
+        Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
+    cataLog.addSource(std::make_shared<Source>(movieSrc));
+
+    cataLog.addNodeIdRelationName(
+        readMovieTagDataPlanNodeId, "movie_relevance_tag");
+    std::shared_ptr<OutputStat> movieTagStats = std::make_shared<OutputStat>(
+        OutputStat(movieTagNumRows, movieTagNumCols));
+    Source movieTagSrc =
+        Source(readMovieTagDataPlanNodeId, Source::Type::FILE, movieTagStats);
+    cataLog.addSource(std::make_shared<Source>(movieTagSrc));
+
   } else if (queryType.find("q3") != std::string::npos) {
     PlanNodeId readMovieTagDataPlanNodeId;
     PlanNodeId readMovieTagDataPlanNodeId2;
@@ -1699,6 +1747,36 @@ PlanBuilder setupMovielensDBQuery(
         readUserDataPlanNodeId,
         userDataPaths,
         dwio::common::FileFormat::PARQUET);
+
+    cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+    std::shared_ptr<OutputStat> userStats =
+        std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+    Source userSrc =
+        Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+    cataLog.addSource(std::make_shared<Source>(userSrc));
+
+    cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+    std::shared_ptr<OutputStat> movieStats =
+        std::make_shared<OutputStat>(OutputStat(movieNumRows, movieNumCols));
+    Source movieSrc =
+        Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
+    cataLog.addSource(std::make_shared<Source>(movieSrc));
+
+    cataLog.addNodeIdRelationName(
+        readMovieTagDataPlanNodeId, "movie_relevance_tag");
+    std::shared_ptr<OutputStat> movieTagStats = std::make_shared<OutputStat>(
+        OutputStat(movieTagNumRows, movieTagNumCols));
+    Source movieTagSrc =
+        Source(readMovieTagDataPlanNodeId, Source::Type::FILE, movieTagStats);
+    cataLog.addSource(std::make_shared<Source>(movieTagSrc));
+
+    cataLog.addNodeIdRelationName(
+        readMovieTagDataPlanNodeId2, "movie_relevance_tag");
+    std::shared_ptr<OutputStat> movieTagStats2 = std::make_shared<OutputStat>(
+        OutputStat(movieTagNumRows, movieTagNumCols));
+    Source movieTagSrc2 =
+        Source(readMovieTagDataPlanNodeId2, Source::Type::FILE, movieTagStats2);
+    cataLog.addSource(std::make_shared<Source>(movieTagSrc2));
   }
 
   return queryPlan;
