@@ -63,6 +63,7 @@
 #include "velox/optimizer/RuleManager.h"
 #include "velox/optimizer/TwoLayerUDF2TorchNNRewriteAction.h"
 #include "velox/optimizer/tests/BenchmarkUtils.h"
+#include "velox/optimizer/tests/ModelRegister.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
@@ -622,7 +623,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
             Source::Type::FILE,
             movieRelevanceTagStats);
         cataLog.addSource(std::make_shared<Source>(movieRelevanceTagSrc));
-      } else if (queryTemplate == "movie_user" || queryTemplate == "user_movie") {
+      } else if (
+          queryTemplate == "movie_user" || queryTemplate == "user_movie") {
         std::string userModel1ComputExpr = registerNNModel(
             userModelStructures[0],
             cataLog,
@@ -745,7 +747,9 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         Source movieSrc =
             Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
         cataLog.addSource(std::make_shared<Source>(movieSrc));
-      } else if (queryTemplate == "movie_user_tag" || queryTemplate == "user_movie_tag") {
+      } else if (
+          queryTemplate == "movie_user_tag" ||
+          queryTemplate == "user_movie_tag") {
         std::string userModel1ComputExpr = registerNNModel(
             userModelStructures[0],
             cataLog,
@@ -1467,20 +1471,28 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
     std::string computationStr;
 
-    generateDummyData(
-        mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
-
     if (mode == "ml") {
-      myPlan = setupProfileQueryPlan(
-          mode, queryTemplate, cataLog, planNodeIdGenerator);
+      if (queryTemplate == "ml-q1" || queryTemplate == "ml-q2" ||
+          queryTemplate == "ml-q3") {
+        if (queryTemplate == "ml-q1") {
+          // register ml-q1 models
+          registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+          registerMLTrendingModelFunctions(cataLog, pool_);
+        }
 
-      // } else if (model == "df") {
-      // } else if (model == "two-tower") {
-      // } else if (model == "llm") {
-      // } else if (model == "fraud") {
-      // } else if (model == "ml-q1") {
-      // } else if (model == "ml-q2") {
-      // } else if (model == "ml-q3") {
+        // use original movielens dataset and pre-defined query plan
+        myPlan = setupMovielensDBQuery(
+            queryTemplate, cataLog, pool_, planNodeIdGenerator);
+
+
+      } else {
+        // use profile query plan
+        generateDummyData(
+            mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+        myPlan = setupProfileQueryPlan(
+            mode, queryTemplate, cataLog, planNodeIdGenerator);
+      }
+
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
@@ -1488,11 +1500,12 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     std::cout << "[INFO] Original Query Plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
 
-    float unOptimizedExecutionTime = runPlanWithCataLog(
-        pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
-    std::cout << "[INFO] Unoptimized Execution time: "
-              << unOptimizedExecutionTime << std::endl;
     outputAugmentedQueryPlan(cataLog, myPlan);
+    // float unOptimizedExecutionTime = runPlanWithCataLog(
+    //     pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+    // std::cout << "[INFO] Unoptimized Execution time: "
+    //           << unOptimizedExecutionTime << std::endl;
+    // return;
 
     /* if (rewrite) {
       myPlan = rewriteQuery(cataLog, myPlan, planNodeIdGenerator, verbose);
@@ -1772,6 +1785,91 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     return;
   }
 
+  void collectMovieLensStats(int numThreads, int repeatRun, int verbose) {
+    std::string tableStatsPath =
+        "/home/velox/velox/optimizer/tests/tableStats.txt";
+    remove(tableStatsPath.c_str());
+
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    myPlan =
+        setupMovielensDBQuery("user_only", cataLog, pool_, planNodeIdGenerator);
+    std::vector<RowVectorPtr> finalResult;
+    runPlanWithCataLog(
+        pool_,
+        numThreads,
+        myPlan,
+        cataLog,
+        finalResult,
+        1 /*repeatRun*/,
+        verbose,
+        true /*copy result*/);
+    RowVectorPtr userDataRowVector = mergeRowVectors(finalResult, pool_);
+
+    // output the histogram for the user data
+    cataLog.outputHistogramForData(
+        userDataRowVector, "user", 50, tableStatsPath);
+    cataLog.clearIdAddressMap();
+
+    myPlan = setupMovielensDBQuery(
+        "movie_only", cataLog, pool_, planNodeIdGenerator);
+    finalResult.clear();
+    runPlanWithCataLog(
+        pool_,
+        numThreads,
+        myPlan,
+        cataLog,
+        finalResult,
+        1 /*repeatRun*/,
+        verbose,
+        true /*copy result*/);
+    RowVectorPtr movieDataRowVector = mergeRowVectors(finalResult, pool_);
+
+    // output the histogram for the user data
+    cataLog.outputHistogramForData(
+        movieDataRowVector, "movie", 50, tableStatsPath);
+    cataLog.clearIdAddressMap();
+
+    myPlan = setupMovielensDBQuery(
+        "movie_rating_only", cataLog, pool_, planNodeIdGenerator);
+    finalResult.clear();
+    runPlanWithCataLog(
+        pool_,
+        numThreads,
+        myPlan,
+        cataLog,
+        finalResult,
+        1 /*repeatRun*/,
+        verbose,
+        true /*copy result*/);
+    RowVectorPtr movieRatingDataRowVector = mergeRowVectors(finalResult, pool_);
+    cataLog.outputHistogramForData(
+        movieRatingDataRowVector, "movie_rating", 50, tableStatsPath);
+    cataLog.clearIdAddressMap();
+
+    myPlan = setupMovielensDBQuery(
+        "movie_tag_only", cataLog, pool_, planNodeIdGenerator);
+    finalResult.clear();
+    runPlanWithCataLog(
+        pool_,
+        numThreads,
+        myPlan,
+        cataLog,
+        finalResult,
+        1 /*repeatRun*/,
+        verbose,
+        true /*copy result*/);
+    RowVectorPtr movieTagDataRowVector = mergeRowVectors(finalResult, pool_);
+    cataLog.outputHistogramForData(
+        movieTagDataRowVector, "movie_relevance_tag", 50, tableStatsPath);
+
+    // std::cout << "userDataRowVector: " << userDataRowVector->toString()
+    //           << std::endl;
+    // std::cout << "DONE" << std::endl;
+  }
+
  private:
   std::shared_ptr<memory::MemoryPool> rootPool_{
       memory::MemoryManager::getInstance()->addRootPool()};
@@ -1834,6 +1932,9 @@ int main(int argc, char** argv) {
     numberOfTuples.push_back(numTag);
     dummyFeatureSizes.push_back(userFeatureSize);
     dummyFeatureSizes.push_back(movieFeatureSize);
+  } else if (mode == "collect_ml_stats") {
+    demo.collectMovieLensStats(numDriver, repeatRun, verbose);
+    return 0;
   }
 
   std::cout << "numberOfTuples: " << numberOfTuples << std::endl;

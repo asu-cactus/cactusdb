@@ -63,6 +63,7 @@
 #include "velox/optimizer/RuleManager.h"
 #include "velox/optimizer/TwoLayerUDF2TorchNNRewriteAction.h"
 #include "velox/optimizer/tests/BenchmarkUtils.h"
+#include "velox/optimizer/tests/ModelRegister.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
@@ -1292,11 +1293,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::string queryTemplate,
       std::vector<int> numberOfTuples,
       std::vector<int> dummyFeatureSizes,
-      // int featureSize,
-      // int numSamples,
       int numThreads,
       int repeatRun,
-      // int blockSize,
       int verbose,
       bool rewrite,
       int dataBatchSize = 256) {
@@ -1308,20 +1306,29 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
     std::string computationStr;
 
-    generateDummyData(
-        mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
 
     if (mode == "ml") {
-      myPlan = setupProfileQueryPlan(
-          mode, queryTemplate, cataLog, planNodeIdGenerator);
+      if (queryTemplate == "ml-q1" || queryTemplate == "ml-q2" ||
+          queryTemplate == "ml-q3") {
+        if (queryTemplate == "ml-q1") {
+          // register ml-q1 models
+          registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+          registerMLTrendingModelFunctions(cataLog, pool_);
+        }
 
-      // } else if (model == "df") {
-      // } else if (model == "two-tower") {
-      // } else if (model == "llm") {
-      // } else if (model == "fraud") {
-      // } else if (model == "ml-q1") {
-      // } else if (model == "ml-q2") {
-      // } else if (model == "ml-q3") {
+        // use original movielens dataset and pre-defined query plan
+        myPlan = setupMovielensDBQuery(
+            queryTemplate, cataLog, pool_, planNodeIdGenerator);
+
+
+      } else {
+        // use profile query plan
+        generateDummyData(
+            mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+        myPlan = setupProfileQueryPlan(
+            mode, queryTemplate, cataLog, planNodeIdGenerator);
+      }
+
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
