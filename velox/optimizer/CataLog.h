@@ -18,6 +18,20 @@
 #include <string>
 #include "velox/cost_model/Source.h"
 
+
+// Function to split a string based on a delimiter
+std::vector<std::string> splitString(const std::string& str, char delimiter) {
+  std::vector<std::string> tokens;
+  std::stringstream ss(str);
+  std::string token;
+
+  while (std::getline(ss, token, delimiter)) {
+    tokens.push_back(token);
+  }
+
+  return tokens;
+}
+
 class CataLog {
  public:
   virtual ~CataLog() = default;
@@ -541,9 +555,21 @@ class CataLog {
     for (size_t j = 0; j < numRows; ++j) {
       if (!stringVector->isNullAt(j)) {
         std::string value = stringVector->valueAt(j).str();
-        categoryCounts[value]++;
-        totalCount++;
-        uniqueCategories.insert(value);
+        if (colName.find("genres") != std::string::npos) {
+          // TODO: add method to automatically split string based on delimiter
+          // special case: if it is genres, needs to split by '|'
+          // example of movie genres: "Action|Adventure|Science Fiction"
+          std::vector<std::string> words = splitString(value, '|');
+          for (const auto& word : words) {
+            categoryCounts[word]++;
+            totalCount++;
+            uniqueCategories.insert(word);
+          }
+        } else {
+          categoryCounts[value]++;
+          totalCount++;
+          uniqueCategories.insert(value);
+        }
       }
     }
     std::vector<std::string> categoricalValsToIterate;
@@ -618,7 +644,7 @@ class CataLog {
         columnType = "Numerical";
       } else if (child->typeKind() == TypeKind::VARCHAR) {
         // Handle VARCHAR type
-        if (columnName.find("title") == std::string::npos) {
+        if (columnName.find("title") == std::string::npos && columnName.find("overview") == std::string::npos) {
           // skip title columns
           auto stringVector = child->asFlatVector<StringView>();
           processCategoricalColumn(
