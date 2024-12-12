@@ -238,6 +238,7 @@ class PlanState {
     getPossibleActions(curNode, cataLog);
   }
 
+  // Store the possible actions in the form of targetExpr: [rule1, rule2, ...]
   std::map<std::string, std::vector<std::string>> actionsPair;
   std::vector<std::string> actions;
   RuleManager ruleManager;

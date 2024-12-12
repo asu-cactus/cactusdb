@@ -1162,82 +1162,6 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     }
   }
 
-  PlanBuilder rewriteQuery(
-      CataLog& cataLog,
-      PlanBuilder& plan,
-      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-      int verbose) {
-    unsigned timestampSeed =
-        std::chrono::system_clock::now().time_since_epoch().count();
-    // Create ruleManager
-    RuleManager ruleManager;
-    // Create planState
-    PlanState planState(ruleManager);
-
-    RandomGenerator randomGenerator = RandomGenerator(0, 1, timestampSeed);
-    RandomSampler randomSampler = RandomSampler(timestampSeed);
-    // randomly apple 1 to 3 actions
-    randomGenerator.setIntRange(1, 3);
-
-    auto planNode = plan.planNode();
-    planState.getPossibleActions(planNode, cataLog);
-
-    std::pair<std::string, std::string> selectedAction;
-
-    if (verbose >= 2) {
-      std::cout << "[INFO] All possible actions:" << std::endl;
-      for (auto entry : planState.actionsPair) {
-        std::cout << entry.first << ": " << entry.second << std::endl;
-      }
-    }
-
-    for (int i = 0; i < randomGenerator.genRandomIntValue(); i++) {
-      // if (true) {
-      if (randomGenerator.genRandomFloatValue() > 0.5) {
-        // Get the logical plan
-        auto planNode = plan.planNode();
-        planState.getPossibleActions(planNode, cataLog);
-        std::vector<std::pair<std::string, std::string>> availableActions;
-        if (verbose >= 2) {
-          std::cout << "[INFO] All possible actions:" << std::endl;
-        }
-        for (auto entry : planState.actionsPair) {
-          if (verbose >= 2) {
-            std::cout << entry.first << ": " << entry.second << std::endl;
-          }
-          for (auto action : entry.second) {
-            availableActions.push_back(std::make_pair(entry.first, action));
-          }
-        }
-
-        if (availableActions.size() == 0) {
-          // if no available actions, break
-          break;
-        }
-
-        std::pair<std::string, std::string> selectedAction =
-            randomSampler.sampleFromSets<std::pair<std::string, std::string>>(
-                1, availableActions)[0];
-        if (verbose >= 2) {
-          std::cout << "[INFO] Selected action: " << selectedAction.first
-                    << ": " << selectedAction.second << std::endl;
-        }
-        planState.takeAction(
-            planNode,
-            nullptr,
-            maker,
-            plan,
-            pool_,
-            planNodeIdGenerator,
-            {selectedAction},
-            cataLog);
-      } else {
-        break;
-      }
-    }
-    return plan;
-  }
-
   void vanillaMCTS(
       std::string mode,
       std::string queryTemplate,
@@ -1508,7 +1432,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     // return;
 
     /* if (rewrite) {
-      myPlan = rewriteQuery(cataLog, myPlan, planNodeIdGenerator, verbose);
+      myPlan = rewriteQuery(cataLog, pool_, myPlan, planNodeIdGenerator, verbose);
     } */
 
     // std::cout << "[INFO] Executed Query Plan: \n"
