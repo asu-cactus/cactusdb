@@ -68,7 +68,7 @@ def performGreedy(edges, factorized_output_features, utility_threshold=0.5, k1=9
             if right not in processed:
                 labels[right] = traverseBranch(right)
                     
-            if (labels[left] == 1 and labels[right] == 1) or (labels[left] == 1 and labels[right] == 2) or (labels[left] == 2 and labels[right] == 1):
+            if (labels[left] == 1 and labels[right] == 1) or (labels[left] == 1 and labels[right] == 2) or (labels[left] == 2 and labels[right] == 1) or (labels[left] == 2 and labels[right] == 2):
                 labels[eLocal] = 2
             else:
                 if utility[eLocal] >= utility_threshold:
