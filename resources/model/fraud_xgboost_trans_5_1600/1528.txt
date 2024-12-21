@@ -1,0 +1,83 @@
+digraph {
+    graph [ rankdir=TB ]
+
+    0 [ label="f0<1.40209449e-05" ]
+    0 -> 1 [label="yes, missing" color="#0000FF"]
+    0 -> 2 [label="no" color="#FF0000"]
+
+    1 [ label="leaf=-0.00761110289" ]
+
+    2 [ label="f0<1.5890404e-05" ]
+    2 -> 3 [label="yes, missing" color="#0000FF"]
+    2 -> 4 [label="no" color="#FF0000"]
+
+    3 [ label="leaf=0.0119270114" ]
+
+    4 [ label="f0<1.96293222e-05" ]
+    4 -> 5 [label="yes, missing" color="#0000FF"]
+    4 -> 6 [label="no" color="#FF0000"]
+
+    5 [ label="f2<0.458333313" ]
+    5 -> 7 [label="yes, missing" color="#0000FF"]
+    5 -> 8 [label="no" color="#FF0000"]
+
+    7 [ label="leaf=-0.0213335585" ]
+
+    8 [ label="leaf=0.00825418718" ]
+
+    6 [ label="f0<2.14987831e-05" ]
+    6 -> 9 [label="yes, missing" color="#0000FF"]
+    6 -> 10 [label="no" color="#FF0000"]
+
+    9 [ label="leaf=0.0139243919" ]
+
+    10 [ label="f0<2.33682422e-05" ]
+    10 -> 11 [label="yes, missing" color="#0000FF"]
+    10 -> 12 [label="no" color="#FF0000"]
+
+    11 [ label="leaf=-0.0116916457" ]
+
+    12 [ label="f0<4.26859915e-05" ]
+    12 -> 13 [label="yes, missing" color="#0000FF"]
+    12 -> 14 [label="no" color="#FF0000"]
+
+    13 [ label="f4<0.75" ]
+    13 -> 15 [label="yes, missing" color="#0000FF"]
+    13 -> 16 [label="no" color="#FF0000"]
+
+    15 [ label="f4<0.583333373" ]
+    15 -> 19 [label="yes, missing" color="#0000FF"]
+    15 -> 20 [label="no" color="#FF0000"]
+
+    19 [ label="leaf=0.0013806303" ]
+
+    20 [ label="leaf=0.0230090786" ]
+
+    16 [ label="f2<0.375" ]
+    16 -> 21 [label="yes, missing" color="#0000FF"]
+    16 -> 22 [label="no" color="#FF0000"]
+
+    21 [ label="leaf=0.0174498856" ]
+
+    22 [ label="leaf=-0.0303720962" ]
+
+    14 [ label="f0<4.33091409e-05" ]
+    14 -> 17 [label="yes, missing" color="#0000FF"]
+    14 -> 18 [label="no" color="#FF0000"]
+
+    17 [ label="f3<0.999751329" ]
+    17 -> 23 [label="yes, missing" color="#0000FF"]
+    17 -> 24 [label="no" color="#FF0000"]
+
+    23 [ label="leaf=0.00634437939" ]
+
+    24 [ label="leaf=-0.0482982881" ]
+
+    18 [ label="f0<4.39322976e-05" ]
+    18 -> 25 [label="yes, missing" color="#0000FF"]
+    18 -> 26 [label="no" color="#FF0000"]
+
+    25 [ label="leaf=0.0161499865" ]
+
+    26 [ label="leaf=9.5804819e-07" ]
+}

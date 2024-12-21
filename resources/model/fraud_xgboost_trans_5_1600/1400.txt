@@ -1,0 +1,749 @@
+digraph {
+    graph [ rankdir=TB ]
+
+    0 [ label="f1<0.209677413" ]
+    0 -> 1 [label="yes, missing" color="#0000FF"]
+    0 -> 2 [label="no" color="#FF0000"]
+
+    1 [ label="f0<0.210425794" ]
+    1 -> 3 [label="yes, missing" color="#0000FF"]
+    1 -> 4 [label="no" color="#FF0000"]
+
+    3 [ label="f0<0.207845837" ]
+    3 -> 7 [label="yes, missing" color="#0000FF"]
+    3 -> 8 [label="no" color="#FF0000"]
+
+    7 [ label="f0<0.207506657" ]
+    7 -> 15 [label="yes, missing" color="#0000FF"]
+    7 -> 16 [label="no" color="#FF0000"]
+
+    15 [ label="f0<0.195715487" ]
+    15 -> 31 [label="yes, missing" color="#0000FF"]
+    15 -> 32 [label="no" color="#FF0000"]
+
+    31 [ label="f0<0.192662239" ]
+    31 -> 61 [label="yes, missing" color="#0000FF"]
+    31 -> 62 [label="no" color="#FF0000"]
+
+    61 [ label="f0<0.19162783" ]
+    61 -> 99 [label="yes, missing" color="#0000FF"]
+    61 -> 100 [label="no" color="#FF0000"]
+
+    99 [ label="f0<0.191425905" ]
+    99 -> 159 [label="yes, missing" color="#0000FF"]
+    99 -> 160 [label="no" color="#FF0000"]
+
+    159 [ label="leaf=-5.77976352e-05" ]
+
+    160 [ label="leaf=-0.0545802526" ]
+
+    100 [ label="f4<0.25" ]
+    100 -> 161 [label="yes, missing" color="#0000FF"]
+    100 -> 162 [label="no" color="#FF0000"]
+
+    161 [ label="leaf=0.0934689417" ]
+
+    162 [ label="leaf=0.00683940714" ]
+
+    62 [ label="f0<0.192776591" ]
+    62 -> 101 [label="yes, missing" color="#0000FF"]
+    62 -> 102 [label="no" color="#FF0000"]
+
+    101 [ label="leaf=-0.0782317817" ]
+
+    102 [ label="f0<0.192845821" ]
+    102 -> 163 [label="yes, missing" color="#0000FF"]
+    102 -> 164 [label="no" color="#FF0000"]
+
+    163 [ label="leaf=0.0635668933" ]
+
+    164 [ label="leaf=-0.0214466285" ]
+
+    32 [ label="f1<0.17741935" ]
+    32 -> 63 [label="yes, missing" color="#0000FF"]
+    32 -> 64 [label="no" color="#FF0000"]
+
+    63 [ label="f0<0.197569668" ]
+    63 -> 103 [label="yes, missing" color="#0000FF"]
+    63 -> 104 [label="no" color="#FF0000"]
+
+    103 [ label="f0<0.19691512" ]
+    103 -> 165 [label="yes, missing" color="#0000FF"]
+    103 -> 166 [label="no" color="#FF0000"]
+
+    165 [ label="leaf=0.00584124308" ]
+
+    166 [ label="leaf=0.0926587358" ]
+
+    104 [ label="f0<0.199112415" ]
+    104 -> 167 [label="yes, missing" color="#0000FF"]
+    104 -> 168 [label="no" color="#FF0000"]
+
+    167 [ label="leaf=-0.0467582904" ]
+
+    168 [ label="leaf=0.00137629919" ]
+
+    64 [ label="f4<0.0833333358" ]
+    64 -> 105 [label="yes, missing" color="#0000FF"]
+    64 -> 106 [label="no" color="#FF0000"]
+
+    105 [ label="f0<0.198646575" ]
+    105 -> 169 [label="yes, missing" color="#0000FF"]
+    105 -> 170 [label="no" color="#FF0000"]
+
+    169 [ label="leaf=0.0278316438" ]
+
+    170 [ label="leaf=0.18864511" ]
+
+    106 [ label="f2<0.708333373" ]
+    106 -> 171 [label="yes, missing" color="#0000FF"]
+    106 -> 172 [label="no" color="#FF0000"]
+
+    171 [ label="leaf=0.0391461253" ]
+
+    172 [ label="leaf=-0.0460700244" ]
+
+    16 [ label="f1<0.145161286" ]
+    16 -> 33 [label="yes, missing" color="#0000FF"]
+    16 -> 34 [label="no" color="#FF0000"]
+
+    33 [ label="leaf=-0.0840772763" ]
+
+    34 [ label="leaf=-0.00670348713" ]
+
+    8 [ label="f4<0.75" ]
+    8 -> 17 [label="yes, missing" color="#0000FF"]
+    8 -> 18 [label="no" color="#FF0000"]
+
+    17 [ label="f2<0.791666627" ]
+    17 -> 35 [label="yes, missing" color="#0000FF"]
+    17 -> 36 [label="no" color="#FF0000"]
+
+    35 [ label="f0<0.208507359" ]
+    35 -> 65 [label="yes, missing" color="#0000FF"]
+    35 -> 66 [label="no" color="#FF0000"]
+
+    65 [ label="f0<0.20792973" ]
+    65 -> 107 [label="yes, missing" color="#0000FF"]
+    65 -> 108 [label="no" color="#FF0000"]
+
+    107 [ label="leaf=0.0366415121" ]
+
+    108 [ label="f2<0.291666687" ]
+    108 -> 173 [label="yes, missing" color="#0000FF"]
+    108 -> 174 [label="no" color="#FF0000"]
+
+    173 [ label="leaf=-0.0231900271" ]
+
+    174 [ label="leaf=-0.0831703916" ]
+
+    66 [ label="f2<0.208333343" ]
+    66 -> 109 [label="yes, missing" color="#0000FF"]
+    66 -> 110 [label="no" color="#FF0000"]
+
+    109 [ label="f0<0.209401757" ]
+    109 -> 175 [label="yes, missing" color="#0000FF"]
+    109 -> 176 [label="no" color="#FF0000"]
+
+    175 [ label="leaf=-0.0658716634" ]
+
+    176 [ label="leaf=-0.0140675697" ]
+
+    110 [ label="f0<0.209525123" ]
+    110 -> 177 [label="yes, missing" color="#0000FF"]
+    110 -> 178 [label="no" color="#FF0000"]
+
+    177 [ label="leaf=0.0973765403" ]
+
+    178 [ label="leaf=-0.0315819569" ]
+
+    36 [ label="f0<0.208637789" ]
+    36 -> 67 [label="yes, missing" color="#0000FF"]
+    36 -> 68 [label="no" color="#FF0000"]
+
+    67 [ label="leaf=0.120676331" ]
+
+    68 [ label="f2<0.875" ]
+    68 -> 111 [label="yes, missing" color="#0000FF"]
+    68 -> 112 [label="no" color="#FF0000"]
+
+    111 [ label="leaf=0.0562608726" ]
+
+    112 [ label="f1<0.0967741907" ]
+    112 -> 179 [label="yes, missing" color="#0000FF"]
+    112 -> 180 [label="no" color="#FF0000"]
+
+    179 [ label="leaf=-0.0122495247" ]
+
+    180 [ label="leaf=-0.0727888495" ]
+
+    18 [ label="f2<0.208333343" ]
+    18 -> 37 [label="yes, missing" color="#0000FF"]
+    18 -> 38 [label="no" color="#FF0000"]
+
+    37 [ label="leaf=0.166540086" ]
+
+    38 [ label="f3<0.999751329" ]
+    38 -> 69 [label="yes, missing" color="#0000FF"]
+    38 -> 70 [label="no" color="#FF0000"]
+
+    69 [ label="f2<0.875" ]
+    69 -> 113 [label="yes, missing" color="#0000FF"]
+    69 -> 114 [label="no" color="#FF0000"]
+
+    113 [ label="f0<0.208812147" ]
+    113 -> 181 [label="yes, missing" color="#0000FF"]
+    113 -> 182 [label="no" color="#FF0000"]
+
+    181 [ label="leaf=0.00803810917" ]
+
+    182 [ label="leaf=0.156297609" ]
+
+    114 [ label="leaf=-0.0187237076" ]
+
+    70 [ label="f0<0.208572924" ]
+    70 -> 115 [label="yes, missing" color="#0000FF"]
+    70 -> 116 [label="no" color="#FF0000"]
+
+    115 [ label="leaf=0.113149941" ]
+
+    116 [ label="f2<0.708333373" ]
+    116 -> 183 [label="yes, missing" color="#0000FF"]
+    116 -> 184 [label="no" color="#FF0000"]
+
+    183 [ label="leaf=-0.0772887692" ]
+
+    184 [ label="leaf=-0.0131975412" ]
+
+    4 [ label="f0<0.211165592" ]
+    4 -> 9 [label="yes, missing" color="#0000FF"]
+    4 -> 10 [label="no" color="#FF0000"]
+
+    9 [ label="f2<0.708333373" ]
+    9 -> 19 [label="yes, missing" color="#0000FF"]
+    9 -> 20 [label="no" color="#FF0000"]
+
+    19 [ label="f1<0.0483870953" ]
+    19 -> 39 [label="yes, missing" color="#0000FF"]
+    19 -> 40 [label="no" color="#FF0000"]
+
+    39 [ label="leaf=-0.0312514864" ]
+
+    40 [ label="leaf=-0.0944965258" ]
+
+    20 [ label="f4<0.416666687" ]
+    20 -> 41 [label="yes, missing" color="#0000FF"]
+    20 -> 42 [label="no" color="#FF0000"]
+
+    41 [ label="leaf=0.0759816393" ]
+
+    42 [ label="leaf=-0.0445354767" ]
+
+    10 [ label="f0<0.211563036" ]
+    10 -> 21 [label="yes, missing" color="#0000FF"]
+    10 -> 22 [label="no" color="#FF0000"]
+
+    21 [ label="f1<0.0483870953" ]
+    21 -> 43 [label="yes, missing" color="#0000FF"]
+    21 -> 44 [label="no" color="#FF0000"]
+
+    43 [ label="leaf=-0.0600377209" ]
+
+    44 [ label="f0<0.211375982" ]
+    44 -> 71 [label="yes, missing" color="#0000FF"]
+    44 -> 72 [label="no" color="#FF0000"]
+
+    71 [ label="f1<0.112903222" ]
+    71 -> 117 [label="yes, missing" color="#0000FF"]
+    71 -> 118 [label="no" color="#FF0000"]
+
+    117 [ label="leaf=0.0735987201" ]
+
+    118 [ label="leaf=-0.0224549603" ]
+
+    72 [ label="leaf=0.134140626" ]
+
+    22 [ label="f0<0.215703726" ]
+    22 -> 45 [label="yes, missing" color="#0000FF"]
+    22 -> 46 [label="no" color="#FF0000"]
+
+    45 [ label="f0<0.215308458" ]
+    45 -> 73 [label="yes, missing" color="#0000FF"]
+    45 -> 74 [label="no" color="#FF0000"]
+
+    73 [ label="f1<0.0483870953" ]
+    73 -> 119 [label="yes, missing" color="#0000FF"]
+    73 -> 120 [label="no" color="#FF0000"]
+
+    119 [ label="f2<0.541666627" ]
+    119 -> 185 [label="yes, missing" color="#0000FF"]
+    119 -> 186 [label="no" color="#FF0000"]
+
+    185 [ label="leaf=-0.0135964779" ]
+
+    186 [ label="leaf=0.0996207371" ]
+
+    120 [ label="f0<0.215107486" ]
+    120 -> 187 [label="yes, missing" color="#0000FF"]
+    120 -> 188 [label="no" color="#FF0000"]
+
+    187 [ label="leaf=-0.0281900708" ]
+
+    188 [ label="leaf=0.0836086273" ]
+
+    74 [ label="leaf=-0.0958428457" ]
+
+    46 [ label="f0<0.215731174" ]
+    46 -> 75 [label="yes, missing" color="#0000FF"]
+    46 -> 76 [label="no" color="#FF0000"]
+
+    75 [ label="leaf=0.107009687" ]
+
+    76 [ label="f4<0.0833333358" ]
+    76 -> 121 [label="yes, missing" color="#0000FF"]
+    76 -> 122 [label="no" color="#FF0000"]
+
+    121 [ label="f0<0.223162919" ]
+    121 -> 189 [label="yes, missing" color="#0000FF"]
+    121 -> 190 [label="no" color="#FF0000"]
+
+    189 [ label="leaf=-0.0423729345" ]
+
+    190 [ label="leaf=-0.00154646754" ]
+
+    122 [ label="f2<0.541666627" ]
+    122 -> 191 [label="yes, missing" color="#0000FF"]
+    122 -> 192 [label="no" color="#FF0000"]
+
+    191 [ label="leaf=0.00225974806" ]
+
+    192 [ label="leaf=-0.00146544317" ]
+
+    2 [ label="f1<0.241935477" ]
+    2 -> 5 [label="yes, missing" color="#0000FF"]
+    2 -> 6 [label="no" color="#FF0000"]
+
+    5 [ label="f0<0.371716499" ]
+    5 -> 11 [label="yes, missing" color="#0000FF"]
+    5 -> 12 [label="no" color="#FF0000"]
+
+    11 [ label="f0<0.367416769" ]
+    11 -> 23 [label="yes, missing" color="#0000FF"]
+    11 -> 24 [label="no" color="#FF0000"]
+
+    23 [ label="f0<0.352855384" ]
+    23 -> 47 [label="yes, missing" color="#0000FF"]
+    23 -> 48 [label="no" color="#FF0000"]
+
+    47 [ label="f0<0.347654343" ]
+    47 -> 77 [label="yes, missing" color="#0000FF"]
+    47 -> 78 [label="no" color="#FF0000"]
+
+    77 [ label="f0<0.346086472" ]
+    77 -> 123 [label="yes, missing" color="#0000FF"]
+    77 -> 124 [label="no" color="#FF0000"]
+
+    123 [ label="f0<0.333245933" ]
+    123 -> 193 [label="yes, missing" color="#0000FF"]
+    123 -> 194 [label="no" color="#FF0000"]
+
+    193 [ label="leaf=-0.00250150613" ]
+
+    194 [ label="leaf=0.0200680587" ]
+
+    124 [ label="f0<0.3469944" ]
+    124 -> 195 [label="yes, missing" color="#0000FF"]
+    124 -> 196 [label="no" color="#FF0000"]
+
+    195 [ label="leaf=-0.0755101666" ]
+
+    196 [ label="leaf=-0.0134893982" ]
+
+    78 [ label="f2<0.541666627" ]
+    78 -> 125 [label="yes, missing" color="#0000FF"]
+    78 -> 126 [label="no" color="#FF0000"]
+
+    125 [ label="f4<0.416666687" ]
+    125 -> 197 [label="yes, missing" color="#0000FF"]
+    125 -> 198 [label="no" color="#FF0000"]
+
+    197 [ label="leaf=0.134910166" ]
+
+    198 [ label="leaf=0.0146864774" ]
+
+    126 [ label="f3<0.999751329" ]
+    126 -> 199 [label="yes, missing" color="#0000FF"]
+    126 -> 200 [label="no" color="#FF0000"]
+
+    199 [ label="leaf=-0.0730732009" ]
+
+    200 [ label="leaf=0.0351806618" ]
+
+    48 [ label="f0<0.366134256" ]
+    48 -> 79 [label="yes, missing" color="#0000FF"]
+    48 -> 80 [label="no" color="#FF0000"]
+
+    79 [ label="f0<0.356180996" ]
+    79 -> 127 [label="yes, missing" color="#0000FF"]
+    79 -> 128 [label="no" color="#FF0000"]
+
+    127 [ label="f2<0.625" ]
+    127 -> 201 [label="yes, missing" color="#0000FF"]
+    127 -> 202 [label="no" color="#FF0000"]
+
+    201 [ label="leaf=-0.081391722" ]
+
+    202 [ label="leaf=-0.019665271" ]
+
+    128 [ label="f0<0.359964997" ]
+    128 -> 203 [label="yes, missing" color="#0000FF"]
+    128 -> 204 [label="no" color="#FF0000"]
+
+    203 [ label="leaf=0.0172666516" ]
+
+    204 [ label="leaf=-0.0449425392" ]
+
+    80 [ label="f2<0.375" ]
+    80 -> 129 [label="yes, missing" color="#0000FF"]
+    80 -> 130 [label="no" color="#FF0000"]
+
+    129 [ label="leaf=0.0922644064" ]
+
+    130 [ label="f0<0.366551399" ]
+    130 -> 205 [label="yes, missing" color="#0000FF"]
+    130 -> 206 [label="no" color="#FF0000"]
+
+    205 [ label="leaf=0.0494974963" ]
+
+    206 [ label="leaf=-0.0694615841" ]
+
+    24 [ label="leaf=-0.0793019384" ]
+
+    12 [ label="f0<0.373224199" ]
+    12 -> 25 [label="yes, missing" color="#0000FF"]
+    12 -> 26 [label="no" color="#FF0000"]
+
+    25 [ label="f2<0.458333313" ]
+    25 -> 49 [label="yes, missing" color="#0000FF"]
+    25 -> 50 [label="no" color="#FF0000"]
+
+    49 [ label="leaf=0.141288251" ]
+
+    50 [ label="leaf=0.0331451818" ]
+
+    26 [ label="f4<0.583333373" ]
+    26 -> 51 [label="yes, missing" color="#0000FF"]
+    26 -> 52 [label="no" color="#FF0000"]
+
+    51 [ label="f4<0.25" ]
+    51 -> 81 [label="yes, missing" color="#0000FF"]
+    51 -> 82 [label="no" color="#FF0000"]
+
+    81 [ label="f0<0.422199726" ]
+    81 -> 131 [label="yes, missing" color="#0000FF"]
+    81 -> 132 [label="no" color="#FF0000"]
+
+    131 [ label="f0<0.419977009" ]
+    131 -> 207 [label="yes, missing" color="#0000FF"]
+    131 -> 208 [label="no" color="#FF0000"]
+
+    207 [ label="leaf=0.0142417923" ]
+
+    208 [ label="leaf=0.139798328" ]
+
+    132 [ label="f0<0.427983642" ]
+    132 -> 209 [label="yes, missing" color="#0000FF"]
+    132 -> 210 [label="no" color="#FF0000"]
+
+    209 [ label="leaf=-0.0563746504" ]
+
+    210 [ label="leaf=-0.00449655531" ]
+
+    82 [ label="f0<0.454402566" ]
+    82 -> 133 [label="yes, missing" color="#0000FF"]
+    82 -> 134 [label="no" color="#FF0000"]
+
+    133 [ label="f0<0.393679202" ]
+    133 -> 211 [label="yes, missing" color="#0000FF"]
+    133 -> 212 [label="no" color="#FF0000"]
+
+    211 [ label="leaf=-0.0716828778" ]
+
+    212 [ label="leaf=-0.0303494092" ]
+
+    134 [ label="f0<0.459213138" ]
+    134 -> 213 [label="yes, missing" color="#0000FF"]
+    134 -> 214 [label="no" color="#FF0000"]
+
+    213 [ label="leaf=0.126185983" ]
+
+    214 [ label="leaf=-0.0058715269" ]
+
+    52 [ label="f0<0.397534013" ]
+    52 -> 83 [label="yes, missing" color="#0000FF"]
+    52 -> 84 [label="no" color="#FF0000"]
+
+    83 [ label="f0<0.387573242" ]
+    83 -> 135 [label="yes, missing" color="#0000FF"]
+    83 -> 136 [label="no" color="#FF0000"]
+
+    135 [ label="f0<0.385951221" ]
+    135 -> 215 [label="yes, missing" color="#0000FF"]
+    135 -> 216 [label="no" color="#FF0000"]
+
+    215 [ label="leaf=0.0357865468" ]
+
+    216 [ label="leaf=-0.0676868185" ]
+
+    136 [ label="f0<0.389461398" ]
+    136 -> 217 [label="yes, missing" color="#0000FF"]
+    136 -> 218 [label="no" color="#FF0000"]
+
+    217 [ label="leaf=0.1130087" ]
+
+    218 [ label="leaf=0.0352110043" ]
+
+    84 [ label="f0<0.437486649" ]
+    84 -> 137 [label="yes, missing" color="#0000FF"]
+    84 -> 138 [label="no" color="#FF0000"]
+
+    137 [ label="f0<0.429728478" ]
+    137 -> 219 [label="yes, missing" color="#0000FF"]
+    137 -> 220 [label="no" color="#FF0000"]
+
+    219 [ label="leaf=-0.0132358745" ]
+
+    220 [ label="leaf=-0.0764519796" ]
+
+    138 [ label="f0<0.441714704" ]
+    138 -> 221 [label="yes, missing" color="#0000FF"]
+    138 -> 222 [label="no" color="#FF0000"]
+
+    221 [ label="leaf=0.11843957" ]
+
+    222 [ label="leaf=0.00941182487" ]
+
+    6 [ label="f0<0.210498095" ]
+    6 -> 13 [label="yes, missing" color="#0000FF"]
+    6 -> 14 [label="no" color="#FF0000"]
+
+    13 [ label="f0<0.20958209" ]
+    13 -> 27 [label="yes, missing" color="#0000FF"]
+    13 -> 28 [label="no" color="#FF0000"]
+
+    27 [ label="f0<0.209555268" ]
+    27 -> 53 [label="yes, missing" color="#0000FF"]
+    27 -> 54 [label="no" color="#FF0000"]
+
+    53 [ label="f0<0.209490329" ]
+    53 -> 85 [label="yes, missing" color="#0000FF"]
+    53 -> 86 [label="no" color="#FF0000"]
+
+    85 [ label="f0<0.20930469" ]
+    85 -> 139 [label="yes, missing" color="#0000FF"]
+    85 -> 140 [label="no" color="#FF0000"]
+
+    139 [ label="f0<0.209239721" ]
+    139 -> 223 [label="yes, missing" color="#0000FF"]
+    139 -> 224 [label="no" color="#FF0000"]
+
+    223 [ label="leaf=-0.000197658766" ]
+
+    224 [ label="leaf=-0.0637633428" ]
+
+    140 [ label="f0<0.209323078" ]
+    140 -> 225 [label="yes, missing" color="#0000FF"]
+    140 -> 226 [label="no" color="#FF0000"]
+
+    225 [ label="leaf=0.144493267" ]
+
+    226 [ label="leaf=0.0112488661" ]
+
+    86 [ label="leaf=-0.0831510797" ]
+
+    54 [ label="leaf=0.131770641" ]
+
+    28 [ label="f3<0.999751329" ]
+    28 -> 55 [label="yes, missing" color="#0000FF"]
+    28 -> 56 [label="no" color="#FF0000"]
+
+    55 [ label="f0<0.21033144" ]
+    55 -> 87 [label="yes, missing" color="#0000FF"]
+    55 -> 88 [label="no" color="#FF0000"]
+
+    87 [ label="f1<0.629032254" ]
+    87 -> 141 [label="yes, missing" color="#0000FF"]
+    87 -> 142 [label="no" color="#FF0000"]
+
+    141 [ label="f2<0.541666627" ]
+    141 -> 227 [label="yes, missing" color="#0000FF"]
+    141 -> 228 [label="no" color="#FF0000"]
+
+    227 [ label="leaf=-0.0126269413" ]
+
+    228 [ label="leaf=-0.0756123662" ]
+
+    142 [ label="leaf=-0.097484909" ]
+
+    88 [ label="f0<0.210368246" ]
+    88 -> 143 [label="yes, missing" color="#0000FF"]
+    88 -> 144 [label="no" color="#FF0000"]
+
+    143 [ label="leaf=0.0850858912" ]
+
+    144 [ label="f2<0.708333373" ]
+    144 -> 229 [label="yes, missing" color="#0000FF"]
+    144 -> 230 [label="no" color="#FF0000"]
+
+    229 [ label="leaf=-0.0810343996" ]
+
+    230 [ label="leaf=0.0478865579" ]
+
+    56 [ label="f1<0.532258034" ]
+    56 -> 89 [label="yes, missing" color="#0000FF"]
+    56 -> 90 [label="no" color="#FF0000"]
+
+    89 [ label="f0<0.210151553" ]
+    89 -> 145 [label="yes, missing" color="#0000FF"]
+    89 -> 146 [label="no" color="#FF0000"]
+
+    145 [ label="f2<0.791666627" ]
+    145 -> 231 [label="yes, missing" color="#0000FF"]
+    145 -> 232 [label="no" color="#FF0000"]
+
+    231 [ label="leaf=-0.0402792282" ]
+
+    232 [ label="leaf=0.0739697143" ]
+
+    146 [ label="leaf=-0.0905785486" ]
+
+    90 [ label="f2<0.541666627" ]
+    90 -> 147 [label="yes, missing" color="#0000FF"]
+    90 -> 148 [label="no" color="#FF0000"]
+
+    147 [ label="f0<0.209703892" ]
+    147 -> 233 [label="yes, missing" color="#0000FF"]
+    147 -> 234 [label="no" color="#FF0000"]
+
+    233 [ label="leaf=-0.0245300997" ]
+
+    234 [ label="leaf=0.0833755732" ]
+
+    148 [ label="f4<0.75" ]
+    148 -> 235 [label="yes, missing" color="#0000FF"]
+    148 -> 236 [label="no" color="#FF0000"]
+
+    235 [ label="leaf=-0.0416085795" ]
+
+    236 [ label="leaf=0.0620336011" ]
+
+    14 [ label="f0<0.211064234" ]
+    14 -> 29 [label="yes, missing" color="#0000FF"]
+    14 -> 30 [label="no" color="#FF0000"]
+
+    29 [ label="f1<0.435483873" ]
+    29 -> 57 [label="yes, missing" color="#0000FF"]
+    29 -> 58 [label="no" color="#FF0000"]
+
+    57 [ label="f4<0.25" ]
+    57 -> 91 [label="yes, missing" color="#0000FF"]
+    57 -> 92 [label="no" color="#FF0000"]
+
+    91 [ label="leaf=-0.0775718316" ]
+
+    92 [ label="f4<0.75" ]
+    92 -> 149 [label="yes, missing" color="#0000FF"]
+    92 -> 150 [label="no" color="#FF0000"]
+
+    149 [ label="f0<0.210697174" ]
+    149 -> 237 [label="yes, missing" color="#0000FF"]
+    149 -> 238 [label="no" color="#FF0000"]
+
+    237 [ label="leaf=-0.0200289767" ]
+
+    238 [ label="leaf=0.0640282556" ]
+
+    150 [ label="f1<0.306451619" ]
+    150 -> 239 [label="yes, missing" color="#0000FF"]
+    150 -> 240 [label="no" color="#FF0000"]
+
+    239 [ label="leaf=-0.0104584489" ]
+
+    240 [ label="leaf=-0.0645476952" ]
+
+    58 [ label="f0<0.211027145" ]
+    58 -> 93 [label="yes, missing" color="#0000FF"]
+    58 -> 94 [label="no" color="#FF0000"]
+
+    93 [ label="f0<0.211004227" ]
+    93 -> 151 [label="yes, missing" color="#0000FF"]
+    93 -> 152 [label="no" color="#FF0000"]
+
+    151 [ label="f2<0.208333343" ]
+    151 -> 241 [label="yes, missing" color="#0000FF"]
+    151 -> 242 [label="no" color="#FF0000"]
+
+    241 [ label="leaf=-0.0403170101" ]
+
+    242 [ label="leaf=0.0519900434" ]
+
+    152 [ label="leaf=-0.0737938136" ]
+
+    94 [ label="f1<0.758064508" ]
+    94 -> 153 [label="yes, missing" color="#0000FF"]
+    94 -> 154 [label="no" color="#FF0000"]
+
+    153 [ label="leaf=0.175869808" ]
+
+    154 [ label="leaf=-0.0171923917" ]
+
+    30 [ label="f0<0.211228997" ]
+    30 -> 59 [label="yes, missing" color="#0000FF"]
+    30 -> 60 [label="no" color="#FF0000"]
+
+    59 [ label="f1<0.59677422" ]
+    59 -> 95 [label="yes, missing" color="#0000FF"]
+    59 -> 96 [label="no" color="#FF0000"]
+
+    95 [ label="f1<0.5" ]
+    95 -> 155 [label="yes, missing" color="#0000FF"]
+    95 -> 156 [label="no" color="#FF0000"]
+
+    155 [ label="f4<0.416666687" ]
+    155 -> 243 [label="yes, missing" color="#0000FF"]
+    155 -> 244 [label="no" color="#FF0000"]
+
+    243 [ label="leaf=-0.011312726" ]
+
+    244 [ label="leaf=-0.0707974359" ]
+
+    156 [ label="leaf=0.0701123327" ]
+
+    96 [ label="leaf=-0.08347857" ]
+
+    60 [ label="f0<0.211245209" ]
+    60 -> 97 [label="yes, missing" color="#0000FF"]
+    60 -> 98 [label="no" color="#FF0000"]
+
+    97 [ label="leaf=0.146353424" ]
+
+    98 [ label="f0<0.212192506" ]
+    98 -> 157 [label="yes, missing" color="#0000FF"]
+    98 -> 158 [label="no" color="#FF0000"]
+
+    157 [ label="f0<0.212111831" ]
+    157 -> 245 [label="yes, missing" color="#0000FF"]
+    157 -> 246 [label="no" color="#FF0000"]
+
+    245 [ label="leaf=-0.00397830084" ]
+
+    246 [ label="leaf=-0.0733880177" ]
+
+    158 [ label="f0<0.212243974" ]
+    158 -> 247 [label="yes, missing" color="#0000FF"]
+    158 -> 248 [label="no" color="#FF0000"]
+
+    247 [ label="leaf=0.112782024" ]
+
+    248 [ label="leaf=0.000102925558" ]
+}
