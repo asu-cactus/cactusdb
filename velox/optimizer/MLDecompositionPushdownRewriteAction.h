@@ -268,6 +268,10 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                 // mat_mul0(ROW["features"]), we need to extract the data source
                 // from the expression via regex
                 std::string pushDownExpression = target;
+                
+                // rewrite lambda function if it exists
+                pushDownExpression = rewriteLambdaInExpStr(pushDownExpression);
+
                 std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
                 std::smatch matches;
                 // Start position for the search
@@ -327,11 +331,14 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
             } else {
               // Parse the non-target expressions
               auto rewriteExpr = exprStr;
+              // rewrite lambda function if it exists
+              rewriteExpr = rewriteLambdaInExpStr(rewriteExpr);
+
               std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
               std::smatch matches;
               // Start position for the search
               std::string::const_iterator searchStart(exprStr.cbegin());
-
+              
               // Search out the matched data source and store in matches
               while (std::regex_search(
                   searchStart,

@@ -46,7 +46,8 @@ class TowTowerModelTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
+            ->newConnector(
+                kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
 
     // SetUp();
@@ -87,7 +88,8 @@ class TowTowerModelTest : public HiveConnectorTestBase {
   std::shared_ptr<core::QueryCtx> queryCtx_{
       std::make_shared<core::QueryCtx>(executor_.get())};
 
-  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
+  std::shared_ptr<memory::MemoryPool> pool_{
+      memory::MemoryManager::getInstance()->addLeafPool()};
   VectorMaker maker{pool_.get()};
 };
 
@@ -403,7 +405,7 @@ void TowTowerModelTest::registerFunction() {
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -433,7 +435,7 @@ void TowTowerModelTest::registerFunction() {
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -613,7 +615,7 @@ void TowTowerModelTest::testStringEncoder() {
                        "zipcode",
                        "title",
                        "genres"})
-                //   .limit(0, numSamples, false)
+                  //   .limit(0, numSamples, false)
                   .planNode();
 
   std::shared_ptr<folly::Executor> executor =
@@ -918,7 +920,7 @@ void TowTowerModelTest::testDataProcessing() {
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -948,7 +950,7 @@ void TowTowerModelTest::testDataProcessing() {
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -1207,7 +1209,7 @@ void TowTowerModelTest::testDataProcessing() {
                "zipcode",
                "title",
                "genres"})
-        //   .limit(0, numSamples, false)
+          //   .limit(0, numSamples, false)
           .planNode();
 
   std::shared_ptr<folly::Executor> executor =
@@ -1739,7 +1741,7 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
   // movid_id
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -1769,7 +1771,7 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -2413,7 +2415,7 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -2443,7 +2445,7 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -3155,7 +3157,7 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -3185,7 +3187,7 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -3381,8 +3383,6 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
 
   boost::interprocess::interprocess_semaphore semaphore(numSplit);
 
-
-
   std::vector<int> userIds = randomGenerator.gen1DInt(numSamples, 1, 6040);
   auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
   auto userRowVector = maker.rowVector({"u_user_id"}, {userIdFlatVector});
@@ -3507,7 +3507,6 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
   waitForFinishedDrivers(taskUser);
   waitForFinishedDrivers(taskMovie);
 
-
   std::chrono::steady_clock::time_point preprocessEnd =
       std::chrono::steady_clock::now();
 
@@ -3551,13 +3550,10 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
           .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
           .planNode();
 
-
   auto finalScore = exec::test::AssertQueryBuilder(finalInferencePlan)
                         .copyResults(pool_.get());
 
-
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-
 
   std::cout << "Preprocess Time (sec) = "
             << (std::chrono::duration_cast<std::chrono::microseconds>(
