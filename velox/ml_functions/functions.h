@@ -91,92 +91,103 @@ class MatrixMultiply : public MLFunction {
       const TypePtr& outputType,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-    // Ensure output vector is writable.
-    context.ensureWritable(rows, outputType, output);
-    output->clearNulls(rows);
-    auto arrayOutput = output->as<ArrayVector>();
-    auto sizes = arrayOutput->mutableSizes(rows.end());
-    auto rawSizes = sizes->asMutable<int32_t>();
-    auto offsets = arrayOutput->mutableOffsets(rows.end());
-    auto rawOffsets = offsets->asMutable<int32_t>();
-
-    // Initialize sizes and offsets to zero.
-    std::fill(rawSizes, rawSizes + rows.end(), 0);
-    std::fill(rawOffsets, rawOffsets + rows.end(), 0);
-
-    auto elementsOutput = arrayOutput->elements();
-    auto elementsPool = context.pool();
-
-    // Perform matrix multiplication logic.
-    exec::DecodedArgs decodedArgs(rows, args, context);
-    auto decodedInput = decodedArgs.at(0);
-    auto inputArray = decodedInput->base()->as<ArrayVector>();
-    auto inputElements = inputArray->elements();
-    float* inputValues = inputElements->values()->asMutable<float>();
-    auto inputOffsets = inputArray->rawOffsets();
-    auto inputSizes = inputArray->rawSizes();
-
-    // The map between the row index in the input data and the row index in the
-    // output data.
-    std::map<vector_size_t, vector_size_t> rowMap;
-    // for efficient check
-    std::unordered_set<vector_size_t> uniqueRawIndexeSet;
-    // for iterating over the insert ordering
-    std::vector<vector_size_t> uniqueRawIndexeVector;
-    vector_size_t numUniqueRows = 0;
-    rows.applyToSelected([&](vector_size_t row) {
-      auto mappedIndexInRowData = decodedInput->index(row);
-      if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
-          uniqueRawIndexeSet.end()) {
-        // add it
-        rowMap[row] = numUniqueRows;
-        uniqueRawIndexeSet.insert(mappedIndexInRowData);
-        uniqueRawIndexeVector.push_back(mappedIndexInRowData);
-        ++numUniqueRows;
-      } else {
-        // already added
-        rowMap[row] = rowMap[mappedIndexInRowData];
-      }
-    });
-
-    int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
-    int rowIndex = 0;
-    for (auto rawIndex : uniqueRawIndexeVector) {
-      Eigen::Map<const Eigen::VectorXf> rowVector(
-          inputValues + inputOffsets[rawIndex], dims[0]);
-      inputMatrix.row(rowIndex++) = rowVector;
+    bool use_gpu = false;
+    if (args.size() == 2) {
+      // an optional parameter can be passed to enable the GPU for mat_mul
+      use_gpu = args[1]->as<ConstantVector<bool>>()->valueAt(0);
     }
+    if (use_gpu) {
+      // TODO: implementation of matrix multiplication in GPU
+      throw std::runtime_error(
+          "GPU implementation of Matrix Multiple is not implemented.");
+    } else {
+      // Ensure output vector is writable.
+      context.ensureWritable(rows, outputType, output);
+      output->clearNulls(rows);
+      auto arrayOutput = output->as<ArrayVector>();
+      auto sizes = arrayOutput->mutableSizes(rows.end());
+      auto rawSizes = sizes->asMutable<int32_t>();
+      auto offsets = arrayOutput->mutableOffsets(rows.end());
+      auto rawOffsets = offsets->asMutable<int32_t>();
 
-    Eigen::Map<
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        weightMatrix(weights_, dims[0], dims[1]);
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
-        resultMatrix = inputMatrix * weightMatrix;
+      // Initialize sizes and offsets to zero.
+      std::fill(rawSizes, rawSizes + rows.end(), 0);
+      std::fill(rawOffsets, rawOffsets + rows.end(), 0);
 
-    // Append results to the output vector.
-    auto baseOffset = elementsOutput->size();
-    elementsOutput->resize(baseOffset + rows.end() * dims[1]);
+      auto elementsOutput = arrayOutput->elements();
+      auto elementsPool = context.pool();
 
-    float* outputValues = elementsOutput->values()->asMutable<float>();
-    vector_size_t outputOffset = 0;
-    rows.applyToSelected([&](vector_size_t row) {
-      if (rowMap.find(row) == rowMap.end()) {
-        throw std::runtime_error(
-            "Mapped index not found for the result matrix.");
+      // Perform matrix multiplication logic.
+      exec::DecodedArgs decodedArgs(rows, args, context);
+      auto decodedInput = decodedArgs.at(0);
+      auto inputArray = decodedInput->base()->as<ArrayVector>();
+      auto inputElements = inputArray->elements();
+      float* inputValues = inputElements->values()->asMutable<float>();
+      auto inputOffsets = inputArray->rawOffsets();
+      auto inputSizes = inputArray->rawSizes();
+
+      // The map between the row index in the input data and the row index in
+      // the output data.
+      std::map<vector_size_t, vector_size_t> rowMap;
+      // for efficient check
+      std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+      // for iterating over the insert ordering
+      std::vector<vector_size_t> uniqueRawIndexeVector;
+      vector_size_t numUniqueRows = 0;
+      rows.applyToSelected([&](vector_size_t row) {
+        auto mappedIndexInRowData = decodedInput->index(row);
+        if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
+            uniqueRawIndexeSet.end()) {
+          // add it
+          rowMap[row] = numUniqueRows;
+          uniqueRawIndexeSet.insert(mappedIndexInRowData);
+          uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+          ++numUniqueRows;
+        } else {
+          // already added
+          rowMap[row] = rowMap[mappedIndexInRowData];
+        }
+      });
+
+      int numInputMatrixRows = numUniqueRows;
+      Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+      int rowIndex = 0;
+      for (auto rawIndex : uniqueRawIndexeVector) {
+        Eigen::Map<const Eigen::VectorXf> rowVector(
+            inputValues + inputOffsets[rawIndex], dims[0]);
+        inputMatrix.row(rowIndex++) = rowVector;
       }
-      auto mappedIndexInResultMatrix = rowMap[row];
-      // auto mappedIndexInRawData = decodedInput->index(row);
-      rawOffsets[row] = outputOffset;
-      rawSizes[row] = dims[1];
-      std::memcpy(
-          outputValues + outputOffset,
-          resultMatrix.row(mappedIndexInResultMatrix).data(),
-          dims[1] * sizeof(float));
 
-      outputOffset += dims[1];
-    });
-    arrayOutput->setElements(elementsOutput);
+      Eigen::Map<
+          Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+          weightMatrix(weights_, dims[0], dims[1]);
+      Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+          resultMatrix = inputMatrix * weightMatrix;
+
+      // Append results to the output vector.
+      auto baseOffset = elementsOutput->size();
+      elementsOutput->resize(baseOffset + rows.end() * dims[1]);
+
+      float* outputValues = elementsOutput->values()->asMutable<float>();
+      vector_size_t outputOffset = 0;
+      rows.applyToSelected([&](vector_size_t row) {
+        if (rowMap.find(row) == rowMap.end()) {
+          throw std::runtime_error(
+              "Mapped index not found for the result matrix.");
+        }
+        auto mappedIndexInResultMatrix = rowMap[row];
+        // auto mappedIndexInRawData = decodedInput->index(row);
+        rawOffsets[row] = outputOffset;
+        rawSizes[row] = dims[1];
+        std::memcpy(
+            outputValues + outputOffset,
+            resultMatrix.row(mappedIndexInResultMatrix).data(),
+            dims[1] * sizeof(float));
+
+        outputOffset += dims[1];
+      });
+      arrayOutput->setElements(elementsOutput);
+    }
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
