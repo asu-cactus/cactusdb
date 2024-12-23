@@ -80,7 +80,6 @@ public:
         // Create a deep copy of the weights
         weights_ = new float[num_rows * num_cols]; 
         std::memcpy(weights_, weights, num_rows * num_cols * sizeof(float));
-        // weights_ = weights;
         dims.push_back(num_rows);
         dims.push_back(num_cols);
     }
@@ -95,44 +94,91 @@ public:
     void apply(
         const SelectivityVector& rows,
         std::vector<VectorPtr>& args,
-        const TypePtr& type,
+        const TypePtr& outputType,
         exec::EvalCtx& context,
         VectorPtr& output) const override {
-        
-        bool use_gpu = false;
-        if (args.size() == 2) {
-            // an optional parameter can be passed to enable the GPU for mat_mul
-            use_gpu = args[1]->as<ConstantVector<bool>>()->valueAt(0);
-        }
-        
-        // results are expected to be stored as std::vector<std::vector<float>>
-        std::vector<std::vector<float>> result;
-        if (use_gpu) {
-            // TODO: implementation of matrix multiplication in GPU
-            throw std::runtime_error("GPU implementation of Matrix Multiple is not implemented.");
-        } else {
-            BaseVector::ensureWritable(rows, type, context.pool(), output);
-            
-            auto input_elements = args[0]->as<ArrayVector>()->elements();
-            float* input_values = input_elements->values()->asMutable<float>();
-            int input_size = input_elements->size();
+        // Ensure output vector is writable.
+        context.ensureWritable(rows, outputType, output);
+        output->clearNulls(rows);
+        auto arrayOutput = output->as<ArrayVector>();
+        auto sizes = arrayOutput->mutableSizes(rows.end());
+        auto rawSizes = sizes->asMutable<int32_t>();
+        auto offsets = arrayOutput->mutableOffsets(rows.end());
+        auto rawOffsets = offsets->asMutable<int32_t>();
 
-            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, input_size/dims[0], dims[0]);
-            Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, dims[0], dims[1]); 
-            
-            // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-            Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;
+        // Initialize sizes and offsets to zero.
+        std::fill(rawSizes, rawSizes + rows.end(), 0);
+        std::fill(rawOffsets, rawOffsets + rows.end(), 0);
 
-            
-            for (int i = 0; i < m.rows(); i++) {
-                std::vector<float> row(
-                m.row(i).data(),
-                m.row(i).data() + m.cols());
-                result.push_back(row);
-            }
+        auto elementsOutput = arrayOutput->elements();
+        auto elementsPool = context.pool();
+
+        // Perform matrix multiplication logic.
+        exec::DecodedArgs decodedArgs(rows, args, context);
+        auto decodedInput = decodedArgs.at(0);
+        auto inputArray = decodedInput->base()->as<ArrayVector>();
+        auto inputElements = inputArray->elements();
+        float* inputValues = inputElements->values()->asMutable<float>();
+        auto inputOffsets = inputArray->rawOffsets();
+        auto inputSizes = inputArray->rawSizes();
+
+
+        // The map between the row index in the input data and the row index in the output data.
+        std::map<vector_size_t, vector_size_t> rowMap;
+        // for efficient check
+        std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+        // for iterating over the insert ordering
+        std::vector<vector_size_t> uniqueRawIndexeVector;
+        vector_size_t numUniqueRows = 0;
+        rows.applyToSelected([&](vector_size_t row) {
+          auto mappedIndexInRowData = decodedInput->index(row);
+          if (uniqueRawIndexeSet.find(mappedIndexInRowData) == uniqueRawIndexeSet.end()) {
+            // add it
+            rowMap[row] = numUniqueRows;
+            uniqueRawIndexeSet.insert(mappedIndexInRowData);
+            uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+            ++numUniqueRows;
+          } else {
+            // already added
+            rowMap[row] = rowMap[mappedIndexInRowData];
+          }
+        });
+
+        int numInputMatrixRows = numUniqueRows;
+        Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+        int rowIndex = 0;
+        for (auto rawIndex : uniqueRawIndexeVector) {
+          Eigen::Map<const Eigen::VectorXf> rowVector(
+              inputValues + inputOffsets[rawIndex], dims[0]);
+          inputMatrix.row(rowIndex++) = rowVector;
         }
-        VectorMaker maker{context.pool()};
-        output = maker.arrayVector<float>(result, REAL());
+
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> weightMatrix(
+            weights_, dims[0], dims[1]);
+        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> resultMatrix = inputMatrix * weightMatrix;
+
+        // Append results to the output vector.
+        auto baseOffset = elementsOutput->size();
+        elementsOutput->resize(baseOffset + rows.end() * dims[1]);
+
+        float* outputValues = elementsOutput->values()->asMutable<float>();
+        vector_size_t outputOffset = 0;
+        rows.applyToSelected([&](vector_size_t row) {
+          if (rowMap.find(row) == rowMap.end()) {
+            throw std::runtime_error("Mapped index not found for the result matrix.");
+          }
+          auto mappedIndexInResultMatrix = rowMap[row];
+          // auto mappedIndexInRawData = decodedInput->index(row);
+          rawOffsets[row] = outputOffset;
+          rawSizes[row] = dims[1];
+          std::memcpy(
+              outputValues + outputOffset,
+              resultMatrix.row(mappedIndexInResultMatrix).data(),
+              dims[1] * sizeof(float));
+
+          outputOffset += dims[1];
+        });
+        arrayOutput->setElements(elementsOutput);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -291,18 +337,32 @@ public:
         exec::EvalCtx& context,
         VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, outputType, context.pool(), output);
+    output->clearNulls(rows);
+    auto arrayOutput = output->as<ArrayVector>();
+    auto sizes = arrayOutput->mutableSizes(rows.end());
+    auto rawSizes = sizes->asMutable<int32_t>();
+    auto offsets = arrayOutput->mutableOffsets(rows.end());
+    auto rawOffsets = offsets->asMutable<int32_t>();
+
+    // Initialize sizes and offsets to zero.
+    std::fill(rawSizes, rawSizes + rows.end(), 0);
+    std::fill(rawOffsets, rawOffsets + rows.end(), 0);
+
+    auto elementsOutput = arrayOutput->elements();
+    auto elementsPool = context.pool();
     VectorMaker maker{context.pool()};
     // Validate input arguments
     VELOX_CHECK_EQ(args.size(), 2, "Blocked-based matrix multiply requires 2 inputs");
 
     exec::DecodedArgs decodedArgs(rows, args, context);
+    auto numInputs = rows.size();
     auto decodedInput1 = decodedArgs.at(0);
     auto decodedInput2 = decodedArgs.at(1);
-
     auto input1Array = decodedInput1->base()->as<ArrayVector>();
     auto input2Array = decodedInput2->base()->as<ArrayVector>();
-
     auto input1Elements = input1Array->elements();
+    auto input1Offsets = input1Array->rawOffsets();
+    auto input1Sizes = input1Array->rawSizes();
     auto input2Elements = input2Array->elements();
 
     float* input1Values = input1Elements->values()->asMutable<float>();
@@ -311,66 +371,57 @@ public:
     int currentBlockSize = (input2Elements->size() < (dims[0] * dims[2])) ? input2Elements->size() / dims[0] : dims[2];
     int input1MatrixNumRow = input1Elements->size() / dims[0];
 
-    Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input1Values, input1MatrixNumRow, dims[0]);
-    Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input2Values, dims[0], currentBlockSize);
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m = m1 * m2;
-    std::vector<std::vector<float>> result;
+    std::map<vector_size_t, vector_size_t> rowMap;
+    std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+    std::vector<vector_size_t> uniqueRawIndexeVector;
+    vector_size_t numUniqueRows = 0;
+    rows.applyToSelected([&](vector_size_t row) {
+      auto mappedIndexInRowData = decodedInput1->index(row);
+      if (uniqueRawIndexeSet.find(mappedIndexInRowData) == uniqueRawIndexeSet.end()) {
+        // add it
+        rowMap[row] = numUniqueRows;
+        uniqueRawIndexeSet.insert(mappedIndexInRowData);
+        uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+        ++numUniqueRows;
+      } else {
+        // already added
+        rowMap[row] = rowMap[mappedIndexInRowData];
+      }
+    });
 
-    for (size_t rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
-      size_t mappedIndexInRowData = decodedInput1->index(rowIdx);
-      std::vector<float> row(
-            m.row(mappedIndexInRowData).data(),
-            m.row(mappedIndexInRowData).data() + m.cols());
-            result.push_back(row);
-      // std::cout << "rowIdx mapping: " << rowIdx << " mapped Index in raw data: " << decodedInput1->index(rowIdx) <<  std::endl;
+    int numInputMatrixRows = numUniqueRows;
+    Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+    int rowIndex = 0;
+    for (auto rawIndex : uniqueRawIndexeVector) {
+      Eigen::Map<const Eigen::VectorXf> rowVector(
+          input1Values + input1Offsets[rawIndex], dims[0]);
+      inputMatrix.row(rowIndex++) = rowVector;
     }
 
-    output = maker.arrayVector<float>(result, REAL());
-    
+    Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> weightMatrix(input2Values, dims[0], currentBlockSize);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> resultMatrix = inputMatrix * weightMatrix;
+
+    auto baseOffset = elementsOutput->size();
+    elementsOutput->resize(baseOffset + rows.end() * currentBlockSize);
+
+    float* outputValues = elementsOutput->values()->asMutable<float>();
+
+    vector_size_t outputOffset = 0;
+    rows.applyToSelected([&](vector_size_t row) {
+      if (rowMap.find(row) == rowMap.end()) {
+        throw std::runtime_error("Mapped index not found for the result matrix.");
+      }
+      auto mappedIndexInResultMatrix = rowMap[row];
+      rawOffsets[row] = outputOffset;
+      rawSizes[row] = currentBlockSize;
+      std::memcpy(
+          outputValues + outputOffset,
+          resultMatrix.row(mappedIndexInResultMatrix).data(),
+          currentBlockSize * sizeof(float));
+      outputOffset += currentBlockSize;
+    });
+    arrayOutput->setElements(elementsOutput);
   }
-
-    /*void  apply(
-        const SelectivityVector& rows,
-        std::vector<VectorPtr>& args,
-        const TypePtr& type,
-        exec::EvalCtx& context,
-        VectorPtr& output) const override {
-        
-        BaseVector::ensureWritable(rows, type, context.pool(), output);
-        VectorMaker maker{context.pool()};
-
-        BaseVector* left = args[0].get();
-        BaseVector* right = args[1].get();
-
-        exec::LocalDecodedVector leftHolder(context, *left, rows);
-        auto decodedLeftArray = leftHolder.get();
-        auto baseLeftArray =
-            decodedLeftArray->base()->as<ArrayVector>()->elements();
-
-        exec::LocalDecodedVector rightHolder(context, *right, rows);
-        auto decodedRightArray = rightHolder.get();
-        auto baseRightArray = rightHolder->base()->as<ArrayVector>()->elements();
-
-        float* input_values_v = baseLeftArray->values()->asMutable<float>();
-        float* input_values_w = baseRightArray->values()->asMutable<float>();
-
-        auto input_elements_v = baseLeftArray;
-        auto input_elements_w = baseRightArray;
-        int current_block_size = (input_elements_w->size()< (dims[0] * dims[2])) ? input_elements_w->size()/dims[0] : dims[2];
-        std::vector<std::vector<float>> result; //6000*500
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values_v, input_elements_v->size()/dims[0], dims[0]);//3*2
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(input_values_w, dims[0], current_block_size); //2*5
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m  =  m1 * m2;//3*5
-        
-        for (int i = 0; i < m.rows(); i++) {
-            std::vector<float> row(
-            m.row(i).data(),
-            m.row(i).data() + m.cols());
-            result.push_back(row);
-        }
-
-        output = maker.arrayVector<float>(result, REAL());
-    } */
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
         return {exec::FunctionSignatureBuilder()
@@ -598,9 +649,7 @@ public:
     MatrixVectorAddition(float* weights, int num_cols) {
         // Create a deep copy of the weights
         weights_ = new float[num_cols];
-        for (int i=0; i < num_cols; i++) {
-        weights_[i] = weights[i];
-        }
+        std::memcpy(weights_, weights, num_cols * sizeof(float));
         dims.push_back(num_cols);
     }
 
@@ -617,24 +666,83 @@ public:
         VectorPtr& output) const override {
 
         BaseVector::ensureWritable(rows, type, context.pool(), output);
+        output->clearNulls(rows);
+        auto arrayOutput = output->as<ArrayVector>();
+        auto sizes = arrayOutput->mutableSizes(rows.end());
+        auto rawSizes = sizes->asMutable<int32_t>();
+        auto offsets = arrayOutput->mutableOffsets(rows.end());
+        auto rawOffsets = offsets->asMutable<int32_t>();
 
-        auto input_elements = args[0]->as<ArrayVector>()->elements();
-        float* input_values = input_elements->values()->asMutable<float>();
+        // Initialize sizes and offsets to zero.
+        std::fill(rawSizes, rawSizes + rows.end(), 0);
+        std::fill(rawOffsets, rawOffsets + rows.end(), 0);
+        auto elementsOutput = arrayOutput->elements();
+        auto elementsPool = context.pool();
 
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m1(input_values, rows.size(), dims[0]);
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m2(weights_, 1, dims[0]);
+        exec::DecodedArgs decodedArgs(rows, args, context);
+        auto decodedInput = decodedArgs.at(0);
+        auto numRows = rows.size();
+        auto inputArray = decodedInput->base()->as<ArrayVector>();
+        auto inputElements = inputArray->elements();
+        float* inputValues = inputElements->values()->asMutable<float>();
+        auto inputOffsets = inputArray->rawOffsets();
+        auto inputSizes = inputArray->rawSizes();
 
-        m1.rowwise() += m2.row(0);
+        std::map<vector_size_t, vector_size_t> rowMap;
+        std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+        std::vector<vector_size_t> uniqueRawIndexeVector;
+        vector_size_t numUniqueRows = 0;
+        rows.applyToSelected([&](vector_size_t row) {
+          auto mappedIndexInRowData = decodedInput->index(row);
+          if (uniqueRawIndexeSet.find(mappedIndexInRowData) == uniqueRawIndexeSet.end()) {
+            // add it
+            rowMap[row] = numUniqueRows;
+            uniqueRawIndexeSet.insert(mappedIndexInRowData);
+            uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+            ++numUniqueRows;
+          } else {
+            // already added
+            rowMap[row] = rowMap[mappedIndexInRowData];
+          }
+        });
 
-        std::vector<std::vector<float>> result;
-        for (int i = 0; i < m1.rows(); i++) {
-            std::vector<float> row(
-            m1.row(i).data(),
-            m1.row(i).data() + m1.cols());
-            result.push_back(row);
+        int numInputMatrixRows = numUniqueRows;
+        Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+        int rowIndex = 0;
+        for (auto rawIndex : uniqueRawIndexeVector) {
+          Eigen::Map<const Eigen::VectorXf> rowVector(
+              inputValues + inputOffsets[rawIndex], dims[0]);
+          inputMatrix.row(rowIndex++) = rowVector;
         }
-        VectorMaker maker{context.pool()};
-        output = maker.arrayVector<float>(result, REAL());
+
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> vectorMatrix(
+            weights_, 1, dims[0]);
+        
+        inputMatrix.rowwise() += vectorMatrix.row(0);
+
+        auto baseOffset = elementsOutput->size();
+        elementsOutput->resize(baseOffset + rows.end() * dims[0]);
+        float* outputValues = elementsOutput->values()->asMutable<float>();
+
+        vector_size_t outputOffset = 0;
+
+        rows.applyToSelected([&](vector_size_t row) {
+          if (rowMap.find(row) == rowMap.end()) {
+            throw std::runtime_error("Mapped index not found for the result matrix.");
+          }
+          auto mappedIndexInResultMatrix = rowMap[row];
+          rawOffsets[row] = outputOffset;
+          rawSizes[row] = dims[0];
+
+          std::memcpy(
+              outputValues + outputOffset,
+              inputMatrix.row(mappedIndexInResultMatrix).data(),
+              dims[0] * sizeof(float));
+
+
+          outputOffset += dims[0];
+        });
+        arrayOutput->setElements(elementsOutput);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -675,7 +783,7 @@ class Relu: public MLFunction {
 public:
     Relu() {}
 
-    float static relu_function(float x) {
+    float static reluFunction(float x) {
         return (x > 0.0f) ? x : 0.0f;
     }
 
@@ -687,31 +795,27 @@ public:
         VectorPtr& output) const override {
 
         BaseVector::ensureWritable(rows, type, context.pool(), output);
-
-        auto input_elements = args[0]->as<ArrayVector>()->elements();
-        float* input_values = input_elements->values()->asMutable<float>();
-        int input_size = input_elements->size();
-        // considering all arrays have same size
-        int num_rows = args[0]->size();
-        int num_cols = input_size / num_rows;
+        exec::DecodedArgs decodedArgs(rows, args, context);
+        auto decodedInput = decodedArgs.at(0);
+        auto numRows = rows.size();
         
-        std::vector<std::vector<float>> result;
-        for (int i = 0; i < num_rows; i++) {
-            std::vector<float> rowResult(num_cols);
-            std::transform(input_values + i*num_cols, input_values + (i+1)*num_cols,
-            rowResult.data(), relu_function);
-            result.push_back(rowResult);
-        }
+        auto inputArray = decodedInput->base()->as<ArrayVector>();
+        auto inputElements = inputArray->elements();
+        float* inputValues = inputElements->values()->asMutable<float>();
+        auto inputOffsets = inputArray->rawOffsets();
+        auto inputSizes = inputArray->rawSizes();
 
-        // std::vector<std::vector<float>> result(num_rows, std::vector<float>(num_cols));
-        // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        // for (int i = 0; i < num_rows; ++i) {
-        //     for (int j = 0; j < num_cols; ++j) {
-        //         result[i][j] = std::max(0.0f, input_values[i*num_cols + j]);
-        //     }
-        // }
-        // std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-        // std::cout << "Time difference for RELU(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+        std::vector<std::vector<float>> result(numRows);
+
+        rows.applyToSelected([&](vector_size_t i) {
+          size_t mappedIndexInRowData = decodedInput->index(i);
+          size_t dataSize = inputSizes[mappedIndexInRowData];
+          size_t dataOffset = inputOffsets[mappedIndexInRowData];
+          std::vector<float> rowResult(dataSize);
+          std::transform(inputValues + dataOffset, inputValues + dataOffset + dataSize,
+          rowResult.data(), reluFunction);
+          result[i] = rowResult;
+        });
         VectorMaker maker{context.pool()};
         output = maker.arrayVector<float>(result, REAL());
     }
@@ -755,32 +859,84 @@ public:
         VectorPtr& output) const override {
 
         BaseVector::ensureWritable(rows, type, context.pool(), output);
+        output->clearNulls(rows);
+        auto arrayOutput = output->as<ArrayVector>();
+        auto sizes = arrayOutput->mutableSizes(rows.end());
+        auto rawSizes = sizes->asMutable<int32_t>();
+        auto offsets = arrayOutput->mutableOffsets(rows.end());
+        auto rawOffsets = offsets->asMutable<int32_t>();
 
-        auto input_elements = args[0]->as<ArrayVector>()->elements();
-        float* input_values = input_elements->values()->asMutable<float>();
-        int input_size = input_elements->size();
+        // Initialize sizes and offsets to zero.
+        std::fill(rawSizes, rawSizes + rows.end(), 0);
+        std::fill(rawOffsets, rawOffsets + rows.end(), 0);
+        auto elementsOutput = arrayOutput->elements();
+        auto elementsPool = context.pool();
 
-        int num_rows = args[0]->size();
-        int num_cols = input_size / num_rows;
-        
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
-        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-        Eigen::ArrayXXf exp = m.array().exp();
+        exec::DecodedArgs decodedArgs(rows, args, context);
+        auto decodedInput = decodedArgs.at(0);
+        auto numRows = rows.size();
+        auto inputArray = decodedInput->base()->as<ArrayVector>();
+        auto inputElements = inputArray->elements();
+        float* inputValues = inputElements->values()->asMutable<float>();
+        auto inputOffsets = inputArray->rawOffsets();
+        auto inputSizes = inputArray->rawSizes();
+
+        std::map<vector_size_t, vector_size_t> rowMap;
+        std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+        std::vector<vector_size_t> uniqueRawIndexeVector;
+        vector_size_t numUniqueRows = 0;
+        int numCols;
+        rows.applyToSelected([&](vector_size_t row) {
+          auto mappedIndexInRowData = decodedInput->index(row);
+          if (uniqueRawIndexeSet.find(mappedIndexInRowData) == uniqueRawIndexeSet.end()) {
+            // add it
+            rowMap[row] = numUniqueRows;
+            uniqueRawIndexeSet.insert(mappedIndexInRowData);
+            uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+            ++numUniqueRows;
+            numCols = inputSizes[mappedIndexInRowData];
+          } else {
+            // already added
+            rowMap[row] = rowMap[mappedIndexInRowData];
+          }
+        });
+
+        int numInputMatrixRows = numUniqueRows;
+        Eigen::MatrixXf inputMatrix(numInputMatrixRows, numCols);
+        int rowIndex = 0;
+        for (auto rawIndex : uniqueRawIndexeVector) {
+          Eigen::Map<const Eigen::VectorXf> rowVector(
+              inputValues + inputOffsets[rawIndex], numCols);
+          inputMatrix.row(rowIndex++) = rowVector;
+        }
+
+        Eigen::ArrayXXf exp = inputMatrix.array().exp();
         Eigen::ArrayXXf sum = exp.rowwise().sum();
         for (int i = 0; i < exp.rows(); i++) {
             exp.row(i) /= sum(i);
         }
-        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-     //    std::cout << "Time difference for Softmax(sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
-        std::vector<std::vector<float>> result(num_rows, std::vector<float>(num_cols));
-        for (int i = 0; i < num_rows; ++i) {
-            for (int j = 0; j < num_cols; ++j) {
-                result[i][j] = exp(i,j);
-            }
-        }
 
-        VectorMaker maker{context.pool()};
-        output = maker.arrayVector<float>(result, REAL());
+        auto baseOffset = elementsOutput->size();
+        elementsOutput->resize(baseOffset + rows.end() * numCols);
+        float* outputValues = elementsOutput->values()->asMutable<float>();
+        vector_size_t outputOffset = 0;
+        rows.applyToSelected([&](vector_size_t row) {
+          if (rowMap.find(row) == rowMap.end()) {
+            throw std::runtime_error("Mapped index not found for the result matrix.");
+          }
+          auto mappedIndexInResultMatrix = rowMap[row];
+          rawOffsets[row] = outputOffset;
+          rawSizes[row] = numCols;
+
+          std::memcpy(
+              outputValues + outputOffset,
+              exp.row(mappedIndexInResultMatrix).data(),
+              numCols * sizeof(float));
+
+          outputOffset += numCols;
+        });
+
+        arrayOutput->setElements(elementsOutput);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -822,45 +978,73 @@ public:
       VectorPtr& output) const override {
 
       BaseVector::ensureWritable(rows, type, context.pool(), output);
-      BaseVector* input = args[0].get();
-      exec::LocalDecodedVector inputHolder(context, *input, rows);
-      auto decodedInputArray = inputHolder.get();
-      auto baseInputArray =
-          decodedInputArray->base()->as<ArrayVector>()->elements();
-  
-      float* input_values = baseInputArray->values()->asMutable<float>();
-      int input_size = baseInputArray->size();
-      int num_rows = args[0]->size();
-      int num_cols = input_size / num_rows;
+      auto arrayOutput = output->asFlatVector<int>();
 
-      LOG(INFO) << "[INFO Argmax:] countSelected: " << rows.countSelected() << " numInput: " << num_rows << std::endl;
+      exec::DecodedArgs decodedArgs(rows, args, context);
+      auto decodedInput = decodedArgs.at(0);
+      auto numRows = rows.size();
       
-      Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
+      auto inputArray = decodedInput->base()->as<ArrayVector>();
+      auto inputElements = inputArray->elements();
+      float* inputValues = inputElements->values()->asMutable<float>();
+      auto inputOffsets = inputArray->rawOffsets();
+      auto inputSizes = inputArray->rawSizes();
 
-      std::unordered_map<int, int> valueCounts;
-      std::vector<int> result(num_rows);
-      for (int i = 0; i < num_rows; i++) {
-          Eigen::Index maxRow, maxCol;
-          m.row(i).maxCoeff(&maxRow, &maxCol);
-          result[i] = maxCol;
-          valueCounts[maxCol]++;
+      std::map<vector_size_t, vector_size_t> rowMap;
+      std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+      std::vector<vector_size_t> uniqueRawIndexeVector;
+      vector_size_t numUniqueRows = 0;
+      int numCols;
+      rows.applyToSelected([&](vector_size_t row) {
+        auto mappedIndexInRowData = decodedInput->index(row);
+        if (uniqueRawIndexeSet.find(mappedIndexInRowData) == uniqueRawIndexeSet.end()) {
+          // add it
+          rowMap[row] = numUniqueRows;
+          uniqueRawIndexeSet.insert(mappedIndexInRowData);
+          uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+          ++numUniqueRows;
+          numCols = inputSizes[mappedIndexInRowData];
+        } else {
+          // already added
+          rowMap[row] = rowMap[mappedIndexInRowData];
+        }
+      });
+
+      int numInputMatrixRows = numUniqueRows;
+      Eigen::MatrixXf inputMatrix(numInputMatrixRows, numCols);
+      int rowIndex = 0;
+      for (auto rawIndex : uniqueRawIndexeVector) {
+        Eigen::Map<const Eigen::VectorXf> rowVector(
+            inputValues + inputOffsets[rawIndex], numCols);
+        inputMatrix.row(rowIndex++) = rowVector;
       }
+
+      std::map<vector_size_t, vector_size_t> argmaxMap;
+      for (int i = 0; i < inputMatrix.rows(); i++) {
+        Eigen::Index maxRow, maxCol;
+        inputMatrix.row(i).maxCoeff(&maxRow, &maxCol);
+        argmaxMap[i] = maxCol;
+      }
+
+      int* outputValues = arrayOutput->mutableRawValues<int>();
+      vector_size_t outputOffset = 0;
+      std::unordered_map<int, int> valueCounts;
+      rows.applyToSelected([&](vector_size_t row) {
+        if (rowMap.find(row) == rowMap.end()) {
+          throw std::runtime_error("Mapped index not found for the result matrix.");
+        } 
+        auto mappedIndexInResultMatrix = rowMap[row];
+        outputValues[row] = argmaxMap[mappedIndexInResultMatrix];
+        valueCounts[outputValues[row]]++;
+      });
 
       for (const auto& pair : valueCounts) {
         LOG(INFO) << "[INFO] Label Distributions: Key: " << pair.first << ", Value: " << pair.second << std::endl;
       }
 
-
       // There could be a more efficient way to do this
       // Ref: https://stackoverflow.com/a/41384560
 
-
-
-        VectorMaker maker{context.pool()};
-        // output = maker.flatVector<int>(result);
-        auto localResult = maker.flatVector<int>(result);
-
-        context.moveOrCopyResult(localResult, rows, output);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -949,37 +1133,80 @@ public:
 
         BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-        exec::LocalDecodedVector decodedInputHolder(context, *args[0], rows);
-        auto decodedInputArray = decodedInputHolder.get();
-        auto baseInputArray =
-            decodedInputArray->base()->as<ArrayVector>()->elements();
-    
-        float* input_values = baseInputArray->values()->asMutable<float>();
-        int input_size = baseInputArray->size();
+        output->clearNulls(rows);
+        auto arrayOutput = output->as<ArrayVector>();
+        auto sizes = arrayOutput->mutableSizes(rows.end());
+        auto rawSizes = sizes->asMutable<int32_t>();
+        auto offsets = arrayOutput->mutableOffsets(rows.end());
+        auto rawOffsets = offsets->asMutable<int32_t>();
 
-        int num_rows = rows.size();
-        int num_cols = numCols_;
-        LOG(INFO) << "[INFO MinMaxScaler:] countSelected: " << rows.countSelected() << " num_rows: " << num_rows << " num_cols: " << num_cols << " num_elements: " << baseInputArray->size() << std::endl;
+        // Initialize sizes and offsets to zero.
+        std::fill(rawSizes, rawSizes + rows.end(), 0);
+        std::fill(rawOffsets, rawOffsets + rows.end(), 0);
+        auto elementsOutput = arrayOutput->elements();
+        auto elementsPool = context.pool();
 
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> m(input_values, num_rows, num_cols);
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> minVals(scalerMinValues_, 1, num_cols);
-        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> maxVals(scalerMaxValues_, 1, num_cols);
-        // Note: The result should be stored as a new object instead of modifying the original matrix
-        // since it will modify the original data stored in Velox and will affect the subsequent operations
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> resultMatrix = (m.rowwise() - minVals.row(0)).array().rowwise() / (maxVals.row(0) - minVals.row(0)).array();
-        std::vector<std::vector<float>> result;
-        for (int i = 0; i < num_rows; i++) {
-            std::vector<float> row(
-            resultMatrix.row(i).data(),
-            resultMatrix.row(i).data() + resultMatrix.cols());
-            result.push_back(row);
+        exec::DecodedArgs decodedArgs(rows, args, context);
+        auto decodedInput = decodedArgs.at(0);
+        auto numRows = rows.size();
+        auto inputArray = decodedInput->base()->as<ArrayVector>();
+        auto inputElements = inputArray->elements();
+        float* inputValues = inputElements->values()->asMutable<float>();
+        auto inputOffsets = inputArray->rawOffsets();
+        auto inputSizes = inputArray->rawSizes();
+
+        std::map<vector_size_t, vector_size_t> rowMap;
+        std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+        std::vector<vector_size_t> uniqueRawIndexeVector;
+        vector_size_t numUniqueRows = 0;
+        int numCols = numCols_;
+        rows.applyToSelected([&](vector_size_t row) {
+          auto mappedIndexInRowData = decodedInput->index(row);
+          if (uniqueRawIndexeSet.find(mappedIndexInRowData) == uniqueRawIndexeSet.end()) {
+            // add it
+            rowMap[row] = numUniqueRows;
+            uniqueRawIndexeSet.insert(mappedIndexInRowData);
+            uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+            ++numUniqueRows;
+          } else {
+            // already added
+            rowMap[row] = rowMap[mappedIndexInRowData];
+          }
+        });
+
+        int numInputMatrixRows = numUniqueRows;
+        Eigen::MatrixXf inputMatrix(numInputMatrixRows, numCols);
+        int rowIndex = 0;
+        for (auto rawIndex : uniqueRawIndexeVector) {
+          Eigen::Map<const Eigen::VectorXf> rowVector(
+              inputValues + inputOffsets[rawIndex], numCols);
+          inputMatrix.row(rowIndex++) = rowVector;
         }
-        VectorMaker maker{context.pool()};
-        // output = maker.arrayVector<float>(result, REAL());
-        
-        auto localResult = maker.arrayVector<float>(result, REAL());
 
-        context.moveOrCopyResult(localResult, rows, output);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> minVals(scalerMinValues_, 1, numCols);
+        Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> maxVals(scalerMaxValues_, 1, numCols);
+        Eigen::MatrixXf resultMatrix = (inputMatrix.rowwise() - minVals.row(0)).array().rowwise() / (maxVals.row(0) - minVals.row(0)).array();
+
+        auto baseOffset = elementsOutput->size();
+        elementsOutput->resize(baseOffset + rows.end() * numCols);
+        float* outputValues = elementsOutput->values()->asMutable<float>();
+        vector_size_t outputOffset = 0;
+        rows.applyToSelected([&](vector_size_t row) {
+          if (rowMap.find(row) == rowMap.end()) {
+            throw std::runtime_error("Mapped index not found for the result matrix.");
+          }
+          auto mappedIndexInResultMatrix = rowMap[row];
+          rawOffsets[row] = outputOffset;
+          rawSizes[row] = numCols;
+
+          std::memcpy(
+              outputValues + outputOffset,
+              resultMatrix.row(mappedIndexInResultMatrix).data(),
+              numCols * sizeof(float));
+
+          outputOffset += numCols;
+        });
+        arrayOutput->setElements(elementsOutput);
     }
 
     static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

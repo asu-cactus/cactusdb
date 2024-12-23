@@ -30,22 +30,13 @@ class IntEncoder : public MLFunction {
     BaseVector::ensureWritable(rows, ARRAY(INTEGER()), context.pool(), output);
 
     // Decode the input argument.
-    BaseVector* input = args[0].get();
-    exec::LocalDecodedVector inputHolder(context, *input, rows);
-    auto decodedInputArray = inputHolder.get();
-    auto inputVector = decodedInputArray->base()->as<ArrayVector>()->elements();
 
     auto arrayVector = args[0]->as<ArrayVector>();
     auto elementsVector = arrayVector->elements()->asFlatVector<int>();
 
     // Map to store result rows.
     auto numInputs = rows.size();
-    std::vector<std::vector<int>> result(numInputs, std::vector<int>(1));
-
-    // auto arrayVector = args[0];
-    exec::LocalDecodedVector arrayHolder(context, *args[0], rows);
-    auto elements = arrayHolder.get()->base()->as<ArrayVector>()->elements();
-    auto inputValues = inputVector->values()->asMutable<int64_t>();
+    std::vector<std::vector<int>> result(numInputs);
 
     // Process only the selected rows.
     rows.applyToSelected([&](int row) {
@@ -56,7 +47,7 @@ class IntEncoder : public MLFunction {
       auto it = mapping_.find(userIdBeforeEncode);
       if (it != mapping_.end()) {
         // If found, set the result.
-        result[row][0] = it->second;
+        result[row] = {it->second};
       } else {
         // Handle missing keys if necessary.
         std::cout << "[ERROR] Missing key: " << userIdBeforeEncode
@@ -112,11 +103,20 @@ class StringEncoder : public MLFunction {
     auto decodedStringInput = decodedStringHolder.get();
     int numInputs = rows.size();
 
-    std::vector<std::vector<int>> result(numInputs, std::vector<int>(1));
-    for (int i = 0; i < numInputs; i++) {
-      StringView val = decodedStringInput->valueAt<StringView>(i);
-      result[i][0] = mapping_.at(val.data());
-    }
+    std::vector<std::vector<int>> result(numInputs);
+
+    rows.applyToSelected([&](int row) {
+      StringView val = decodedStringInput->valueAt<StringView>(row);
+      auto it = mapping_.find(val.getString());
+      if (it != mapping_.end()) {
+        result[row] = {it->second};
+      } else {
+        // Handle missing keys if necessary
+        result[row] = {0};
+        std::cout << "[ERROR] Missing key: " << val.getString() << std::endl;
+      }
+    });
+
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<int>(result, INTEGER());
   }
@@ -164,8 +164,7 @@ class StringVariadicEncoder : public MLFunction {
     auto elementsVector = arrayVector->elements()->asFlatVector<StringView>();
     auto numRows = rows.size();
 
-    std::vector<std::vector<int>> result;
-    result.reserve(numRows);
+    std::vector<std::vector<int>> result(numRows);
 
     rows.applyToSelected([&](vector_size_t row) {
       int numElements = arrayVector->sizeAt(row);
@@ -187,7 +186,7 @@ class StringVariadicEncoder : public MLFunction {
           std::cout << "[ERROR] Missing key: " << val.getString() << std::endl;
         }
       }
-      result.push_back(std::move(indices));
+      result[row] = indices;
     });
 
     VectorMaker maker{context.pool()};

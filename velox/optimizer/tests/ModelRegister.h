@@ -472,7 +472,7 @@ void registerTwoTowerFunc(
       std::make_unique<TorchDNNV2>(
           userTowerKernelTypes, userTowerWeights, userTowerdims));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -506,7 +506,7 @@ void registerTwoTowerFunc(
           std::move(genderEmbeddingWeightsVector->elements()
                         ->values()
                         ->asMutable<float>()),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims),
       {},
       true,

@@ -687,8 +687,8 @@ std::string reformatComparisonExpr(std::string exprStr) {
 
     if (dataType == "DOUBLE" || dataType == "REAL") {
       compareValue = std::to_string(std::stod(compareValue));
-    } 
-    
+    }
+
     // Return the reformatted expression
     return expression + " " + operatorStr + " " + compareValue;
   } else {
@@ -697,6 +697,40 @@ std::string reformatComparisonExpr(std::string exprStr) {
 
   // If no match, return an empty optional
   return "";
+}
+
+/**
+ * @brief Function to rewrite the lambda expression in the input expression
+ * string to a standard format, the input following the format:
+ * lambda ROW<[ParameterName]:[DataType]> -> cast ROW["[ParameterName]"] as
+ * [TargetType]
+ * The output format: lambda [ParameterName] -> cast [ParameterName] as
+ * [TargetType]
+ *
+ * @param exprStr The input expression string
+ * @return std::string The rewritten expression string
+ */
+std::string rewriteLambdaInExpStr(const std::string& exprStr) {
+  // Define a regex pattern to match the lambda syntax
+  std::regex lambdaRegex(
+      R"(lambda ROW<([^:]+):[^>]+> -> cast ROW\["\1"\] as ([A-Z]+))");
+  std::smatch matches;
+
+  // Search for the lambda expression
+  if (std::regex_search(exprStr, matches, lambdaRegex)) {
+    std::string paramName = matches[1]; // Extract the parameter name
+    std::string targetType = matches[2]; // Extract the target type (e.g., REAL)
+
+    // Rewrite the lambda expression
+    std::string rewrittenLambda =
+        " " + paramName + " -> cast (" + paramName + " as " + targetType + ")";
+
+    // Replace the original lambda expression with the rewritten one
+    return std::regex_replace(exprStr, lambdaRegex, rewrittenLambda);
+  }
+
+  // If no match, return the original input
+  return exprStr;
 }
 
 std::vector<RowVectorPtr> splitRowVectorIntoBatches(

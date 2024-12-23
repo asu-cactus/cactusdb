@@ -57,10 +57,14 @@ class TowTowerModelPipelineTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>(), ioExecutor_.get());
+            ->newConnector(
+                kHiveConnectorId,
+                std::make_shared<core::MemConfig>(),
+                ioExecutor_.get());
     connector::registerConnector(hiveConnector);
 
-    rootPool_ = memory::MemoryManager::getInstance()->addRootPool("TwoTowerTest");
+    rootPool_ =
+        memory::MemoryManager::getInstance()->addRootPool("TwoTowerTest");
     pool_ = rootPool_->addLeafChild("TwoTowerTest");
 
     // SetUp();
@@ -329,24 +333,6 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
               ->asMutable<float>(),
           occupationNumEmbedding,
           embeddingDims));
-  exec::registerVectorFunction(
-      "concat1",
-      Concat::signatures(),
-      std::make_unique<Concat>(embeddingDims, embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat2",
-      Concat::signatures(),
-      std::make_unique<Concat>(2 * embeddingDims, embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat3",
-      Concat::signatures(),
-      std::make_unique<Concat>(3 * embeddingDims, embeddingDims));
-  exec::registerVectorFunction(
-      "concat4",
-      Concat::signatures(),
-      std::make_unique<Concat>(4 * embeddingDims, 1));
 
   randomGenerator.setFloatRange(-1, 1);
   std::vector<std::vector<float>> userNNweight1 =
@@ -466,7 +452,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -496,23 +482,13 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
       "sequence_pooling",
       SequencePooling::signatures(),
       std::make_unique<SequencePooling>(std::string("MEAN"), embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat2_1",
-      Concat::signatures(),
-      std::make_unique<Concat>(embeddingDims, embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat2_2",
-      Concat::signatures(),
-      std::make_unique<Concat>(2 * embeddingDims, 1));
 
   randomGenerator.setFloatRange(-1, 1);
   std::vector<std::vector<float>> itemNNweight1 =
@@ -707,10 +683,13 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
   auto sinkPtr = sink.get();
   uint64_t kRowsInRowGroup = 1000;
   uint64_t kBytesInRowGroup = 128 * 1024 * 1024;
-  auto writer = createWriter(std::move(sink), [&]() {
-    return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
-        kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
-  }, queryDataRowType);
+  auto writer = createWriter(
+      std::move(sink),
+      [&]() {
+        return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
+            kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
+      },
+      queryDataRowType);
   writer->write(queryDataRowVector);
   writer->flush();
   writer->close();
@@ -826,8 +805,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreading(
                "sequence_pooling(genres_embedding(genres)) as genres",
                "movie_mean_rating"})
           .project( // concate embedding vectors
-              {"concat4(concat3(concat2(concat1(user_id,gender),age),occupation), user_mean_rating) as user_tower_features",
-               "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
+              {"concat(user_id,gender,age,occupation, user_mean_rating) as user_tower_features",
+               "concat(movie_id, genres, movie_mean_rating) as movie_tower_features"})
           .project( // user/movie tower inference
               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
                "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
@@ -1175,24 +1154,6 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
               ->asMutable<float>(),
           occupationNumEmbedding,
           embeddingDims));
-  exec::registerVectorFunction(
-      "concat1",
-      Concat::signatures(),
-      std::make_unique<Concat>(embeddingDims, embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat2",
-      Concat::signatures(),
-      std::make_unique<Concat>(2 * embeddingDims, embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat3",
-      Concat::signatures(),
-      std::make_unique<Concat>(3 * embeddingDims, embeddingDims));
-  exec::registerVectorFunction(
-      "concat4",
-      Concat::signatures(),
-      std::make_unique<Concat>(4 * embeddingDims, 1));
 
   randomGenerator.setFloatRange(-1, 1);
   std::vector<std::vector<float>> userNNweight1 =
@@ -1282,7 +1243,7 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
           300,
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -1312,23 +1273,13 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
       "sequence_pooling",
       SequencePooling::signatures(),
       std::make_unique<SequencePooling>(std::string("MEAN"), embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat2_1",
-      Concat::signatures(),
-      std::make_unique<Concat>(embeddingDims, embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat2_2",
-      Concat::signatures(),
-      std::make_unique<Concat>(2 * embeddingDims, 1));
 
   randomGenerator.setFloatRange(-1, 1);
   std::vector<std::vector<float>> itemNNweight1 =
@@ -1491,10 +1442,13 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
   auto sinkPtr = sink.get();
   uint64_t kRowsInRowGroup = 1000;
   uint64_t kBytesInRowGroup = 128 * 1024 * 1024;
-  auto writer = createWriter(std::move(sink), [&]() {
-    return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
-        kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
-  }, queryDataRowType);
+  auto writer = createWriter(
+      std::move(sink),
+      [&]() {
+        return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
+            kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
+      },
+      queryDataRowType);
   writer->write(queryDataRowVector);
   writer->flush();
   writer->close();
@@ -1610,8 +1564,8 @@ int64_t TowTowerModelPipelineTest::testEndtoEndPipelineFusedMultiThreading(
                "sequence_pooling(genres_embedding(genres)) as genres",
                "movie_mean_rating"})
           .project( // concate embedding vectors
-              {"concat4(concat3(concat2(concat1(user_id, gender),age),occupation), user_mean_rating) as user_tower_features",
-               "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
+              {"concat(user_id, gender,age,occupation, user_mean_rating) as user_tower_features",
+               "concat(movie_id, genres, movie_mean_rating) as movie_tower_features"})
           .project( // user/movie tower inference
               {"fully_layer_with_batch_norm3(fully_layer_with_batch_norm2(fully_layer_with_batch_norm1(user_tower_features))) as user_nn_out",
                "fully_layer_with_batch_norm2_3(fully_layer_with_batch_norm2_2(fully_layer_with_batch_norm2_1(movie_tower_features))) as movie_nn_out"})
@@ -1893,24 +1847,6 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
               ->asMutable<float>(),
           occupationNumEmbedding,
           embeddingDims));
-  exec::registerVectorFunction(
-      "concat1",
-      Concat::signatures(),
-      std::make_unique<Concat>(embeddingDims, embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat2",
-      Concat::signatures(),
-      std::make_unique<Concat>(2 * embeddingDims, embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat3",
-      Concat::signatures(),
-      std::make_unique<Concat>(3 * embeddingDims, embeddingDims));
-  exec::registerVectorFunction(
-      "concat4",
-      Concat::signatures(),
-      std::make_unique<Concat>(4 * embeddingDims, 1));
 
   randomGenerator.setFloatRange(-1, 1);
   std::vector<std::vector<float>> userNNweight1 =
@@ -2030,7 +1966,7 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -2060,23 +1996,13 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
       "sequence_pooling",
       SequencePooling::signatures(),
       std::make_unique<SequencePooling>(std::string("MEAN"), embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat2_1",
-      Concat::signatures(),
-      std::make_unique<Concat>(embeddingDims, embeddingDims));
-
-  exec::registerVectorFunction(
-      "concat2_2",
-      Concat::signatures(),
-      std::make_unique<Concat>(2 * embeddingDims, 1));
 
   randomGenerator.setFloatRange(-1, 1);
   std::vector<std::vector<float>> itemNNweight1 =
@@ -2298,8 +2224,8 @@ TowTowerModelPipelineTest::testEndtoEndPipelineMultiThreadingmaterialize(
                "sequence_pooling(genres_embedding(genres)) as genres",
                "movie_mean_rating"})
           .project( // concat embedding vectors
-              {"concat4(concat3(concat2(concat1(user_id, gender),age),occupation), user_mean_rating) as user_tower_features",
-               "concat2_2(concat2_1(movie_id, genres), movie_mean_rating) as movie_tower_features"})
+              {"concat(user_id, gender,age,occupation), user_mean_rating) as user_tower_features",
+               "concat(movie_id, genres, movie_mean_rating) as movie_tower_features"})
           .project( // inference for user/movie twoer
               {"relu(batch_norm3(mat_vector_add3(mat_mul3(relu(batch_norm2(mat_vector_add2(mat_mul2(relu(batch_norm1(mat_vector_add1(mat_mul1(user_tower_features)))))))))))) as user_nn_out",
                "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})

@@ -218,7 +218,6 @@ class PlanState {
                   << std::endl;
       }
     }
-
   }
 
   /**
@@ -236,6 +235,13 @@ class PlanState {
     auto curNode = planBuilder.planNode();
     // renew possible actions in new state
     getPossibleActions(curNode, cataLog);
+  }
+
+  void showAllActions() {
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+    }
   }
 
   // Store the possible actions in the form of targetExpr: [rule1, rule2, ...]
