@@ -1162,7 +1162,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
     std::string computationStr;
 
-
     if (mode == "ml") {
       if (queryTemplate == "ml-q1" || queryTemplate == "ml-q2" ||
           queryTemplate == "ml-q3") {
@@ -1175,7 +1174,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         // use original movielens dataset and pre-defined query plan
         myPlan = setupMovielensDBQuery(
             queryTemplate, cataLog, pool_, planNodeIdGenerator);
-
 
       } else {
         // use profile query plan
@@ -1193,7 +1191,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << myPlan.planNode()->toString(true, true) << std::endl;
 
     if (rewrite) {
-      myPlan = rewriteQuery(cataLog, pool_, myPlan, planNodeIdGenerator, verbose, "pushdown");
+      myPlan = rewriteQuery(
+          cataLog, pool_, myPlan, planNodeIdGenerator, verbose, "random");
     }
 
     // auto idAddressMap = cataLog.getIdAddressMap();

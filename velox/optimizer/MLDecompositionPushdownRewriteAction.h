@@ -98,6 +98,10 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
           //           << " pushdownNodeId: " << curNodeId
           //           << " expressionAlias: " << expressionAlias << std::endl;
         }
+      }
+      if (curNodeName.find("Aggregation") != std::string::npos) {
+        // do not the pushdown through aggregation node
+        return "";
       } else {
         // Since the pushdown is applied by creating a new project node after
         // the pushdown node, and the expression alias are not available in the
@@ -268,9 +272,9 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                 // mat_mul0(ROW["features"]), we need to extract the data source
                 // from the expression via regex
                 std::string pushDownExpression = target;
-                
                 // rewrite lambda function if it exists
                 pushDownExpression = rewriteLambdaInExpStr(pushDownExpression);
+                pushDownExpression = removeUnnecessaryCast(pushDownExpression);
 
                 std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
                 std::smatch matches;
@@ -333,12 +337,12 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
               auto rewriteExpr = exprStr;
               // rewrite lambda function if it exists
               rewriteExpr = rewriteLambdaInExpStr(rewriteExpr);
+              rewriteExpr = removeUnnecessaryCast(rewriteExpr);
 
               std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
               std::smatch matches;
               // Start position for the search
               std::string::const_iterator searchStart(exprStr.cbegin());
-              
               // Search out the matched data source and store in matches
               while (std::regex_search(
                   searchStart,
@@ -464,15 +468,19 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                     .setRoot(curNodeInUpdatedPlan->sources()[0])
                     .project(targetProjectExprs);
 
-            auto serializedNewSource = rewritePlan.planNode()->serialize();
+            if (prevNode == nullptr) {
+              planBuilder.setRoot(rewritePlan.planNode());
+            } else {
+              auto serializedNewSource = rewritePlan.planNode()->serialize();
 
-            replaceSourceWithIdInSerializedPlan(
-                serializedPlan, serializedNewSource, curNodeId);
+              replaceSourceWithIdInSerializedPlan(
+                  serializedPlan, serializedNewSource, curNodeId);
 
-            auto deserlizedFinalPlanNode =
-                ISerializable::deserialize<core::PlanNode>(
-                    serializedPlan, pool_.get());
-            planBuilder.setRoot(deserlizedFinalPlanNode);
+              auto deserlizedFinalPlanNode =
+                  ISerializable::deserialize<core::PlanNode>(
+                      serializedPlan, pool_.get());
+              planBuilder.setRoot(deserlizedFinalPlanNode);
+            }
           }
         } else if (nodeName == "Filter") {
           auto myFilterNode =

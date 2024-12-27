@@ -491,13 +491,13 @@ PlanBuilder setupMovielensDBQuery(
                    "transform(array_constructor(u_user_mean_rating), x -> CAST(x as REAL)) as u_user_mean_rating",
                    "m_movie_id",
                    "movie_id_embedding(movie_id_encoder(convert_int_array(m_movie_id))) as m_movie_id_embed",
-                   "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres",
+                   "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres_embed",
                    "transform(array_constructor(m_movie_mean_rating), x -> CAST(x as REAL)) as m_movie_mean_rating"})
               .project(
                   {"u_user_id",
                    "concat(u_user_id_embed, u_gender, u_age, u_occupation,u_user_mean_rating) as user_tower_features",
                    "m_movie_id",
-                   "concat(m_movie_id_embed, m_genres, m_movie_mean_rating) as movie_tower_features"})
+                   "concat(m_movie_id_embed, m_genres_embed, m_movie_mean_rating) as movie_tower_features"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
@@ -599,13 +599,13 @@ PlanBuilder setupMovielensDBQuery(
                    "transform(array_constructor(u_user_mean_rating), x -> CAST(x as REAL)) as u_user_mean_rating",
                    "m_movie_id",
                    "movie_id_embedding(movie_id_encoder(convert_int_array(m_movie_id))) as m_movie_id_embed",
-                   "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres",
+                   "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres_embed",
                    "transform(array_constructor(m_movie_mean_rating), x -> CAST(x as REAL)) as m_movie_mean_rating"})
               .project(
                   {"u_user_id",
                    "concat(u_user_id_embed, u_gender, u_age, u_occupation,u_user_mean_rating) as user_tower_features",
                    "m_movie_id",
-                   "concat(m_movie_id_embed, m_genres, m_movie_mean_rating) as movie_tower_features"})
+                   "concat(m_movie_id_embed, m_genres_embed, m_movie_mean_rating) as movie_tower_features"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
@@ -708,13 +708,13 @@ PlanBuilder setupMovielensDBQuery(
                    "transform(array_constructor(u_user_mean_rating), x -> CAST(x as REAL)) as u_user_mean_rating",
                    "m_movie_id",
                    "movie_id_embedding(movie_id_encoder(convert_int_array(m_movie_id))) as m_movie_id_embed",
-                   "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres",
+                   "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres_embed",
                    "transform(array_constructor(m_movie_mean_rating), x -> CAST(x as REAL)) as m_movie_mean_rating"})
               .project(
                   {"u_user_id",
                    "concat(u_user_id_embed, u_gender, u_age, u_occupation,u_user_mean_rating) as user_tower_features",
                    "m_movie_id",
-                   "concat(m_movie_id_embed, m_genres, m_movie_mean_rating) as movie_tower_features"})
+                   "concat(m_movie_id_embed, m_genres_embed, m_movie_mean_rating) as movie_tower_features"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
@@ -812,13 +812,13 @@ PlanBuilder setupMovielensDBQuery(
                            "movie_description_array",
                            "m_genres AS m_genres1",
                            "movie_id_embedding(movie_id_encoder(convert_int_array(m_movie_id))) as m_movie_id_embed",
-                           "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres",
+                           "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres_embed",
                            "transform(array_constructor(m_movie_mean_rating), x -> CAST(x as REAL)) as m_movie_mean_rating"})
                       .project({
                           "m_movie_id",
                           "movie_description_array",
                           "m_genres1",
-                          "concat(m_movie_id_embed, m_genres, m_movie_mean_rating) as movie_tower_features",
+                          "concat(m_movie_id_embed, m_genres_embed, m_movie_mean_rating) as movie_tower_features",
                       })
                       .project(
                           {"m_movie_id",
@@ -941,11 +941,11 @@ PlanBuilder setupMovielensDBQuery(
                       .project(
                           {"m_movie_id",
                            "movie_id_embedding(movie_id_encoder(convert_int_array(m_movie_id))) as m_movie_id_embed",
-                           "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres",
+                           "sequence_pooling(genres_embedding(genres_encoder(split(m_genres, '|')))) as m_genres_embed",
                            "transform(array_constructor(m_movie_mean_rating), x -> CAST(x as REAL)) as m_movie_mean_rating"})
                       .project({
                           "m_movie_id",
-                          "concat(m_movie_id_embed, m_genres, m_movie_mean_rating) as movie_tower_features",
+                          "concat(m_movie_id_embed, m_genres_embed, m_movie_mean_rating) as movie_tower_features",
                       })
                       .project(
                           {"m_movie_id",
@@ -1519,7 +1519,6 @@ PlanBuilder setupMovielensDBQuery(
                    "mt_movie_id",
                    "m_genres",
                    "mt_relevance_ir",
-                   "mt_movie_id1",
                    "mt_relevance_ir1",
                    "user_movie_interest_pred",
                    "user_movie_rating_pred"})

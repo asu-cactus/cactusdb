@@ -1513,6 +1513,25 @@ class TorchDNN : public MLFunction {
 namespace velox::dl {
 enum class KernelType { MatMul, MatAdd, ReLU, Softmax, BatchNorm, Argmax };
 
+std::string kernelTypeToString(KernelType kernelType) {
+  switch (kernelType) {
+    case KernelType::MatMul:
+      return "MatMul";
+    case KernelType::MatAdd:
+      return "MatAdd";
+    case KernelType::ReLU:
+      return "ReLU";
+    case KernelType::Softmax:
+      return "Softmax";
+    case KernelType::BatchNorm:
+      return "BatchNorm";
+    case KernelType::Argmax:
+      return "Argmax";
+    default:
+      return "Unknown";
+  }
+}
+
 std::ostream& operator<<(std::ostream& os, KernelType kernelType) {
   switch (kernelType) {
     case KernelType::MatMul:
@@ -1553,28 +1572,31 @@ class TorchDNNV2 : public MLFunction {
     // dims.size() = weights.size() + 1, dims[0] is the input dimension
     dims = dimensions;
     kernelTypes_ = kernelTypes;
-    int numLayers = kernelTypes.size();
+    int numOps = kernelTypes.size();
     int weightIdx = 0;
     hasArgmax_ = false;
     model_ = torch::nn::Sequential();
-    for (int i = 0; i < numLayers; ++i) {
+    assert(2 * numOps == dims.size());
+    for (int i = 0; i < numOps; ++i) {
       if (kernelTypes[i] == velox::dl::KernelType::MatMul &&
           kernelTypes[i + 1] == velox::dl::KernelType::MatAdd) {
-        auto denseLayer = torch::nn::Linear(dims[i], dims[i + 1]);
+        auto denseLayer = torch::nn::Linear(dims[2 * i], dims[2 * i + 1]);
         denseLayer->weight.set_data(
-            torch::from_blob(weights[weightIdx++], {dims[i], dims[i + 1]}).t());
+            torch::from_blob(
+                weights[weightIdx++], {dims[2 * i], dims[2 * i + 1]})
+                .t());
         denseLayer->bias.set_data(
-            torch::from_blob(weights[weightIdx++], {dims[i + 1]}));
+            torch::from_blob(weights[weightIdx++], {dims[2 * i + 1]}));
         model_->push_back(denseLayer);
       } else if (kernelTypes[i] == velox::dl::KernelType::MatAdd) {
         // Do nothing, which is handled by creating a Dense Layer in the above
         // code
       } else if (kernelTypes[i] == velox::dl::KernelType::BatchNorm) {
-        auto batchNormLayer = torch::nn::BatchNorm1d(dims[i]);
+        auto batchNormLayer = torch::nn::BatchNorm1d(dims[2 * i]);
         batchNormLayer->weight.set_data(
-            torch::from_blob(weights[weightIdx++], {dims[i + 1]}));
+            torch::from_blob(weights[weightIdx++], {dims[2 * i + 1]}));
         batchNormLayer->bias.set_data(
-            torch::from_blob(weights[weightIdx++], {dims[i + 1]}));
+            torch::from_blob(weights[weightIdx++], {dims[2 * i + 1]}));
         model_->push_back(batchNormLayer);
       } else if (kernelTypes[i] == velox::dl::KernelType::ReLU) {
         model_->push_back(torch::nn::ReLU());
@@ -1676,6 +1698,10 @@ class TorchDNNV2 : public MLFunction {
   static std::string getName() {
     return "complexTorchNN";
   };
+
+  std::vector<velox::dl::KernelType> getKernelTypes() const {
+    return kernelTypes_;
+  }
 
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to compute cost based on dims

@@ -324,25 +324,39 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
               // the source name overlaps with the id column name and id
               // is included in the column name as well.
               std::string srcName = splitString(rewriteMatMulSrc, '_')[0];
-              std::string matMulAggKey;
+              std::set<std::string> matMulAggKeysToAdd;
               for (std::string colName : nestedLoopProjectExprSets) {
                 if (containsStrButNotEqual(colName, srcName) &&
                     containsStrButNotEqual(colName, "id")) {
-                  matMulAggKey = colName;
+                  matMulAggKeysToAdd.insert(colName);
+                  // matMulAggKey = colName;
                   break;
                 }
               }
-              if (matMulAggKey.empty()) {
-                matMulAggKey = "idx";
+              // if no inference is made, we try to include all columns
+              // contain id
+              if (matMulAggKeysToAdd.empty()) {
+                for (std::string colName : nestedLoopProjectExprSets) {
+                  if (containsStrButNotEqual(colName, "id")) {
+                    matMulAggKeysToAdd.insert(colName);
+                  }
+                }
+              }
+              // if still no inference is made, we use the default value
+              if (matMulAggKeysToAdd.empty()) {
+                matMulAggKeysToAdd.insert("idx");
                 LOG(INFO)
                     << "[WARN] inference of MatMul agg key failed, use default value: idx"
                     << std::endl;
               }
 
-              matMulAggKeySets.insert(matMulAggKey);
-              preComputeExprSets.insert(matMulAggKey);
-              nestedLoopProjectExprSets.insert(matMulAggKey);
-              mulProjectExprSets.insert(matMulAggKey);
+              for (auto matMulAggKey : matMulAggKeysToAdd) {
+                preComputeExprSets.insert(matMulAggKey);
+                nestedLoopProjectExprSets.insert(matMulAggKey);
+                mulProjectExprSets.insert(matMulAggKey);
+                matMulAggKeySets.insert(matMulAggKey);
+              }
+
               // std::cout << "[DEBUG] matMulAggKey: " << matMulAggKey <<
               // std::endl; std::cout << "[DEBUG] srcName: " << srcName <<
               // std::endl; std::cout << "[DEBUG] nestedLoopProjectExprsSets: "

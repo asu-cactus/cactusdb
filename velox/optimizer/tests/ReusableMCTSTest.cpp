@@ -1184,6 +1184,22 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
 
     if (mode == "ml") {
+      if (queryTemplate == "ml-q1") {
+        // register ml-q1 models
+        registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+        registerMLTrendingModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "ml-q2") {
+        registerMLTrendingModelFunctions(cataLog, pool_);
+        registerMLInterestMovieModelFunctions(cataLog, pool_);
+        registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+        registerMLDLRMModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "ml-q3") {
+        registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
+        registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
+        registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+        registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
+      }
+
       myPlan = setupProfileQueryPlan(
           mode, queryTemplate, cataLog, planNodeIdGenerator);
 
@@ -1402,12 +1418,21 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
           // register ml-q1 models
           registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
           registerMLTrendingModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q2") {
+          registerMLTrendingModelFunctions(cataLog, pool_);
+          registerMLInterestMovieModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLDLRMModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q3") {
+          registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
+          registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
         }
 
         // use original movielens dataset and pre-defined query plan
         myPlan = setupMovielensDBQuery(
             queryTemplate, cataLog, pool_, planNodeIdGenerator);
-
 
       } else {
         // use profile query plan
@@ -1432,7 +1457,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     // return;
 
     /* if (rewrite) {
-      myPlan = rewriteQuery(cataLog, pool_, myPlan, planNodeIdGenerator, verbose);
+      myPlan = rewriteQuery(cataLog, pool_, myPlan, planNodeIdGenerator,
+    verbose);
     } */
 
     // std::cout << "[INFO] Executed Query Plan: \n"
