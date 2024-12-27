@@ -193,33 +193,30 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                     // cannot be the innermost UDF.
                     udfDims = {dims.back()};
                     kernelTypes.push_back(velox::dl::KernelType::Softmax);
-                  } else if ( dlKernelName.find("argmax") != std::string::npos) {
+                  } else if (dlKernelName.find("argmax") != std::string::npos) {
                     // Argmax itself does not have dims stored in the UDF will
                     // use the last element in dims. current limitation: argmax
                     // cannot be the innermost UDF.
                     udfDims = {dims.back()};
                     kernelTypes.push_back(velox::dl::KernelType::Argmax);
                     hasArgmax = true;
-                  }else {
+                  } else {
                     std::cout
                         << "ERROR, Unsupported DL kernel: " << dlKernelName
                         << std::endl;
                   }
 
-                  // Size of dimension should equal to size of DLs + 1, since
-                  // the first entry is the input size.
-                  if (dims.empty()) {
-                    if (udfDims.size() == 2) {
-                      // For DLs have two dimensions, like MatMul
-                      dims.push_back(udfDims[0]);
-                      dims.push_back(udfDims[1]);
-                    } else {
-                      dims.push_back(udfDims[0]);
-                      dims.push_back(udfDims[0]);
-                    }
+                  // Size of dimension should equal to 2*(Number of DL Ops)
+                  // dims with index 2*i and 2*i+1 are the input and output
+
+                  if (udfDims.size() == 2) {
+                    // For DLs have two dimensions, like MatMul
+                    dims.push_back(udfDims[0]);
+                    dims.push_back(udfDims[1]);
                   } else {
-                    // Add DL's last dimension
-                    dims.push_back(udfDims.back());
+                    // For DLs have one dimension, like Relu
+                    dims.push_back(udfDims[0]);
+                    dims.push_back(udfDims[0]);
                   }
                 }
 
@@ -246,16 +243,17 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                 }
 
                 std::regex pattern(escapeRegex(target));
-                // To distinguish the argmax and non-argmax case, the TorchDNN function
-                // requires different signatures to handle the output type
-                // TorchDNNV2(input: array(REAL)) -> array(REAL)
+                // To distinguish the argmax and non-argmax case, the TorchDNN
+                // function requires different signatures to handle the output
+                // type TorchDNNV2(input: array(REAL)) -> array(REAL)
                 // TorchDNNV2(input: array(REAL), 1 :INTEGER) -> INTEGER
                 // Replace the expression
                 if (hasArgmax) {
                   targetExprStr = std::regex_replace(
                       targetExprStr,
                       pattern,
-                      fmt::format("{}({},{})", torchDNNName, matchedDataSrc, 1));
+                      fmt::format(
+                          "{}({},{})", torchDNNName, matchedDataSrc, 1));
                 } else {
                   targetExprStr = std::regex_replace(
                       targetExprStr,

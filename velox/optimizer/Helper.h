@@ -292,9 +292,31 @@ std::vector<int> extractUDFDimension(std::string udfName) {
     std::shared_ptr<MatrixVectorAddition> myAddUDF =
         std::dynamic_pointer_cast<MatrixVectorAddition>(myUDF);
     return myAddUDF->getDims();
+  } else if (udfName.find("torchdnn") != std::string::npos) {
+    std::shared_ptr<TorchDNNV2> myTorchDNN =
+        std::dynamic_pointer_cast<TorchDNNV2>(myUDF);
+    return myTorchDNN->getDims();
   } else {
     return {};
   }
+}
+
+void augmentTorchDNNExpression(
+    folly::dynamic& serializedPlan,
+    std::string udfName) {
+  core::QueryConfig config({});
+  std::shared_ptr<VectorFunction> myUDF =
+      getVectorFunction(udfName, {ARRAY(REAL())}, {}, config);
+  std::shared_ptr<TorchDNNV2> myTorchDNN =
+      std::dynamic_pointer_cast<TorchDNNV2>(myUDF);
+  assert(myTorchDNN);
+  std::vector<velox::dl::KernelType> kernelTypes = myTorchDNN->getKernelTypes();
+
+  folly::dynamic jsonArray = folly::dynamic::array;
+  for (auto kernelType : kernelTypes) {
+    jsonArray.push_back(kernelTypeToString(kernelType));
+  }
+  serializedPlan["torchdnn_kernels"] = jsonArray;
 }
 
 void augmentFunctionExpression(folly::dynamic& serializedPlan) {
@@ -308,6 +330,9 @@ void augmentFunctionExpression(folly::dynamic& serializedPlan) {
           jsonArray.push_back(value);
         }
         serializedPlan["dims"] = jsonArray;
+      }
+      if (functionName.find("torchdnn") != std::string::npos) {
+        augmentTorchDNNExpression(serializedPlan, functionName);
       }
     } catch (const std::exception& e) {
       std::cout << "Error: extractUDFDimension: " << functionName << " "
@@ -612,7 +637,9 @@ void addProjectionFiledInSerializedPlan(
       serializedPlan["outputType"]["cTypes"].push_back(filedToBeAdded["type"]);
       serializedPlan["outputType"]["names"].push_back(
           filedToBeAdded["fieldName"]);
-    } else if (currentNodeName.find("Filter") != std::string::npos) {
+    } else if (
+        currentNodeName.find("Filter") != std::string::npos ||
+        currentNodeName.find("LimitNode") != std::string::npos) {
       // No need to add the filed to the FilterNode
     } else {
       throw std::runtime_error(
@@ -658,7 +685,8 @@ std::string fix_cast_function_parsing(std::string input) {
  */
 
 std::string reformatComparisonExpr(std::string exprStr) {
-  std::regex pattern(R"((\w+)\(cast\s+(.*?)\s+as\s+(\w+),\s*(.*?)\s*\))");
+  std::regex pattern(
+      R"((eq|neq|lt|lte|gt|gte)\(cast\s+(.*?)\s+as\s+(\w+),\s*(.*?)\s*\))");
   // Match the exprStr string against the pattern
   std::smatch match;
   if (std::regex_search(exprStr, match, pattern)) {
@@ -731,6 +759,28 @@ std::string rewriteLambdaInExpStr(const std::string& exprStr) {
 
   // If no match, return the original input
   return exprStr;
+}
+
+std::string removeUnnecessaryCast(const std::string& exprStr) {
+  // Define a regex pattern to match the cast syntax
+  std::regex castRegex(R"(cast ROW\[\"([^"]+)\"\] as [A-Z]+)");
+  std::vector<std::string> columnNames;
+
+  auto begin = std::sregex_iterator(exprStr.begin(), exprStr.end(), castRegex);
+  auto end = std::sregex_iterator();
+
+  std::string rewrittenExpr = exprStr;
+
+  for (std::sregex_iterator i = begin; i != end; ++i) {
+    std::smatch match = *i;
+    if (match.size() > 1) {
+      std::string columnName = match[1];
+      std::string matchedStr = match.str();
+      rewrittenExpr = std::regex_replace(
+          rewrittenExpr, std::regex(escapeRegex(matchedStr)), columnName);
+    }
+  }
+  return rewrittenExpr;
 }
 
 std::vector<RowVectorPtr> splitRowVectorIntoBatches(

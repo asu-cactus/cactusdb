@@ -244,6 +244,20 @@ class PlanState {
     }
   }
 
+  std::vector<std::pair<std::string, std::string>> getActionPairsWithRule(
+      std::string rule) {
+    std::vector<std::pair<std::string, std::string>> targetExprRulePairs;
+    for (auto entry : actionsPair) {
+      std::string targetExpr = entry.first;
+      for (auto ruleName : entry.second) {
+        if (ruleName == rule) {
+          targetExprRulePairs.push_back(std::make_pair(targetExpr, ruleName));
+        }
+      }
+    }
+    return targetExprRulePairs;
+  }
+
   // Store the possible actions in the form of targetExpr: [rule1, rule2, ...]
   std::map<std::string, std::vector<std::string>> actionsPair;
   std::vector<std::string> actions;
