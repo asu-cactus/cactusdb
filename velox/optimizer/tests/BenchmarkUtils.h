@@ -2058,87 +2058,236 @@ RowVectorPtr mergeRowVectors(
 }
 
 PlanBuilder rewriteQuery(
-      CataLog& cataLog,
-      std::shared_ptr<memory::MemoryPool> pool_,
-      PlanBuilder& plan,
-      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-      int verbose,
-      std::string rewriteStrategt = "random") {
-    VectorMaker maker{pool_.get()};
-    unsigned timestampSeed =
-        std::chrono::system_clock::now().time_since_epoch().count();
-    // Create ruleManager
-    RuleManager ruleManager;
-    // Create planState
-    PlanState planState(ruleManager);
+    CataLog& cataLog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    PlanBuilder& plan,
+    std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+    int verbose,
+    std::string rewriteStrategt = "random") {
+  VectorMaker maker{pool_.get()};
+  unsigned timestampSeed =
+      std::chrono::system_clock::now().time_since_epoch().count();
+  // Create ruleManager
+  RuleManager ruleManager;
+  // Create planState
+  PlanState planState(ruleManager);
 
-    RandomGenerator randomGenerator = RandomGenerator(0, 1, timestampSeed);
-    RandomSampler randomSampler = RandomSampler(timestampSeed);
-    // randomly apple 1 to 3 actions
-    randomGenerator.setIntRange(1, 5);
+  RandomGenerator randomGenerator = RandomGenerator(0, 1, timestampSeed);
+  RandomSampler randomSampler = RandomSampler(timestampSeed);
+  // randomly apple 1 to 3 actions
+  randomGenerator.setIntRange(1, 8);
 
-    auto planNode = plan.planNode();
-    planState.getPossibleActions(planNode, cataLog);
+  auto planNode = plan.planNode();
+  planState.getPossibleActions(planNode, cataLog);
 
-    std::pair<std::string, std::string> selectedAction;
+  std::pair<std::string, std::string> selectedAction;
 
-    if (verbose >= 2) {
-      std::cout << "[INFO] All possible actions:" << std::endl;
+  if (verbose >= 2) {
+    planState.showAllActions();
+  }
+
+  std::vector<std::pair<std::string, std::string>> listOfAppliedActions;
+
+  for (int i = 0; i < randomGenerator.genRandomIntValue(); i++) {
+    // if (true) {
+    // if (randomGenerator.genRandomFloatValue() > 0.2) {
+    if (true) {
+      // Get the logical plan
+      auto planNode = plan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+      std::vector<std::pair<std::string, std::string>> availableActions;
       for (auto entry : planState.actionsPair) {
-        std::cout << entry.first << ": " << entry.second << std::endl;
+        std::string targetExprStr = entry.first;
+        auto optimizationRules = entry.second;
+
+        for (auto action : optimizationRules) {
+          if (rewriteStrategt == "pushdown" &&
+              action != "MLDecompositionPushdownRewriteAction") {
+            // if pushdown strategy, only select pushdown actions
+            continue;
+          }
+          availableActions.push_back(std::make_pair(targetExprStr, action));
+        }
       }
-    }
 
-    for (int i = 0; i < randomGenerator.genRandomIntValue(); i++) {
-      // if (true) {
-      if (randomGenerator.genRandomFloatValue() > 0.2) {
-        // Get the logical plan
-        auto planNode = plan.planNode();
-        planState.getPossibleActions(planNode, cataLog);
-        std::vector<std::pair<std::string, std::string>> availableActions;
-        if (verbose >= 2) {
-          std::cout << "[INFO] All possible actions:" << std::endl;
-        }
-        for (auto entry : planState.actionsPair) {
-          std::string targetExprStr = entry.first;
-          auto optimizationRules = entry.second;
-          if (verbose >= 2) {
-            std::cout << targetExprStr << ": " << optimizationRules << std::endl;
-          }
-
-          for (auto action : optimizationRules) {
-            if (rewriteStrategt == "pushdown" && action != "MLDecompositionPushdownRewriteAction") {
-              // if pushdown strategy, only select pushdown actions
-              continue;
-            }
-            availableActions.push_back(std::make_pair(targetExprStr, action));
-          }
-        }
-
-        if (availableActions.size() == 0) {
-          // if no available actions, break
-          break;
-        }
-
-        std::pair<std::string, std::string> selectedAction =
-            randomSampler.sampleFromSets<std::pair<std::string, std::string>>(
-                1, availableActions)[0];
-        if (verbose >= 2) {
-          std::cout << "[INFO] Selected action: " << selectedAction.first
-                    << ": " << selectedAction.second << std::endl;
-        }
-        planState.takeAction(
-            planNode,
-            nullptr,
-            maker,
-            plan,
-            pool_,
-            planNodeIdGenerator,
-            {selectedAction},
-            cataLog);
-      } else {
+      if (availableActions.size() == 0) {
+        // if no available actions, break
         break;
       }
+
+      std::pair<std::string, std::string> selectedAction =
+          randomSampler.sampleFromSets<std::pair<std::string, std::string>>(
+              1, availableActions)[0];
+      if (verbose >= 2) {
+        std::cout << "[INFO] Selected action: " << selectedAction.first << ": "
+                  << selectedAction.second << std::endl;
+      }
+
+      listOfAppliedActions.push_back(selectedAction);
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          plan,
+          pool_,
+          planNodeIdGenerator,
+          {selectedAction},
+          cataLog);
+    } else {
+      break;
     }
-    return plan;
   }
+
+  if (verbose >= 2) {
+    std::cout << "[INFO] List of applied actions:" << std::endl;
+    std::cout << "====================================" << std::endl;
+    size_t i = 0;
+    for (auto action : listOfAppliedActions) {
+      std::cout << i++ << ". " << action.first << ": " << action.second
+                << std::endl;
+    }
+  }
+  return plan;
+}
+
+PlanBuilder arbitraryQueryRewrite(
+    CataLog& cataLog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    PlanBuilder& plan,
+    std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+    int verbose) {
+  VectorMaker maker{pool_.get()};
+  unsigned timestampSeed =
+      std::chrono::system_clock::now().time_since_epoch().count();
+  // Create ruleManager
+  RuleManager ruleManager;
+  // Create planState
+  PlanState planState(ruleManager);
+  RandomSampler randomSampler = RandomSampler(timestampSeed);
+
+  auto planNode = plan.planNode();
+  planState.getPossibleActions(planNode, cataLog);
+
+  std::pair<std::string, std::string> selectedAction;
+
+  if (verbose >= 2) {
+    planState.showAllActions();
+  }
+
+  std::vector<std::pair<std::string, std::string>> listOfAppliedActions;
+
+  while (planState.actionsPair.size() > 0) {
+    auto planNode = plan.planNode();
+    std::vector<std::pair<std::string, std::string>> availableActions;
+    for (auto entry : planState.actionsPair) {
+      std::string targetExprStr = entry.first;
+      auto optimizationRules = entry.second;
+      for (auto action : optimizationRules) {
+        availableActions.push_back(std::make_pair(targetExprStr, action));
+      }
+    }
+    if (availableActions.size() == 0) {
+      // if no available actions, break
+      break;
+    }
+    std::pair<std::string, std::string> selectedAction =
+        randomSampler.sampleFromSets<std::pair<std::string, std::string>>(
+            1, availableActions)[0];
+    listOfAppliedActions.push_back(selectedAction);
+    if (verbose >= 2) {
+      std::cout << "[DEBUG] query plan: " << planNode->toString(true, true)
+                << std::endl;
+      std::cout << "[INFO] Selected action: " << selectedAction.first << ": "
+                << selectedAction.second << std::endl;
+    }
+    planState.takeAction(
+        planNode,
+        nullptr,
+        maker,
+        plan,
+        pool_,
+        planNodeIdGenerator,
+        {selectedAction},
+        cataLog);
+    planState.getPossibleActions(planNode, cataLog);
+  }
+
+  if (verbose >= 2) {
+    std::cout << "[INFO] List of applied actions:" << std::endl;
+    std::cout << "====================================" << std::endl;
+    size_t i = 0;
+    for (auto action : listOfAppliedActions) {
+      std::cout << i++ << ". " << action.first << ": " << action.second
+                << std::endl;
+    }
+  }
+
+  return plan;
+}
+
+PlanBuilder heuristicQueryRewrite(
+    CataLog& cataLog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    PlanBuilder& plan,
+    std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+    int verbose) {
+  VectorMaker maker{pool_.get()};
+  unsigned timestampSeed =
+      std::chrono::system_clock::now().time_since_epoch().count();
+  // Create ruleManager
+  RuleManager ruleManager;
+  // Create planState
+  PlanState planState(ruleManager);
+  RandomSampler randomSampler = RandomSampler(timestampSeed);
+
+  std::pair<std::string, std::string> selectedAction;
+
+  if (verbose >= 2) {
+    planState.showAllActions();
+  }
+
+  std::vector<std::pair<std::string, std::string>> listOfAppliedActions;
+
+  auto planNode = plan.planNode();
+  planState.getPossibleActions(planNode, cataLog);
+  std::vector<std::pair<std::string, std::string>> pushDownRules =
+      planState.getActionPairsWithRule("MLDecompositionPushdownRewriteAction");
+  while (pushDownRules.size() > 0) {
+    auto planNode = plan.planNode();
+    std::pair<std::string, std::string> selectedAction =
+        randomSampler.sampleFromSets<std::pair<std::string, std::string>>(
+            1, pushDownRules)[0];
+    listOfAppliedActions.push_back(selectedAction);
+    if (verbose >= 2) {
+      std::cout << "[DEBUG] query plan: " << planNode->toString(true, true)
+                << std::endl;
+      std::cout << "[INFO] Selected action: " << selectedAction.first << ": "
+                << selectedAction.second << std::endl;
+    }
+    planState.takeAction(
+        planNode,
+        nullptr,
+        maker,
+        plan,
+        pool_,
+        planNodeIdGenerator,
+        {selectedAction},
+        cataLog);
+    planNode = plan.planNode();
+    planState.getPossibleActions(planNode, cataLog);
+    pushDownRules = planState.getActionPairsWithRule(
+        "MLDecompositionPushdownRewriteAction");
+  }
+
+  if (verbose >= 2) {
+    std::cout << "[INFO] List of applied actions:" << std::endl;
+    std::cout << "====================================" << std::endl;
+    size_t i = 0;
+    for (auto action : listOfAppliedActions) {
+      std::cout << i++ << ". " << action.first << ": " << action.second
+                << std::endl;
+    }
+  }
+
+  return plan;
+}
