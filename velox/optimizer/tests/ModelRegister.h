@@ -463,8 +463,9 @@ void registerTwoTowerFunc(
       bn3Bias,
   };
 
-  std::vector<int> userTowerdims = {
-      129, 300, 300, 300, 300, 300, 300, 300, 300, 128, 128, 128, 128};
+  std::vector<int> userTowerdims = {129, 300, 300, 300, 300, 300, 300, 300,
+                                    300, 300, 300, 300, 300, 300, 300, 300,
+                                    300, 128, 128, 128, 128, 128, 128, 128};
 
   exec::registerVectorFunction(
       "user_torchNN",
@@ -735,8 +736,9 @@ void registerTwoTowerFunc(
       mbn3Weight,
       mbn3Bias,
   };
-  std::vector<int> movieTowerdims = {
-      65, 300, 300, 300, 300, 300, 300, 300, 300, 128, 128, 128, 128};
+  std::vector<int> movieTowerdims = {65,  300, 300, 300, 300, 300, 300, 300,
+                                     300, 300, 300, 300, 300, 300, 300, 300,
+                                     300, 128, 128, 128, 128, 128, 128, 128};
 
   exec::registerVectorFunction(
       "movie_torchNN",

@@ -1735,6 +1735,98 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     return;
   }
 
+  void baselineOptimizer(
+      std::string mctsType,
+      std::string mode,
+      std::string queryTemplate,
+      std::vector<int> numberOfTuples,
+      std::vector<int> dummyFeatureSizes,
+      int numThreads,
+      int repeatRun,
+      int verbose,
+      bool rewrite,
+      int dataBatchSize = 256) {
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    std::vector<std::string> inputFilePaths;
+    std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
+    std::string computationStr;
+
+    if (mode == "ml") {
+      if (queryTemplate == "ml-q1" || queryTemplate == "ml-q2" ||
+          queryTemplate == "ml-q3") {
+        if (queryTemplate == "ml-q1") {
+          // register ml-q1 models
+          registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+          registerMLTrendingModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q2") {
+          registerMLTrendingModelFunctions(cataLog, pool_);
+          registerMLInterestMovieModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLDLRMModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q3") {
+          registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
+          registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
+        }
+
+        // use original movielens dataset and pre-defined query plan
+        myPlan = setupMovielensDBQuery(
+            queryTemplate, cataLog, pool_, planNodeIdGenerator);
+
+      } else {
+        // use profile query plan
+        generateDummyData(
+            mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+        myPlan = setupProfileQueryPlan(
+            mode, queryTemplate, cataLog, planNodeIdGenerator);
+      }
+
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
+    }
+
+    std::cout << "[INFO] Original Query Plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+
+    std::chrono::steady_clock::time_point timeOptimizerStart =
+        std::chrono::steady_clock::now();
+
+    if (rewrite) {
+      if (mctsType == "arbitrary") {
+        arbitraryQueryRewrite(
+            cataLog, pool_, myPlan, planNodeIdGenerator, verbose);
+      } else if (mctsType == "heuristic") {
+        heuristicQueryRewrite(
+            cataLog, pool_, myPlan, planNodeIdGenerator, verbose);
+      } else {
+        throw std::runtime_error(
+            fmt::format("Non-supported MCTS type: {}", mctsType));
+      }
+    }
+
+    std::chrono::steady_clock::time_point timeOptimizerEnd =
+        std::chrono::steady_clock::now();
+
+    std::cout << "[INFO] Executed Query Plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+    float executionTime = runPlanWithCataLog(
+        pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+
+    auto queryOptimizerElapsedTime =
+        (std::chrono::duration_cast<std::chrono::microseconds>(
+             timeOptimizerEnd - timeOptimizerStart)
+             .count()) /
+        1000000.0;
+    std::cout << "[INFO] Arbitrary Query Optimizer Execution time: "
+              << queryOptimizerElapsedTime << std::endl;
+    std::cout << "[INFO] Arbitrary Query Optimized Plan Execution time: "
+              << executionTime << std::endl;
+  }
+
   void collectMovieLensStats(int numThreads, int repeatRun, int verbose) {
     std::string tableStatsPath =
         "/home/velox/velox/optimizer/tests/tableStats.txt";
@@ -1903,6 +1995,18 @@ int main(int argc, char** argv) {
         dataBatchSize);
   } else if (mctsType == "reusable") {
     demo.reusableMCTS(
+        mode,
+        queryTemplate,
+        numberOfTuples,
+        dummyFeatureSizes,
+        numDriver,
+        repeatRun,
+        verbose,
+        rewrite,
+        dataBatchSize);
+  } else if (mctsType == "arbitrary" || mctsType == "heuristic") {
+    demo.baselineOptimizer(
+        mctsType,
         mode,
         queryTemplate,
         numberOfTuples,
