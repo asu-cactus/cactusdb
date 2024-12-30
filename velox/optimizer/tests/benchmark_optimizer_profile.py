@@ -38,6 +38,20 @@ def run_cpp_program(path, params):
     # print("result", result)
     return result
 
+def collect_movielens_stats():
+    execution_command = [
+        "/home/velox/_build/release/velox/optimizer/tests/reusable_mcts_test -mode=collect_ml_stats"
+    ]
+    result = subprocess.run(
+        execution_command,
+        stdout=subprocess.PIPE,
+        shell=True,
+        timeout=60 * 30,  # 30 minutes
+    ).stdout
+
+    # print("result", result)
+    return result
+
 
 def read_file(filename):
     with open(filename, "r") as file:
@@ -76,7 +90,8 @@ def sample_model_structure(num_layer, model_scale):
         middle_layer_range = (512, 1024)
         output_layer_range = (3, 10)
     elif model_scale == "large":
-        input_layer_range = (50000, 100000)
+        input_layer_range = (5000, 10000)
+        # input_layer_range = (50000, 100000)
         middle_layer_range = (512, 2048)
         output_layer_range = (10, 100)
 
@@ -158,15 +173,30 @@ def configure_model_params(query_template, params_base, num_tag):
 
 
 if __name__ == "__main__":
-    list_num_user = [100, 500, 1000]
-    list_num_movie = [100, 500, 1000]
-    list_num_tag = [25, 50, 100, 1000, 5000]
-    list_query_template = ["user", "movie", "movie_user", "movie_user_tag"]
+    # setting for synthetic data
+    # list_num_user = [100, 500, 1000]
+    # list_num_movie = [100, 500, 1000]
+    # list_num_tag = [25, 50, 100, 1000, 5000]
+    # list_query_template = ["user", "movie", "movie_user", "movie_user_tag"]
+    # list_num_tag = np.arange(50, 5000, 50)
+    # list_num_tag = np.random.choice(list_num_tag, 5, replace=True)
     # list_num_user = [100]
     # list_num_movie = [50]
     # list_num_tag = [25]
 
-    num_repeat = 2
+    # setting for movielens dataset
+    list_num_user = np.arange(100, 2000, 100)
+    list_num_user = np.random.choice(list_num_user, 10, replace=True)
+    list_num_movie = np.arange(100, 2000, 100)
+    list_num_movie = np.random.choice(list_num_movie, 1, replace=True)
+    list_query_template = ["ml-q1", "ml-q2", "ml-q3"]
+    list_num_tag = np.arange(50, 5000, 50)
+    list_num_tag = np.random.choice(list_num_tag, 5, replace=True)
+
+    if 'ml-q1' in list_query_template:
+        collect_movielens_stats()
+
+    num_repeat = 1
     run_configs = list(
         itertools.product(
             list_query_template,

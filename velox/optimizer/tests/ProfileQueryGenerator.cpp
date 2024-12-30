@@ -1169,6 +1169,16 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           // register ml-q1 models
           registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
           registerMLTrendingModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q2") {
+          registerMLTrendingModelFunctions(cataLog, pool_);
+          registerMLInterestMovieModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLDLRMModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q3") {
+          registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
+          registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
         }
 
         // use original movielens dataset and pre-defined query plan
@@ -1224,8 +1234,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     writeStringToFile(std::to_string(executeTime), latencyOutPutPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
-
-    std::cout << "Success" << std::endl;
 
     return;
   }
