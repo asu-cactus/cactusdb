@@ -69,9 +69,9 @@ using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
-class IntegratedMCTSTest : public HiveConnectorTestBase {
+class ReusableMCTSTest : public HiveConnectorTestBase {
  public:
-  IntegratedMCTSTest() {
+  ReusableMCTSTest() {
     // Register Presto scalar functions.
     functions::prestosql::registerAllScalarFunctions();
 
@@ -103,7 +103,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     tempDirPath_ = exec::test::TempDirectoryPath::create();
   }
 
-  ~IntegratedMCTSTest() {
+  ~ReusableMCTSTest() {
     TearDown();
   }
 
@@ -121,25 +121,39 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
   }
 
-  int cacheQueryPlan(PlanBuilder& planBuilder) {
+  int cacheQueryPlanAndCateLog(PlanBuilder& planBuilder, CataLog& cataLog) {
     int queryPlanCacheId = queryPlanCacheId_++;
     auto serializedPlan = planBuilder.planNode()->serialize();
-    // queryPlanCaches_[queryPlanCacheId] = serializedPlan;
+    queryPlanCaches_[queryPlanCacheId] = serializedPlan;
+    cataLogIdAddressMapCaches_[queryPlanCacheId] = cataLog.getIdAddressMap();
 
     return queryPlanCacheId;
   }
 
-  void resetQueryPlanFromCache(PlanBuilder& planBuilder, int queryPlanCacheId) {
-    auto it = queryPlanCaches_.find(queryPlanCacheId);
-    if (it != queryPlanCaches_.end()) {
-      auto serializedPlan = it->second;
+  void resetQueryPlanAndQueryPlanFromCache(
+      PlanBuilder& planBuilder,
+      CataLog& cataLog,
+      int queryPlanCacheId) {
+    auto it1 = queryPlanCaches_.find(queryPlanCacheId);
+    if (it1 != queryPlanCaches_.end()) {
+      auto serializedPlan = it1->second;
       auto deserlizedUpdatedPlanNode =
           ISerializable::deserialize<core::PlanNode>(
               serializedPlan, pool_.get());
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
       throw std::runtime_error(fmt::format(
-          "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+          "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
+          queryPlanCacheId));
+    }
+
+    auto it2 = cataLogIdAddressMapCaches_.find(queryPlanCacheId);
+    if (it2 != cataLogIdAddressMapCaches_.end()) {
+      cataLog.setIdAddressMap(it2->second);
+    } else {
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
+          queryPlanCacheId));
     }
   }
 
@@ -434,7 +448,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       std::string queryTemplate,
       CataLog& cataLog,
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
-    bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
+    // bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
+    bool generateFilter = true;
 
     unsigned timestampSeed =
         std::chrono::system_clock::now().time_since_epoch().count();
@@ -608,7 +623,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             Source::Type::FILE,
             movieRelevanceTagStats);
         cataLog.addSource(std::make_shared<Source>(movieRelevanceTagSrc));
-      } else if (queryTemplate == "movie_user") {
+      } else if (
+          queryTemplate == "movie_user" || queryTemplate == "user_movie") {
         std::string userModel1ComputExpr = registerNNModel(
             userModelStructures[0],
             cataLog,
@@ -731,7 +747,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         Source movieSrc =
             Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
         cataLog.addSource(std::make_shared<Source>(movieSrc));
-      } else if (queryTemplate == "movie_user_tag") {
+      } else if (
+          queryTemplate == "movie_user_tag" ||
+          queryTemplate == "user_movie_tag") {
         std::string userModel1ComputExpr = registerNNModel(
             userModelStructures[0],
             cataLog,
@@ -1144,7 +1162,581 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
   }
 
-  void runProfile(
+  void vanillaMCTS(
+      std::string mode,
+      std::string queryTemplate,
+      std::vector<int> numberOfTuples,
+      std::vector<int> dummyFeatureSizes,
+      int numThreads,
+      int repeatRun,
+      int verbose,
+      bool rewrite,
+      int dataBatchSize = 256) {
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    std::vector<std::string> inputFilePaths;
+    std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
+    std::string computationStr;
+
+    generateDummyData(
+        mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+
+    if (mode == "ml") {
+      if (queryTemplate == "ml-q1") {
+        // register ml-q1 models
+        registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+        registerMLTrendingModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "ml-q2") {
+        registerMLTrendingModelFunctions(cataLog, pool_);
+        registerMLInterestMovieModelFunctions(cataLog, pool_);
+        registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+        registerMLDLRMModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "ml-q3") {
+        registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
+        registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
+        registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+        registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
+      }
+
+      myPlan = setupProfileQueryPlan(
+          mode, queryTemplate, cataLog, planNodeIdGenerator);
+
+      // } else if (model == "df") {
+      // } else if (model == "two-tower") {
+      // } else if (model == "llm") {
+      // } else if (model == "fraud") {
+      // } else if (model == "ml-q1") {
+      // } else if (model == "ml-q2") {
+      // } else if (model == "ml-q3") {
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
+    }
+
+    std::cout << "[INFO] Original Query Plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+
+    float unOptimizedExecutionTime = runPlanWithCataLog(
+        pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+    std::cout << "[INFO] Unoptimized Execution time: "
+              << unOptimizedExecutionTime << std::endl;
+
+    // Get the logical plan
+    auto planNode = myPlan.planNode();
+
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
+
+    planState.getPossibleActions(planNode, cataLog);
+
+    // Set up socket
+    int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (clientSocket == -1) {
+      std::cerr << "Error creating socket\n";
+    }
+
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    serverAddr.sin_port = htons(12345);
+
+    if (connect(
+            clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) ==
+        -1) {
+      std::cerr << "Error connecting to server\n";
+      close(clientSocket);
+    }
+
+    std::cout << "Start optimization." << std::endl;
+    // cache initial query plan and catalog
+    int initQueryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+    // send start message to start MCTS optimization
+    // start flag and initial query plan
+    Json::Value startJsonMessage;
+    startJsonMessage["mctsAction"] = "start";
+    startJsonMessage["queryPlan"] = planNode->toString(true, true);
+    std::cout << "json message: " << startJsonMessage << std::endl;
+    sendJsonBySocket(startJsonMessage, clientSocket);
+    bool optimizationIsFinished = false;
+
+    while (!optimizationIsFinished) {
+      planNode = myPlan.planNode();
+      // received json message from MCTS
+      Json::Value receivedJsonMessage = receiveJsonFromSocket(clientSocket);
+      std::string mctsAction = receivedJsonMessage["mctsAction"].asString();
+      LOG(INFO) << "===================================" << std::endl;
+      LOG(INFO) << "Received message with mcts action: " << mctsAction
+                << std::endl;
+      if (mctsAction == "") {
+        LOG(INFO) << "Un-captured error happened" << std::endl;
+        return;
+      }
+      LOG(INFO) << "JSON Message: " << receivedJsonMessage << std::endl;
+      if (mctsAction == "resetPlan") {
+        // if it is root node, it needs to start with original plan
+        // the p0 will be increased after capturePlanNodeId is called
+        // so it is required to clean the old IdAddressMap and VectorIdMap
+        // before reset the myPlan
+
+        resetQueryPlanAndQueryPlanFromCache(
+            myPlan, cataLog, initQueryPlanCacheId);
+        planNode = myPlan.planNode();
+        planState.clearTransformedExpr();
+        planState.getPossibleActions(planNode, cataLog);
+        // send acknowledgement for synchronization
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getQueryPlan") {
+        Json::Value jsonMessage;
+        jsonMessage["communicateFlag"] = true;
+        jsonMessage["mctsAction"] = "recQueryPlan";
+        jsonMessage["queryPlan"] =
+            "\"" + myPlan.planNode()->toString(true, true) + "\"";
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "getActionSpace") {
+        planState.getPossibleActions(planNode, cataLog);
+        Json::Value jsonMessage;
+        jsonMessage["actionSpace"] = Json::arrayValue;
+        for (const auto& entry : planState.actionsPair) {
+          // LOG(INFO) << "[ACTION SPACE] " << entry.first << s't'd
+          // entry.second << std::endl;
+          Json::Value jsonEntry;
+          jsonEntry["expression"] = entry.first;
+          jsonEntry["action"] = Json::arrayValue;
+          for (auto action : entry.second) {
+            jsonEntry["action"].append(Json::Value(action));
+          }
+          jsonMessage["actionSpace"].append(jsonEntry);
+        }
+        // cache current state
+        int queryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "takeAction") {
+        std::pair<std::string, std::string> targetAction;
+        targetAction.first = receivedJsonMessage["targetString"].asString();
+        targetAction.second = receivedJsonMessage["targetAction"].asString();
+
+        LOG(INFO) << "[INFO] take action: " << targetAction << std::endl;
+        if (targetAction.first != "None") {
+          // None action is selected
+          planState.takeAction(
+              planNode,
+              nullptr,
+              maker,
+              myPlan,
+              pool_,
+              planNodeIdGenerator,
+              {targetAction},
+              cataLog);
+          planState.update(myPlan, cataLog);
+        }
+        LOG(INFO) << "[INFO] current my query plan"
+                  << myPlan.planNode()->toString(true, true) << std::endl;
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "cacheState") {
+        int queryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+        Json::Value jsonMessage;
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "resetState") {
+        int queryPlanCacheId = receivedJsonMessage["queryPlanCacheId"].asInt();
+        resetQueryPlanAndQueryPlanFromCache(myPlan, cataLog, queryPlanCacheId);
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getCost") {
+        Json::Value jsonMessage;
+        if (receivedJsonMessage["costMode"] == "offline") {
+          float executeTime = runPlanWithCataLog(
+              pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+          jsonMessage["reward"] = executeTime;
+          LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
+                    << std::endl;
+        } else if (receivedJsonMessage["costMode"] == "online") {
+          CostModel* cm = new SimpleCostModel(cataLog);
+          CostEstimator* ce =
+              new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+
+          planNode = myPlan.planNode();
+          CostEstimate cost = ce->estimateCost(planNode);
+          jsonMessage["reward"] = cost.cost;
+          LOG(INFO) << "[INFO] get Cost(online): " << cost.cost << std::endl;
+        }
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+
+      } else if (mctsAction == "runPlan") {
+        auto latency = runPlanWithCataLog(
+            pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+        Json::Value jsonMessage;
+        jsonMessage["latency"] = latency;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "finished") {
+        // finished
+        // nothing to do
+      }
+
+      optimizationIsFinished =
+          receivedJsonMessage["optimizationIsFinished"].asBool();
+      LOG(INFO) << "[INFO] reached end of the loop, current opt flag: "
+                << optimizationIsFinished << std::endl;
+    };
+
+    return;
+  }
+
+  void reusableMCTS(
+      std::string mode,
+      std::string queryTemplate,
+      std::vector<int> numberOfTuples,
+      std::vector<int> dummyFeatureSizes,
+      // int featureSize,
+      // int numSamples,
+      int numThreads,
+      int repeatRun,
+      // int blockSize,
+      int verbose,
+      bool rewrite,
+      int dataBatchSize = 256) {
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    std::vector<std::string> inputFilePaths;
+    std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
+    std::string computationStr;
+
+    if (mode == "ml") {
+      if (queryTemplate == "ml-q1" || queryTemplate == "ml-q2" ||
+          queryTemplate == "ml-q3") {
+        if (queryTemplate == "ml-q1") {
+          // register ml-q1 models
+          registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+          registerMLTrendingModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q2") {
+          registerMLTrendingModelFunctions(cataLog, pool_);
+          registerMLInterestMovieModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLDLRMModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q3") {
+          registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
+          registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
+        }
+
+        // use original movielens dataset and pre-defined query plan
+        myPlan = setupMovielensDBQuery(
+            queryTemplate, cataLog, pool_, planNodeIdGenerator);
+
+      } else {
+        // use profile query plan
+        generateDummyData(
+            mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+        myPlan = setupProfileQueryPlan(
+            mode, queryTemplate, cataLog, planNodeIdGenerator);
+      }
+
+    } else {
+      throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
+    }
+
+    std::cout << "[INFO] Original Query Plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+
+    outputAugmentedQueryPlan(cataLog, myPlan);
+    // float unOptimizedExecutionTime = runPlanWithCataLog(
+    //     pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+    // std::cout << "[INFO] Unoptimized Execution time: "
+    //           << unOptimizedExecutionTime << std::endl;
+    // return;
+
+    /* if (rewrite) {
+      myPlan = rewriteQuery(cataLog, pool_, myPlan, planNodeIdGenerator,
+    verbose);
+    } */
+
+    // std::cout << "[INFO] Executed Query Plan: \n"
+    //           << myPlan.planNode()->toString(true, true) << std::endl;
+    // auto serializedPlan = myPlan.planNode()->serialize();
+    // std::string queryOutPutPath =
+    //     "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+    // augmentSerializedPlan(serializedPlan, cataLog);
+    // writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
+
+    // float executeTime =
+    //     runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
+
+    // std::string latencyOutPutPath =
+    //     "/home/velox/velox/optimizer/tests/executionLatency.txt";
+    // writeStringToFile(std::to_string(executeTime), latencyOutPutPath);
+
+    // std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+
+    // std::cout << "Success" << std::endl;
+
+    // myPlan = setupProfileQueryPlan(
+    //     model,
+    //     computationStr,
+    //     inputFilePaths,
+    //     inputTempFiles,
+    //     numSamples,
+    //     featureSize,
+    //     cataLog,
+    //     planNodeIdGenerator);
+
+    // Get the logical plan
+    auto planNode = myPlan.planNode();
+
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
+
+    planState.getPossibleActions(planNode, cataLog);
+
+    // std::cout << "[INFO] All possible actions:" << std::endl;
+    // for (auto entry : planState.actionsPair) {
+    //   std::cout << entry.first << ": " << entry.second << std::endl;
+    // }
+
+    // Set up socket
+    int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (clientSocket == -1) {
+      std::cerr << "Error creating socket\n";
+    }
+
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    serverAddr.sin_port = htons(12345);
+
+    if (connect(
+            clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) ==
+        -1) {
+      std::cerr << "Error connecting to server\n";
+      close(clientSocket);
+    }
+
+    std::cout << "Start optimization." << std::endl;
+    // cache initial query plan and catalog
+    int initQueryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+    // send start message to start MCTS optimization
+    // start flag and initial query plan
+    Json::Value startJsonMessage;
+    startJsonMessage["mctsAction"] = "start";
+    std::cout << "json message: " << startJsonMessage << std::endl;
+    sendJsonBySocket(startJsonMessage, clientSocket);
+    bool optimizationIsFinished = false;
+
+    while (!optimizationIsFinished) {
+      planNode = myPlan.planNode();
+      // received json message from MCTS
+      Json::Value receivedJsonMessage = receiveJsonFromSocket(clientSocket);
+      std::string mctsAction = receivedJsonMessage["mctsAction"].asString();
+      LOG(INFO) << "===================================" << std::endl;
+      LOG(INFO) << "Received message with mcts action: " << mctsAction
+                << std::endl;
+      if (mctsAction == "") {
+        LOG(INFO) << "Un-captured error happened" << std::endl;
+        return;
+      }
+      LOG(INFO) << "JSON Message: " << receivedJsonMessage << std::endl;
+      if (mctsAction == "resetPlan") {
+        // if it is root node, it needs to start with original plan
+        // the p0 will be increased after capturePlanNodeId is called
+        // so it is required to clean the old IdAddressMap and VectorIdMap
+        // before reset the myPlan
+
+        resetQueryPlanAndQueryPlanFromCache(
+            myPlan, cataLog, initQueryPlanCacheId);
+        planNode = myPlan.planNode();
+        planState.clearTransformedExpr();
+        planState.getPossibleActions(planNode, cataLog);
+        // std::cout << "[INFO] All possible actions:" << std::endl;
+        // for (auto entry : planState.actionsPair) {
+        //   std::cout << entry.first << ": " << entry.second << std::endl;
+        // }
+        // send acknowledgement for synchronization
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getQueryPlan") {
+        // Dump structured query plan to disk
+        // default path:
+        // /home/velox/velox/optimizer/tests/structuredQueryPlan.txt Json::Value
+        outputAugmentedQueryPlan(cataLog, myPlan);
+        outputStructuredQueryPlan(myPlan);
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getActionSpace") {
+        planState.getPossibleActions(planNode, cataLog);
+        Json::Value jsonMessage;
+        jsonMessage["actionSpace"] = Json::arrayValue;
+        for (const auto& entry : planState.actionsPair) {
+          // LOG(INFO) << "[ACTION SPACE] " << entry.first << s't'd
+          // entry.second << std::endl;
+          Json::Value jsonEntry;
+          jsonEntry["expression"] = entry.first;
+          jsonEntry["action"] = Json::arrayValue;
+          for (auto action : entry.second) {
+            jsonEntry["action"].append(Json::Value(action));
+          }
+          jsonMessage["actionSpace"].append(jsonEntry);
+        }
+        // cache current state
+        int queryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "takeAction") {
+        std::string selectedHighLevelOptRule =
+            receivedJsonMessage["targetAction"].asString();
+
+        LOG(INFO) << "[INFO] selectedHighLevelOptRule: "
+                  << selectedHighLevelOptRule << std::endl;
+        if (selectedHighLevelOptRule != "None") {
+          // Take action
+          std::pair<std::string, std::string> targetAction;
+          std::vector<std::string> applicableTargetExprs;
+
+          for (const auto& entry : planState.actionsPair) {
+            for (auto action : entry.second) {
+              if (action == selectedHighLevelOptRule) {
+                // add all applicable target expressions falling into the
+                // selected high level optimization rule
+                applicableTargetExprs.push_back(entry.first);
+              }
+            }
+          }
+
+          if (applicableTargetExprs.size() == 0) {
+            throw std::runtime_error(
+                "[INFO] No applicable target expressions found for the "
+                "selected high level optimization rule: " +
+                selectedHighLevelOptRule);
+          }
+          // cache current state
+          int cachedQueryPlanCacheId =
+              cacheQueryPlanAndCateLog(myPlan, cataLog);
+          // enumerate plan
+          targetAction.second = selectedHighLevelOptRule;
+
+          std::string tempEnumeratePlanPaths =
+              "/home/velox/velox/optimizer/tests/_tempOptimization";
+          deleteFilesInFolder(tempEnumeratePlanPaths);
+
+          for (int i = 0; i < applicableTargetExprs.size(); i++) {
+            targetAction.first = applicableTargetExprs[i];
+            planNode = myPlan.planNode();
+            planState.takeAction(
+                planNode,
+                nullptr,
+                maker,
+                myPlan,
+                pool_,
+                planNodeIdGenerator,
+                {targetAction},
+                cataLog);
+            std::string queryPlanOutputPath =
+                fmt::format("{}/{}.json", tempEnumeratePlanPaths, i);
+            outputAugmentedQueryPlan(cataLog, myPlan, queryPlanOutputPath);
+            // std::cout << "[debug] Enumerated plan: " << i << std::endl
+            //           << "path: " << queryPlanOutputPath << std::endl;
+            // reset the plan
+            resetQueryPlanAndQueryPlanFromCache(
+                myPlan, cataLog, cachedQueryPlanCacheId);
+          }
+
+          sendAcknowledgment(clientSocket);
+          // wait to receive another message indicating the cost estimation is
+          // done
+          Json::Value queryEstimationMessage =
+              receiveJsonFromSocket(clientSocket);
+          int selectedTargetExprIndex =
+              queryEstimationMessage["selectedPlanIdx"].asInt();
+
+          auto listPlanIds = queryEstimationMessage["listPlanIds"];
+          auto listPlanLatencies = queryEstimationMessage["listPlanLatencies"];
+          // reset the plan
+          resetQueryPlanAndQueryPlanFromCache(
+              myPlan, cataLog, cachedQueryPlanCacheId);
+
+          targetAction.first = applicableTargetExprs[selectedTargetExprIndex];
+          planNode = myPlan.planNode();
+          planState.takeAction(
+              planNode,
+              nullptr,
+              maker,
+              myPlan,
+              pool_,
+              planNodeIdGenerator,
+              {targetAction},
+              cataLog);
+          planState.update(myPlan, cataLog);
+          outputAugmentedQueryPlan(cataLog, myPlan);
+        }
+        LOG(INFO) << "[INFO] current my query plan"
+                  << myPlan.planNode()->toString(true, true) << std::endl;
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "cacheState") {
+        int queryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+        Json::Value jsonMessage;
+        jsonMessage["queryPlanCacheId"] = queryPlanCacheId;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "resetState") {
+        // reset the query plan and catalog to the cached state
+        int queryPlanCacheId = receivedJsonMessage["queryPlanCacheId"].asInt();
+        resetQueryPlanAndQueryPlanFromCache(myPlan, cataLog, queryPlanCacheId);
+        outputAugmentedQueryPlan(cataLog, myPlan);
+        sendAcknowledgment(clientSocket);
+      } else if (mctsAction == "getCost") {
+        Json::Value jsonMessage;
+        if (receivedJsonMessage["costMode"] == "offline") {
+          float executeTime = runPlanWithCataLog(
+              pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+          jsonMessage["reward"] = executeTime;
+          LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
+                    << std::endl;
+        } else if (receivedJsonMessage["costMode"] == "online") {
+          CostModel* cm = new SimpleCostModel(cataLog);
+          CostEstimator* ce =
+              new SimpleCostEstimator(std::unique_ptr<CostModel>(cm));
+
+          planNode = myPlan.planNode();
+          CostEstimate cost = ce->estimateCost(planNode);
+          jsonMessage["reward"] = cost.cost;
+          LOG(INFO) << "[INFO] get Cost(online): " << cost.cost << std::endl;
+        }
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+
+      } else if (mctsAction == "runPlan") {
+        auto latency = runPlanWithCataLog(
+            pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+        Json::Value jsonMessage;
+        jsonMessage["latency"] = latency;
+        sendAcknowledgment(clientSocket);
+        sendJsonBySocket(jsonMessage, clientSocket);
+      } else if (mctsAction == "finished") {
+        // finished
+        // nothing to do
+      }
+
+      optimizationIsFinished =
+          receivedJsonMessage["optimizationIsFinished"].asBool();
+      LOG(INFO) << "[INFO] reached end of the loop, current opt flag: "
+                << optimizationIsFinished << std::endl;
+    };
+
+    return;
+  }
+
+  void baselineOptimizer(
+      std::string mctsType,
       std::string mode,
       std::string queryTemplate,
       std::vector<int> numberOfTuples,
@@ -1200,42 +1792,124 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << "[INFO] Original Query Plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
 
+    std::chrono::steady_clock::time_point timeOptimizerStart =
+        std::chrono::steady_clock::now();
+
     if (rewrite) {
-      myPlan = rewriteQuery(
-          cataLog, pool_, myPlan, planNodeIdGenerator, verbose, "random");
+      if (mctsType == "arbitrary") {
+        arbitraryQueryRewrite(
+            cataLog, pool_, myPlan, planNodeIdGenerator, verbose);
+      } else if (mctsType == "heuristic") {
+        heuristicQueryRewrite(
+            cataLog, pool_, myPlan, planNodeIdGenerator, verbose);
+      } else {
+        throw std::runtime_error(
+            fmt::format("Non-supported MCTS type: {}", mctsType));
+      }
     }
 
-    // auto idAddressMap = cataLog.getIdAddressMap();
-    // std::cout << "[INFO] Id Address Map: \n";
-    // for (auto entry : idAddressMap) {
-    //   std::cout << entry.first << ": " << entry.second.size() << " Files" <<
-    //   std::endl;
-    // }
+    std::chrono::steady_clock::time_point timeOptimizerEnd =
+        std::chrono::steady_clock::now();
 
     std::cout << "[INFO] Executed Query Plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
-    auto serializedPlan = myPlan.planNode()->serialize();
-    std::string queryOutPutPath =
-        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
-    augmentSerializedPlan(serializedPlan, cataLog);
-    writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
-
-    std::cout << "[INFO] IdAddressMap: \n";
-    for (auto entry : cataLog.getIdAddressMap()) {
-      std::cout << entry.first << ": # Files: " << entry.second.size() << " "
-                << entry.second << std::endl;
-    }
-
-    float executeTime = runPlanWithCataLog(
+    float executionTime = runPlanWithCataLog(
         pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
 
-    std::string latencyOutPutPath =
-        "/home/velox/velox/optimizer/tests/executionLatency.txt";
-    writeStringToFile(std::to_string(executeTime), latencyOutPutPath);
+    auto queryOptimizerElapsedTime =
+        (std::chrono::duration_cast<std::chrono::microseconds>(
+             timeOptimizerEnd - timeOptimizerStart)
+             .count()) /
+        1000000.0;
+    std::cout << "[INFO] Arbitrary Query Optimizer Execution time: "
+              << queryOptimizerElapsedTime << std::endl;
+    std::cout << "[INFO] Arbitrary Query Optimized Plan Execution time: "
+              << executionTime << std::endl;
+  }
 
-    std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+  void collectMovieLensStats(int numThreads, int repeatRun, int verbose) {
+    std::string tableStatsPath =
+        "/home/velox/velox/optimizer/tests/tableStats.txt";
+    remove(tableStatsPath.c_str());
 
-    return;
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    myPlan =
+        setupMovielensDBQuery("user_only", cataLog, pool_, planNodeIdGenerator);
+    std::vector<RowVectorPtr> finalResult;
+    runPlanWithCataLog(
+        pool_,
+        numThreads,
+        myPlan,
+        cataLog,
+        finalResult,
+        1 /*repeatRun*/,
+        verbose,
+        true /*copy result*/);
+    RowVectorPtr userDataRowVector = mergeRowVectors(finalResult, pool_);
+
+    // output the histogram for the user data
+    cataLog.outputHistogramForData(
+        userDataRowVector, "user", 50, tableStatsPath);
+    cataLog.clearIdAddressMap();
+
+    myPlan = setupMovielensDBQuery(
+        "movie_only", cataLog, pool_, planNodeIdGenerator);
+    finalResult.clear();
+    runPlanWithCataLog(
+        pool_,
+        numThreads,
+        myPlan,
+        cataLog,
+        finalResult,
+        1 /*repeatRun*/,
+        verbose,
+        true /*copy result*/);
+    RowVectorPtr movieDataRowVector = mergeRowVectors(finalResult, pool_);
+
+    // output the histogram for the user data
+    cataLog.outputHistogramForData(
+        movieDataRowVector, "movie", 50, tableStatsPath);
+    cataLog.clearIdAddressMap();
+
+    myPlan = setupMovielensDBQuery(
+        "movie_rating_only", cataLog, pool_, planNodeIdGenerator);
+    finalResult.clear();
+    runPlanWithCataLog(
+        pool_,
+        numThreads,
+        myPlan,
+        cataLog,
+        finalResult,
+        1 /*repeatRun*/,
+        verbose,
+        true /*copy result*/);
+    RowVectorPtr movieRatingDataRowVector = mergeRowVectors(finalResult, pool_);
+    cataLog.outputHistogramForData(
+        movieRatingDataRowVector, "movie_rating", 50, tableStatsPath);
+    cataLog.clearIdAddressMap();
+
+    myPlan = setupMovielensDBQuery(
+        "movie_tag_only", cataLog, pool_, planNodeIdGenerator);
+    finalResult.clear();
+    runPlanWithCataLog(
+        pool_,
+        numThreads,
+        myPlan,
+        cataLog,
+        finalResult,
+        1 /*repeatRun*/,
+        verbose,
+        true /*copy result*/);
+    RowVectorPtr movieTagDataRowVector = mergeRowVectors(finalResult, pool_);
+    cataLog.outputHistogramForData(
+        movieTagDataRowVector, "movie_relevance_tag", 50, tableStatsPath);
+
+    // std::cout << "userDataRowVector: " << userDataRowVector->toString()
+    //           << std::endl;
+    // std::cout << "DONE" << std::endl;
   }
 
  private:
@@ -1248,9 +1922,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
   static inline int queryPlanCacheId_ = 0;
   std::map<int, folly::dynamic> queryPlanCaches_;
+  std::map<int, std::map<core::PlanNodeId, std::vector<std::string>>>
+      cataLogIdAddressMapCaches_;
   static inline int modelGroupId_ = 0;
 };
 
+DEFINE_string(mcts, "reusable", "MCTS type: reusable, vanilla");
 DEFINE_string(mode, "ml", "Mode: ml");
 DEFINE_string(
     query_template,
@@ -1274,6 +1951,7 @@ int main(int argc, char** argv) {
   std::string mode = FLAGS_mode;
   std::string queryTemplate = FLAGS_query_template;
   std::string model = FLAGS_model;
+  std::string mctsType = FLAGS_mcts;
 
   bool rewrite = FLAGS_rewrite;
   int repeatRun = FLAGS_num_repeat;
@@ -1285,7 +1963,7 @@ int main(int argc, char** argv) {
   int numDriver = FLAGS_num_driver;
   int verbose = FLAGS_verbose;
   int dataBatchSize = FLAGS_data_batch_size;
-  IntegratedMCTSTest demo;
+  ReusableMCTSTest demo;
 
   std::vector<int> numberOfTuples;
   std::vector<int> dummyFeatureSizes;
@@ -1296,19 +1974,50 @@ int main(int argc, char** argv) {
     numberOfTuples.push_back(numTag);
     dummyFeatureSizes.push_back(userFeatureSize);
     dummyFeatureSizes.push_back(movieFeatureSize);
+  } else if (mode == "collect_ml_stats") {
+    demo.collectMovieLensStats(numDriver, repeatRun, verbose);
+    return 0;
   }
 
   std::cout << "numberOfTuples: " << numberOfTuples << std::endl;
   std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
 
-  demo.runProfile(
-      mode,
-      queryTemplate,
-      numberOfTuples,
-      dummyFeatureSizes,
-      numDriver,
-      repeatRun,
-      verbose,
-      rewrite,
-      dataBatchSize);
+  if (mctsType == "vanilla") {
+    demo.vanillaMCTS(
+        mode,
+        queryTemplate,
+        numberOfTuples,
+        dummyFeatureSizes,
+        numDriver,
+        repeatRun,
+        verbose,
+        rewrite,
+        dataBatchSize);
+  } else if (mctsType == "reusable") {
+    demo.reusableMCTS(
+        mode,
+        queryTemplate,
+        numberOfTuples,
+        dummyFeatureSizes,
+        numDriver,
+        repeatRun,
+        verbose,
+        rewrite,
+        dataBatchSize);
+  } else if (mctsType == "arbitrary" || mctsType == "heuristic") {
+    demo.baselineOptimizer(
+        mctsType,
+        mode,
+        queryTemplate,
+        numberOfTuples,
+        dummyFeatureSizes,
+        numDriver,
+        repeatRun,
+        verbose,
+        rewrite,
+        dataBatchSize);
+  } else {
+    throw std::runtime_error(
+        fmt::format("Non-supported MCTS type: {}", mctsType));
+  }
 }

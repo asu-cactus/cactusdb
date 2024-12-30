@@ -134,8 +134,8 @@ create_weight_block(int total_size, float* values, int block_numbers) {
 
 std::vector<std::vector<float>>
 create_blocks(int row, int col, float* values, int block_size) {
-  int num_blocks = (col + block_size - 1) /
-      block_size; // Calculate the number of blocks needed
+  int num_blocks =
+      static_cast<int>(std::ceil(static_cast<float>(col) / block_size));
   std::vector<std::vector<float>> blocks(
       num_blocks); // Initialize vector of blocks
   int current_col = 0; // Current column index in the values array
@@ -274,28 +274,69 @@ std::vector<int> extractUDFDimension(std::string udfName) {
   std::shared_ptr<VectorFunction> myUDF =
       getVectorFunction(udfName, {ARRAY(REAL())}, {}, config);
   if (udfName.find("mat_mul") != std::string::npos) {
-    std::shared_ptr<MatrixMultiply> myMulUDF =
-        std::dynamic_pointer_cast<MatrixMultiply>(myUDF);
-    return myMulUDF->getDims();
+    if (udfName.find("_h") != std::string::npos) {
+      // block based MatrixMultiply
+      myUDF = getVectorFunction(
+          udfName, {ARRAY(REAL()), ARRAY(REAL())}, {}, config);
+      std::shared_ptr<MatrixMultiply_h> myMulUDF =
+          std::dynamic_pointer_cast<MatrixMultiply_h>(myUDF);
+      std::vector<int> dims = myMulUDF->getDims();
+      return {dims[2] /*block size */, dims[1]};
+    } else {
+      // non-block based MatrixMultiply
+      std::shared_ptr<MatrixMultiply> myMulUDF =
+          std::dynamic_pointer_cast<MatrixMultiply>(myUDF);
+      return myMulUDF->getDims();
+    }
   } else if (udfName.find("mat_vector_add") != std::string::npos) {
     std::shared_ptr<MatrixVectorAddition> myAddUDF =
         std::dynamic_pointer_cast<MatrixVectorAddition>(myUDF);
     return myAddUDF->getDims();
+  } else if (udfName.find("torchdnn") != std::string::npos) {
+    std::shared_ptr<TorchDNNV2> myTorchDNN =
+        std::dynamic_pointer_cast<TorchDNNV2>(myUDF);
+    return myTorchDNN->getDims();
   } else {
     return {};
   }
 }
 
+void augmentTorchDNNExpression(
+    folly::dynamic& serializedPlan,
+    std::string udfName) {
+  core::QueryConfig config({});
+  std::shared_ptr<VectorFunction> myUDF =
+      getVectorFunction(udfName, {ARRAY(REAL())}, {}, config);
+  std::shared_ptr<TorchDNNV2> myTorchDNN =
+      std::dynamic_pointer_cast<TorchDNNV2>(myUDF);
+  assert(myTorchDNN);
+  std::vector<velox::dl::KernelType> kernelTypes = myTorchDNN->getKernelTypes();
+
+  folly::dynamic jsonArray = folly::dynamic::array;
+  for (auto kernelType : kernelTypes) {
+    jsonArray.push_back(kernelTypeToString(kernelType));
+  }
+  serializedPlan["torchdnn_kernels"] = jsonArray;
+}
+
 void augmentFunctionExpression(folly::dynamic& serializedPlan) {
   if (serializedPlan.count("functionName")) {
     std::string functionName = serializedPlan["functionName"].asString();
-    std::vector<int> dims = extractUDFDimension(functionName);
-    if (dims.size() > 0) {
-      folly::dynamic jsonArray = folly::dynamic::array;
-      for (int value : dims) {
-        jsonArray.push_back(value);
+    try {
+      std::vector<int> dims = extractUDFDimension(functionName);
+      if (dims.size() > 0) {
+        folly::dynamic jsonArray = folly::dynamic::array;
+        for (int value : dims) {
+          jsonArray.push_back(value);
+        }
+        serializedPlan["dims"] = jsonArray;
       }
-      serializedPlan["dims"] = jsonArray;
+      if (functionName.find("torchdnn") != std::string::npos) {
+        augmentTorchDNNExpression(serializedPlan, functionName);
+      }
+    } catch (const std::exception& e) {
+      std::cout << "Error: extractUDFDimension: " << functionName << " "
+                << e.what() << std::endl;
     }
     if (serializedPlan.count("inputs")) {
       for (auto& input : serializedPlan["inputs"]) {
@@ -532,11 +573,12 @@ std::shared_ptr<const core::PlanNode> findPlanNodeById(
 
 /**
  * @brief Function to find the nodeIds between two nodeId
- * 
+ *
  * @param planNode The current planNode to search for the nodeIds
  * @param sourceNodeId The source nodeId
  * @param targetNodeId The target nodeId
- * @return std::vector<std::string> The nodeIds between the source and target nodeId 
+ * @return std::vector<std::string> The nodeIds between the source and target
+ * nodeId
  */
 
 std::vector<std::string> findNodeIdsBetweenIds(
@@ -568,7 +610,7 @@ std::vector<std::string> findNodeIdsBetweenIds(
 
 /**
  * @brief Function to add the projection field in the serialized plan
- * 
+ *
  * @param serializedPlan The serialized plan to add the projection field
  * @param filedToBeAdded The field to be added in the projection
  * @param nodeIds The nodeIds to add the projection field
@@ -595,7 +637,9 @@ void addProjectionFiledInSerializedPlan(
       serializedPlan["outputType"]["cTypes"].push_back(filedToBeAdded["type"]);
       serializedPlan["outputType"]["names"].push_back(
           filedToBeAdded["fieldName"]);
-    } else if (currentNodeName.find("Filter") != std::string::npos) {
+    } else if (
+        currentNodeName.find("Filter") != std::string::npos ||
+        currentNodeName.find("LimitNode") != std::string::npos) {
       // No need to add the filed to the FilterNode
     } else {
       throw std::runtime_error(
@@ -615,18 +659,128 @@ void addProjectionFiledInSerializedPlan(
 // In Velox, when parsing the cast function, parentheses are omitted in the
 // exprStr output, making it unusable directly. This function reconstructs the
 // correct cast expression by adding the necessary parentheses to match the body
-// of the expression. For example: Input: eq(cast
-// argmax(ROW["trending_prediction"]) as BIGINT, 1) Output:
-// eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
+// of the expression. For example:
+// Input: eq(cast argmax(ROW["trending_prediction"]) as BIGINT, 1)
+// Output: eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
 std::string fix_cast_function_parsing(std::string input) {
   // Use regex to match the pattern "cast" followed by a space and a function
   // call
-  std::regex cast_regex(R"(cast\s+(\w+\(.*?\))\s+as\s+(\w+))");
+  std::regex cast_regex(R"(cast\s+(\w+.*?)\s+as\s+(\w+))");
 
   // Use a lambda function for the replacement to insert parentheses
   std::string result =
       std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
   return result;
+}
+
+/**
+ * @brief Function to reformat the comparison expression to a standard format,
+ * the input following the format:
+ * [Operator](cast [Expression] as [DataType], [CompareValue])
+ * The output format: [Expression] [Operator] [CompareValue]
+ *
+ *
+ * @param exprStr The input comparison expression string
+ * @return std::string The reformatted comparison expression
+ */
+
+std::string reformatComparisonExpr(std::string exprStr) {
+  std::regex pattern(
+      R"((eq|neq|lt|lte|gt|gte)\(cast\s+(.*?)\s+as\s+(\w+),\s*(.*?)\s*\))");
+  // Match the exprStr string against the pattern
+  std::smatch match;
+  if (std::regex_search(exprStr, match, pattern)) {
+    // Extract the matched groups
+    std::string operatorStr = match[1]; // Operator
+    std::string expression = match[2]; // Expression
+    std::string dataType = match[3]; // Expression
+    std::string compareValue = match[4]; // CompareValue
+
+    if (operatorStr == "eq") {
+      operatorStr = "=";
+    } else if (operatorStr == "neq") {
+      operatorStr = "!=";
+    } else if (operatorStr == "lt") {
+      operatorStr = "<";
+    } else if (operatorStr == "lte") {
+      operatorStr = "<=";
+    } else if (operatorStr == "gt") {
+      operatorStr = ">";
+    } else if (operatorStr == "gte") {
+      operatorStr = ">=";
+    } else {
+      throw std::runtime_error(
+          "Unsupported operator in the expression: " + exprStr);
+    }
+
+    if (dataType == "DOUBLE" || dataType == "REAL") {
+      compareValue = std::to_string(std::stod(compareValue));
+    }
+
+    // Return the reformatted expression
+    return expression + " " + operatorStr + " " + compareValue;
+  } else {
+    throw std::runtime_error("Failed to match the pattern: " + exprStr);
+  }
+
+  // If no match, return an empty optional
+  return "";
+}
+
+/**
+ * @brief Function to rewrite the lambda expression in the input expression
+ * string to a standard format, the input following the format:
+ * lambda ROW<[ParameterName]:[DataType]> -> cast ROW["[ParameterName]"] as
+ * [TargetType]
+ * The output format: lambda [ParameterName] -> cast [ParameterName] as
+ * [TargetType]
+ *
+ * @param exprStr The input expression string
+ * @return std::string The rewritten expression string
+ */
+std::string rewriteLambdaInExpStr(const std::string& exprStr) {
+  // Define a regex pattern to match the lambda syntax
+  std::regex lambdaRegex(
+      R"(lambda ROW<([^:]+):[^>]+> -> cast ROW\["\1"\] as ([A-Z]+))");
+  std::smatch matches;
+
+  // Search for the lambda expression
+  if (std::regex_search(exprStr, matches, lambdaRegex)) {
+    std::string paramName = matches[1]; // Extract the parameter name
+    std::string targetType = matches[2]; // Extract the target type (e.g., REAL)
+
+    // Rewrite the lambda expression
+    std::string rewrittenLambda =
+        " " + paramName + " -> cast (" + paramName + " as " + targetType + ")";
+
+    // Replace the original lambda expression with the rewritten one
+    return std::regex_replace(exprStr, lambdaRegex, rewrittenLambda);
+  }
+
+  // If no match, return the original input
+  return exprStr;
+}
+
+std::string removeUnnecessaryCast(const std::string& exprStr) {
+  // Define a regex pattern to match the cast syntax
+  std::regex castRegex(R"(cast ROW\[\"([^"]+)\"\] as [A-Z]+)");
+  std::vector<std::string> columnNames;
+
+  auto begin = std::sregex_iterator(exprStr.begin(), exprStr.end(), castRegex);
+  auto end = std::sregex_iterator();
+
+  std::string rewrittenExpr = exprStr;
+
+  for (std::sregex_iterator i = begin; i != end; ++i) {
+    std::smatch match = *i;
+    if (match.size() > 1) {
+      std::string columnName = match[1];
+      std::string matchedStr = match.str();
+      rewrittenExpr = std::regex_replace(
+          rewrittenExpr, std::regex(escapeRegex(matchedStr)), columnName);
+    }
+  }
+  return rewrittenExpr;
 }
 
 std::vector<RowVectorPtr> splitRowVectorIntoBatches(

@@ -18,6 +18,20 @@
 #include <string>
 #include "velox/cost_model/Source.h"
 
+
+// Function to split a string based on a delimiter
+std::vector<std::string> splitString(const std::string& str, char delimiter) {
+  std::vector<std::string> tokens;
+  std::stringstream ss(str);
+  std::string token;
+
+  while (std::getline(ss, token, delimiter)) {
+    tokens.push_back(token);
+  }
+
+  return tokens;
+}
+
 class CataLog {
  public:
   virtual ~CataLog() = default;
@@ -35,6 +49,9 @@ class CataLog {
       int flag,
       std::string nameSuffix = "") {
     // TODO: better naming convention for the flag variable
+    for (auto& path : filePath) {
+      preserveTempFilePaths.push_back(path);
+    }
     if (flag == 1) {
       std::string key = name + "_weights" + nameSuffix;
 
@@ -190,6 +207,11 @@ class CataLog {
   // Get the entire file address map for PlanNodeId
   std::map<core::PlanNodeId, std::vector<std::string>> getIdAddressMap() {
     return idFileAddrMap;
+  }
+
+  void setIdAddressMap(
+      std::map<core::PlanNodeId, std::vector<std::string>> map) {
+    idFileAddrMap = map;
   }
 
   // Set the schema for a given PlanNodeId
@@ -502,7 +524,6 @@ class CataLog {
       double binValue = static_cast<double>(minValue) + b * binSize;
       bins[b] = std::to_string(binValue);
     }
-    
     bins[numBins] = std::to_string(maxValue);
 
     for (size_t j = 0; j < numRows; ++j) {
@@ -534,12 +555,23 @@ class CataLog {
     for (size_t j = 0; j < numRows; ++j) {
       if (!stringVector->isNullAt(j)) {
         std::string value = stringVector->valueAt(j).str();
-        categoryCounts[value]++;
-        totalCount++;
-        uniqueCategories.insert(value);
+        if (colName.find("genres") != std::string::npos) {
+          // TODO: add method to automatically split string based on delimiter
+          // special case: if it is genres, needs to split by '|'
+          // example of movie genres: "Action|Adventure|Science Fiction"
+          std::vector<std::string> words = splitString(value, '|');
+          for (const auto& word : words) {
+            categoryCounts[word]++;
+            totalCount++;
+            uniqueCategories.insert(word);
+          }
+        } else {
+          categoryCounts[value]++;
+          totalCount++;
+          uniqueCategories.insert(value);
+        }
       }
     }
-
     std::vector<std::string> categoricalValsToIterate;
     if (categoricalColVals.find(colName) != categoricalColVals.end()) {
       // Use the unique values from the categoricalColVals map if exists
@@ -551,6 +583,9 @@ class CataLog {
 
     size_t index = 0;
     for (const auto& category : categoricalValsToIterate) {
+      if (index >= bins.size()) {
+        break;
+      }
       bins[index] = category;
       if (categoryCounts.find(category) == categoryCounts.end()) {
         frequencies[index] = 0;
@@ -581,7 +616,7 @@ class CataLog {
 
       // initialize the bins
       std::vector<double> frequencies(numBins, 0);
-      std::vector<std::string> bins(numBins+1); // bins store the bin edges
+      std::vector<std::string> bins(numBins + 1); // bins store the bin edges
       if (child->typeKind() == TypeKind::INTEGER) {
         // Handle INTEGER type
         auto numericVector = child->asFlatVector<int32_t>();
@@ -609,7 +644,7 @@ class CataLog {
         columnType = "Numerical";
       } else if (child->typeKind() == TypeKind::VARCHAR) {
         // Handle VARCHAR type
-        if (columnName.find("title") == std::string::npos) {
+        if (columnName.find("title") == std::string::npos && columnName.find("overview") == std::string::npos) {
           // skip title columns
           auto stringVector = child->asFlatVector<StringView>();
           processCategoricalColumn(
@@ -650,7 +685,7 @@ class CataLog {
   // Default values
   int defaultBlocksNum = 4;
   int defaultBlocksSize = 256;
-  int blockingThreshold = 1;
+  int blockingThreshold = 256;
   int defaultSplits = 392;
   // Maps for storing data
   std::map<std::string, std::vector<int>> dataSourceStatMap;
