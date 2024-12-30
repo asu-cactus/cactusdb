@@ -37,39 +37,91 @@ class BatchNorm1D : public MLFunction {
       exec::EvalCtx& context,
       VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
+    output->clearNulls(rows);
+    auto arrayOutput = output->as<ArrayVector>();
+    auto sizes = arrayOutput->mutableSizes(rows.end());
+    auto rawSizes = sizes->asMutable<int32_t>();
+    auto offsets = arrayOutput->mutableOffsets(rows.end());
+    auto rawOffsets = offsets->asMutable<int32_t>();
 
-    auto inputFeatures = args[0]->as<ArrayVector>()->elements();
-    float* inputValues = inputFeatures->values()->asMutable<float>();
-    int numInput = rows.size();
+    // Initialize sizes and offsets to zero.
+    std::fill(rawSizes, rawSizes + rows.end(), 0);
+    std::fill(rawOffsets, rawOffsets + rows.end(), 0);
 
-    Eigen::Map<
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        inputMatrix(inputValues, numInput, dims[0]);
+    auto elementsOutput = arrayOutput->elements();
+    auto elementsPool = context.pool();
+
+    exec::DecodedArgs decodedArgs(rows, args, context);
+    auto decodedInput = decodedArgs.at(0);
+    auto numRows = rows.size();
+
+    auto inputArray = decodedInput->base()->as<ArrayVector>();
+    auto inputElements = inputArray->elements();
+    float* inputValues = inputElements->values()->asMutable<float>();
+    auto inputOffsets = inputArray->rawOffsets();
+    auto inputSizes = inputArray->rawSizes();
+
+    std::map<vector_size_t, vector_size_t> rowMap;
+    std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+    std::vector<vector_size_t> uniqueRawIndexeVector;
+    vector_size_t numUniqueRows = 0;
+    int numCols = dims[0];
+    rows.applyToSelected([&](vector_size_t row) {
+      auto mappedIndexInRowData = decodedInput->index(row);
+      if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
+          uniqueRawIndexeSet.end()) {
+        // add it
+        rowMap[row] = numUniqueRows;
+        uniqueRawIndexeSet.insert(mappedIndexInRowData);
+        uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+        ++numUniqueRows;
+      } else {
+        // already added
+        rowMap[row] = rowMap[mappedIndexInRowData];
+      }
+    });
+
+    int numInputMatrixRows = numUniqueRows;
+    Eigen::MatrixXf inputMatrix(numInputMatrixRows, numCols);
+    int rowIndex = 0;
+    for (auto rawIndex : uniqueRawIndexeVector) {
+      Eigen::Map<const Eigen::VectorXf> rowVector(
+          inputValues + inputOffsets[rawIndex], numCols);
+      inputMatrix.row(rowIndex++) = rowVector;
+    }
+
     Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
-        result(numInput, dims[0]);
-
-    for (int i = 0; i < dims[0]; i++) {
+        resultMatrix(numInputMatrixRows, numCols);
+    for (int i = 0; i < numCols; i++) {
       Eigen::VectorXf colData = inputMatrix.col(i);
       float colMean = colData.mean();
       float colVariance =
-          (colData.array() - colMean).square().sum() / (numInput - 1);
+          (colData.array() - colMean).square().sum() / (numInputMatrixRows - 1);
 
-      result.col(i) =
+      resultMatrix.col(i) =
           (colData.array() - colMean) / sqrt(colVariance + eps_) * weights_[i] +
           bias_[i];
     }
 
-    // Convert from Eigen::Matrix to std::vector<std::vector<>>
-    std::vector<std::vector<float>> resultVector;
-    for (int rowIndex = 0; rowIndex < result.rows(); rowIndex++) {
-      std::vector<float> row(
-          result.row(rowIndex).data(),
-          result.row(rowIndex).data() + result.cols());
-      resultVector.push_back(row);
-    }
+    auto baseOffset = elementsOutput->size();
+    elementsOutput->resize(baseOffset + rows.end() * numCols);
+    float* outputValues = elementsOutput->values()->asMutable<float>();
+    vector_size_t outputOffset = 0;
+    rows.applyToSelected([&](vector_size_t row) {
+      if (rowMap.find(row) == rowMap.end()) {
+        throw std::runtime_error(
+            "Mapped index not found for the result matrix.");
+      }
+      auto mappedIndexInResultMatrix = rowMap[row];
+      rawOffsets[row] = outputOffset;
+      rawSizes[row] = numCols;
+      std::memcpy(
+          outputValues + outputOffset,
+          resultMatrix.row(mappedIndexInResultMatrix).data(),
+          numCols * sizeof(float));
+    });
 
-    VectorMaker maker{context.pool()};
-    output = maker.arrayVector<float>(resultVector, REAL());
+    arrayOutput->setElements(elementsOutput);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {

@@ -98,6 +98,10 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
           //           << " pushdownNodeId: " << curNodeId
           //           << " expressionAlias: " << expressionAlias << std::endl;
         }
+      }
+      if (curNodeName.find("Aggregation") != std::string::npos) {
+        // do not the pushdown through aggregation node
+        return "";
       } else {
         // Since the pushdown is applied by creating a new project node after
         // the pushdown node, and the expression alias are not available in the
@@ -268,6 +272,10 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                 // mat_mul0(ROW["features"]), we need to extract the data source
                 // from the expression via regex
                 std::string pushDownExpression = target;
+                // rewrite lambda function if it exists
+                pushDownExpression = rewriteLambdaInExpStr(pushDownExpression);
+                pushDownExpression = removeUnnecessaryCast(pushDownExpression);
+
                 std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
                 std::smatch matches;
                 // Start position for the search
@@ -327,11 +335,14 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
             } else {
               // Parse the non-target expressions
               auto rewriteExpr = exprStr;
+              // rewrite lambda function if it exists
+              rewriteExpr = rewriteLambdaInExpStr(rewriteExpr);
+              rewriteExpr = removeUnnecessaryCast(rewriteExpr);
+
               std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
               std::smatch matches;
               // Start position for the search
               std::string::const_iterator searchStart(exprStr.cbegin());
-
               // Search out the matched data source and store in matches
               while (std::regex_search(
                   searchStart,
@@ -436,7 +447,6 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
             LOG(INFO) << "[INFO] nodeIdsBetweenSourceAndTarget: "
                       << nodeIdsBetweenSourceAndTarget << std::endl;
-
             addProjectionFiledInSerializedPlan(
                 serializedPlan,
                 pushdownExprFiled,
@@ -458,15 +468,19 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                     .setRoot(curNodeInUpdatedPlan->sources()[0])
                     .project(targetProjectExprs);
 
-            auto serializedNewSource = rewritePlan.planNode()->serialize();
+            if (prevNode == nullptr) {
+              planBuilder.setRoot(rewritePlan.planNode());
+            } else {
+              auto serializedNewSource = rewritePlan.planNode()->serialize();
 
-            replaceSourceWithIdInSerializedPlan(
-                serializedPlan, serializedNewSource, curNodeId);
+              replaceSourceWithIdInSerializedPlan(
+                  serializedPlan, serializedNewSource, curNodeId);
 
-            auto deserlizedFinalPlanNode =
-                ISerializable::deserialize<core::PlanNode>(
-                    serializedPlan, pool_.get());
-            planBuilder.setRoot(deserlizedFinalPlanNode);
+              auto deserlizedFinalPlanNode =
+                  ISerializable::deserialize<core::PlanNode>(
+                      serializedPlan, pool_.get());
+              planBuilder.setRoot(deserlizedFinalPlanNode);
+            }
           }
         } else if (nodeName == "Filter") {
           auto myFilterNode =
@@ -521,8 +535,13 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
             // Invoke the cast function to fix the parsing issue
             if (pushDownExpression.find("cast") != std::string::npos) {
-              pushDownExpression =
-                  fix_cast_function_parsing(pushDownExpression);
+              // pushDownExpression =
+              //     fix_cast_function_parsing(pushDownExpression);
+              // Reformat filter expression
+              pushDownExpression = reformatComparisonExpr(pushDownExpression);
+              // std::cout << "[DEBUG] pushDownExpression: " <<
+              // pushDownExpression
+              //           << std::endl;
             }
             pushDownExpression = replaceDoubleQuotes(pushDownExpression);
 
@@ -662,6 +681,14 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
 
         for (int i = 0; i < parsedSingleExprs.size(); i++) {
           targetExprStr = matchedExprs[i];
+          if (targetExprStr.find("_partial_agg") != std::string::npos) {
+            // Edge case: when converting  the MatMul to relational approach,
+            // its intermediate aggregation name is following the pattern
+            // "[Table_Source]_partial_agg[Number]", and it will later be used
+            // in the following computation, actually it is not a pushdown
+            // target, so we need to skip it.
+            continue;
+          }
           if (mayPushdown(
                   rootNode, targetExprStr, matchedDataSources, curNodeId)) {
             targetActions.push_back(targetExprStr);

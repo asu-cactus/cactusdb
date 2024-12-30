@@ -68,7 +68,14 @@ class PlanState {
         for (const auto& action : actions) {
           LOG(INFO) << "[INFO] PlanState: pushed Action: " << action
                     << " Rule: " << rulePair.first << std::endl;
-          actionsPair[action].push_back(rulePair.first);
+          // Check if the rule is already applied on the action, if not, add it
+          // to the actionsPair, otherwise do nothing
+          if (isRuleApplied(action, rulePair.first)) {
+            LOG(INFO) << "[INFO] PlanState: Rule " << rulePair.first
+                      << " already applied on " << action << std::endl;
+          } else {
+            actionsPair[action].push_back(rulePair.first);
+          }
         }
         // clear target UDF name, prepare for next rule
       }
@@ -96,6 +103,30 @@ class PlanState {
       }
     }
     return false;
+  }
+
+  bool isRuleApplied(std::string targetString, std::string targetRule) {
+    auto it = transformedExprs.find(targetString);
+    if (it != transformedExprs.end()) {
+      const std::vector<std::string>& appliedRules = it->second;
+      if (std::find(appliedRules.begin(), appliedRules.end(), targetRule) !=
+          appliedRules.end()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void addTransformedExpr(std::string targetString, std::string targetRule) {
+    if (transformedExprs.find(targetString) == transformedExprs.end()) {
+      transformedExprs[targetString] = {targetRule};
+    } else {
+      transformedExprs[targetString].push_back(targetRule);
+    }
+  }
+
+  void clearTransformedExpr() {
+    transformedExprs.clear();
   }
 
   /**
@@ -172,6 +203,11 @@ class PlanState {
         // Store this rule name as the previous action, prepare for next
         // rewritten
         preAction = targetRule;
+
+        // add transformed exprs to the set
+        for (std::string targetString : targetStrings) {
+          addTransformedExpr(targetString, targetRule);
+        }
         // TODO: forbidden preAction in next step. (Avoid cycle)
       } else {
         // Handle the case when the rule is not found
@@ -182,8 +218,6 @@ class PlanState {
                   << std::endl;
       }
     }
-
-    actionsPair.clear();
   }
 
   /**
@@ -203,10 +237,34 @@ class PlanState {
     getPossibleActions(curNode, cataLog);
   }
 
+  void showAllActions() {
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+    }
+  }
+
+  std::vector<std::pair<std::string, std::string>> getActionPairsWithRule(
+      std::string rule) {
+    std::vector<std::pair<std::string, std::string>> targetExprRulePairs;
+    for (auto entry : actionsPair) {
+      std::string targetExpr = entry.first;
+      for (auto ruleName : entry.second) {
+        if (ruleName == rule) {
+          targetExprRulePairs.push_back(std::make_pair(targetExpr, ruleName));
+        }
+      }
+    }
+    return targetExprRulePairs;
+  }
+
+  // Store the possible actions in the form of targetExpr: [rule1, rule2, ...]
   std::map<std::string, std::vector<std::string>> actionsPair;
   std::vector<std::string> actions;
   RuleManager ruleManager;
   std::string preAction;
+  // store the transformed expressions, key: targetExpr, value: applied rules
+  std::map<std::string, std::vector<std::string>> transformedExprs;
 };
 
 } // namespace optimization

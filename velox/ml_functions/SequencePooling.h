@@ -27,6 +27,7 @@ class SequencePooling : public MLFunction {
     }
     mode_ = mode;
     embeddingDims_ = embeddingDims;
+    dims.push_back(embeddingDims);
   }
 
   // TODO: add support of loading from disk file
@@ -44,32 +45,66 @@ class SequencePooling : public MLFunction {
       exec::EvalCtx& context,
       VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
+    output->clearNulls(rows);
+    auto arrayOutput = output->as<ArrayVector>();
+    auto sizes = arrayOutput->mutableSizes(rows.end());
+    auto rawSizes = sizes->asMutable<int32_t>();
+    auto offsets = arrayOutput->mutableOffsets(rows.end());
+    auto rawOffsets = offsets->asMutable<int32_t>();
 
-    auto inputFeatures = args[0]->as<ArrayVector>()->elements();
-    float* inputValues = inputFeatures->values()->asMutable<float>();
-    int numInput = rows.size();
+    // Initialize sizes and offsets to zero.
+    std::fill(rawSizes, rawSizes + rows.end(), 0);
+    std::fill(rawOffsets, rawOffsets + rows.end(), 0);
 
-    auto arrayVector = args[0]->as<ArrayVector>();
-    std::vector<std::vector<float>> result;
+    auto elementsOutput = arrayOutput->elements();
+    auto elementsPool = context.pool();
 
-    for (int i = 0; i < numInput; i++) {
-      int numEmbeddingValues = arrayVector->sizeAt(i);
-      int valueOffset = arrayVector->offsetAt(i);
-      int numEmbeddingToCombie = numEmbeddingValues / embeddingDims_;
-      std::vector<float> embeddingVector(embeddingDims_);
-      if (numEmbeddingToCombie == 1) {
-        // non-variadic, just copy
-        std::memcpy(
-            embeddingVector.data(),
-            inputValues + valueOffset,
-            embeddingDims_ * sizeof(float));
+    exec::DecodedArgs decodedArgs(rows, args, context);
+    auto decodedInput = decodedArgs.at(0);
+    auto numRows = rows.size();
+
+    auto inputArray = decodedInput->base()->as<ArrayVector>();
+    auto inputElements = inputArray->elements();
+    float* inputValues = inputElements->values()->asMutable<float>();
+    auto inputOffsets = inputArray->rawOffsets();
+    auto inputSizes = inputArray->rawSizes();
+
+    std::map<vector_size_t, vector_size_t> rowMap;
+    std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+    std::vector<vector_size_t> uniqueRawIndexeVector;
+    vector_size_t numUniqueRows = 0;
+    rows.applyToSelected([&](vector_size_t row) {
+      auto mappedIndexInRowData = decodedInput->index(row);
+      if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
+          uniqueRawIndexeSet.end()) {
+        // add it
+        rowMap[row] = numUniqueRows;
+        uniqueRawIndexeSet.insert(mappedIndexInRowData);
+        uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+        ++numUniqueRows;
       } else {
-        // variadic case, combine the values base on mode
+        // already added
+        rowMap[row] = rowMap[mappedIndexInRowData];
+      }
+    });
+
+    int numResultMatrixRows = numUniqueRows;
+    Eigen::MatrixXf resultMatix(numResultMatrixRows, dims[0]);
+    int rowIndex = 0;
+    for (auto rawIndex : uniqueRawIndexeVector) {
+      int numEmbeddingValues = inputSizes[rawIndex];
+      // int valueOffset = inputOffsets[rawIndex];
+      int numEmbeddingToCombie = numEmbeddingValues / embeddingDims_;
+      if (numEmbeddingToCombie == 1) {
+        Eigen::Map<const Eigen::VectorXf> rowVector(
+            inputValues + inputOffsets[rawIndex], embeddingDims_);
+        resultMatix.row(rowIndex) = rowVector;
+      } else {
         Eigen::Map<
             Eigen::
                 Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
             varaidicEmbedding(
-                inputValues + valueOffset,
+                inputValues + inputOffsets[rawIndex],
                 numEmbeddingToCombie,
                 embeddingDims_);
 
@@ -81,17 +116,34 @@ class SequencePooling : public MLFunction {
         } else if (mode_ == "MEAN") {
           mergedValues = varaidicEmbedding.colwise().mean();
         }
-
-        std::memcpy(
-            embeddingVector.data(),
-            mergedValues.data(),
-            embeddingDims_ * sizeof(float));
+        resultMatix.row(rowIndex) = mergedValues;
       }
-      result.push_back(embeddingVector);
+      rowIndex++;
     }
 
-    VectorMaker maker{context.pool()};
-    output = maker.arrayVector<float>(result, REAL());
+    auto baseOffset = elementsOutput->size();
+    elementsOutput->resize(baseOffset + rows.end() * dims[0]);
+    float* outputValues = elementsOutput->values()->asMutable<float>();
+
+    vector_size_t outputOffset = 0;
+
+    rows.applyToSelected([&](vector_size_t row) {
+      if (rowMap.find(row) == rowMap.end()) {
+        throw std::runtime_error(
+            "Mapped index not found for the result matrix.");
+      }
+      auto mappedIndexInResultMatrix = rowMap[row];
+      rawOffsets[row] = outputOffset;
+      rawSizes[row] = dims[0];
+
+      std::memcpy(
+          outputValues + outputOffset,
+          resultMatix.row(mappedIndexInResultMatrix).data(),
+          dims[0] * sizeof(float));
+
+      outputOffset += dims[0];
+    });
+    arrayOutput->setElements(elementsOutput);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -124,7 +176,7 @@ class SequencePooling : public MLFunction {
     return nullptr;
   }
 
-  CostEstimate getCost(std::vector<int> inputDims){
+  CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
