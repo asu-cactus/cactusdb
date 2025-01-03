@@ -9,46 +9,52 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get install -y libopenblas-dev unzip 
-RUN apt-get install -y ninja-build
-RUN apt-get install -y libboost-all-dev
-RUN apt-get install -y libssl-dev
-RUN apt install -y libsodium-dev libsodium23
-RUN apt install -y libgoogle-glog-dev
-RUN apt-get install -y zstd
-RUN apt-get install -y libzstd-dev
-RUN apt-get install -y liblz4-dev
-RUN apt-get install -y liblzo2-dev
-RUN apt-get install -y libsnappy-dev
-RUN apt-get install -y libre2-dev
-RUN apt-get install -y bison
-RUN apt-get install -y flex
-RUN apt-get install -y wget
-RUN apt-get install -y git
-RUN apt-get install -y cmake
-RUN apt-get install -y build-essential
-RUN apt-get install -y libdouble-conversion-dev
-RUN apt-get install -y libgdl-3-dev
-RUN apt-get install -y vim
-RUN apt-get install -y libeigen3-dev
-RUN apt-get install -y libprotobuf-dev protobuf-compiler
-RUN apt-get install -y python3-pip
-RUN apt-get install -y tmux
-RUN apt-get install -y sudo
-RUN apt-get install -y libpq-dev
-RUN apt-get install -y libjsoncpp-dev
-RUN apt-get install -y libxsimd-dev
-RUN apt-get install -y curl
-RUN apt-get install -y zip
-RUN apt-get install -y default-jre 
-RUN apt-get install -y kmod
-RUN apt-get install -y nlohmann-json3-dev
-RUN apt-get install -y libhdf5-dev
-RUN apt-get install -y catch2
-RUN pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2
-RUN apt-get install -y openjdk-11-jdk
-RUN apt install -y openssh-server openssh-client
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+RUN apt-get update && apt-get install -y \
+    libopenblas-dev \
+    unzip \
+    ninja-build \
+    libboost-all-dev \
+    libssl-dev \
+    libsodium-dev \
+    libsodium23 \
+    libgoogle-glog-dev \
+    zstd \
+    libzstd-dev \
+    liblz4-dev \
+    liblzo2-dev \
+    libsnappy-dev \
+    libre2-dev \
+    bison \
+    flex \
+    wget \
+    git \
+    cmake \
+    build-essential \
+    libdouble-conversion-dev \
+    libgdl-3-dev \
+    vim \
+    libeigen3-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    python3-pip \
+    tmux \
+    sudo \
+    htop \
+    libpq-dev \
+    libjsoncpp-dev \
+    libxsimd-dev \
+    curl \
+    zip \
+    default-jre \
+    kmod \
+    nlohmann-json3-dev \
+    libhdf5-dev \
+    catch2 \
+    openjdk-11-jdk \
+    openssh-server \
+    openssh-client && \
+    pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2 && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 # install aws cli
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
