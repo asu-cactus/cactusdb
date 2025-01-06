@@ -8,7 +8,10 @@ import multiprocessing
 import subprocess
 import connectorx as cx
 import requests
+import tempfile
 from openai import OpenAI
+import pyarrow.parquet as pq
+from psycopg2 import sql
 
 
 def get_sys_num_threads():
@@ -133,6 +136,7 @@ def check_hdfs_dir_exist(directory_path):
     print(result)
     return result.returncode == 0
 
+
 def check_hdfs_file_exist(file_path):
     command = ["hdfs", "dfs", "-test", "-e", file_path]
     result = subprocess.run(command, capture_output=True)
@@ -246,33 +250,33 @@ def get_openAI_key():
         raise Exception("Please set the OPENAI_API_KEY environment variable.")
     return os.environ["OPENAI_API_KEY"]
 
+
 def chatgpt_server_restfulAPI(message):
-  openAI_key = get_openAI_key()
-  # Replace 'your_api_key' with your actual OpenAI API key
-  url = 'https://api.openai.com/v1/chat/completions'
+    openAI_key = get_openAI_key()
+    # Replace 'your_api_key' with your actual OpenAI API key
+    url = "https://api.openai.com/v1/chat/completions"
 
-  headers = {
-      'Authorization': f'Bearer {openAI_key}',
-      'Content-Type': 'application/json'
-  }
+    headers = {
+        "Authorization": f"Bearer {openAI_key}",
+        "Content-Type": "application/json",
+    }
 
-  # Define the conversation or prompt
-  data = {
-      "model": "gpt-3.5-turbo",
-      "messages": [
-          {"role": "user", "content": message}
-      ]
-  }
-  count_failures = 0
-  response = requests.post(url, headers=headers, json=data)
-  while response.status_code != 200:
-      count_failures += 1
-      response = requests.post(url, headers=headers, json=data)
-  response = response.json()
-  returned_message = response['choices'][0]['message']['content']
-  num_input_token = response['usage']['prompt_tokens']
-  num_output_token = response['usage']['completion_tokens']
-  return returned_message, num_input_token, num_output_token, count_failures
+    # Define the conversation or prompt
+    data = {
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": message}],
+    }
+    count_failures = 0
+    response = requests.post(url, headers=headers, json=data)
+    while response.status_code != 200:
+        count_failures += 1
+        response = requests.post(url, headers=headers, json=data)
+    response = response.json()
+    returned_message = response["choices"][0]["message"]["content"]
+    num_input_token = response["usage"]["prompt_tokens"]
+    num_output_token = response["usage"]["completion_tokens"]
+    return returned_message, num_input_token, num_output_token, count_failures
+
 
 def chatgpt_server(openAI_client, message):
     chat_completion = openAI_client.chat.completions.create(
@@ -283,3 +287,74 @@ def chatgpt_server(openAI_client, message):
         max_tokens=500,
     )
     return chat_completion.choices[0].message.content
+
+
+def load_parquet_to_postgres(parquet_file, table_name, conn_params, show_schema=False):
+    # Step 1: Read the Parquet file and get the schema
+    table = pq.read_table(parquet_file)
+    schema = table.schema
+    df = table.to_pandas()
+
+    # Step 2: Generate the CREATE TABLE statement
+    column_definitions = []
+    for field in schema:
+        postgres_type = map_arrow_to_postgres(field.type)
+        column_definitions.append(f"{field.name} {postgres_type}")
+
+    create_table_query = f"CREATE TABLE {table_name} ({', '.join(column_definitions)});"
+    if show_schema:
+        print("create_table_query:", create_table_query)
+
+    # Step 3: Write the data to a temporary CSV file
+    # Generate a temporary file path
+    temp_file = tempfile.NamedTemporaryFile(delete=False)
+    temp_file_path = temp_file.name
+
+    df.to_csv(temp_file_path, index=False)
+
+    # Step 4: Execute the SQL commands in PostgreSQL
+    try:
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(**conn_params)
+        cur = conn.cursor()
+        # Drop the table if it already exists
+        cur.execute("DROP TABLE IF EXISTS {}".format(table_name))
+        conn.commit()
+        # Create the table
+        cur.execute(create_table_query)
+
+        # Load the data using COPY
+        with open(temp_file_path, "r") as f:
+            cur.copy_expert(sql.SQL(f"COPY {table_name} FROM STDIN WITH CSV HEADER"), f)
+
+        # Commit the transaction
+        conn.commit()
+        print(f"Table {table_name} created and data loaded successfully.")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+    temp_file.close()
+
+
+def map_arrow_to_postgres(arrow_type):
+    """Map PyArrow types to PostgreSQL types."""
+    if arrow_type == "int32":
+        return "INTEGER"
+    elif arrow_type == "int64":
+        return "BIGINT"
+    elif arrow_type == "float":
+        return "REAL"
+    elif arrow_type == "double":
+        return "DOUBLE PRECISION"
+    elif arrow_type == "string":
+        return "TEXT"
+    elif arrow_type == "bool":
+        return "BOOLEAN"
+    elif arrow_type == "timestamp[ns]":
+        return "TIMESTAMP"
+    else:
+        raise ValueError(f"Unsupported type: {arrow_type}")
