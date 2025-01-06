@@ -1718,6 +1718,168 @@ class TorchDNNV2 : public MLFunction {
   torch::nn::Sequential model_;
 };
 
+class TorchDNNV2CUDA : public MLFunction {
+ public:
+  TorchDNNV2CUDA(
+      std::vector<velox::dl::KernelType> kernelTypes,
+      std::vector<float*> weights,
+      std::vector<int> dimensions) {
+    // device_ = torch::Device(torch::kCUDA);
+    device_ = "cuda:0";
+    this->weights = weights;
+    // dims.size() = weights.size() + 1, dims[0] is the input dimension
+    dims = dimensions;
+    kernelTypes_ = kernelTypes;
+    int numOps = kernelTypes.size();
+    int weightIdx = 0;
+    hasArgmax_ = false;
+    model_ = torch::nn::Sequential();
+    assert(2 * numOps == dims.size());
+    for (int i = 0; i < numOps; ++i) {
+      if (kernelTypes[i] == velox::dl::KernelType::MatMul &&
+          kernelTypes[i + 1] == velox::dl::KernelType::MatAdd) {
+        auto denseLayer = torch::nn::Linear(dims[2 * i], dims[2 * i + 1]);
+        denseLayer->weight.set_data(
+            torch::from_blob(
+                weights[weightIdx++], {dims[2 * i], dims[2 * i + 1]})
+                .t());
+        denseLayer->bias.set_data(
+            torch::from_blob(weights[weightIdx++], {dims[2 * i + 1]}));
+        model_->push_back(denseLayer);
+      } else if (kernelTypes[i] == velox::dl::KernelType::MatAdd) {
+        // Do nothing, which is handled by creating a Dense Layer in the above
+        // code
+      } else if (kernelTypes[i] == velox::dl::KernelType::BatchNorm) {
+        auto batchNormLayer = torch::nn::BatchNorm1d(dims[2 * i]);
+        batchNormLayer->weight.set_data(
+            torch::from_blob(weights[weightIdx++], {dims[2 * i + 1]}));
+        batchNormLayer->bias.set_data(
+            torch::from_blob(weights[weightIdx++], {dims[2 * i + 1]}));
+        model_->push_back(batchNormLayer);
+      } else if (kernelTypes[i] == velox::dl::KernelType::ReLU) {
+        model_->push_back(torch::nn::ReLU());
+      } else if (kernelTypes[i] == velox::dl::KernelType::Softmax) {
+        model_->push_back(torch::nn::Softmax(1));
+      } else if (kernelTypes[i] == velox::dl::KernelType::Argmax) {
+        model_->push_back(LibTorchArgmaxKernel(1));
+        hasArgmax_ = true;
+      } else {
+        throw std::runtime_error(fmt::format(
+            "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
+      }
+    }
+    // enable evaluation mode, this is required for inference, otherwise some
+    // module could failed, like dropout, batchnorm, etc.
+    model_->to(device_);
+    model_->eval();
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+    auto input_elements = args[0]->as<ArrayVector>()->elements();
+    float* input_values = input_elements->values()->asMutable<float>();
+    torch::Tensor input =
+        torch::from_blob(input_values, {rows.size(), dims[0]});
+    torch::Tensor output_tensor = input;
+    output_tensor = output_tensor.to(device_);
+
+    output_tensor =
+        const_cast<torch::nn::Sequential&>(model_)->forward(output_tensor);
+    VectorMaker maker{context.pool()};
+    VectorPtr& localResult = output;
+
+    output_tensor = output_tensor.to(torch::kCPU);
+
+    if (hasArgmax_) {
+      // convert to int
+      auto int_tensor = output_tensor.to(torch::kInt);
+      int* data = int_tensor.data_ptr<int>();
+      std::vector<int> results(data, data + rows.size());
+      output = maker.flatVector<int>(results, INTEGER());
+      // localResult = maker.flatVector<int>(results, INTEGER());
+    } else {
+      float* data = output_tensor.data_ptr<float>();
+      std::vector<std::vector<float>> results;
+      for (int i = 0; i < rows.size(); ++i) {
+        std::vector<float> result(
+            data + i * dims.back(), data + (i + 1) * dims.back());
+        results.push_back(result);
+      }
+      // localResult = maker.arrayVector<float>(results, REAL());
+      output = maker.arrayVector<float>(results, REAL());
+    }
+
+    // context.moveOrCopyResult(localResult, rows, output);
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {
+        exec::FunctionSignatureBuilder()
+            .returnType("array(REAL)")
+            .argumentType("array(REAL)")
+            .build(),
+        // Output flat vector of int when Argmax is applied
+        // Add an un-used argument to distinguish the signature
+        exec::FunctionSignatureBuilder()
+            .returnType("INTEGER")
+            .argumentType("array(REAL)")
+            .argumentType("INTEGER")
+            .build(),
+        exec::FunctionSignatureBuilder()
+            .returnType("INTEGER")
+            .argumentType("array(REAL)")
+            .argumentType("BIGINT")
+            .build()};
+  }
+
+  // getters for metadata to be used by optimiser
+  float* getTensor() const override {
+    return new float[0];
+  }
+
+  // Getter method for weights
+  const std::vector<float*>& getWeights() const {
+    return weights;
+  }
+
+  // Getter method for bias
+  const std::vector<float*>& getBias() const {
+    return bias;
+  }
+
+  std::string getFuncName() {
+    return getName();
+  };
+
+  static std::string getName() {
+    return "complexTorchNN_GPU";
+  };
+
+  std::vector<velox::dl::KernelType> getKernelTypes() const {
+    return kernelTypes_;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to compute cost based on dims
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
+
+ private:
+  std::vector<float*> weights;
+  std::vector<float*> bias;
+  std::vector<velox::dl::KernelType> kernelTypes_;
+  bool hasArgmax_;
+  std::string device_;
+  // std::vector<torch::nn::AnyModule> layers_;
+  torch::nn::Sequential model_;
+};
+
 class TorchDNNKernel : public MLFunction {
  public:
   TorchDNNKernel(
