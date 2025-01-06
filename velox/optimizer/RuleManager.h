@@ -29,6 +29,7 @@
 #include "Mul2JoinAggRewriteAction.h"
 #include "Mul2JoinAggHorizontalRewriteAction.h"
 #include "MultiLayerUDF2TorchNNRewriteAction.h"
+#include "MultiLayerUDF2TorchNNCUDARewriteAction.h"
 #include "MLDecompositionPushdownRewriteAction.h"
 
 
@@ -49,6 +50,8 @@ public:
         rules.emplace("Mul2JoinAggRewriteAction", std::make_shared<Mul2JoinAggRewriteAction>());
 
         rules.emplace("MultiLayerUDF2TorchNNRewriteAction", std::make_shared<MultiLayerUDF2TorchNNRewriteAction>());
+
+        // rules.emplace("MultiLayerUDF2TorchNNCUDARewriteAction", std::make_shared<MultiLayerUDF2TorchNNCUDARewriteAction>());
 
         rules.emplace("MLDecompositionPushdownRewriteAction", std::make_shared<MLDecompositionPushdownRewriteAction>());
 

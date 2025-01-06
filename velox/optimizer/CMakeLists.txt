@@ -109,6 +109,23 @@ target_link_libraries(
   ${TORCH_LIBRARIES}
 )
 
+add_executable(multilayer2torchcuda_test MultiLayerUDF2TorchNNCUDARewriteActionTest.cpp)
+target_link_libraries(
+  multilayer2torchcuda_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
 add_executable(ml_decomp_pushdown_test MLDecompositionPushdownRewriteActionTest.cpp)
 target_link_libraries(
   ml_decomp_pushdown_test
