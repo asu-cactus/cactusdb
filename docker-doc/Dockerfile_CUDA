@@ -112,8 +112,8 @@ RUN echo "service postgresql start" >> /etc/bash.bashrc
 
 
 WORKDIR /home
-RUN wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.0.1%2Bcpu.zip
-RUN unzip libtorch-cxx11-abi-shared-with-deps-2.0.1+cpu.zip
+RUN wget https://download.pytorch.org/libtorch/cu124/libtorch-cxx11-abi-shared-with-deps-2.5.1%2Bcu124.zip
+RUN unzip libtorch-cxx11-abi-shared-with-deps-2.5.1+cu124.zip
 ENV Torch_DIR=/home/libtorch
 # set up evadb
 WORKDIR /home

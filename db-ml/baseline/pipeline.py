@@ -2142,3 +2142,132 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
 
         return data
+
+
+class TPCxAIUsecase03PipelineTF(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase03PipelineTF, self).__init__(
+            "tpcxai-usecase03-tf", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        self.model = None
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # TODO: implement data loading
+        sql_to_fetch_data = """
+        SELECT 42 AS test
+        """
+        
+        data = utils.fetch_data_from_postgres_via_connectorx(sql_to_fetch_data)
+        return data
+
+    def data_processing_impl(self, data):
+        # TODO data processing
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        return data
+    
+class TPCxAIUsecase10PipelineTF(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase10PipelineTF, self).__init__(
+            "tpcxai-usecase10-tf", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        self.model = None
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # TODO: implement data loading
+        sql_to_fetch_data = """
+        SELECT 42 AS test
+        """
+        
+        data = utils.fetch_data_from_postgres_via_connectorx(sql_to_fetch_data)
+        return data
+
+    def data_processing_impl(self, data):
+        # TODO data processing
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        return data
+    
+class TPCxAIUsecase03PipelineEvaDB(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase03PipelineEvaDB, self).__init__(
+            "tpcxai-usecase03-evadb", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        self.model = None
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # TODO: implement data loading
+        sql_to_fetch_data = """
+        SELECT 42 AS test
+        """
+        
+        data = utils.fetch_data_from_postgres_via_connectorx(sql_to_fetch_data)
+        return data
+
+    def data_processing_impl(self, data):
+        # TODO data processing
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        return data
+    
+class TPCxAIUsecase10PipelineEvaDB(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase10PipelineEvaDB, self).__init__(
+            "tpcxai-usecase10-evadb", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        self.model = None
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # TODO: implement data loading
+        sql_to_fetch_data = """
+        SELECT 42 AS test
+        """
+        
+        data = utils.fetch_data_from_postgres_via_connectorx(sql_to_fetch_data)
+        return data
+
+    def data_processing_impl(self, data):
+        # TODO data processing
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        return data
