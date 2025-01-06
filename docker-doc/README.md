@@ -37,14 +37,23 @@ curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dear
 sudo sed -i -e '/experimental/ s/^#//g' /etc/apt/sources.list.d/nvidia-container-toolkit.list
 sudo apt-get update
 sudo apt-get install -y nvidia-container-toolkit
+# to configure the docker in a rootless mode, please refer to the following link: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuring-docker
+sudo nvidia-ctk runtime configure --runtime=docker
 
 # restart docker
 service docker restart
 
-# use the following commands to grant the GPU access
-docker run --name velox-container -it --gpus all velox-docker
-```
+# use the following commands to test if nvidia-container-tookit is installed successful
+sudo docker run --rm --runtime=nvidia --gpus all ubuntu nvidia-smi
 
+# build image with cuda
+docker build -t velox-cuda -f Dockerfile_CUDA .
+
+# use the following commands to grant the GPU access
+docker run --name velox-cuda --runtime=nvidia --gpus all -it velox-cuda
+# or 
+docker run --name velox-cuda --gpus all -it velox-cuda
+```
 
 
 
