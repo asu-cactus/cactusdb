@@ -333,7 +333,7 @@ class MovielensQ1PipelineDLCentric(Pipeline):
         sparse_features = ["user_id", "movie_id", "gender", "age", "occupation"]
         dense_features = ["user_mean_rating", "movie_mean_rating"]
         target = ["rating"]
-        device = "cpu"
+        device = "cuda:0"
         user_sparse_features, user_dense_features = [
             "user_id",
             "gender",
@@ -448,6 +448,7 @@ class MovielensQ2PipelineDLCentric(Pipeline):
         top_mlp_sizes = [256, 128]
 
         self.dlrm_model = DLRM(embedding_dim, num_numerical_features, categorical_feature_sizes, bottom_mlp_sizes, top_mlp_sizes)
+        # self.dlrm_model = self.dlrm_model.to(torch.device("cuda:0"))
         self.gender_encoder = {
             'M': 1,
             'F': 0
@@ -528,6 +529,8 @@ class MovielensQ2PipelineDLCentric(Pipeline):
 
     def model_inference_impl(self, data):
         dlrm_numerical_features, dlrm_categorical_features = data
+        # dlrm_numerical_features = dlrm_numerical_features.to(torch.device("cuda:0"))
+        # dlrm_categorical_features = dlrm_categorical_features.to(torch.device("cuda:0"))
         y_preds = self.dlrm_model(dlrm_numerical_features, dlrm_categorical_features)
         return y_preds
 
@@ -1798,7 +1801,7 @@ class MovielensQ1PipelineSparkHadoop(Pipeline):
         )
 
         super(MovielensQ1PipelineSparkHadoop, self).__init__(
-            "MovielensQ1PipelineSparkHadoop", num_sample=num_sample, num_loop=num_loop
+            "movielens-q1-pipeline-sparkhadoop", num_sample=num_sample, num_loop=num_loop
         )
 
         self.model = DSSM_Moel_Wrapper()
