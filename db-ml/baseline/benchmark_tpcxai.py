@@ -55,10 +55,10 @@ def benchmark_tpcxai_usecase10_evadb(num_loop=10, **kwargs):
 def benchmark_tpcxai():
     list_benchmark = []
     list_benchmark += [benchmark_tpcxai_usecase03_tf]
-    list_benchmark += [benchmark_tpcxai_usecase03_evadb]
+    #list_benchmark += [benchmark_tpcxai_usecase03_evadb]
     # list_benchmark += [benchmark_tpcxai_usecase03_sparkhadoop]
     list_benchmark += [benchmark_tpcxai_usecase10_tf]
-    list_benchmark += [benchmark_tpcxai_usecase10_evadb]
+    #list_benchmark += [benchmark_tpcxai_usecase10_evadb]
     # list_benchmark += [benchmark_tpcxai_usecase10_sparkhadoop]
     list_num_user = [1]
     list_num_movie = [1]
