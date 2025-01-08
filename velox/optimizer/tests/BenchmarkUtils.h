@@ -1451,8 +1451,7 @@ PlanBuilder setupMovielensDBQuery(
                    "mt_relevance_score",
                    "m_popularity",
                    "m_vote_average",
-                   "m_genres"})
-              .filter("m_genres LIKE '\%Adventure\%'");
+                   "m_genres"});
       queryPlan =
           movieQueryPlan
               .nestedLoopJoin(
@@ -1532,6 +1531,7 @@ PlanBuilder setupMovielensDBQuery(
                    "user_movie_interest_pred",
                    "user_movie_rating_pred"})
               .filter("user_movie_interest_pred = 1")
+              .filter("m_genres LIKE '\%Adventure\%'")
               .filter("user_movie_rating_pred = 5");
 
     } else if (queryOptType.find("mlq3-pushdown") != std::string::npos) {
