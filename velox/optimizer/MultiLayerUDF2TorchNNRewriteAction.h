@@ -197,7 +197,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                     // Argmax itself does not have dims stored in the UDF will
                     // use the last element in dims. current limitation: argmax
                     // cannot be the innermost UDF.
-                    udfDims = {dims.back()};
+                    udfDims = {dims.back(), 1};
                     kernelTypes.push_back(velox::dl::KernelType::Argmax);
                     hasArgmax = true;
                   } else {
