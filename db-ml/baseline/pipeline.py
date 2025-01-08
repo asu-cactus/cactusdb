@@ -1774,8 +1774,8 @@ class FFNNPipelineSparkSQLHadoop(Pipeline):
         return result_df
 
 
-movielens_q1_ffnn_spark_min_max_scaler = pickle.load(open("../../resources/model/movielens/final/tf/q1_ffnn_minmax_scaler_py.pkl", "rb"))
-movielens_q1_ffnn_spark_trendeng_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q1_ffnn_tf.h5", compile=False)
+#movielens_q1_ffnn_spark_min_max_scaler = pickle.load(open("../../resources/model/movielens/final/tf/q1_ffnn_minmax_scaler_py.pkl", "rb"))
+#movielens_q1_ffnn_spark_trendeng_model = tf.keras.models.load_model("../../resources/model/movielens/final/tf/q1_ffnn_tf.h5", compile=False)
 
 @pandas_udf(IntegerType())
 def movielens_q1_trending_ffnn(m_popularity: pd.Series, m_vote_average: pd.Series, m_vote_count: pd.Series) -> pd.Series:
@@ -2153,29 +2153,57 @@ class TPCxAIUsecase03PipelineTF(Pipeline):
             "tpcxai-usecase03-tf", num_loop=num_loop
         )
         self.postgres_conn_param = utils.get_connectorx_configuration()
-        # TODO: init
-        self.model = None
+        self.model = tf.keras.Sequential([
+            tf.keras.layers.Dense(256, activation='relu', input_shape=(3,)),
+            tf.keras.layers.Dense(1024, activation='relu'),
+            tf.keras.layers.Dense(1)
+        ])
 
     def loading_meta_impl(self):
         pass
 
     def data_loading_impl(self, batch_size):
-        # TODO: implement data loading
-        sql_to_fetch_data = """
-        SELECT 42 AS test
+        query_to_fetch_training_data = """
+        select store, department, li_order_id, price, quantity,
+        EXTRACT(WEEK FROM date) AS week,
+        EXTRACT(MONTH FROM date) AS month,
+        CASE 
+            WHEN EXTRACT(WEEK FROM date) > 50 AND EXTRACT(MONTH FROM date) = 1 
+            THEN EXTRACT(YEAR FROM date) - 1
+            ELSE EXTRACT(YEAR FROM date)
+        END AS year,
+        quantity * price as row_price
+        from tpcxai_order_training join tpcxai_lineitem_training on o_order_id=li_order_id
+        join tpcxai_product_training on li_product_id=p_product_id
         """
         
-        data = utils.fetch_data_from_postgres_via_connectorx(sql_to_fetch_data)
+        data = utils.fetch_data_from_postgres_via_psycopg2(query_to_fetch_training_data)
         return data
 
     def data_processing_impl(self, data):
-        # TODO data processing
-        return data
+
+        grouped = data.groupby(['store', 'department', 'year', 'week'])['row_price'].sum().reset_index()
+        grouped = grouped.rename(index=str, columns={'store': 'Store', 'department': 'Dept', 'date': 'Date', 'row_price': 'Weekly_Sales'})
+        
+        grouped['num_of_week'] = (grouped['year'].astype(int) - 2010) * 52 + grouped['week'].astype(int) - 1
+        
+        le_store = LabelEncoder()
+        le_dept = LabelEncoder()
+        
+        grouped['Store'] = le_store.fit_transform(grouped['Store'])
+        grouped['Dept'] = le_dept.fit_transform(grouped['Dept'])
+        
+        min_num_of_week = 0
+        max_num_of_week = 52*3
+        grouped['num_of_week'] = (grouped['num_of_week'] - 0) / max_num_of_week
+        
+        X_features = grouped[['Store', 'Dept', 'num_of_week']].values
+        return X_features
 
     def model_inference_impl(self, data):
-        # TODO model inference
-        return data
-    
+        return self.model(data)
+
+
 class TPCxAIUsecase10PipelineTF(Pipeline):
     def __init__(
         self,
@@ -2185,27 +2213,30 @@ class TPCxAIUsecase10PipelineTF(Pipeline):
             "tpcxai-usecase10-tf", num_loop=num_loop
         )
         self.postgres_conn_param = utils.get_connectorx_configuration()
-        # TODO: init
-        self.model = None
+        self.model = tf.keras.Sequential([
+            tf.keras.layers.Dense(32, activation='relu', input_shape=(2,)),
+            tf.keras.layers.Dense(1, activation='sigmoid')
+        ])
 
     def loading_meta_impl(self):
         pass
 
     def data_loading_impl(self, batch_size):
-        # TODO: implement data loading
-        sql_to_fetch_data = """
-        SELECT 42 AS test
+        # Use case 10, trainig query
+        query_to_fetch_training_data = """
+        select transaction_id, EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm, is_fraud
+        from tpcxai_financial_account_training join tpcxai_financial_transactions_training on fa_customer_sk=sender_id
         """
         
-        data = utils.fetch_data_from_postgres_via_connectorx(sql_to_fetch_data)
+        data = utils.fetch_data_from_postgres_via_connectorx(query_to_fetch_training_data)
         return data
 
     def data_processing_impl(self, data):
-        # TODO data processing
+        data = data[['business_hour_norm', 'amount_norm']].values
         return data
 
     def model_inference_impl(self, data):
-        # TODO model inference
+        data = self.model(data)
         return data
     
 class TPCxAIUsecase03PipelineEvaDB(Pipeline):
