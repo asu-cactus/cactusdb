@@ -1790,9 +1790,15 @@ PlanBuilder setupMovielensDBQuery(
   return queryPlan;
 };
 
-std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
+std::vector<std::string> sampleUserMovieFilterExpr(
+    std::string filterTable,
+    int randomSeed = -1) {
   unsigned timestampSeed =
       std::chrono::system_clock::now().time_since_epoch().count();
+  if (randomSeed != -1) {
+    timestampSeed = randomSeed;
+  }
+
   RandomSampler randomSampler = RandomSampler(timestampSeed);
 
   std::vector<std::string> userGenderFilterExprs = {

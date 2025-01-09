@@ -447,12 +447,16 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       std::string mode,
       std::string queryTemplate,
       CataLog& cataLog,
-      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
+      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+      int randomSeed = -1) {
     // bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
     bool generateFilter = true;
 
     unsigned timestampSeed =
         std::chrono::system_clock::now().time_since_epoch().count();
+    if (randomSeed != -1) {
+      timestampSeed = randomSeed;
+    }
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
     randomGenerator.setIntRange(0, 1);
     PlanBuilder myPlan;
@@ -525,7 +529,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
                           fmt::format(userModel1ComputExpr, "u_features")});
         if (generateFilter) {
           std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("user");
+              sampleUserMovieFilterExpr("user", randomSeed);
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -574,7 +578,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
 
         if (generateFilter) {
           std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("movie");
+              sampleUserMovieFilterExpr("movie", randomSeed);
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -660,7 +664,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
                                   "m_vote_average",
                                   "m_vote_count",
                                   "m_features"});
-        RandomGenerator numModelGenerator = RandomGenerator(-1, 1, 0);
+        RandomGenerator numModelGenerator =
+            RandomGenerator(-1, 1, timestampSeed);
         numModelGenerator.setIntRange(0, 2);
         int numModel = numModelGenerator.genRandomIntValue();
         myPlan = userPlan.nestedLoopJoin(
@@ -719,7 +724,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
 
         if (generateFilter) {
           std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("movie_user");
+              sampleUserMovieFilterExpr("movie_user", randomSeed);
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -817,7 +822,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
              "m_features",
              "mt_relevance_score"});
 
-        RandomGenerator numModelGenerator = RandomGenerator(-1, 1, 0);
+        RandomGenerator numModelGenerator =
+            RandomGenerator(-1, 1, timestampSeed);
         numModelGenerator.setIntRange(0, 3);
         int numModel = numModelGenerator.genRandomIntValue();
         myPlan = userPlan.nestedLoopJoin(
@@ -899,7 +905,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
 
         if (generateFilter) {
           std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("movie_user");
+              sampleUserMovieFilterExpr("movie_user", randomSeed);
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -1200,8 +1206,11 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
       }
 
+      const char* globalRandomSeedEnv = std::getenv("CD_GLOBAL_RANDOMSEED");
+      int globalRandomSeed =
+          globalRandomSeedEnv ? std::stoi(globalRandomSeedEnv) : 0;
       myPlan = setupProfileQueryPlan(
-          mode, queryTemplate, cataLog, planNodeIdGenerator);
+          mode, queryTemplate, cataLog, planNodeIdGenerator, globalRandomSeed);
 
       // } else if (model == "df") {
       // } else if (model == "two-tower") {
@@ -1438,8 +1447,16 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         // use profile query plan
         generateDummyData(
             mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+
+        const char* globalRandomSeedEnv = std::getenv("CD_GLOBAL_RANDOMSEED");
+        int globalRandomSeed =
+            globalRandomSeedEnv ? std::stoi(globalRandomSeedEnv) : 0;
         myPlan = setupProfileQueryPlan(
-            mode, queryTemplate, cataLog, planNodeIdGenerator);
+            mode,
+            queryTemplate,
+            cataLog,
+            planNodeIdGenerator,
+            globalRandomSeed);
       }
 
     } else {
@@ -1781,8 +1798,15 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         // use profile query plan
         generateDummyData(
             mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+        const char* globalRandomSeedEnv = std::getenv("CD_GLOBAL_RANDOMSEED");
+        int globalRandomSeed =
+            globalRandomSeedEnv ? std::stoi(globalRandomSeedEnv) : 0;
         myPlan = setupProfileQueryPlan(
-            mode, queryTemplate, cataLog, planNodeIdGenerator);
+            mode,
+            queryTemplate,
+            cataLog,
+            planNodeIdGenerator,
+            globalRandomSeed);
       }
 
     } else {
