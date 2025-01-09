@@ -387,7 +387,7 @@ PlanBuilder setupMovielensDBQuery(
     PlanNodeId readRatingDataPlanNodeId1;
     PlanNodeId readRatingDataPlanNodeId2;
     if (queryOptType.empty() || queryOptType == "" ||
-        queryOptType == "fusion") {
+        queryOptType.find("fusion") != std::string::npos) {
       // default query
       auto readUserAvgRatingPlan =
           PlanBuilder(planNodeIdGenerator, pool_.get())
@@ -1090,7 +1090,6 @@ PlanBuilder setupMovielensDBQuery(
                    "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(m_trending_features)))))))))) AS trending_prediction",
                    "u_final_interest_features",
                    "mt_relevance_score"})
-              .filter("trending_prediction = 1")
               .project(
                   {"u_user_id",
                    "u_age",
@@ -1098,28 +1097,38 @@ PlanBuilder setupMovielensDBQuery(
                    "u_gender_encoded",
                    "m_movie_id",
                    "argmax(softmax(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(u_final_interest_features))))))) AS user_interest_prediction",
-                   "mt_relevance_score"})
-              .filter("user_interest_prediction = 1")
+                   "mt_relevance_score",
+                   "trending_prediction"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
                    "age_embedding(age_encoder(convert_int_array(u_age))) as u_age_embed",
                    "occupation_embedding(occupation_encoder(convert_int_array(u_occupation))) as u_occupation_embed",
                    "gender_embedding(u_gender_encoded) as u_gender_embed",
-                   "mt_relevance_score"})
+                   "mt_relevance_score",
+                   "trending_prediction",
+                   "user_interest_prediction"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
+                   "trending_prediction",
+                   "user_interest_prediction",
                    "relu(mat_vector_add11_2(mat_mul11_1(mt_relevance_score))) as bottom_mlp_out",
                    "concat(u_age_embed, u_occupation_embed, u_gender_embed) as categorical_features"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
+                   "trending_prediction",
+                   "user_interest_prediction",
                    "concat(bottom_mlp_out, categorical_features) as top_mlp_input"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
-                   "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(top_mlp_input))))))))) as top_mlp_out"});
+                   "trending_prediction",
+                   "user_interest_prediction",
+                   "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(top_mlp_input))))))))) as top_mlp_out"})
+              .filter("trending_prediction = 1")
+              .filter("user_interest_prediction = 1");
     }
     if (queryOptType == "decomposition_pushdown") {
       auto movieQueryPlan =
