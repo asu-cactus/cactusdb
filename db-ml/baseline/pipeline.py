@@ -2247,21 +2247,29 @@ class TPCxAIUsecase03PipelineEvaDB(Pipeline):
         super(TPCxAIUsecase03PipelineEvaDB, self).__init__(
             "tpcxai-usecase03-evadb", num_loop=num_loop
         )
-        self.postgres_conn_param = utils.get_connectorx_configuration()
+        #self.postgres_conn_param = utils.get_connectorx_configuration()
         # TODO: init
-        self.model = None
+        utils.setup_postgres_for_evadb()
+        
+        self.cursor = evadb.connect().cursor()
+        
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS Model_UseCase3_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS Model_UseCase3_EVADB
+            IMPL './function_tpcxai_evadb.py';
+            """
+        ).df()
 
     def loading_meta_impl(self):
         pass
 
     def data_loading_impl(self, batch_size):
         # TODO: implement data loading
-        sql_to_fetch_data = """
-        SELECT 42 AS test
-        """
-        
-        data = utils.fetch_data_from_postgres_via_connectorx(sql_to_fetch_data)
-        return data
+        return None
 
     def data_processing_impl(self, data):
         # TODO data processing
@@ -2269,7 +2277,11 @@ class TPCxAIUsecase03PipelineEvaDB(Pipeline):
 
     def model_inference_impl(self, data):
         # TODO model inference
-        return data
+        query_to_fetch_serving_data = "select Model_UseCase3_EVADB(store, department, num_of_week).predicted from postgres_data.tpcxai_store_dept_serving"
+        
+        result_df = self.cursor.query(query_to_fetch_serving_data).df()
+        return result_df.values
+        
     
 class TPCxAIUsecase10PipelineEvaDB(Pipeline):
     def __init__(
@@ -2279,21 +2291,38 @@ class TPCxAIUsecase10PipelineEvaDB(Pipeline):
         super(TPCxAIUsecase10PipelineEvaDB, self).__init__(
             "tpcxai-usecase10-evadb", num_loop=num_loop
         )
-        self.postgres_conn_param = utils.get_connectorx_configuration()
+        #self.postgres_conn_param = utils.get_connectorx_configuration()
         # TODO: init
-        self.model = None
+        utils.setup_postgres_for_evadb()
+        self.cursor = evadb.connect().cursor()
+        
+        # create a view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_tpcxai_uc10 AS
+            select transaction_id, EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
+            };
+        """
+        ).df()
+        
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS Model_UseCase10_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS Model_UseCase10_EVADB
+            IMPL './function_tpcxai_evadb.py';
+            """
+        ).df()
 
     def loading_meta_impl(self):
         pass
 
     def data_loading_impl(self, batch_size):
         # TODO: implement data loading
-        sql_to_fetch_data = """
-        SELECT 42 AS test
-        """
-        
-        data = utils.fetch_data_from_postgres_via_connectorx(sql_to_fetch_data)
-        return data
+        return None
 
     def data_processing_impl(self, data):
         # TODO data processing
@@ -2301,4 +2330,6 @@ class TPCxAIUsecase10PipelineEvaDB(Pipeline):
 
     def model_inference_impl(self, data):
         # TODO model inference
-        return data
+        query_to_fetch_serving_data = "SELECT Model_UseCase10_EVADB(business_hour_norm, amount_norm).label FROM postgres_data.evadb_tpcxai_uc10"
+        result_df = self.cursor.query(query_to_fetch_serving_data).df()
+        return result_df.values
