@@ -1,0 +1,172 @@
+from collections import OrderedDict
+import os
+import time
+import datetime
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from torch.utils.data.sampler import SubsetRandomSampler
+from torch.utils.data import DataLoader, TensorDataset
+from evadb.functions.decorators.decorators import forward, setup
+from evadb.catalog.catalog_type import NdArrayType
+from evadb.functions.abstract.abstract_function import AbstractFunction
+from evadb.functions.decorators.io_descriptors.data_types import PandasDataframe
+from evadb.functions.abstract.pytorch_abstract_function import (
+    PytorchAbstractClassifierFunction,
+)
+from evadb.utils.generic_utils import try_to_import_torch, try_to_import_torchvision
+import tensorflow as tf
+import pickle
+
+
+
+class Model_UseCase3_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of Model_UseCase3_EVADB: \n")
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "Model_UseCase3_EVADB"
+
+    @setup(cacheable=True, function_type="regression", batchable=True)
+    def setup(self):
+        self.max_num_of_week = 52*3
+        self.model = tf.keras.models.load_model('../../resources/model/tpcxai_sf1/final/tf/usecase3.h5', compile=False)
+        self.le_store = pickle.load(open('../../resources/model/tpcxai_sf1/final/tf/usecase3_le_store.pkl', 'rb'))
+        self.le_dept = pickle.load(open('../../resources/model/tpcxai_sf1/final/tf/usecase3_le_dept.pkl', 'rb'))
+
+    @property
+    def labels(self):
+        return []
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'store',
+                      'department',
+                      'num_of_week',
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32
+                ],
+                column_shapes=[
+                    (None,),
+                    (None,),
+                    (None,)
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["predicted"],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        data['store'] = self.le_store.transform(data['store'].values)
+        data['department'] = self.le_dept.transform(data['department'].values)
+        data['num_of_week'] = (data['num_of_week'] - 0) / self.max_num_of_week
+        
+        X_serve = data[['store', 'department', 'num_of_week']].values.astype(float)
+        y_pred = self.model.predict(X_serve)
+
+        result_df = pd.DataFrame(
+            {
+                "predicted": y_pred.flatten(),
+            }
+        )
+        return result_df
+
+
+
+
+
+
+class Model_UseCase10_EVADB(AbstractFunction):
+    
+
+    def __del__(self):
+        print("[INFO] Summarization of Model_UseCase10_EVADB: \n")
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "Model_UseCase10_EVADB"
+
+    @setup(cacheable=True, function_type="regression", batchable=True)
+    def setup(self):
+        self.model = tf.keras.models.load_model("../../resources/model/tpcxai_sf1/final/tf/usecase10.h5", compile=False)
+
+    @property
+    def labels(self):
+        return []
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                      'business_hour_norm',
+                      'amount_norm',
+                ],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                    NdArrayType.FLOAT32
+                ],
+                column_shapes=[
+                    (None,),
+                    (None,)
+                ],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["label"],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        X_serve = data[['business_hour_norm', 'amount_norm']].values.astype(float)
+        y_pred = self.model.predict(X_serve)
+
+        result_df = pd.DataFrame(
+            {
+                "label": y_pred.flatten(),
+            }
+        )
+        return result_df
+
