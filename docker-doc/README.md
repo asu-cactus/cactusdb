@@ -125,7 +125,7 @@ cmake ..
 export PATH=$PATH:/usr/lib/postgresql/14/bin
 
 # install madlib to postgres
-/usr/local/madlib/bin/madpack -s madlib -p postgres install -c postgresdb@localhost
+su -u postgres /usr/local/madlib/bin/madpack -s madlib -p postgres install -c postgresdb@localhost
 ```
 
 ### Develop with Visual Studio Code
