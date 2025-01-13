@@ -415,6 +415,7 @@ def main():
 
     args = parser.parse_args()
     dataset = args.dataset
+    utils.setup_postgres_for_evadb()
 
     if dataset == "all":
         load_movielens_to_postgres()

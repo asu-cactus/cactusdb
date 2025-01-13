@@ -16,6 +16,11 @@ def create_tpcxai_dataset(data_dir):
                 continue
             dataset_name = file.split(".")[0]
             df = pq.read_table(os.path.join(root, file)).to_pandas()
+
+            # Convert timestamp columns to varchar
+            for col in df.select_dtypes(include=['datetime64[ns]']).columns:
+              df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+
             df_dict[dataset_name] = df
             batch_size = math.ceil(len(df) / NUM_SPLIT)
             target_dir_path = os.path.join(
