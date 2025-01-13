@@ -1582,7 +1582,15 @@ class TorchDNN : public MLFunction {
 };
 
 namespace velox::dl {
-enum class KernelType { MatMul, MatAdd, ReLU, Softmax, BatchNorm, Argmax };
+enum class KernelType {
+  MatMul,
+  MatAdd,
+  ReLU,
+  Softmax,
+  BatchNorm,
+  Argmax,
+  Sigmoid
+};
 
 std::string kernelTypeToString(KernelType kernelType) {
   switch (kernelType) {
@@ -1598,6 +1606,8 @@ std::string kernelTypeToString(KernelType kernelType) {
       return "BatchNorm";
     case KernelType::Argmax:
       return "Argmax";
+    case KernelType::Sigmoid:
+      return "Sigmoid";
     default:
       return "Unknown";
   }
@@ -1671,6 +1681,8 @@ class TorchDNNV2 : public MLFunction {
         model_->push_back(batchNormLayer);
       } else if (kernelTypes[i] == velox::dl::KernelType::ReLU) {
         model_->push_back(torch::nn::ReLU());
+      } else if (kernelTypes[i] == velox::dl::KernelType::Sigmoid) {
+        model_->push_back(torch::nn::Sigmoid());
       } else if (kernelTypes[i] == velox::dl::KernelType::Softmax) {
         model_->push_back(torch::nn::Softmax(1));
       } else if (kernelTypes[i] == velox::dl::KernelType::Argmax) {
@@ -1900,6 +1912,8 @@ class TorchDNNV2CUDA : public MLFunction {
         model_->push_back(batchNormLayer);
       } else if (kernelTypes[i] == velox::dl::KernelType::ReLU) {
         model_->push_back(torch::nn::ReLU());
+      } else if (kernelTypes[i] == velox::dl::KernelType::Sigmoid) {
+        model_->push_back(torch::nn::Sigmoid());
       } else if (kernelTypes[i] == velox::dl::KernelType::Softmax) {
         model_->push_back(torch::nn::Softmax(1));
       } else if (kernelTypes[i] == velox::dl::KernelType::Argmax) {

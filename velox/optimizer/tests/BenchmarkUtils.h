@@ -279,7 +279,7 @@ PlanBuilder setupTPCxAIQuery(
       {DOUBLE(), VARCHAR(), BIGINT(), VARCHAR(), BIGINT(), VARCHAR()});
   auto orderDataRowType =
       ROW({"o_order_id", "o_customer_sk", "weekday", "date", "store"},
-          {BIGINT(), BIGINT(), VARCHAR(), TIMESTAMP(), BIGINT()});
+          {BIGINT(), BIGINT(), VARCHAR(), VARCHAR(), BIGINT()});
   auto lineitemDataRowType =
       ROW({"li_order_id", "li_product_id", "quantity", "price"},
           {BIGINT(), BIGINT(), BIGINT(), DOUBLE()});
@@ -331,7 +331,144 @@ PlanBuilder setupTPCxAIQuery(
       storeDeptNumRows,
       storeDeptNumCols);
   if (queryType.find("uc3") != std::string::npos) {
+    PlanNodeId readStoreDeptDataPlanNodeId;
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(storeDeptDataRowType, {}, "")
+            .capturePlanNodeId(readStoreDeptDataPlanNodeId)
+            .project({
+                "store",
+                "department",
+                "num_of_week",
+                "store_id_encoder(array_constructor(CAST(store as INTEGER))) as store_id_encoded",
+                "department_encoder(department) as department_encoded",
+                "CAST(num_of_week / 156 AS REAL) as num_of_week_norm",
+            })
+            .project(
+                {"store",
+                 "department",
+                 "num_of_week",
+                 "transform(concat(store_id_encoded, department_encoded), x-> CAST(x as REAL))  as features1",
+                 "array_constructor(num_of_week_norm) as features2"})
+            .project(
+                {"store",
+                 "department",
+                 "num_of_week",
+                 "concat(features1, features2) as features"})
+            .project(
+                {"store",
+                 "department",
+                 "num_of_week",
+                 "mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))))) as prediction"});
+    cataLog.setIdAddressMap(
+        readStoreDeptDataPlanNodeId,
+        storeDeptDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(readStoreDeptDataPlanNodeId, "store_dept");
+    Source storeDeptSrc = Source(
+        readStoreDeptDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(storeDeptNumRows, storeDeptNumCols)));
+    cataLog.addSource(std::make_shared<Source>(storeDeptSrc));
+
   } else if (queryType.find("uc8") != std::string::npos) {
+    PlanNodeId readOrderDataPlanNodeId;
+    PlanNodeId readLineitemDataPlanNodeId;
+    PlanNodeId readProductDataPlanNodeId;
+
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(orderDataRowType, {}, "")
+            .capturePlanNodeId(readOrderDataPlanNodeId)
+            .project({
+                "o_order_id",
+                "store",
+                "CAST (date AS TIMESTAMP) AS date",
+            })
+            .project({
+                "o_order_id",
+                "store",
+                "date",
+                "day_of_week(date) as weekday",
+            })
+            .hashJoin(
+                {"o_order_id"},
+                {"li_order_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(lineitemDataRowType, {}, "")
+                    .capturePlanNodeId(readLineitemDataPlanNodeId)
+                    .planNode(),
+                "",
+                {"li_order_id",
+                 "li_product_id",
+                 "o_order_id",
+                 "quantity",
+                 "date",
+                 "weekday"})
+            .hashJoin(
+                {"li_product_id"},
+                {"p_product_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(productDataRowType, {}, "")
+                    .capturePlanNodeId(readProductDataPlanNodeId)
+                    .planNode(),
+                "",
+                {"li_order_id",
+                 "o_order_id",
+                 "quantity",
+                 "date",
+                 "department",
+                 "weekday"})
+            .partialAggregation(
+                {"o_order_id", "date", "department", "quantity"},
+                {"sum(quantity) as scan_count", "min(weekday) as weekday"})
+            .finalAggregation()
+            .project(
+                {"o_order_id",
+                 "date",
+                 "array_constructor(quantity, scan_count, weekday) as features",
+                 "department_encoder(department) as department_encoded"})
+            .project(
+                {"o_order_id",
+                 "date",
+                 "transform(concat(features, department_encoded), x-> CAST(x as REAL)) as features"})
+            .project(
+                {"o_order_id",
+                 "date",
+                 "softmax(mat_vector_add1_8(mat_mul1_7(relu(mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))))))))) as prediction"});
+    cataLog.setIdAddressMap(
+        readOrderDataPlanNodeId,
+        orderDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readLineitemDataPlanNodeId,
+        lineitemDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readProductDataPlanNodeId,
+        productDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
+    cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
+    cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+    Source orderSrc = Source(
+        readOrderDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(OutputStat(orderNumRows, orderNumCols)));
+    Source lineitemSrc = Source(
+        readLineitemDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(lineitemNumRows, lineitemNumCols)));
+    Source productSrc = Source(
+        readProductDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(productNumRows, productNumCols)));
+    cataLog.addSource(std::make_shared<Source>(orderSrc));
+    cataLog.addSource(std::make_shared<Source>(lineitemSrc));
+    cataLog.addSource(std::make_shared<Source>(productSrc));
   } else if (queryType.find("uc10") != std::string::npos) {
     PlanNodeId readFinancialAccountDataPlanNodeId;
     PlanNodeId readFinancialTransactionsDataPlanNodeId;
@@ -2407,7 +2544,9 @@ PlanBuilder heuristicQueryRewrite(
   auto planNode = plan.planNode();
   planState.getPossibleActions(planNode, cataLog);
   std::vector<std::pair<std::string, std::string>> pushDownRules =
-      planState.getActionPairsWithRule("MLDecompositionPushdownRewriteAction");
+      planState.getActionPairsWithRules(
+          {"MLDecompositionPushdownRewriteAction",
+           "MultiLayerUDF2TorchNNRewriteAction"});
   while (pushDownRules.size() > 0) {
     auto planNode = plan.planNode();
     std::pair<std::string, std::string> selectedAction =
@@ -2431,8 +2570,9 @@ PlanBuilder heuristicQueryRewrite(
         cataLog);
     planNode = plan.planNode();
     planState.getPossibleActions(planNode, cataLog);
-    pushDownRules = planState.getActionPairsWithRule(
-        "MLDecompositionPushdownRewriteAction");
+    pushDownRules = planState.getActionPairsWithRules(
+        {"MLDecompositionPushdownRewriteAction",
+         "MultiLayerUDF2TorchNNRewriteAction"});
   }
 
   if (verbose >= 2) {
