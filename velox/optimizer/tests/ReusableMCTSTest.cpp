@@ -1225,6 +1225,20 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
             globalRandomSeed);
       }
 
+    } else if (mode == "tpcxai") {
+      if (queryTemplate == "uc3") {
+        registerTPCxAIUC3ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc8") {
+        registerTPCxAIUC8ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc10") {
+        registerTPCxAIUC10ModelFunctions(cataLog, pool_);
+      } else {
+        throw std::runtime_error(
+            fmt::format("Non-supported query template: {}", queryTemplate));
+      }
+      myPlan =
+          setupTPCxAIQuery(queryTemplate, cataLog, pool_, planNodeIdGenerator);
+
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
@@ -1463,6 +1477,21 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
             planNodeIdGenerator,
             globalRandomSeed);
       }
+
+    } else if (mode == "tpcxai") {
+      if (queryTemplate == "uc3") {
+        registerTPCxAIUC3ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc8") {
+        registerTPCxAIUC8ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc10") {
+        registerTPCxAIUC10ModelFunctions(cataLog, pool_);
+      } else {
+        throw std::runtime_error(
+            fmt::format("Non-supported query template: {}", queryTemplate));
+      }
+
+      myPlan =
+          setupTPCxAIQuery(queryTemplate, cataLog, pool_, planNodeIdGenerator);
 
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
@@ -1773,20 +1802,20 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
 
     } else if (mode == "tpcxai") {
       if (queryTemplate == "uc3") {
-
+        registerTPCxAIUC3ModelFunctions(cataLog, pool_);
       } else if (queryTemplate == "uc8") {
-
+        registerTPCxAIUC8ModelFunctions(cataLog, pool_);
       } else if (queryTemplate == "uc10") {
         registerTPCxAIUC10ModelFunctions(cataLog, pool_);
       } else {
-        throw std::runtime_error(fmt::format("Non-supported query template: {}", queryTemplate));
+        throw std::runtime_error(
+            fmt::format("Non-supported query template: {}", queryTemplate));
       }
 
-      myPlan = setupTPCxAIQuery(
-          queryTemplate, cataLog, pool_, planNodeIdGenerator);
+      myPlan =
+          setupTPCxAIQuery(queryTemplate, cataLog, pool_, planNodeIdGenerator);
 
-      
-    }else {
+    } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
 
