@@ -19,7 +19,7 @@ from models.dlrm import DLRM
 from sklearn.preprocessing import LabelEncoder
 from tqdm.auto import tqdm
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, pandas_udf, when
+from pyspark.sql.functions import col, pandas_udf, when, from_unixtime
 import pyspark.sql.functions as F
 from pyspark.sql.types import ArrayType, FloatType, StringType, IntegerType
 from dssm_evadb import DSSM_Moel_Wrapper
@@ -2666,3 +2666,176 @@ class TPCxAIUsecase10PipelineEvaDB(Pipeline):
         query_to_fetch_serving_data = "SELECT Model_UseCase10_EVADB(business_hour_norm, amount_norm).label FROM postgres_data.evadb_tpcxai_uc10"
         result_df = self.cursor.query(query_to_fetch_serving_data).df()
         return result_df.values
+class TPCxAIUsecase3PipelineSparkHadoop(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        # np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "60g")
+            .config("spark.sql.legacy.parquet.nanosAsLong", "true")
+            .getOrCreate()
+        )
+        super(TPCxAIUsecase3PipelineSparkHadoop, self).__init__(
+            "tpcxai-usecase3-sparkhadoop", num_loop=num_loop
+        )
+
+        from register_tpcxai_spark_func import uc3_sales_predicator
+        
+
+        self.model_redictor = uc3_sales_predicator
+
+        self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
+        self.store_depth_path_in_hdfs = os.path.join(self.data_path, "store_dept_serving")
+
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        df = self.spark.read.parquet(self.store_depth_path_in_hdfs)
+        df.createOrReplaceTempView("tpcxai_store_dept_serving")
+        uc3_sql = """
+        select store, department, num_of_week from tpcxai_store_dept_serving
+        """
+
+        joined_df = self.spark.sql(uc3_sql)
+
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        
+        result_df = data.withColumn(
+            "predicted",
+            self.model_redictor("store", "department", "num_of_week")
+        )
+        result_df.collect()
+        return result_df
+    
+class TPCxAIUsecase8PipelineSparkHadoop(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        # np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "60g")
+            .config("spark.sql.legacy.parquet.nanosAsLong", "true")
+            .getOrCreate()
+        )
+        super(TPCxAIUsecase8PipelineSparkHadoop, self).__init__(
+            "tpcxai-usecase8-sparkhadoop", num_loop=num_loop
+        )
+
+        from register_tpcxai_spark_func import uc8_trip_classifier
+        
+
+        self.model_redictor = uc8_trip_classifier
+
+        self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
+        self.order_path_in_hdfs = os.path.join(self.data_path, "order_serving")
+        self.lineitem_path_in_hdfs = os.path.join(self.data_path, "lineitem_serving")
+        self.product_path_in_hdfs = os.path.join(self.data_path, "product_serving")
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        df_order = self.spark.read.parquet(self.order_path_in_hdfs).withColumn("date", from_unixtime(col("date")))
+        df_lineitem = self.spark.read.parquet(self.lineitem_path_in_hdfs)
+        df_product = self.spark.read.parquet(self.product_path_in_hdfs)
+        df_order.createOrReplaceTempView("tpcxai_order_serving")
+        df_lineitem.createOrReplaceTempView("tpcxai_lineitem_serving")
+        df_product.createOrReplaceTempView("tpcxai_product_serving")
+
+        uc8_sql = """
+        SELECT 
+            o_order_id,
+            department,
+            quantity,
+            SUM(quantity) AS scan_count,               
+            MIN(EXTRACT(DOW FROM date)) AS weekday     
+        FROM tpcxai_order_serving 
+        JOIN tpcxai_lineitem_serving ON o_order_id = li_order_id 
+        JOIN tpcxai_product_serving ON li_product_id = p_product_id
+        GROUP BY o_order_id, date, department, quantity
+        """
+
+        joined_df = self.spark.sql(uc8_sql)
+
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        
+        result_df = data.withColumn(
+            "predicted",
+            self.model_redictor("quantity", "scan_count", "weekday", "department")
+        )
+        result_df.collect()
+        return result_df
+
+
+class TPCxAIUsecase10PipelineSparkHadoop(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        # np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "60g")
+            .config("spark.sql.legacy.parquet.nanosAsLong", "true")
+            .getOrCreate()
+        )
+        super(TPCxAIUsecase10PipelineSparkHadoop, self).__init__(
+            "tpcxai-usecase10-sparkhadoop", num_loop=num_loop
+        )
+
+        from register_tpcxai_spark_func import uc10_fraud_spark_predicator
+        
+
+        self.model_redictor = uc10_fraud_spark_predicator
+
+        self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
+        self.fa_path_in_hdfs = os.path.join(self.data_path, "financial_account_serving")
+        self.ft_path_in_hdfs = os.path.join(self.data_path, "financial_transactions_serving")
+
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        df_ft = self.spark.read.parquet(self.ft_path_in_hdfs).withColumn("time", from_unixtime(col("time")))
+        df_fa = self.spark.read.parquet(self.fa_path_in_hdfs)
+        df_ft.createOrReplaceTempView("tpcxai_financial_transactions_serving")
+        df_fa.createOrReplaceTempView("tpcxai_financial_account_serving")
+
+        uc10_sql = """
+        select transaction_id, EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm
+        from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
+        """
+
+        joined_df = self.spark.sql(uc10_sql)
+
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        
+        result_df = data.withColumn(
+            "predicted",
+            self.model_redictor("business_hour_norm", "amount_norm")
+        )
+        result_df.collect()
+        return result_df
