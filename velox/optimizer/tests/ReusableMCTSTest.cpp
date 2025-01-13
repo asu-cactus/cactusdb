@@ -1771,7 +1771,22 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
             globalRandomSeed);
       }
 
-    } else {
+    } else if (mode == "tpcxai") {
+      if (queryTemplate == "uc3") {
+
+      } else if (queryTemplate == "uc8") {
+
+      } else if (queryTemplate == "uc10") {
+        registerTPCxAIUC10ModelFunctions(cataLog, pool_);
+      } else {
+        throw std::runtime_error(fmt::format("Non-supported query template: {}", queryTemplate));
+      }
+
+      myPlan = setupTPCxAIQuery(
+          queryTemplate, cataLog, pool_, planNodeIdGenerator);
+
+      
+    }else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
 

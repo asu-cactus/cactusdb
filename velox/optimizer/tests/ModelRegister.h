@@ -1448,3 +1448,59 @@ void registerMLMovieTagEncoderModelFunctions(
       true,
       catalog);
 };
+
+void registerTPCxAIUC10ModelFunctions(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+
+  std::string ffnnModelPath =
+      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase10_ffnn_weight.h5";
+  std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+  std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+  std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+  std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+
+  optimization::registerVectorFunction(
+      "mat_mul1_1",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w1)), 2, 32),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b1)), 32),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_mul1_3",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w2)), 32, 1),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_4",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b2)), 1),
+      {},
+      true,
+      catalog);
+
+  optimization::registerVectorFunction(
+      "sigmoid",
+      Sigmoid::signatures(),
+      std::make_unique<Sigmoid>(),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "relu", Relu::signatures(), std::make_unique<Relu>(), {}, true, catalog);
+};

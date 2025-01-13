@@ -805,6 +805,77 @@ class MatrixVectorAddition : public MLFunction {
   std::string weightsFile_;
 };
 
+class Sigmoid : public MLFunction {
+ public:
+  Sigmoid() {}
+
+  // Sigmoid computation
+  float static sigmoidFunction(float x) {
+    return 1.0f / (1.0f + std::exp(-x));
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+    exec::DecodedArgs decodedArgs(rows, args, context);
+    auto decodedInput = decodedArgs.at(0);
+    auto numRows = rows.size();
+
+    auto inputArray = decodedInput->base()->as<ArrayVector>();
+    auto inputElements = inputArray->elements();
+    float* inputValues = inputElements->values()->asMutable<float>();
+    auto inputOffsets = inputArray->rawOffsets();
+    auto inputSizes = inputArray->rawSizes();
+
+    std::vector<std::vector<float>> result(numRows);
+
+    rows.applyToSelected([&](vector_size_t i) {
+      size_t mappedIndexInRowData = decodedInput->index(i);
+      size_t dataSize = inputSizes[mappedIndexInRowData];
+      size_t dataOffset = inputOffsets[mappedIndexInRowData];
+      std::vector<float> rowResult(dataSize);
+      std::transform(
+          inputValues + dataOffset,
+          inputValues + dataOffset + dataSize,
+          rowResult.data(),
+          sigmoidFunction);
+      result[i] = rowResult;
+    });
+    VectorMaker maker{context.pool()};
+    output = maker.arrayVector<float>(result, REAL());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {exec::FunctionSignatureBuilder()
+                .returnType("array(REAL)")
+                .argumentType("array(REAL)")
+                .build()};
+  }
+
+  // getters for metadata to be used by optimiser
+  float* getTensor() const override {
+    return new float[0];
+  }
+
+  std::string getFuncName() {
+    return getName();
+  };
+
+  static std::string getName() {
+    return "sigmoid";
+  };
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    std::vector<double> coefficientVector = getCoefficientVector(getName());
+    float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+    return CostEstimate(cost, inputDims[0], inputDims[1]);
+  }
+};
+
 class Relu : public MLFunction {
  public:
   Relu() {}
@@ -1898,7 +1969,8 @@ class TorchDNNV2CUDA : public MLFunction {
 
     float* inputValues1 = inputMatrix.data();
 
-    torch::Tensor input = torch::from_blob(inputValues1, {numUniqueRows, dims[0]});
+    torch::Tensor input =
+        torch::from_blob(inputValues1, {numUniqueRows, dims[0]});
     torch::Tensor output_tensor = input;
     output_tensor = output_tensor.to(device_);
 

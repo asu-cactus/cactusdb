@@ -263,6 +263,141 @@ std::vector<std::vector<float>> loadHDF5Array(
   return result;
 };
 
+PlanBuilder setupTPCxAIQuery(
+    std::string queryType,
+    CataLog& cataLog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
+  std::string queryOptType =
+      getEnvVar("CD_VELOX_QUERY_OPT_TYPE"); // env used for ablation study of
+  PlanBuilder queryPlan;
+
+  auto finicialAccountDataRowType =
+      ROW({"fa_customer_sk", "transaction_limit"}, {BIGINT(), DOUBLE()});
+  auto finicialTransactionsDataRowType = ROW(
+      {"amount", "iban", "sender_id", "receiver_id", "transaction_id", "time"},
+      {DOUBLE(), VARCHAR(), BIGINT(), VARCHAR(), BIGINT(), VARCHAR()});
+  auto orderDataRowType =
+      ROW({"o_order_id", "o_customer_sk", "weekday", "date", "store"},
+          {BIGINT(), BIGINT(), VARCHAR(), TIMESTAMP(), BIGINT()});
+  auto lineitemDataRowType =
+      ROW({"li_order_id", "li_product_id", "quantity", "price"},
+          {BIGINT(), BIGINT(), BIGINT(), DOUBLE()});
+  auto productDataRowType = ROW(
+      {"p_product_id", "name", "department"}, {BIGINT(), VARCHAR(), VARCHAR()});
+  auto storeDeptDataRowType = ROW(
+      {"store", "department", "num_of_week"}, {BIGINT(), VARCHAR(), BIGINT()});
+  std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+  if (dataDirPrefix == "") {
+    // use default value:
+    dataDirPrefix =
+        "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
+  }
+
+  std::vector<std::string> finicialAccountDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "financial_account");
+  std::vector<std::string> finicialTransactionsDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "financial_transactions");
+  std::vector<std::string> orderDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "order");
+  std::vector<std::string> lineitemDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "lineitem");
+  std::vector<std::string> productDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "product");
+  std::vector<std::string> storeDeptDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "store_dept");
+
+  int finicialAccountNumRows, finicialAccountNumCols,
+      finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
+      orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
+      productNumCols, storeDeptNumRows, storeDeptNumCols;
+
+  readDataStats(
+      dataDirPrefix + "financial_account_stats.txt",
+      finicialAccountNumRows,
+      finicialAccountNumCols);
+  readDataStats(
+      dataDirPrefix + "financial_transactions_stats.txt",
+      finicialTransactionsNumRows,
+      finicialTransactionsNumCols);
+  readDataStats(dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
+  readDataStats(
+      dataDirPrefix + "lineitem_stats.txt", lineitemNumRows, lineitemNumCols);
+  readDataStats(
+      dataDirPrefix + "product_stats.txt", productNumRows, productNumCols);
+  readDataStats(
+      dataDirPrefix + "store_dept_stats.txt",
+      storeDeptNumRows,
+      storeDeptNumCols);
+  if (queryType.find("uc3") != std::string::npos) {
+  } else if (queryType.find("uc8") != std::string::npos) {
+  } else if (queryType.find("uc10") != std::string::npos) {
+    PlanNodeId readFinancialAccountDataPlanNodeId;
+    PlanNodeId readFinancialTransactionsDataPlanNodeId;
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(finicialAccountDataRowType, {}, "")
+            .capturePlanNodeId(readFinancialAccountDataPlanNodeId)
+            .hashJoin(
+                {"fa_customer_sk"},
+                {"sender_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(finicialTransactionsDataRowType, {}, "")
+                    .capturePlanNodeId(readFinancialTransactionsDataPlanNodeId)
+                    .project(
+                        {"transaction_id",
+                         "sender_id",
+                         "CAST(hour(CAST(time AS TIMESTAMP)) as DOUBLE) as business_hour_norm",
+                         "amount"})
+                    .planNode(),
+                "",
+                {"transaction_id",
+                 "sender_id",
+                 "business_hour_norm",
+                 "amount",
+                 "transaction_limit"})
+            .project(
+                {"transaction_id",
+                 "amount / transaction_limit as amount_norm",
+                 "business_hour_norm"})
+            .project(
+                {"transaction_id",
+                 "transform(array_constructor(amount_norm, business_hour_norm), x-> CAST(X as REAL)) as features"})
+            .project(
+                {"transaction_id",
+                 "sigmoid(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))) as prediction"});
+    cataLog.setIdAddressMap(
+        readFinancialAccountDataPlanNodeId,
+        finicialAccountDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readFinancialTransactionsDataPlanNodeId,
+        finicialTransactionsDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(
+        readFinancialAccountDataPlanNodeId, "financial_account");
+    cataLog.addNodeIdRelationName(
+        readFinancialTransactionsDataPlanNodeId, "financial_transactions");
+    Source financialAccountSrc = Source(
+        readFinancialAccountDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(finicialAccountNumRows, finicialAccountNumCols)));
+    Source financialTransactionsSrc = Source(
+        readFinancialTransactionsDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(OutputStat(
+            finicialTransactionsNumRows, finicialTransactionsNumCols)));
+    cataLog.addSource(std::make_shared<Source>(financialAccountSrc));
+    cataLog.addSource(std::make_shared<Source>(financialTransactionsSrc));
+  } else {
+    throw std::runtime_error(
+        "[setupTPCxAIQuery] Unsupported query type: " + queryType);
+  }
+  return queryPlan;
+}
+
 PlanBuilder setupMovielensDBQuery(
     std::string queryType,
     CataLog& cataLog,
@@ -1967,6 +2102,12 @@ std::vector<std::string> sampleUserMovieFilterExpr(
 
 // Function to write a string to a file
 void writeStringToFile(const std::string& str, const std::string& filename) {
+  // Create the folder if it does not exist
+  std::filesystem::path folderPath =
+      std::filesystem::path(filename).parent_path();
+  if (!std::filesystem::exists(folderPath)) {
+    std::filesystem::create_directories(folderPath);
+  }
   // Open the file in write mode
   std::ofstream outfile(filename);
 
