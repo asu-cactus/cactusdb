@@ -13,74 +13,70 @@ from tqdm.auto import tqdm
 
 
 def benchmark_tpcxai_usecase03_tf(num_loop=10, **kwargs):
-    llm_recommendation_pipeline = pipeline.TPCxAIUsecase03PipelineTF(num_loop=num_loop)
-    benchmark_result = llm_recommendation_pipeline.run_pipeline()
+    benchmark_pipeline = pipeline.TPCxAIUsecase03PipelineTF(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
     return benchmark_result
 
 
 def benchmark_tpcxai_usecase03_evadb(num_loop=10, **kwargs):
-    llm_recommendation_pipeline = pipeline.TPCxAIUsecase03PipelineEvaDB(
-        num_loop=num_loop
-    )
-    benchmark_result = llm_recommendation_pipeline.run_pipeline()
+    benchmark_pipeline = pipeline.TPCxAIUsecase03PipelineEvaDB(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
     return benchmark_result
 
 
-# def benchmark_tpcxai_usecase03_sparkhadoop(num_loop=10, **kwargs):
-#     llm_recommendation_pipeline = pipeline.TPCxAIUsecase03PipelineSparkHadoop(
-#         num_loop=num_loop
-#     )
-#     benchmark_result = llm_recommendation_pipeline.run_pipeline()
-#     return benchmark_result
+def benchmark_tpcxai_usecase03_sparkhadoop(num_loop=10, **kwargs):
+    benchmark_pipeline = pipeline.TPCxAIUsecase3PipelineSparkHadoop(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
+    return benchmark_result
 
 
 def benchmark_tpcxai_usecase08_tf(num_loop=10, **kwargs):
-    llm_recommendation_pipeline = pipeline.TPCxAIUsecase08PipelineTF(num_loop=num_loop)
-    benchmark_result = llm_recommendation_pipeline.run_pipeline()
+    benchmark_pipeline = pipeline.TPCxAIUsecase08PipelineTF(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
     return benchmark_result
 
 
 def benchmark_tpcxai_usecase08_evadb(num_loop=10, **kwargs):
-    llm_recommendation_pipeline = pipeline.TPCxAIUsecase08PipelineEvaDB(
-        num_loop=num_loop
-    )
-    benchmark_result = llm_recommendation_pipeline.run_pipeline()
+    benchmark_pipeline = pipeline.TPCxAIUsecase08PipelineEvaDB(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
+    return benchmark_result
+
+
+def benchmark_tpcxai_usecase08_sparkhadoop(num_loop=10, **kwargs):
+    benchmark_pipeline = pipeline.TPCxAIUsecase8PipelineSparkHadoop(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
     return benchmark_result
 
 
 def benchmark_tpcxai_usecase10_tf(num_loop=10, **kwargs):
-    llm_recommendation_pipeline = pipeline.TPCxAIUsecase10PipelineTF(num_loop=num_loop)
-    benchmark_result = llm_recommendation_pipeline.run_pipeline()
+    benchmark_pipeline = pipeline.TPCxAIUsecase10PipelineTF(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
     return benchmark_result
 
 
 def benchmark_tpcxai_usecase10_evadb(num_loop=10, **kwargs):
-    llm_recommendation_pipeline = pipeline.TPCxAIUsecase10PipelineEvaDB(
-        num_loop=num_loop
-    )
-    benchmark_result = llm_recommendation_pipeline.run_pipeline()
+    benchmark_pipeline = pipeline.TPCxAIUsecase10PipelineEvaDB(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
     return benchmark_result
 
 
-# def benchmark_tpcxai_usecase10_sparkhadoop(num_loop=10, **kwargs):
-#     llm_recommendation_pipeline = pipeline.TPCxAIUsecase10PipelineSparkHadoop(
-#         num_loop=num_loop
-#     )
-#     benchmark_result = llm_recommendation_pipeline.run_pipeline()
-#     return benchmark_result
+def benchmark_tpcxai_usecase10_sparkhadoop(num_loop=10, **kwargs):
+    benchmark_pipeline = pipeline.TPCxAIUsecase10PipelineSparkHadoop(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
+    return benchmark_result
 
 
 def benchmark_tpcxai():
     list_benchmark = []
-    # list_benchmark += [benchmark_tpcxai_usecase03_tf]
-    # list_benchmark += [benchmark_tpcxai_usecase03_evadb]
-    # list_benchmark += [benchmark_tpcxai_usecase03_sparkhadoop]
-    # list_benchmark += [benchmark_tpcxai_usecase08_tf]
-    # list_benchmark += [benchmark_tpcxai_usecase08_evadb]
-    # list_benchmark += [benchmark_tpcxai_usecase08_sparkhadoop]
+    list_benchmark += [benchmark_tpcxai_usecase03_tf]
+    list_benchmark += [benchmark_tpcxai_usecase03_evadb]
+    list_benchmark += [benchmark_tpcxai_usecase03_sparkhadoop]
+    list_benchmark += [benchmark_tpcxai_usecase08_tf]
+    list_benchmark += [benchmark_tpcxai_usecase08_evadb]
+    list_benchmark += [benchmark_tpcxai_usecase08_sparkhadoop]
     list_benchmark += [benchmark_tpcxai_usecase10_tf]
     list_benchmark += [benchmark_tpcxai_usecase10_evadb]
-    # list_benchmark += [benchmark_tpcxai_usecase10_sparkhadoop]
+    list_benchmark += [benchmark_tpcxai_usecase10_sparkhadoop]
     list_num_user = [1]
     list_num_movie = [1]
 
