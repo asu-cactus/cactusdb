@@ -1448,3 +1448,346 @@ void registerMLMovieTagEncoderModelFunctions(
       true,
       catalog);
 };
+
+void registerTPCxAIUC10ModelFunctions(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+
+  std::string ffnnModelPath =
+      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase10_ffnn_weight.h5";
+  std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+  std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+  std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+  std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+
+  optimization::registerVectorFunction(
+      "mat_mul1_1",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w1)), 2, 32),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b1)), 32),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_mul1_3",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w2)), 32, 1),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_4",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b2)), 1),
+      {},
+      true,
+      catalog);
+
+  optimization::registerVectorFunction(
+      "sigmoid",
+      Sigmoid::signatures(),
+      std::make_unique<Sigmoid>(),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "relu", Relu::signatures(), std::make_unique<Relu>(), {}, true, catalog);
+};
+
+void registerTPCxAIUC3ModelFunctions(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+
+  std::string ffnnModelPath =
+      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase3_ffnn_weight.h5";
+  std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+  std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+  std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+  std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+  std::vector<std::vector<float>> w3 = loadHDF5Array(ffnnModelPath, "w3");
+  std::vector<std::vector<float>> b3 = loadHDF5Array(ffnnModelPath, "b3");
+
+  optimization::registerVectorFunction(
+      "mat_mul1_1",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w1)), 3, 256),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b1)), 256),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_mul1_3",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w2)), 256, 1024),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_4",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b2)), 1024),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_mul1_5",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w3)), 1024, 1),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_6",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b3)), 1),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "relu", Relu::signatures(), std::make_unique<Relu>(), {}, true, catalog);
+
+  // init user encoder
+  std::unordered_map<int, int> storeIdMapping;
+  for (int i = 1; i < 12; i++) {
+    storeIdMapping[i] = i - 1;
+  }
+  optimization::registerVectorFunction(
+      "store_id_encoder",
+      IntEncoder::signatures(),
+      std::make_unique<IntEncoder>(std::move(storeIdMapping)),
+      {},
+      true,
+      catalog);
+  std::vector<std::string> departmentList = {
+      "AUTOMOTIVE",
+      "BATH AND SHOWER",
+      "BEAUTY",
+      "BEDDING",
+      "BOYS WEAR",
+      "CANDY, TOBACCO, COOKIES",
+      "CELEBRATION",
+      "COMM BREAD",
+      "COOK AND DINE",
+      "DAIRY",
+      "DSD GROCERY",
+      "ELECTRONICS",
+      "FABRICS AND CRAFTS",
+      "FINANCIAL SERVICES",
+      "FROZEN FOODS",
+      "GIRLS WEAR, 4-6X  AND 7-14",
+      "GROCERY DRY GOODS",
+      "HARDWARE",
+      "HOME DECOR",
+      "HOME MANAGEMENT",
+      "HORTICULTURE AND ACCESS",
+      "HOUSEHOLD CHEMICALS/SUPP",
+      "HOUSEHOLD PAPER GOODS",
+      "IMPULSE MERCHANDISE",
+      "INFANT APPAREL",
+      "INFANT CONSUMABLE HARDLINES",
+      "JEWELRY AND SUNGLASSES",
+      "LADIESWEAR",
+      "LAWN AND GARDEN",
+      "LIQUOR,WINE,BEER",
+      "MEAT - FRESH & FROZEN",
+      "MEDIA AND GAMING",
+      "MENS WEAR",
+      "OFFICE SUPPLIES",
+      "PAINT AND ACCESSORIES",
+      "PERSONAL CARE",
+      "PETS AND SUPPLIES",
+      "PHARMACY OTC",
+      "PHARMACY RX",
+      "PLAYERS AND ELECTRONICS",
+      "PRODUCE",
+      "SERVICE DELI",
+      "SHOES",
+      "SPORTING GOODS",
+      "TOYS",
+      "WIRELESS"};
+  std::unordered_map<std::string, int> departmentMapping;
+  for (int i = 0; i < departmentList.size(); i++) {
+    departmentMapping[departmentList[i]] = i;
+  }
+  optimization::registerVectorFunction(
+      "department_encoder",
+      StringEncoder::signatures(),
+      std::make_unique<StringEncoder>(std::move(departmentMapping)),
+      {},
+      true,
+      catalog);
+};
+
+void registerTPCxAIUC8ModelFunctions(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+
+  std::string ffnnModelPath =
+      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_ffnn_weight.h5";
+  std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+  std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+  std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
+  std::vector<std::vector<float>> b2 = loadHDF5Array(ffnnModelPath, "b2");
+  std::vector<std::vector<float>> w3 = loadHDF5Array(ffnnModelPath, "w3");
+  std::vector<std::vector<float>> b3 = loadHDF5Array(ffnnModelPath, "b3");
+  std::vector<std::vector<float>> w4 = loadHDF5Array(ffnnModelPath, "w4");
+  std::vector<std::vector<float>> b4 = loadHDF5Array(ffnnModelPath, "b4");
+
+  optimization::registerVectorFunction(
+      "mat_mul1_1",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w1)), 4, 256),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b1)), 256),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_mul1_3",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w2)), 256, 128),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_4",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b2)), 128),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_mul1_5",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w3)), 128, 64),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_6",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b3)), 64),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_mul1_7",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w4)), 64, 1),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_8",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b4)), 1),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "softmax",
+      Softmax::signatures(),
+      std::make_unique<Softmax>(),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "relu", Relu::signatures(), std::make_unique<Relu>(), {}, true, catalog);
+
+  std::vector<std::string> departmentList = {
+      "AUTOMOTIVE",
+      "BATH AND SHOWER",
+      "BEAUTY",
+      "BEDDING",
+      "BOYS WEAR",
+      "CANDY, TOBACCO, COOKIES",
+      "CELEBRATION",
+      "COMM BREAD",
+      "COOK AND DINE",
+      "DAIRY",
+      "DSD GROCERY",
+      "ELECTRONICS",
+      "FABRICS AND CRAFTS",
+      "FINANCIAL SERVICES",
+      "FROZEN FOODS",
+      "GIRLS WEAR, 4-6X  AND 7-14",
+      "GROCERY DRY GOODS",
+      "HARDWARE",
+      "HOME DECOR",
+      "HOME MANAGEMENT",
+      "HORTICULTURE AND ACCESS",
+      "HOUSEHOLD CHEMICALS/SUPP",
+      "HOUSEHOLD PAPER GOODS",
+      "IMPULSE MERCHANDISE",
+      "INFANT APPAREL",
+      "INFANT CONSUMABLE HARDLINES",
+      "JEWELRY AND SUNGLASSES",
+      "LADIESWEAR",
+      "LAWN AND GARDEN",
+      "LIQUOR,WINE,BEER",
+      "MEAT - FRESH & FROZEN",
+      "MEDIA AND GAMING",
+      "MENS WEAR",
+      "OFFICE SUPPLIES",
+      "PAINT AND ACCESSORIES",
+      "PERSONAL CARE",
+      "PETS AND SUPPLIES",
+      "PHARMACY OTC",
+      "PHARMACY RX",
+      "PLAYERS AND ELECTRONICS",
+      "PRODUCE",
+      "SERVICE DELI",
+      "SHOES",
+      "SPORTING GOODS",
+      "TOYS",
+      "WIRELESS"};
+  std::unordered_map<std::string, int> departmentMapping;
+  for (int i = 0; i < departmentList.size(); i++) {
+    departmentMapping[departmentList[i]] = i;
+  }
+  optimization::registerVectorFunction(
+      "department_encoder",
+      StringEncoder::signatures(),
+      std::make_unique<StringEncoder>(std::move(departmentMapping)),
+      {},
+      true,
+      catalog);
+};

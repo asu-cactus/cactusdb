@@ -40,6 +40,10 @@ class RandomGenerator {
     distI_ = std::uniform_int_distribution<int>((int)lb, (int)ub);
   }
 
+  void setSeed(int randomSeed) {
+    gen_ = std::mt19937(randomSeed);
+  }
+
   void setFloatRange(float lb, float ub) {
     distR_ = std::uniform_real_distribution<float>(lb, ub);
   }
