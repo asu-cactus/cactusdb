@@ -177,7 +177,7 @@ class MLQ2FFNN_EVADB(AbstractFunction):
 
         self.model = model
         self.min_max_scaler = pickle.load(open("/home/velox/resources/model/movielens/final/tf/q1_ffnn_minmax_scaler_py.pkl", "rb"))
-        
+        # self.model = self.model.to(torch.device('cuda:0'))
         self.model.eval()
         self.timer_process = utils.Timer()
         self.timer_model_inference = utils.Timer()
@@ -226,6 +226,7 @@ class MLQ2FFNN_EVADB(AbstractFunction):
 
         X_for_ffnn = self.min_max_scaler.transform(data[['m_popularity', 'm_vote_average', 'm_vote_count']].values)
         X_for_ffnn = torch.tensor(X_for_ffnn, dtype=torch.float32)
+        # X_for_ffnn = X_for_ffnn.to(torch.device('cuda:0'))
 
         self.t_process += self.timer_process.toc()
         self.timer_model_inference.tic()
@@ -705,8 +706,8 @@ class MLQ2DLRMModel_EVADB(AbstractFunction):
             50: 5,
             56: 6
         }
-        
-        # self.model.eval()
+        # self.dlrm_model = self.dlrm_model.to(torch.device('cuda:0'))
+        self.dlrm_model.eval()
         self.timer_process = utils.Timer()
         self.timer_model_inference = utils.Timer()
         self.t_process = 0
@@ -768,7 +769,8 @@ class MLQ2DLRMModel_EVADB(AbstractFunction):
         dlrm_numerical_features = torch.Tensor(dlrm_numerical_features)
         dlrm_categorical_features = torch.Tensor(dlrm_categorical_features.astype(np.int32))
         dlrm_categorical_features = dlrm_categorical_features.to(torch.int32)
-
+        # dlrm_numerical_features = dlrm_numerical_features.to(torch.device('cuda:0'))
+        # dlrm_categorical_features = dlrm_categorical_features.to(torch.device('cuda:0'))
 
         self.t_process += self.timer_process.toc()
         self.timer_model_inference.tic()
@@ -997,6 +999,7 @@ class DSSM_EVADB(AbstractFunction):
         dense_features = ["user_mean_rating", "movie_mean_rating"]
         target = ["rating"]
         device = "cpu"
+        # device = "cuda:0"
         user_sparse_features, user_dense_features = [
             "user_id",
             "gender",
@@ -1165,6 +1168,7 @@ class DSSM_Moel_Wrapper():
         dense_features = ["user_mean_rating", "movie_mean_rating"]
         target = ["rating"]
         device = "cpu"
+        # device = "cuda:0"
         user_sparse_features, user_dense_features = [
             "user_id",
             "gender",

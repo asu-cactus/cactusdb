@@ -447,12 +447,16 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       std::string mode,
       std::string queryTemplate,
       CataLog& cataLog,
-      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
+      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+      int randomSeed = -1) {
     // bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
     bool generateFilter = true;
 
     unsigned timestampSeed =
         std::chrono::system_clock::now().time_since_epoch().count();
+    if (randomSeed != -1) {
+      timestampSeed = randomSeed;
+    }
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
     randomGenerator.setIntRange(0, 1);
     PlanBuilder myPlan;
@@ -525,7 +529,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
                           fmt::format(userModel1ComputExpr, "u_features")});
         if (generateFilter) {
           std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("user");
+              sampleUserMovieFilterExpr("user", randomSeed);
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -574,7 +578,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
 
         if (generateFilter) {
           std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("movie");
+              sampleUserMovieFilterExpr("movie", randomSeed);
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -660,7 +664,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
                                   "m_vote_average",
                                   "m_vote_count",
                                   "m_features"});
-        RandomGenerator numModelGenerator = RandomGenerator(-1, 1, 0);
+        RandomGenerator numModelGenerator =
+            RandomGenerator(-1, 1, timestampSeed);
         numModelGenerator.setIntRange(0, 2);
         int numModel = numModelGenerator.genRandomIntValue();
         myPlan = userPlan.nestedLoopJoin(
@@ -719,7 +724,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
 
         if (generateFilter) {
           std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("movie_user");
+              sampleUserMovieFilterExpr("movie_user", randomSeed);
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -817,7 +822,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
              "m_features",
              "mt_relevance_score"});
 
-        RandomGenerator numModelGenerator = RandomGenerator(-1, 1, 0);
+        RandomGenerator numModelGenerator =
+            RandomGenerator(-1, 1, timestampSeed);
         numModelGenerator.setIntRange(0, 3);
         int numModel = numModelGenerator.genRandomIntValue();
         myPlan = userPlan.nestedLoopJoin(
@@ -899,7 +905,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
 
         if (generateFilter) {
           std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("movie_user");
+              sampleUserMovieFilterExpr("movie_user", randomSeed);
           for (auto expr : filterExpr) {
             myPlan = myPlan.filter(expr);
           }
@@ -1180,47 +1186,71 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
     std::string computationStr;
 
-    generateDummyData(
-        mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
-
     if (mode == "ml") {
-      if (queryTemplate == "ml-q1") {
-        // register ml-q1 models
-        registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
-        registerMLTrendingModelFunctions(cataLog, pool_);
-      } else if (queryTemplate == "ml-q2") {
-        registerMLTrendingModelFunctions(cataLog, pool_);
-        registerMLInterestMovieModelFunctions(cataLog, pool_);
-        registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
-        registerMLDLRMModelFunctions(cataLog, pool_);
-      } else if (queryTemplate == "ml-q3") {
-        registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
-        registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
-        registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
-        registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
+      if (queryTemplate == "ml-q1" || queryTemplate == "ml-q2" ||
+          queryTemplate == "ml-q3") {
+        if (queryTemplate == "ml-q1") {
+          // register ml-q1 models
+          registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+          registerMLTrendingModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q2") {
+          registerMLTrendingModelFunctions(cataLog, pool_);
+          registerMLInterestMovieModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLDLRMModelFunctions(cataLog, pool_);
+        } else if (queryTemplate == "ml-q3") {
+          registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
+          registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
+        }
+
+        // use original movielens dataset and pre-defined query plan
+        myPlan = setupMovielensDBQuery(
+            queryTemplate, cataLog, pool_, planNodeIdGenerator);
+
+      } else {
+        // use profile query plan
+        generateDummyData(
+            mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+
+        const char* globalRandomSeedEnv = std::getenv("CD_GLOBAL_RANDOMSEED");
+        int globalRandomSeed =
+            globalRandomSeedEnv ? std::stoi(globalRandomSeedEnv) : 2;
+        myPlan = setupProfileQueryPlan(
+            mode,
+            queryTemplate,
+            cataLog,
+            planNodeIdGenerator,
+            globalRandomSeed);
       }
 
-      myPlan = setupProfileQueryPlan(
-          mode, queryTemplate, cataLog, planNodeIdGenerator);
+    } else if (mode == "tpcxai") {
+      if (queryTemplate == "uc3") {
+        registerTPCxAIUC3ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc8") {
+        registerTPCxAIUC8ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc10") {
+        registerTPCxAIUC10ModelFunctions(cataLog, pool_);
+      } else {
+        throw std::runtime_error(
+            fmt::format("Non-supported query template: {}", queryTemplate));
+      }
+      myPlan =
+          setupTPCxAIQuery(queryTemplate, cataLog, pool_, planNodeIdGenerator);
 
-      // } else if (model == "df") {
-      // } else if (model == "two-tower") {
-      // } else if (model == "llm") {
-      // } else if (model == "fraud") {
-      // } else if (model == "ml-q1") {
-      // } else if (model == "ml-q2") {
-      // } else if (model == "ml-q3") {
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
 
-    std::cout << "[INFO] Original Query Plan: \n"
-              << myPlan.planNode()->toString(true, true) << std::endl;
-
-    float unOptimizedExecutionTime = runPlanWithCataLog(
-        pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
-    std::cout << "[INFO] Unoptimized Execution time: "
-              << unOptimizedExecutionTime << std::endl;
+    // std::cout << "[INFO] Original Query Plan: \n"
+    //           << myPlan.planNode()->toString(true, true) << std::endl;
+    outputAugmentedQueryPlan(cataLog, myPlan);
+    outputStructuredQueryPlan(myPlan);
+    // float unOptimizedExecutionTime = runPlanWithCataLog(
+    //     pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+    // std::cout << "[INFO] Unoptimized Execution time: "
+    //           << unOptimizedExecutionTime << std::endl;
 
     // Get the logical plan
     auto planNode = myPlan.planNode();
@@ -1229,7 +1259,6 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     RuleManager ruleManager;
     // Create planState
     PlanState planState(ruleManager);
-
     planState.getPossibleActions(planNode, cataLog);
 
     // Set up socket
@@ -1297,6 +1326,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         sendAcknowledgment(clientSocket);
         sendJsonBySocket(jsonMessage, clientSocket);
       } else if (mctsAction == "getActionSpace") {
+        planNode = myPlan.planNode();
         planState.getPossibleActions(planNode, cataLog);
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
@@ -1334,6 +1364,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
               {targetAction},
               cataLog);
           planState.update(myPlan, cataLog);
+          outputAugmentedQueryPlan(cataLog, myPlan);
         }
         LOG(INFO) << "[INFO] current my query plan"
                   << myPlan.planNode()->toString(true, true) << std::endl;
@@ -1395,11 +1426,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       std::string queryTemplate,
       std::vector<int> numberOfTuples,
       std::vector<int> dummyFeatureSizes,
-      // int featureSize,
-      // int numSamples,
       int numThreads,
       int repeatRun,
-      // int blockSize,
       int verbose,
       bool rewrite,
       int dataBatchSize = 256) {
@@ -1438,57 +1466,46 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         // use profile query plan
         generateDummyData(
             mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+
+        const char* globalRandomSeedEnv = std::getenv("CD_GLOBAL_RANDOMSEED");
+        int globalRandomSeed =
+            globalRandomSeedEnv ? std::stoi(globalRandomSeedEnv) : 2;
         myPlan = setupProfileQueryPlan(
-            mode, queryTemplate, cataLog, planNodeIdGenerator);
+            mode,
+            queryTemplate,
+            cataLog,
+            planNodeIdGenerator,
+            globalRandomSeed);
       }
+
+    } else if (mode == "tpcxai") {
+      if (queryTemplate == "uc3") {
+        registerTPCxAIUC3ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc8") {
+        registerTPCxAIUC8ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc10") {
+        registerTPCxAIUC10ModelFunctions(cataLog, pool_);
+      } else {
+        throw std::runtime_error(
+            fmt::format("Non-supported query template: {}", queryTemplate));
+      }
+
+      myPlan =
+          setupTPCxAIQuery(queryTemplate, cataLog, pool_, planNodeIdGenerator);
 
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
     }
 
-    std::cout << "[INFO] Original Query Plan: \n"
-              << myPlan.planNode()->toString(true, true) << std::endl;
+    // std::cout << "[INFO] Original Query Plan: \n"
+    //           << myPlan.planNode()->toString(true, true) << std::endl;
 
     outputAugmentedQueryPlan(cataLog, myPlan);
+    outputStructuredQueryPlan(myPlan);
     // float unOptimizedExecutionTime = runPlanWithCataLog(
     //     pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
     // std::cout << "[INFO] Unoptimized Execution time: "
     //           << unOptimizedExecutionTime << std::endl;
-    // return;
-
-    /* if (rewrite) {
-      myPlan = rewriteQuery(cataLog, pool_, myPlan, planNodeIdGenerator,
-    verbose);
-    } */
-
-    // std::cout << "[INFO] Executed Query Plan: \n"
-    //           << myPlan.planNode()->toString(true, true) << std::endl;
-    // auto serializedPlan = myPlan.planNode()->serialize();
-    // std::string queryOutPutPath =
-    //     "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
-    // augmentSerializedPlan(serializedPlan, cataLog);
-    // writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
-
-    // float executeTime =
-    //     runPlanWithCataLog(numThreads, myPlan, cataLog, repeatRun, verbose);
-
-    // std::string latencyOutPutPath =
-    //     "/home/velox/velox/optimizer/tests/executionLatency.txt";
-    // writeStringToFile(std::to_string(executeTime), latencyOutPutPath);
-
-    // std::cout << "[INFO] Execution time: " << executeTime << std::endl;
-
-    // std::cout << "Success" << std::endl;
-
-    // myPlan = setupProfileQueryPlan(
-    //     model,
-    //     computationStr,
-    //     inputFilePaths,
-    //     inputTempFiles,
-    //     numSamples,
-    //     featureSize,
-    //     cataLog,
-    //     planNodeIdGenerator);
 
     // Get the logical plan
     auto planNode = myPlan.planNode();
@@ -1497,13 +1514,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     RuleManager ruleManager;
     // Create planState
     PlanState planState(ruleManager);
-
     planState.getPossibleActions(planNode, cataLog);
-
-    // std::cout << "[INFO] All possible actions:" << std::endl;
-    // for (auto entry : planState.actionsPair) {
-    //   std::cout << entry.first << ": " << entry.second << std::endl;
-    // }
 
     // Set up socket
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -1558,10 +1569,6 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         planNode = myPlan.planNode();
         planState.clearTransformedExpr();
         planState.getPossibleActions(planNode, cataLog);
-        // std::cout << "[INFO] All possible actions:" << std::endl;
-        // for (auto entry : planState.actionsPair) {
-        //   std::cout << entry.first << ": " << entry.second << std::endl;
-        // }
         // send acknowledgement for synchronization
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getQueryPlan") {
@@ -1572,6 +1579,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         outputStructuredQueryPlan(myPlan);
         sendAcknowledgment(clientSocket);
       } else if (mctsAction == "getActionSpace") {
+        planNode = myPlan.planNode();
         planState.getPossibleActions(planNode, cataLog);
         Json::Value jsonMessage;
         jsonMessage["actionSpace"] = Json::arrayValue;
@@ -1781,9 +1789,31 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         // use profile query plan
         generateDummyData(
             mode, numberOfTuples, dummyFeatureSizes, cataLog, dataBatchSize);
+        const char* globalRandomSeedEnv = std::getenv("CD_GLOBAL_RANDOMSEED");
+        int globalRandomSeed =
+            globalRandomSeedEnv ? std::stoi(globalRandomSeedEnv) : 2;
         myPlan = setupProfileQueryPlan(
-            mode, queryTemplate, cataLog, planNodeIdGenerator);
+            mode,
+            queryTemplate,
+            cataLog,
+            planNodeIdGenerator,
+            globalRandomSeed);
       }
+
+    } else if (mode == "tpcxai") {
+      if (queryTemplate == "uc3") {
+        registerTPCxAIUC3ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc8") {
+        registerTPCxAIUC8ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc10") {
+        registerTPCxAIUC10ModelFunctions(cataLog, pool_);
+      } else {
+        throw std::runtime_error(
+            fmt::format("Non-supported query template: {}", queryTemplate));
+      }
+
+      myPlan =
+          setupTPCxAIQuery(queryTemplate, cataLog, pool_, planNodeIdGenerator);
 
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
@@ -1791,7 +1821,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
 
     std::cout << "[INFO] Original Query Plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
-
+    outputStructuredQueryPlan(myPlan);
     std::chrono::steady_clock::time_point timeOptimizerStart =
         std::chrono::steady_clock::now();
 
@@ -1802,6 +1832,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       } else if (mctsType == "heuristic") {
         heuristicQueryRewrite(
             cataLog, pool_, myPlan, planNodeIdGenerator, verbose);
+      } else if (mctsType == "unoptimized") {
+        // no optimization
       } else {
         throw std::runtime_error(
             fmt::format("Non-supported MCTS type: {}", mctsType));
@@ -1821,10 +1853,17 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
              timeOptimizerEnd - timeOptimizerStart)
              .count()) /
         1000000.0;
-    std::cout << "[INFO] Arbitrary Query Optimizer Execution time: "
+    std::cout << "[INFO] Baseline Query Optimizer Execution time: "
               << queryOptimizerElapsedTime << std::endl;
-    std::cout << "[INFO] Arbitrary Query Optimized Plan Execution time: "
-              << executionTime << std::endl;
+    std::cout << "[INFO] Baseline Query Execution time: " << executionTime
+              << std::endl;
+    std::string queryOptLatencyOutputPath =
+        "/home/velox/velox/optimizer/tests/_tempOptimization/queryOptLatency.txt";
+    writeStringToFile(
+        std::to_string(queryOptimizerElapsedTime), queryOptLatencyOutputPath);
+    std::string queryExeLatencyOutputPath =
+        "/home/velox/velox/optimizer/tests/_tempOptimization/queryExeLatency.txt";
+    writeStringToFile(std::to_string(executionTime), queryExeLatencyOutputPath);
   }
 
   void collectMovieLensStats(int numThreads, int repeatRun, int verbose) {
@@ -2004,7 +2043,9 @@ int main(int argc, char** argv) {
         verbose,
         rewrite,
         dataBatchSize);
-  } else if (mctsType == "arbitrary" || mctsType == "heuristic") {
+  } else if (
+      mctsType == "arbitrary" || mctsType == "heuristic" ||
+      mctsType == "unoptimized") {
     demo.baselineOptimizer(
         mctsType,
         mode,
