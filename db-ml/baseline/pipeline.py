@@ -2281,10 +2281,10 @@ class LLMRecommendationPipelinePython(Pipeline):
 
         self.openAI_client = utils.get_openAI_client()
         self.llm_ffnn_model = tf.keras.models.load_model(
-            "/home/velox/data/llm_mr_ffnn.h5", compile=False
+            "/home/velox/resources/model/llm_mr/tf/llm_mr_ffnn.h5", compile=False
         )
         self.min_max_scaler = pickle.load(
-            open("/home/velox/data/llm_mr_minmax_scaler_py.pkl", "rb")
+            open("/home/velox/resources/model/llm_mr/tf/llm_mr_minmax_scaler_py.pkl", "rb")
         )
         self.timer = utils.Timer()
         self.num_thread = int(os.environ.get("NUM_THREADS", 8))
@@ -2350,6 +2350,114 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.timer.tic()
         data = parallelize_dataframe(data, None, self.prompt3, True, self.num_thread)
         # data.loc[:, "result"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, "Summarized user statistics data (preference): " + x['user_description_summarized'] +". \n Summarized user movie metadata:  " + x['movie_description_summarized'] + self.prompt3), axis=1)
+
+        self.metrics_additional["t_llm3"] += self.timer.toc()
+        self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
+        self.metrics_additional["num_receive_tokens"] += np.sum(
+            data["num_receive_token"]
+        )
+        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
+
+        return data
+    
+class LLMRecommendationPipeline2Python(Pipeline):
+    def __init__(
+        self,
+        num_user=5,
+        num_movie=10,
+        num_loop=10,
+    ):
+
+        super(LLMRecommendationPipelinePython, self).__init__(
+            "llm-recommendation_python",
+            num_sample=num_user * num_movie,
+            num_loop=num_loop,
+        )
+        self.num_user = num_user
+        self.num_movie = num_movie
+        load_data_to_db.load_llm_recommendation_data_to_postgres(
+            self.num_user, self.num_movie
+        )
+        self.postgres_conn = utils.get_postgres_connection_config()
+
+        self.prompt1 = "Please summarize the users description. The following are the average ratings given by users to movies in each genre."
+        self.prompt2 = "Please summarize the movies description. The following are the detailed information of the movie."
+        self.prompt3 = "Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason."
+
+        self.openAI_client = utils.get_openAI_client()
+        self.llm_ffnn_model = tf.keras.models.load_model(
+            "/home/velox/resources/model/llm_mr/tf/llm_mr_ffnn.h5", compile=False
+        )
+        self.min_max_scaler = pickle.load(
+            open("/home/velox/resources/model/llm_mr/tf/llm_mr_minmax_scaler_py.pkl", "rb")
+        )
+        self.timer = utils.Timer()
+        self.num_thread = int(os.environ.get("NUM_THREADS", 8))
+
+    def loading_meta_impl(self):
+        self.metrics_additional["t_llm1"] = 0
+        self.metrics_additional["t_llm2"] = 0
+        self.metrics_additional["t_llm3"] = 0
+
+    def data_loading_impl(self, batch_size):
+        join_query = """
+            select
+            user_id,
+            llm_u.description as user_description,
+            id as movie_id,
+            llm_m.description as movie_description,
+            llm_m.popularity,
+            llm_m.vote_average,
+            llm_m.vote_count,
+            llm_m.spoken_languages
+          from
+            llm_recommend_user llm_u
+            cross join llm_recommend_movie llm_m
+          where
+            llm_m.spoken_languages LIKE '%English%'
+          limit
+            { }
+        """.format(
+            batch_size
+        )
+        joined_df = utils.fetch_data_from_postgres_via_connectorx(join_query)
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        # stage - 2 filtering
+        data_features = data[["popularity", "vote_average", "vote_count"]]
+        data_features = self.min_max_scaler.transform(data_features)
+        trendening_label = np.argmax(self.llm_ffnn_model.predict(data_features), axis=1)
+        trendening_label = trendening_label == True
+        data = data[trendening_label]
+
+        self.timer.tic()
+        data = parallelize_dataframe(
+            data, "user_description", self.prompt1, False, self.num_thread
+        )
+        self.metrics_additional["t_llm1"] += self.timer.toc()
+        self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
+        self.metrics_additional["num_receive_tokens"] += np.sum(
+            data["num_receive_token"]
+        )
+        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
+        self.timer.tic()
+
+        data = parallelize_dataframe(
+            data, "movie_description", self.prompt2, False, self.num_thread
+        )
+
+        self.metrics_additional["t_llm2"] += self.timer.toc()
+        self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
+        self.metrics_additional["num_receive_tokens"] += np.sum(
+            data["num_receive_token"]
+        )
+        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
+        self.timer.tic()
+        data = parallelize_dataframe(data, None, self.prompt3, True, self.num_thread)
 
         self.metrics_additional["t_llm3"] += self.timer.toc()
         self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
