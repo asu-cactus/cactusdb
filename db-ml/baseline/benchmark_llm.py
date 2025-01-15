@@ -17,13 +17,17 @@ def benchmark_llm_recommendation_pipeline_python(num_user, num_movie, num_loop=1
     benchmark_result = llm_recommendation_pipeline.run_pipeline()
     return benchmark_result
 
+def benchmark_llm_recommendation_pipeline2_python(num_user, num_movie, num_loop=10, **kwargs):
+    llm_recommendation_pipeline = pipeline.LLMRecommendationPipeline2Python(
+        num_user=num_user, num_movie=num_movie, num_loop=num_loop
+    )
+    benchmark_result = llm_recommendation_pipeline.run_pipeline()
+    return benchmark_result
+
 def benchmark_llm():
     list_benchmark = []
-    list_benchmark += [benchmark_llm_recommendation_pipeline_python]
-    # list_benchmark += [benchmark_ffnn_pipeline_evadb]
-    # list_benchmark += [benchmark_ffnn_pipeline_tf] 
-    # list_benchmark += [benchmark_ffnn_pipeline_pytorch]
-    # list_benchmark += [benchmark_ffnn_pipeline_sparksqlhadoop]
+    # list_benchmark += [benchmark_llm_recommendation_pipeline_python]
+    list_benchmark += [benchmark_llm_recommendation_pipeline2_python]
     list_num_user = [5]
     list_num_movie = [30]
 
