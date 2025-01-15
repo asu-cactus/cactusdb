@@ -2368,8 +2368,8 @@ class LLMRecommendationPipeline2Python(Pipeline):
         num_loop=10,
     ):
 
-        super(LLMRecommendationPipelinePython, self).__init__(
-            "llm-recommendation_python",
+        super(LLMRecommendationPipeline2Python, self).__init__(
+            "llm-recommendation2_python",
             num_sample=num_user * num_movie,
             num_loop=num_loop,
         )
