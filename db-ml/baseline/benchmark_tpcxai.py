@@ -30,6 +30,12 @@ def benchmark_tpcxai_usecase03_sparkhadoop(num_loop=10, **kwargs):
     return benchmark_result
 
 
+def benchmark_tpcxai_usecase03_madlib(num_loop=10, **kwargs):
+    benchmark_pipeline = pipeline.TPCxAIUsecase03PipelineMadlib(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
+    return benchmark_result
+
+
 def benchmark_tpcxai_usecase08_tf(num_loop=10, **kwargs):
     benchmark_pipeline = pipeline.TPCxAIUsecase08PipelineTF(num_loop=num_loop)
     benchmark_result = benchmark_pipeline.run_pipeline()
@@ -44,6 +50,12 @@ def benchmark_tpcxai_usecase08_evadb(num_loop=10, **kwargs):
 
 def benchmark_tpcxai_usecase08_sparkhadoop(num_loop=10, **kwargs):
     benchmark_pipeline = pipeline.TPCxAIUsecase8PipelineSparkHadoop(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
+    return benchmark_result
+
+
+def benchmark_tpcxai_usecase08_madlib(num_loop=10, **kwargs):
+    benchmark_pipeline = pipeline.TPCxAIUsecase08PipelineMadlib(num_loop=num_loop)
     benchmark_result = benchmark_pipeline.run_pipeline()
     return benchmark_result
 
@@ -66,17 +78,26 @@ def benchmark_tpcxai_usecase10_sparkhadoop(num_loop=10, **kwargs):
     return benchmark_result
 
 
+def benchmark_tpcxai_usecase10_madlib(num_loop=10, **kwargs):
+    benchmark_pipeline = pipeline.TPCxAIUsecase10PipelineMadlib(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
+    return benchmark_result
+
+
 def benchmark_tpcxai():
     list_benchmark = []
-    list_benchmark += [benchmark_tpcxai_usecase03_tf]
-    list_benchmark += [benchmark_tpcxai_usecase03_evadb]
-    list_benchmark += [benchmark_tpcxai_usecase03_sparkhadoop]
-    list_benchmark += [benchmark_tpcxai_usecase08_tf]
-    list_benchmark += [benchmark_tpcxai_usecase08_evadb]
-    list_benchmark += [benchmark_tpcxai_usecase08_sparkhadoop]
-    list_benchmark += [benchmark_tpcxai_usecase10_tf]
-    list_benchmark += [benchmark_tpcxai_usecase10_evadb]
-    list_benchmark += [benchmark_tpcxai_usecase10_sparkhadoop]
+    # list_benchmark += [benchmark_tpcxai_usecase03_tf]
+    # list_benchmark += [benchmark_tpcxai_usecase03_evadb]
+    # list_benchmark += [benchmark_tpcxai_usecase03_sparkhadoop]
+    list_benchmark += [benchmark_tpcxai_usecase03_madlib]
+    # list_benchmark += [benchmark_tpcxai_usecase08_tf]
+    # list_benchmark += [benchmark_tpcxai_usecase08_evadb]
+    # list_benchmark += [benchmark_tpcxai_usecase08_sparkhadoop]
+    list_benchmark += [benchmark_tpcxai_usecase08_madlib]
+    # list_benchmark += [benchmark_tpcxai_usecase10_tf]
+    # list_benchmark += [benchmark_tpcxai_usecase10_evadb]
+    # list_benchmark += [benchmark_tpcxai_usecase10_sparkhadoop]
+    list_benchmark += [benchmark_tpcxai_usecase10_madlib]
     list_num_user = [1]
     list_num_movie = [1]
 
