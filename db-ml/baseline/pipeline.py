@@ -10,6 +10,7 @@ import utils
 import load_data_to_db
 import collections
 import os
+import psycopg2
 import torch
 import torch.nn as nn
 from abc import ABC, abstractmethod
@@ -2956,3 +2957,387 @@ class TPCxAIUsecase10PipelineSparkHadoop(Pipeline):
         )
         result_df.collect()
         return result_df
+
+
+class TPCxAIUsecase03PipelineMadlib(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase03PipelineMadlib, self).__init__(
+            "tpcxai-usecase03-madlib", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+        self.model = tf.keras.models.load_model(
+            "../../resources/model/tpcxai_sf1/final/tf/usecase3.h5", compile=False
+        )
+        self.le_store = pickle.load(
+            open(
+                "../../resources/model/tpcxai_sf1/final/tf/usecase3_le_store.pkl", "rb"
+            )
+        )
+        self.le_dept = pickle.load(
+            open("../../resources/model/tpcxai_sf1/final/tf/usecase3_le_dept.pkl", "rb")
+        )
+
+        # register encoder
+        sql_to_register_encoder = """
+        CREATE OR REPLACE FUNCTION uc3_store_encoder(value BIGINT)
+        RETURNS BIGINT AS $$
+        BEGIN
+            RETURN value - 1;
+        END;
+        $$ LANGUAGE plpgsql;
+
+
+        CREATE OR REPLACE FUNCTION uc3_department_encoder(category TEXT)
+        RETURNS INT AS $$
+        DECLARE
+            category_list TEXT[] := ARRAY[
+                'AUTOMOTIVE', 'BATH AND SHOWER', 'BEAUTY', 'BEDDING', 'BOYS WEAR',
+                'CANDY, TOBACCO, COOKIES', 'CELEBRATION', 'COMM BREAD',
+                'COOK AND DINE', 'DAIRY', 'DSD GROCERY', 'ELECTRONICS',
+                'FABRICS AND CRAFTS', 'FINANCIAL SERVICES', 'FROZEN FOODS',
+                'GIRLS WEAR, 4-6X  AND 7-14', 'GROCERY DRY GOODS', 'HARDWARE',
+                'HOME DECOR', 'HOME MANAGEMENT', 'HORTICULTURE AND ACCESS',
+                'HOUSEHOLD CHEMICALS/SUPP', 'HOUSEHOLD PAPER GOODS',
+                'IMPULSE MERCHANDISE', 'INFANT APPAREL',
+                'INFANT CONSUMABLE HARDLINES', 'JEWELRY AND SUNGLASSES',
+                'LADIESWEAR', 'LAWN AND GARDEN', 'LIQUOR,WINE,BEER',
+                'MEAT - FRESH & FROZEN', 'MEDIA AND GAMING', 'MENS WEAR',
+                'OFFICE SUPPLIES', 'PAINT AND ACCESSORIES', 'PERSONAL CARE',
+                'PETS AND SUPPLIES', 'PHARMACY OTC', 'PHARMACY RX',
+                'PLAYERS AND ELECTRONICS', 'PRODUCE', 'SERVICE DELI', 'SHOES',
+                'SPORTING GOODS', 'TOYS', 'WIRELESS'
+            ];
+            index INT;
+        BEGIN
+            -- Find the index of the category in the list
+            index := array_position(category_list, category);
+            
+            -- If not found, return -1
+            IF index IS NULL THEN
+                RETURN -1;
+            ELSE
+                RETURN index - 1; -- Convert 1-based index to 0-based index
+            END IF;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+
+        utils.execute_sql_query_via_psycopg2(sql_to_register_encoder)
+
+        # register model through madlib
+        utils.execute_sql_query_via_psycopg2(
+            "DROP TABLE IF EXISTS tpcxai_uc3_predictor"
+        )
+
+        weights = self.model.get_weights()
+        weights_flat = [w.flatten() for w in weights]
+        weights1d = np.concatenate(weights_flat).ravel()
+        weights_bytea = psycopg2.Binary(weights1d.tobytes())
+
+        query = "SELECT madlib.load_keras_model('tpcxai_uc3_predictor', %s, %s, %s, %s)"
+        conn = utils.get_psycopg2_connection()
+        cur = conn.cursor()
+        cur.execute(
+            query,
+            [self.model.to_json(), weights_bytea, "uc3 model", "tpcxai_uc3_model."],
+        )
+        conn.commit()
+
+        sql_to_create_view_for_data_processing = """
+          DROP VIEW IF EXISTS tpcxai_uc3_view;
+
+          create view tpcxai_uc3_view as (
+              SELECT
+                  store,
+                  department,
+                  num_of_week,
+                  ROW_NUMBER() OVER () AS ctid,
+                  ROW_NUMBER() OVER () AS id,
+                  ARRAY [
+                  (store)::real, 
+                  (department)::real,
+                  (num_of_week)::real
+              ] AS x
+              FROM
+                  (
+                      select
+                          uc3_store_encoder(store) AS store,
+                          uc3_department_encoder(department) AS department,
+                          num_of_week / 156 AS num_of_week
+                      from
+                          tpcxai_store_dept_serving
+                  ) as t
+          );
+        """
+        utils.execute_sql_query_via_psycopg2(
+            sql_to_create_view_for_data_processing
+        )
+
+        utils.execute_sql_query_via_psycopg2(
+            "DROP TABLE IF EXISTS tpcxai_uc3_predictions;"
+        )
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        query_to_run_model_inference = """
+          SELECT madlib.madlib_keras_predict_byom('tpcxai_uc3_predictor',  
+                                          1,                           
+                                          'tpcxai_uc3_view',         
+                                          'id',                  
+                                          'x',
+                                          'tpcxai_uc3_predictions',      
+                                          'response',
+                                          FALSE,
+                                          NULL,
+                                          NULL
+          );
+        """
+
+        data = utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)
+        return data
+
+    def data_processing_impl(self, data):
+
+        return data
+
+    def model_inference_impl(self, data):
+        query_to_load_data = """select * from tpcxai_uc3_predictions;"""
+        return utils.fetch_data_from_postgres_via_psycopg2(query_to_load_data)
+
+
+class TPCxAIUsecase08PipelineMadlib(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase08PipelineMadlib, self).__init__(
+            "tpcxai-usecase08-madlib", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+        self.model = tf.keras.models.load_model(
+            "../../resources/model/tpcxai_sf1/final/tf/usecase8.h5", compile=False
+        )
+
+        self.le_dept = pickle.load(
+            open("../../resources/model/tpcxai_sf1/final/tf/usecase8_le_dept.pkl", "rb")
+        )
+
+        # register encoder
+        sql_to_register_encoder = """
+          CREATE OR REPLACE FUNCTION uc8_department_encoder(category TEXT)
+          RETURNS INT AS $$
+          DECLARE
+              category_list TEXT[] := ARRAY[
+                  'AUTOMOTIVE', 'BATH AND SHOWER', 'BEAUTY', 'BEDDING', 'BOYS WEAR',
+                  'CANDY, TOBACCO, COOKIES', 'CELEBRATION', 'COMM BREAD',
+                  'COOK AND DINE', 'DAIRY', 'DSD GROCERY', 'ELECTRONICS',
+                  'FABRICS AND CRAFTS', 'FINANCIAL SERVICES', 'FROZEN FOODS',
+                  'GIRLS WEAR, 4-6X  AND 7-14', 'GROCERY DRY GOODS', 'HARDWARE',
+                  'HOME DECOR', 'HOME MANAGEMENT', 'HORTICULTURE AND ACCESS',
+                  'HOUSEHOLD CHEMICALS/SUPP', 'HOUSEHOLD PAPER GOODS',
+                  'IMPULSE MERCHANDISE', 'INFANT APPAREL',
+                  'INFANT CONSUMABLE HARDLINES', 'JEWELRY AND SUNGLASSES',
+                  'LADIESWEAR', 'LAWN AND GARDEN', 'LIQUOR,WINE,BEER',
+                  'MEAT - FRESH & FROZEN', 'MEDIA AND GAMING', 'MENS WEAR',
+                  'OFFICE SUPPLIES', 'PAINT AND ACCESSORIES', 'PERSONAL CARE',
+                  'PETS AND SUPPLIES', 'PHARMACY OTC', 'PHARMACY RX',
+                  'PLAYERS AND ELECTRONICS', 'PRODUCE', 'SERVICE DELI', 'SHOES',
+                  'SPORTING GOODS', 'TOYS', 'WIRELESS'
+              ];
+              index INT;
+          BEGIN
+              -- Find the index of the category in the list
+              index := array_position(category_list, category);
+              
+              -- If not found, return -1
+              IF index IS NULL THEN
+                  RETURN -1;
+              ELSE
+                  RETURN index - 1; -- Convert 1-based index to 0-based index
+              END IF;
+          END;
+          $$ LANGUAGE plpgsql;
+        """
+
+        utils.execute_sql_query_via_psycopg2(sql_to_register_encoder)
+
+        # register model through madlib
+        utils.execute_sql_query_via_psycopg2(
+            "DROP TABLE IF EXISTS tpcxai_uc8_predictor"
+        )
+
+        weights = self.model.get_weights()
+        weights_flat = [w.flatten() for w in weights]
+        weights1d = np.concatenate(weights_flat).ravel()
+        weights_bytea = psycopg2.Binary(weights1d.tobytes())
+
+        query = "SELECT madlib.load_keras_model('tpcxai_uc8_predictor', %s, %s, %s, %s)"
+        conn = utils.get_psycopg2_connection()
+        cur = conn.cursor()
+        cur.execute(
+            query,
+            [self.model.to_json(), weights_bytea, "uc8 model", "tpcxai_uc8_model."],
+        )
+        conn.commit()
+
+        sql_to_create_view_for_data_processing = """
+          DROP VIEW IF EXISTS tpcxai_uc8_view;
+
+          create view tpcxai_uc8_view as (
+              SELECT
+                  o_order_id,
+                  department,
+                  quantity,
+                  scan_count,
+                  weekday,
+                  ROW_NUMBER() OVER () AS ctid,
+                  ROW_NUMBER() OVER () AS id,
+                  ARRAY [
+                  (quantity)::real, 
+                  (scan_count)::real,
+                  (weekday)::real,
+                  (department)::real
+              ] AS x
+              FROM
+                  (
+                      SELECT 
+                    o_order_id,
+                    uc8_department_encoder(department) as department,
+                    quantity,
+                    SUM(quantity) AS scan_count,                
+                    MIN(EXTRACT(DOW FROM date)) AS weekday     
+                  FROM tpcxai_order_serving 
+                  JOIN tpcxai_lineitem_serving ON o_order_id = li_order_id 
+                  JOIN tpcxai_product_serving ON li_product_id = p_product_id
+                  GROUP BY o_order_id, date, department, quantity
+                  ) as t
+          );
+        """
+        utils.execute_sql_query_via_psycopg2(
+            sql_to_create_view_for_data_processing
+        )
+
+        utils.execute_sql_query_via_psycopg2(
+            "DROP TABLE IF EXISTS tpcxai_uc8_predictor;"
+        )
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        query_to_run_model_inference = """
+          SELECT madlib.madlib_keras_predict_byom('tpcxai_uc8_predictor',  
+                                          1,                           
+                                          'tpcxai_uc8_view',         
+                                          'id',                  
+                                          'x',
+                                          'tpcxai_uc8_predictions',      
+                                          'response',
+                                          FALSE,
+                                          NULL,
+                                          NULL
+          );
+        """
+
+        data = utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)
+        return data
+
+    def data_processing_impl(self, data):
+
+        return data
+
+    def model_inference_impl(self, data):
+        query_to_load_data = """select * from tpcxai_uc8_predictions;"""
+        return utils.fetch_data_from_postgres_via_psycopg2(query_to_load_data)
+
+
+class TPCxAIUsecase10PipelineMadlib(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase10PipelineMadlib, self).__init__(
+            "tpcxai-usecase10-madlib", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+        self.model = tf.keras.models.load_model(
+            "../../resources/model/tpcxai_sf1/final/tf/usecase10.h5", compile=False
+        )
+
+        # register model through madlib
+        utils.execute_sql_query_via_psycopg2(
+            "DROP TABLE IF EXISTS tpcxai_uc10_predictor"
+        )
+
+        weights = self.model.get_weights()
+        weights_flat = [w.flatten() for w in weights]
+        weights1d = np.concatenate(weights_flat).ravel()
+        weights_bytea = psycopg2.Binary(weights1d.tobytes())
+
+        query = (
+            "SELECT madlib.load_keras_model('tpcxai_uc10_predictor', %s, %s, %s, %s)"
+        )
+        conn = utils.get_psycopg2_connection()
+        cur = conn.cursor()
+        cur.execute(
+            query,
+            [self.model.to_json(), weights_bytea, "uc10 model", "tpcxai_uc10_model."],
+        )
+        conn.commit()
+
+        sql_to_create_view_for_data_processing = """
+          DROP VIEW IF EXISTS tpcxai_uc10_view;
+          create view tpcxai_uc10_view as (
+          SELECT 
+              transaction_id AS id, 
+              ROW_NUMBER() OVER () AS ctid,
+              ARRAY[
+                  (EXTRACT(HOUR FROM time) / 23.0)::real, 
+                  (amount / transaction_limit)::real
+              ] AS x
+          FROM tpcxai_financial_account_serving 
+          JOIN tpcxai_financial_transactions_serving 
+              ON fa_customer_sk = sender_id
+          );
+        """
+        utils.execute_sql_query_via_psycopg2(
+            sql_to_create_view_for_data_processing
+        )
+
+        utils.execute_sql_query_via_psycopg2(
+            "DROP TABLE IF EXISTS tpcxai_uc10_predictions;"
+        )
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        query_to_run_model_inference = """
+          SELECT madlib.madlib_keras_predict_byom('tpcxai_uc10_predictor',  
+                                         1,                           
+                                        'tpcxai_uc10_view',         
+                                        'id',                  
+                                        'x',
+                                        'tpcxai_uc10_predictions',      
+                                        'response',
+                                        FALSE,
+                                        NULL,
+                                        NULL
+            );
+        """
+
+        data = utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)
+        return data
+
+    def data_processing_impl(self, data):
+
+        return data
+
+    def model_inference_impl(self, data):
+        query_to_load_data = """select * from tpcxai_uc10_predictions;"""
+        return utils.fetch_data_from_postgres_via_psycopg2(query_to_load_data)
