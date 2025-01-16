@@ -2284,7 +2284,10 @@ class LLMRecommendationPipelinePython(Pipeline):
             "/home/velox/resources/model/llm_mr/tf/llm_mr_ffnn.h5", compile=False
         )
         self.min_max_scaler = pickle.load(
-            open("/home/velox/resources/model/llm_mr/tf/llm_mr_minmax_scaler_py.pkl", "rb")
+            open(
+                "/home/velox/resources/model/llm_mr/tf/llm_mr_minmax_scaler_py.pkl",
+                "rb",
+            )
         )
         self.timer = utils.Timer()
         self.num_thread = int(os.environ.get("NUM_THREADS", 8))
@@ -2359,7 +2362,8 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
 
         return data
-    
+
+
 class LLMRecommendationPipeline2Python(Pipeline):
     def __init__(
         self,
@@ -2389,7 +2393,10 @@ class LLMRecommendationPipeline2Python(Pipeline):
             "/home/velox/resources/model/llm_mr/tf/llm_mr_ffnn.h5", compile=False
         )
         self.min_max_scaler = pickle.load(
-            open("/home/velox/resources/model/llm_mr/tf/llm_mr_minmax_scaler_py.pkl", "rb")
+            open(
+                "/home/velox/resources/model/llm_mr/tf/llm_mr_minmax_scaler_py.pkl",
+                "rb",
+            )
         )
         self.timer = utils.Timer()
         self.num_thread = int(os.environ.get("NUM_THREADS", 8))
@@ -2549,9 +2556,7 @@ class TPCxAIUsecase08PipelineTF(Pipeline):
         GROUP BY o_order_id, date, department, quantity
         """
 
-        data = utils.fetch_data_from_postgres_via_psycopg2(
-            query_to_fetch_serving_data
-        )
+        data = utils.fetch_data_from_postgres_via_psycopg2(query_to_fetch_serving_data)
         return data
 
     def data_processing_impl(self, data):
@@ -2569,7 +2574,7 @@ class TPCxAIUsecase08PipelineTF(Pipeline):
 
 
 class TPCxAIUsecase10PipelineTF(Pipeline):
-    
+
     def __init__(
         self,
         num_loop=10,
@@ -2650,7 +2655,7 @@ class TPCxAIUsecase03PipelineEvaDB(Pipeline):
 
 
 class TPCxAIUsecase08PipelineEvaDB(Pipeline):
-    
+
     def __del__(self):
         self.cursor.query(
             "USE postgres_data{DROP VIEW IF EXISTS evadb_tpcxai_uc8_view};"
@@ -2719,7 +2724,7 @@ class TPCxAIUsecase08PipelineEvaDB(Pipeline):
 
 
 class TPCxAIUsecase10PipelineEvaDB(Pipeline):
-    
+
     def __del__(self):
         self.cursor.query(
             "USE postgres_data{DROP VIEW IF EXISTS evadb_tpcxai_uc10};"
@@ -2774,6 +2779,8 @@ class TPCxAIUsecase10PipelineEvaDB(Pipeline):
         query_to_fetch_serving_data = "SELECT Model_UseCase10_EVADB(business_hour_norm, amount_norm).label FROM postgres_data.evadb_tpcxai_uc10"
         result_df = self.cursor.query(query_to_fetch_serving_data).df()
         return result_df.values
+
+
 class TPCxAIUsecase3PipelineSparkHadoop(Pipeline):
     def __init__(
         self,
@@ -2791,13 +2798,13 @@ class TPCxAIUsecase3PipelineSparkHadoop(Pipeline):
         )
 
         from register_tpcxai_spark_func import uc3_sales_predicator
-        
 
         self.model_redictor = uc3_sales_predicator
 
         self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
-        self.store_depth_path_in_hdfs = os.path.join(self.data_path, "store_dept_serving")
-
+        self.store_depth_path_in_hdfs = os.path.join(
+            self.data_path, "store_dept_serving"
+        )
 
     def loading_meta_impl(self):
         pass
@@ -2817,14 +2824,14 @@ class TPCxAIUsecase3PipelineSparkHadoop(Pipeline):
         return data
 
     def model_inference_impl(self, data):
-        
+
         result_df = data.withColumn(
-            "predicted",
-            self.model_redictor("store", "department", "num_of_week")
+            "predicted", self.model_redictor("store", "department", "num_of_week")
         )
         result_df.collect()
         return result_df
-    
+
+
 class TPCxAIUsecase8PipelineSparkHadoop(Pipeline):
     def __init__(
         self,
@@ -2842,7 +2849,6 @@ class TPCxAIUsecase8PipelineSparkHadoop(Pipeline):
         )
 
         from register_tpcxai_spark_func import uc8_trip_classifier
-        
 
         self.model_redictor = uc8_trip_classifier
 
@@ -2855,7 +2861,9 @@ class TPCxAIUsecase8PipelineSparkHadoop(Pipeline):
         pass
 
     def data_loading_impl(self, batch_size):
-        df_order = self.spark.read.parquet(self.order_path_in_hdfs).withColumn("date", from_unixtime(col("date")))
+        df_order = self.spark.read.parquet(self.order_path_in_hdfs).withColumn(
+            "date", from_unixtime(col("date"))
+        )
         df_lineitem = self.spark.read.parquet(self.lineitem_path_in_hdfs)
         df_product = self.spark.read.parquet(self.product_path_in_hdfs)
         df_order.createOrReplaceTempView("tpcxai_order_serving")
@@ -2883,10 +2891,10 @@ class TPCxAIUsecase8PipelineSparkHadoop(Pipeline):
         return data
 
     def model_inference_impl(self, data):
-        
+
         result_df = data.withColumn(
             "predicted",
-            self.model_redictor("quantity", "scan_count", "weekday", "department")
+            self.model_redictor("quantity", "scan_count", "weekday", "department"),
         )
         result_df.collect()
         return result_df
@@ -2909,20 +2917,22 @@ class TPCxAIUsecase10PipelineSparkHadoop(Pipeline):
         )
 
         from register_tpcxai_spark_func import uc10_fraud_spark_predicator
-        
 
         self.model_redictor = uc10_fraud_spark_predicator
 
         self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
         self.fa_path_in_hdfs = os.path.join(self.data_path, "financial_account_serving")
-        self.ft_path_in_hdfs = os.path.join(self.data_path, "financial_transactions_serving")
-
+        self.ft_path_in_hdfs = os.path.join(
+            self.data_path, "financial_transactions_serving"
+        )
 
     def loading_meta_impl(self):
         pass
 
     def data_loading_impl(self, batch_size):
-        df_ft = self.spark.read.parquet(self.ft_path_in_hdfs).withColumn("time", from_unixtime(col("time")))
+        df_ft = self.spark.read.parquet(self.ft_path_in_hdfs).withColumn(
+            "time", from_unixtime(col("time"))
+        )
         df_fa = self.spark.read.parquet(self.fa_path_in_hdfs)
         df_ft.createOrReplaceTempView("tpcxai_financial_transactions_serving")
         df_fa.createOrReplaceTempView("tpcxai_financial_account_serving")
@@ -2940,10 +2950,9 @@ class TPCxAIUsecase10PipelineSparkHadoop(Pipeline):
         return data
 
     def model_inference_impl(self, data):
-        
+
         result_df = data.withColumn(
-            "predicted",
-            self.model_redictor("business_hour_norm", "amount_norm")
+            "predicted", self.model_redictor("business_hour_norm", "amount_norm")
         )
         result_df.collect()
         return result_df
