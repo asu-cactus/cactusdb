@@ -78,6 +78,53 @@ def fetch_data_from_postgres_via_connectorx(sql):
         print(f"Error: {e}")
     return df
 
+def execute_sql_query_via_psycopg2(query, fetch_results=False):
+    """
+    Executes a SQL query using psycopg2.
+
+    Args:
+        query (str): The SQL query to execute.
+        fetch_results (bool): Whether to fetch and return the query results (default is False).
+
+    Returns:
+        list: Query results if fetch_results is True, otherwise None.
+    """
+    connection = None
+    db_params = {
+        "dbname": "postgresdb",
+        "user": "postgresdb",
+        "password": "postgresdb",
+        "host": "localhost",
+        "port": "5432",
+    }
+    try:
+        # Connect to the database
+        connection = psycopg2.connect(**db_params)
+        cursor = connection.cursor()
+        
+        # Execute the SQL query
+        cursor.execute(sql.SQL(query))
+        
+        # Commit changes for DML queries (INSERT, UPDATE, DELETE)
+        connection.commit()
+
+        # Fetch and return results if required
+        if fetch_results:
+            results = cursor.fetchall()
+            return results
+
+    except psycopg2.Error as e:
+        print(f"Error while executing query: {e}")
+        connection.rollback()
+    finally:
+        # Close the cursor and connection
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+    return None
+
 
 # TODO: in the future, fetching results from DB should utilize connectorx
 # for better performance, while connectorx can only execute one query at once
