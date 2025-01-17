@@ -2610,6 +2610,41 @@ class TPCxAIUsecase10PipelineTF(Pipeline):
         data = self.model(data)
         return data
 
+class TPCxAIUsecase10MLPipelineTF(Pipeline):
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase10MLPipelineTF, self).__init__(
+            "tpcxai-usecase10-ml-tf", num_loop=num_loop
+        )
+        with open("../../resources/model/tpcxai_sf1/final/tf/usecase10_lr_model.h5", "rb") as f:
+            self.model = pickle.load(f)
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # Use case 10, trainig query
+        query_to_fetch_serving_data = """
+        select transaction_id, EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm
+        from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
+        """
+
+        data = utils.fetch_data_from_postgres_via_connectorx(
+            query_to_fetch_serving_data
+        )
+        return data
+
+    def data_processing_impl(self, data):
+        X_features = data[["business_hour_norm", "amount_norm"]].values
+        return X_features
+
+    def model_inference_impl(self, data):
+        data = self.model.predict(data)
+        return data
+
 
 class TPCxAIUsecase03PipelineEvaDB(Pipeline):
     def __init__(
@@ -2782,6 +2817,63 @@ class TPCxAIUsecase10PipelineEvaDB(Pipeline):
         return result_df.values
 
 
+class TPCxAIUsecase10MLPipelineEvaDB(Pipeline):
+
+    def __del__(self):
+        self.cursor.query(
+            "USE postgres_data{DROP VIEW IF EXISTS evadb_tpcxai_uc10};"
+        ).df()
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase10MLPipelineEvaDB, self).__init__(
+            "tpcxai-usecase10-ml-evadb", num_loop=num_loop
+        )
+        # self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        utils.setup_postgres_for_evadb()
+        self.cursor = evadb.connect().cursor()
+
+        # create a view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_tpcxai_uc10 AS
+            select transaction_id, EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
+            };
+        """
+        ).df()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS Model_UseCase10_ML_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS Model_UseCase10_ML_EVADB
+            IMPL './function_tpcxai_evadb.py';
+            """
+        ).df()
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # TODO: implement data loading
+        return None
+
+    def data_processing_impl(self, data):
+        # TODO data processing
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        query_to_fetch_serving_data = "SELECT Model_UseCase10_ML_EVADB(business_hour_norm, amount_norm).label FROM postgres_data.evadb_tpcxai_uc10"
+        result_df = self.cursor.query(query_to_fetch_serving_data).df()
+        return result_df.values
+
 class TPCxAIUsecase3PipelineSparkHadoop(Pipeline):
     def __init__(
         self,
@@ -2800,7 +2892,7 @@ class TPCxAIUsecase3PipelineSparkHadoop(Pipeline):
 
         from register_tpcxai_spark_func import uc3_sales_predicator
 
-        self.model_redictor = uc3_sales_predicator
+        self.model_predictor = uc3_sales_predicator
 
         self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
         self.store_depth_path_in_hdfs = os.path.join(
@@ -2827,7 +2919,7 @@ class TPCxAIUsecase3PipelineSparkHadoop(Pipeline):
     def model_inference_impl(self, data):
 
         result_df = data.withColumn(
-            "predicted", self.model_redictor("store", "department", "num_of_week")
+            "predicted", self.model_predictor("store", "department", "num_of_week")
         )
         result_df.collect()
         return result_df
@@ -2851,7 +2943,7 @@ class TPCxAIUsecase8PipelineSparkHadoop(Pipeline):
 
         from register_tpcxai_spark_func import uc8_trip_classifier
 
-        self.model_redictor = uc8_trip_classifier
+        self.model_predictor = uc8_trip_classifier
 
         self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
         self.order_path_in_hdfs = os.path.join(self.data_path, "order_serving")
@@ -2895,7 +2987,7 @@ class TPCxAIUsecase8PipelineSparkHadoop(Pipeline):
 
         result_df = data.withColumn(
             "predicted",
-            self.model_redictor("quantity", "scan_count", "weekday", "department"),
+            self.model_predictor("quantity", "scan_count", "weekday", "department"),
         )
         result_df.collect()
         return result_df
@@ -2919,7 +3011,7 @@ class TPCxAIUsecase10PipelineSparkHadoop(Pipeline):
 
         from register_tpcxai_spark_func import uc10_fraud_spark_predicator
 
-        self.model_redictor = uc10_fraud_spark_predicator
+        self.model_predictor = uc10_fraud_spark_predicator
 
         self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
         self.fa_path_in_hdfs = os.path.join(self.data_path, "financial_account_serving")
@@ -2953,11 +3045,69 @@ class TPCxAIUsecase10PipelineSparkHadoop(Pipeline):
     def model_inference_impl(self, data):
 
         result_df = data.withColumn(
-            "predicted", self.model_redictor("business_hour_norm", "amount_norm")
+            "predicted", self.model_predictor("business_hour_norm", "amount_norm")
         )
         result_df.collect()
         return result_df
 
+
+class TPCxAIUsecase10PipelineSparkMLHadoop(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        # np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "60g")
+            .config("spark.sql.legacy.parquet.nanosAsLong", "true")
+            .getOrCreate()
+        )
+        super(TPCxAIUsecase10PipelineSparkMLHadoop, self).__init__(
+            "tpcxai-usecase10-sparkhadoop-ml", num_loop=num_loop
+        )
+
+        from register_tpcxai_spark_func import uc10_fraud_ml_spark_predicator
+
+        self.model_predictor = uc10_fraud_ml_spark_predicator
+
+        self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
+        self.fa_path_in_hdfs = os.path.join(self.data_path, "financial_account_serving")
+        self.ft_path_in_hdfs = os.path.join(
+            self.data_path, "financial_transactions_serving"
+        )
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        df_ft = self.spark.read.parquet(self.ft_path_in_hdfs).withColumn(
+            "time", from_unixtime(col("time"))
+        )
+        df_fa = self.spark.read.parquet(self.fa_path_in_hdfs)
+        df_ft.createOrReplaceTempView("tpcxai_financial_transactions_serving")
+        df_fa.createOrReplaceTempView("tpcxai_financial_account_serving")
+
+        uc10_sql = """
+        select transaction_id, EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm
+        from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
+        """
+
+        joined_df = self.spark.sql(uc10_sql)
+
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+
+        result_df = data.withColumn(
+            "predicted", self.model_predictor("business_hour_norm", "amount_norm")
+        )
+        result_df.collect()
+        return result_df
+    
 
 class TPCxAIUsecase03PipelineMadlib(Pipeline):
     def __init__(
@@ -3343,3 +3493,96 @@ class TPCxAIUsecase10PipelineMadlib(Pipeline):
     def model_inference_impl(self, data):
         query_to_load_data = """select * from tpcxai_uc10_predictions;"""
         return utils.fetch_data_from_postgres_via_psycopg2(query_to_load_data)
+
+
+class TPCxAIUsecase10MLPipelineMadlib(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase10MLPipelineMadlib, self).__init__(
+            "tpcxai-usecase10-ml-madlib", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+
+        utils.execute_sql_query_via_psycopg2(
+            """
+        DROP TABLE IF EXISTS tpcxai_uc10_table_training;
+        CREATE TABLE tpcxai_uc10_table_training as (
+        SELECT 
+            transaction_id AS id, 
+            (is_fraud != 0) AS label,
+            ARRAY[
+                (EXTRACT(HOUR FROM time) / 23.0)::real, 
+                (amount / transaction_limit)::real
+            ] AS x
+        FROM tpcxai_financial_account_training
+        JOIN tpcxai_financial_transactions_training 
+            ON fa_customer_sk = sender_id
+        );
+
+        DROP TABLE IF EXISTS uc10_logregr;
+        DROP TABLE IF EXISTS uc10_logregr_summary;
+
+        SELECT madlib.logregr_train(
+            'tpcxai_uc10_table_training',
+            'uc10_logregr',
+            'label',  
+            'x',  
+            NULL,
+            '100',
+            'cg'
+        );
+        """
+        )
+
+
+    def loading_meta_impl(self):
+        pass
+    
+    def data_loading_impl(self, batch_size):
+
+      # DROP TABLE IF EXISTS tpcxai_uc10_table_serving;
+
+      #     CREATE TABLE tpcxai_uc10_table_serving as (
+      #       SELECT
+      #         transaction_id AS id,
+      #         ARRAY [
+      #                   (EXTRACT(HOUR FROM time) / 23.0)::real, 
+      #                   (amount / transaction_limit)::real
+      #                 ] AS x
+      #       FROM
+      #         tpcxai_financial_account_serving
+      #         JOIN tpcxai_financial_transactions_serving ON fa_customer_sk = sender_id
+      #     );
+        query_to_gather_serving_data = """
+
+          DROP VIEW IF EXISTS tpcxai_uc10_table_serving_view;
+          CREATE VIEW tpcxai_uc10_table_serving_view as (
+            SELECT
+              transaction_id AS id,
+              ARRAY [
+                        (EXTRACT(HOUR FROM time) / 23.0)::real, 
+                        (amount / transaction_limit)::real
+                      ] AS x
+            FROM
+              tpcxai_financial_account_serving
+              JOIN tpcxai_financial_transactions_serving ON fa_customer_sk = sender_id
+          );
+        """
+
+        data = utils.execute_sql_query_via_psycopg2(query_to_gather_serving_data)
+        return data
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        query_to_run_model_inference = """
+        SELECT
+          madlib.logregr_predict(coef, x)
+        FROM
+          uc10_logregr m,
+          tpcxai_uc10_table_serving_view;
+        """
+        return utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)

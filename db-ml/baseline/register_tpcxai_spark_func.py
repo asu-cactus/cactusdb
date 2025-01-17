@@ -93,11 +93,15 @@ uc10model = tf.keras.models.load_model(
 )
 
 
+with open("../../resources/model/tpcxai_sf1/final/tf/usecase10_lr_model.h5", "rb") as f:
+    uc10lr_model = pickle.load(f)
+
+
 @pandas_udf(IntegerType())
-def uc10_fraud_spark_predicator(
+def uc10_fraud_ml_spark_predicator(
     business_hour_norm: pd.Series, amount_norm: pd.Series
 ) -> pd.Series:
     X = np.array([business_hour_norm.values, amount_norm.values]).T
-    y = np.argmax(uc10model(X), axis=1)
+    y = uc10lr_model.predict(X)
 
     return pd.Series(y)
