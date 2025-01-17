@@ -1807,6 +1807,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         registerTPCxAIUC8ModelFunctions(cataLog, pool_);
       } else if (queryTemplate == "uc10") {
         registerTPCxAIUC10ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc10-ml") {
+        registerTPCxAIUC10MLModelFunctions(cataLog, pool_);
       } else {
         throw std::runtime_error(
             fmt::format("Non-supported query template: {}", queryTemplate));

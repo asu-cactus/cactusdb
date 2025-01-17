@@ -500,10 +500,17 @@ PlanBuilder setupTPCxAIQuery(
                  "business_hour_norm"})
             .project(
                 {"transaction_id",
-                 "transform(array_constructor(amount_norm, business_hour_norm), x-> CAST(X as REAL)) as features"})
-            .project(
-                {"transaction_id",
-                 "sigmoid(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))) as prediction"});
+                 "transform(array_constructor(amount_norm, business_hour_norm), x-> CAST(X as REAL)) as features"});
+    if (queryType.find("ml") == std::string::npos) {
+      queryPlan = queryPlan.project(
+          {"transaction_id",
+           "sigmoid(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))) as prediction"});
+    } else {
+      queryPlan = queryPlan.project(
+          {"transaction_id",
+           "sigmoid(mat_vector_add1_2(mat_mul1_1(features))) as prediction"});
+    }
+
     cataLog.setIdAddressMap(
         readFinancialAccountDataPlanNodeId,
         finicialAccountDataPaths,
