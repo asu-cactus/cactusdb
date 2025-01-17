@@ -3085,6 +3085,7 @@ class TPCxAIUsecase03PipelineMadlib(Pipeline):
 
     def data_loading_impl(self, batch_size):
         query_to_run_model_inference = """
+          DROP TABLE IF EXISTS tpcxai_uc3_predictions;
           SELECT madlib.madlib_keras_predict_byom('tpcxai_uc3_predictor',  
                                           1,                           
                                           'tpcxai_uc3_view',         
@@ -3098,7 +3099,7 @@ class TPCxAIUsecase03PipelineMadlib(Pipeline):
           );
         """
 
-        data = utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)
+        data = utils.execute_sql_query_via_psycopg2(query_to_run_model_inference)
         return data
 
     def data_processing_impl(self, data):
@@ -3223,7 +3224,7 @@ class TPCxAIUsecase08PipelineMadlib(Pipeline):
         )
 
         utils.execute_sql_query_via_psycopg2(
-            "DROP TABLE IF EXISTS tpcxai_uc8_predictor;"
+            "DROP TABLE IF EXISTS tpcxai_uc8_predictions;"
         )
 
     def loading_meta_impl(self):
@@ -3231,6 +3232,7 @@ class TPCxAIUsecase08PipelineMadlib(Pipeline):
 
     def data_loading_impl(self, batch_size):
         query_to_run_model_inference = """
+        DROP TABLE IF EXISTS tpcxai_uc8_predictions;
           SELECT madlib.madlib_keras_predict_byom('tpcxai_uc8_predictor',  
                                           1,                           
                                           'tpcxai_uc8_view',         
@@ -3244,7 +3246,7 @@ class TPCxAIUsecase08PipelineMadlib(Pipeline):
           );
         """
 
-        data = utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)
+        data = utils.execute_sql_query_via_psycopg2(query_to_run_model_inference)
         return data
 
     def data_processing_impl(self, data):
@@ -3315,9 +3317,9 @@ class TPCxAIUsecase10PipelineMadlib(Pipeline):
 
     def loading_meta_impl(self):
         pass
-
     def data_loading_impl(self, batch_size):
         query_to_run_model_inference = """
+        DROP TABLE IF EXISTS tpcxai_uc10_predictions;
           SELECT madlib.madlib_keras_predict_byom('tpcxai_uc10_predictor',  
                                          1,                           
                                         'tpcxai_uc10_view',         
@@ -3331,7 +3333,7 @@ class TPCxAIUsecase10PipelineMadlib(Pipeline):
             );
         """
 
-        data = utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)
+        data = utils.execute_sql_query_via_psycopg2(query_to_run_model_inference)
         return data
 
     def data_processing_impl(self, data):

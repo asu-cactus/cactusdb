@@ -185,15 +185,13 @@ RUN /home/hadoop-3.4.0/bin/hdfs namenode -format
 # setup madlib
 WORKDIR /home
 RUN apt-get install postgresql-plpython3-14 -y 
-RUN wget https://dist.apache.org/repos/dist/release/madlib/2.1.0/apache-madlib-2.1.0-src.tar.gz
-RUN tar -xvzf apache-madlib-2.1.0-src.tar.gz
 RUN apt-get install postgresql-server-dev-14 -y
-RUN cd apache-madlib-2.1.0-src \
+RUN git clone -b madlib2-master --single-branch https://github.com/lixi-zhou/madlib.git
+RUN cd madlib \
     && mkdir build \
     && cd build \
     && cmake .. \
-    && make \
-    && make install
+    && make 
 ENV PATH=$PATH:/usr/lib/postgresql/14/bin
 
 # set up velox

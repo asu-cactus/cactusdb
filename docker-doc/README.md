@@ -8,18 +8,22 @@
 - [Run Two-Tower Model Pipeline](#run-two-tower-model-pipeline)
 
 <!-- /TOC -->
+
 ## Use Docker to Build Your Development Environment
 
 ### Build Docker Image
-*It is recommended to use docker to create your development environment, and your dependencies won't get messed up with other stuff.*
+
+_It is recommended to use docker to create your development environment, and your dependencies won't get messed up with other stuff._
 
 Using the following command to build your docker image and start a container
+
 ```bash
 docker build --tag velox-docker .
 docker run --name velox-container -it velox-docker
 ```
 
 NOTE: if you are using arm chip, you need to use the following command:
+
 ```bash
 docker build -t velox-arm -f Dockerfile_ARM .
 docker run --name velox-container-arm -it velox-arm
@@ -28,6 +32,7 @@ docker run --name velox-container-arm -it velox-arm
 ### Use Docker with GPU
 
 Before creating the container from the image, install the NVIDIA container toolkit by following the commands [Links](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installing-the-nvidia-container-toolkit):
+
 ```bash
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
   && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
@@ -51,13 +56,12 @@ docker build -t velox-cuda -f Dockerfile_CUDA .
 
 # use the following commands to grant the GPU access
 docker run --name velox-cuda --runtime=nvidia --gpus all -it velox-cuda
-# or 
+# or
 docker run --name velox-cuda --gpus all -it velox-cuda
 ```
 
-
-
 ### Link to Our Private Velox Repository
+
 Because the docker image is not expected to contain any confidential credentials and our GitHub repository is private now. You are required to configure your git configuration by using the following commands:
 
 ```bash
@@ -94,15 +98,18 @@ python3 setup.py install
 Before `make release` in Velox folder, you are required to set the following two environment variables:
 
 The following paths can be directly used if you are using docker. Otherwise, you need to accordingly adjust it.
+
 ```
 Caffe2_DIR=/usr/local/lib/python3.10/dist-packages/torch/share/cmake/Caffe2
 Torch_DIR=/usr/local/lib/python3.10/dist-packages/torch/share/cmake/Torch
 ```
 
+### 3rd-party dependecies
 
-3rd-party dependecies 
+#### EvaDB
 
-EvaDB with modification to support `ARRAY` in Postgres.
+Since the latest EvaDB does not support datetype `ARRAY` in Postgres, we introduce a patch which can be installed through the following:
+
 ```
 git clone https://github.com/lixi-zhou/evadb.git
 git checkout array
@@ -110,34 +117,35 @@ cd evadb
 pip install ./[ray]
 ```
 
-Madlib
+#### Madlib
+
+The latest version of Madlib 2.1.0 has a bug in BYOM function, please use the following command to install a pacted version of Madlib.
+
 ```bash
 # install madlib if not configured environment thourgh docker
 
-apt-get install libpq-dev
-apt-get install postgresql-plpython3-14
-wget https://dist.apache.org/repos/dist/release/madlib/2.1.0/apache-madlib-2.1.0-src.tar.gz
-tar -zxvf apache-madlib-2.1.0-src.tar.gz
-cd apache-madlib-2.1.0-src
-mkdir build
-cd build
-cmake ..
+apt-get install libpq-dev -y
+apt-get install postgresql-plpython3-14 -y
+git clone -b madlib2-master --single-branch https://github.com/lixi-zhou/madlib.git
+cd madlib && \
+  && mkdir build \
+  && cd build \
+  && cmake .. \
+  && make \
+
 # add postgresql 14 to path
 export PATH=$PATH:/usr/lib/postgresql/14/bin
 # install madlib to postgres (under user postgres)
-su postgres 
-/usr/local/madlib/bin/madpack -s madlib -p postgres install -c postgresdb@localhost
+su postgres
+$MADLIB_ROOT/build/src/bin/madpack -s madlib -p postgres install -c postgresdb@localhost
 # or
-su postgres -c "PATH=$PATH:/usr/lib/postgresql/14/bin; /home/apache-madlib-2.0.0-src/build/src/bin/madpack -s madlib -p postgres install -c postgresdb@localhost:5432"
-```
-
-# install madlib to postgres
-su -u postgres /usr/local/madlib/bin/madpack -s madlib -p postgres install -c postgresdb@localhost
+su postgres -c "PATH=$PATH:/usr/lib/postgresql/14/bin; /home/madlib/build/src/bin/madpack -s madlib -p postgres install -c postgresdb@localhost:5432"
 ```
 
 ### Develop with Visual Studio Code
 
 It is recommended to code with Visual Studio Code. You can use the following script to start a VS Code Tunnel for remote development. If you want to keep the tunnel alive in the background, you can first launch a `tmux` session and then execute the following command.
+
 ```
 bash ~/start_vscode_tunnel.sh
 ```
@@ -147,6 +155,7 @@ bash ~/start_vscode_tunnel.sh
 ```bash
 start-dfs.sh
 start-yarn.sh
+start-all.sh
 ```
 
 ## Run Two-Tower Model Pipeline
@@ -156,10 +165,9 @@ If you are going to run the two-tower model pipeline in the docker, there is no 
 ` ./two_tower_model_pipeline_test --num_sample=50000 --num_split=10 --batch_size=5000  --num_driver=8`
 
 | Argument   | Description          | Default Value |
-|------------|----------------------|---------------|
-| num_sample | Number of samples    |           500 |
-| num_split  | Number of splits     |             1 |
-| batch_size | Batch size           |           500 |
-| num_repeat | Number of repeat run |             1 |
-| num_driver | Number of drivers    |             1 |
-
+| ---------- | -------------------- | ------------- |
+| num_sample | Number of samples    | 500           |
+| num_split  | Number of splits     | 1             |
+| batch_size | Batch size           | 500           |
+| num_repeat | Number of repeat run | 1             |
+| num_driver | Number of drivers    | 1             |
