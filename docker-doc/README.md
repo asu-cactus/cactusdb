@@ -117,15 +117,22 @@ Madlib
 apt-get install libpq-dev
 apt-get install postgresql-plpython3-14
 wget https://dist.apache.org/repos/dist/release/madlib/2.1.0/apache-madlib-2.1.0-src.tar.gz
-tar -zxvf apache-madlib-2.1.0-src.tar.g
+tar -zxvf apache-madlib-2.1.0-src.tar.gz
 cd apache-madlib-2.1.0-src
 mkdir build
+cd build
 cmake ..
 # add postgresql 14 to path
 export PATH=$PATH:/usr/lib/postgresql/14/bin
+# install madlib to postgres (under user postgres)
+su postgres 
+/usr/local/madlib/bin/madpack -s madlib -p postgres install -c postgresdb@localhost
+# or
+su postgres -c "PATH=$PATH:/usr/lib/postgresql/14/bin; /home/apache-madlib-2.0.0-src/build/src/bin/madpack -s madlib -p postgres install -c postgresdb@localhost:5432"
+```
 
 # install madlib to postgres
-/usr/local/madlib/bin/madpack -s madlib -p postgres install -c postgresdb@localhost
+su -u postgres /usr/local/madlib/bin/madpack -s madlib -p postgres install -c postgresdb@localhost
 ```
 
 ### Develop with Visual Studio Code

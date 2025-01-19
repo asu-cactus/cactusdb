@@ -197,9 +197,13 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                     // Argmax itself does not have dims stored in the UDF will
                     // use the last element in dims. current limitation: argmax
                     // cannot be the innermost UDF.
-                    udfDims = {dims.back()};
+                    udfDims = {dims.back(), 1};
                     kernelTypes.push_back(velox::dl::KernelType::Argmax);
                     hasArgmax = true;
+                  } else if (
+                      dlKernelName.find("sigmoid") != std::string::npos) {
+                    udfDims = {dims.back(), 1};
+                    kernelTypes.push_back(velox::dl::KernelType::Sigmoid);
                   } else {
                     std::cout
                         << "ERROR, Unsupported DL kernel: " << dlKernelName
@@ -612,8 +616,15 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
   std::string targetExprStr;
   std::vector<float*> weights;
   std::vector<float*> bias;
-  std::vector<std::string> supportedDLKernels =
-      {"mat_mul", "mat_add", "relu", "batch_norm", "softmax", "argmax"};
+  std::vector<std::string> supportedDLKernels = {
+      "mat_mul",
+      "mat_vector_add",
+      "mat_add",
+      "relu",
+      "batch_norm",
+      "softmax",
+      "argmax",
+      "sigmoid"};
   static inline int rewriteTorchDNNCounter = 0;
 };
 

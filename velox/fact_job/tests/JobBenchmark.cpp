@@ -678,6 +678,183 @@ class JobBenchmark : HiveConnectorTestBase {
     AND cct2.id = cc.status_id;
     */
 
+ std::unordered_map<std::string, PlanBuilder> getBaseTableSourcesQ29(std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
+      std::unordered_map<std::string, PlanBuilder>
+        sources; // with filters and projections pushed down;
+
+    auto an_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({tableName2RowVector["aka_name"]})
+                    .project({"person_id as an_person_id", "an_features"});
+    //  .capturePlanNodeId(akaNameNodeId1)
+    tabel2Columns["an"] = {"an_person_id", "an_features"};
+
+    sources["an"] = an_a;
+
+    auto cc_a =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({tableName2RowVector["complete_cast"]})
+            .project({"movie_id", "subject_id", "status_id", "cc_features"});
+    //  .capturePlanNodeId(completeCastNodeId1)
+    tabel2Columns["cc"] = {"movie_id", "subject_id", "status_id", "cc_features"};
+
+    sources["cc"] = cc_a;
+
+    auto cct1_a =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({tableName2RowVector["comp_cast_type"]})
+            .filter("kind = 'cast'")
+            .project({"id as cct1_id", "cct_features as cct1_features"});
+    //  .capturePlanNodeId(completeCastNodeId1)
+    tabel2Columns["cct1"] = {"cct1_id", "cct1_features"};
+
+    sources["cct1"] = cct1_a;
+
+    auto cct2_a =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({tableName2RowVector["comp_cast_type"]})
+            .filter("kind ='complete+verified'")
+            .project({"id as cct2_id", "cct_features as cct2_features"});
+    //  .capturePlanNodeId(compCastTypeNodeId2)
+    tabel2Columns["cct2"] = {"cct2_id", "cct2_features"};
+
+    sources["cct2"] = cct2_a;
+
+    auto chn_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                     .values({tableName2RowVector["char_name"]})
+                     .filter("name = 'Queen'")
+                     .project({"id as chn_id", "chn_features"});
+    //  .capturePlanNodeId(charNameNodeId)
+    tabel2Columns["chn"] = {"chn_id", "chn_features"};
+
+    sources["chn"] = chn_a;
+
+    auto ci_a =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({tableName2RowVector["cast_info"]})
+            .filter(
+                "note = '(voice)' OR note = '(voice) (uncredited)' OR note = '(voice: English version)'")
+            .project(
+                {"movie_id",
+                 "person_id",
+                 "role_id",
+                 "person_role_id",
+                 "ci_features"});
+    //  .capturePlanNodeId(castInfoNodeId)
+    tabel2Columns["ci"] = {"movie_id",
+                 "person_id",
+                 "role_id",
+                 "person_role_id",
+                 "ci_features"};
+
+    sources["ci"] = ci_a;
+
+    auto cn_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({tableName2RowVector["company_name"]})
+                    .filter("country_code ='[us]'")
+                    .project({"id as cn_id", "cn_features"});
+    //  .capturePlanNodeId(companyNameNodeId)
+    tabel2Columns["cn"] = {"cn_id", "cn_features"};
+
+    sources["cn"] = cn_a;
+
+    auto it_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({tableName2RowVector["info_type"]})
+                    .filter("info = 'release dates'")
+                    .project({"id as it_id", "it_features"});
+    //  .capturePlanNodeId(infoTypeNodeId1)
+    tabel2Columns["it"] = {"it_id", "it_features"};
+
+    sources["it"] = it_a;
+
+    auto it3_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                     .values({tableName2RowVector["info_type"]})
+                     .filter("info = 'trivia'")
+                     .project({"id as it3_id", "it_features as it3_features"});
+    //  .capturePlanNodeId(infoTypeNodeId2)
+    tabel2Columns["it3"] = {"it3_id", "it3_features"};
+
+    sources["it3"] = it3_a;
+
+    auto k_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                   .values({tableName2RowVector["keyword"]})
+                   .filter("keyword = 'computer-animation'")
+                   .project({"id as k_id", "k_features"});
+    //  .capturePlanNodeId(keywordNodeId)
+    tabel2Columns["k"] = {"k_id", "k_features"};
+
+    sources["k"] = k_a;
+
+    auto mc_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({tableName2RowVector["movie_companies"]})
+                    .project({"movie_id", "company_id", "mc_features"});
+    //  .capturePlanNodeId(movieCompaniesNodeId)
+    tabel2Columns["mc"] = {"movie_id", "company_id", "mc_features"};
+
+    sources["mc"] = mc_a;
+
+    auto mi_a =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({tableName2RowVector["movie_info"]})
+            .filter(
+                "info IS NOT NULL AND (info LIKE 'Japan:%200%' OR info LIKE 'USA:%200%')")
+            .project({"movie_id", "info_type_id", "mi_features"});
+    //  .capturePlanNodeId(movieInfoNodeId)
+    tabel2Columns["mi"] = {"movie_id", "info_type_id", "mi_features"};
+
+    sources["mi"] = mi_a;
+
+    auto mk_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({tableName2RowVector["movie_keyword"]})
+                    .project({"movie_id", "keyword_id", "mk_features"});
+    //  .capturePlanNodeId(movieKeywordNodeId)
+    tabel2Columns["mk"] = {"movie_id", "keyword_id", "mk_features"};
+
+    sources["mk"] = mk_a;
+
+    auto n_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                   .values({tableName2RowVector["name"]})
+                   .filter("gender ='f' AND name LIKE '%An%'")
+                   .project({"id as n_id", "n_features"});
+    //  .capturePlanNodeId(nameNodeId)
+    tabel2Columns["n"] = {"n_id", "n_features"};
+
+    sources["n"] = n_a;
+
+    auto pi_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({tableName2RowVector["person_info"]})
+                    .project(
+                        {"person_id as pi_person_id",
+                         "info_type_id as pi_info_type_id",
+                         "pi_features"});
+    // .capturePlanNodeId(personInfoNodeId)
+    tabel2Columns["pi"] = {"pi_person_id", "pi_info_type_id", "pi_features"};
+
+    sources["pi"] = pi_a;
+
+    auto rt_a = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({tableName2RowVector["role_type"]})
+                    .filter("role ='actress'")
+                    .project({"id as rt_id", "rt_features"});
+    //  .capturePlanNodeId(roleTypeNodeId)
+    tabel2Columns["rt"] = {"rt_id", "rt_features"};
+
+    sources["rt"] = rt_a;
+
+    auto t_a =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({tableName2RowVector["title"]})
+            .filter(
+                "title = 'Shrek 2' AND  production_year > 2000 AND production_year < 2010")
+            .project({"id", "t_features"});
+    //    .capturePlanNodeId(titleNodeId)
+    tabel2Columns["t"] = {"id", "t_features"};
+
+    sources["t"] = t_a;
+
+    return sources;
+  }
+
+
   bool constructSQLQuery29(
       PlanBuilder& planBuilder,
       std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,

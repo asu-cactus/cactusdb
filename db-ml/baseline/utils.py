@@ -13,6 +13,8 @@ from openai import OpenAI
 import pyarrow.parquet as pq
 from psycopg2 import sql
 
+import faiss
+
 
 def get_sys_num_threads():
     return multiprocessing.cpu_count()
@@ -358,3 +360,13 @@ def map_arrow_to_postgres(arrow_type):
         return "TIMESTAMP"
     else:
         raise ValueError(f"Unsupported type: {arrow_type}")
+
+def get_rag_reference(model):
+    movie_data = pd.read_csv("/home/local/ASUAD/luluxie/velox/resources/data/wiki_movie_plots_deduped.csv")
+    embeddings = np.array([np.array(model.encode(x + " " + y)) for x, y in zip(movie_data['Title'], movie_data['Plot'])])
+    dimension = len(embeddings[0])
+    index = faiss.IndexFlatL2(dimension)
+    index.add(embeddings)
+    return index, movie_data
+    
+
