@@ -2573,6 +2573,53 @@ class TPCxAIUsecase08PipelineTF(Pipeline):
     def model_inference_impl(self, data):
         return self.model(data)
 
+class TPCxAIUsecase08PipelineML(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase08PipelineML, self).__init__(
+            "tpcxai-usecase08-ml", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+        self.model = pickle.load(open("../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost.pkl", "rb"))
+        self.le_dept = pickle.load(
+            open("../../resources/model/tpcxai_sf1/final/tf/usecase8_le_dept.pkl", "rb")
+        )
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        query_to_fetch_serving_data = """
+        SELECT 
+          o_order_id,
+          department,
+          quantity,
+          SUM(quantity) AS scan_count,                
+          MIN(EXTRACT(DOW FROM date)) AS weekday     
+        FROM tpcxai_order_serving 
+        JOIN tpcxai_lineitem_serving ON o_order_id = li_order_id 
+        JOIN tpcxai_product_serving ON li_product_id = p_product_id
+        GROUP BY o_order_id, date, department, quantity
+        """
+
+        data = utils.fetch_data_from_postgres_via_psycopg2(query_to_fetch_serving_data)
+        return data
+
+    def data_processing_impl(self, data):
+        data["department_encoded"] = self.le_dept.transform(data[["department"]].values)
+        data["scan_count"] = data["scan_count"].astype(int)
+        data["weekday"] = data["weekday"].astype(int)
+
+        X_features = data[
+            ["department_encoded", "quantity", "scan_count", "weekday"]
+        ].values.astype(float)
+        return X_features
+
+    def model_inference_impl(self, data):
+        return self.model.predict(data)
+
 
 class TPCxAIUsecase10PipelineTF(Pipeline):
 
@@ -2754,6 +2801,74 @@ class TPCxAIUsecase08PipelineEvaDB(Pipeline):
     def model_inference_impl(self, data):
         # TODO model inference
         query_to_fetch_serving_data = "select o_order_id, Model_UseCase8_EVADB(quantity, scan_count, weekday, department).predicted from postgres_data.evadb_tpcxai_uc8_view"
+
+        result_df = self.cursor.query(query_to_fetch_serving_data).df()
+        return result_df.values
+
+class TPCxAIUsecase08MLPipelineEvaDB(Pipeline):
+
+    def __del__(self):
+        self.cursor.query(
+            "USE postgres_data{DROP VIEW IF EXISTS evadb_tpcxai_uc8_view};"
+        ).df()
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase08MLPipelineEvaDB, self).__init__(
+            "tpcxai-usecase08-ml-evadb", num_loop=num_loop
+        )
+        # self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        # utils.setup_postgres_for_evadb()
+
+        self.cursor = evadb.connect().cursor()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS Model_UseCase8_ML_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS Model_UseCase8_ML_EVADB
+            IMPL './function_tpcxai_evadb.py';
+            """
+        ).df()
+
+        # create a view
+        self.cursor.query(
+            """
+            USE postgres_data {
+            CREATE OR REPLACE VIEW evadb_tpcxai_uc8_view AS
+            SELECT 
+              o_order_id,
+              department,
+              quantity,
+              SUM(quantity) AS scan_count,                
+              MIN(EXTRACT(DOW FROM date)) AS weekday    
+            FROM tpcxai_order_serving 
+            JOIN tpcxai_lineitem_serving ON o_order_id = li_order_id 
+            JOIN tpcxai_product_serving ON li_product_id = p_product_id
+            GROUP BY o_order_id, date, department, quantity
+            };
+        """
+        ).df()
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # TODO: implement data loading
+        return None
+
+    def data_processing_impl(self, data):
+        # TODO data processing
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        query_to_fetch_serving_data = "select o_order_id, Model_UseCase8_ML_EVADB(quantity, scan_count, weekday, department).predicted from postgres_data.evadb_tpcxai_uc8_view"
 
         result_df = self.cursor.query(query_to_fetch_serving_data).df()
         return result_df.values
@@ -2944,6 +3059,73 @@ class TPCxAIUsecase8PipelineSparkHadoop(Pipeline):
         from register_tpcxai_spark_func import uc8_trip_classifier
 
         self.model_predictor = uc8_trip_classifier
+
+        self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
+        self.order_path_in_hdfs = os.path.join(self.data_path, "order_serving")
+        self.lineitem_path_in_hdfs = os.path.join(self.data_path, "lineitem_serving")
+        self.product_path_in_hdfs = os.path.join(self.data_path, "product_serving")
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        df_order = self.spark.read.parquet(self.order_path_in_hdfs).withColumn(
+            "date", from_unixtime(col("date"))
+        )
+        df_lineitem = self.spark.read.parquet(self.lineitem_path_in_hdfs)
+        df_product = self.spark.read.parquet(self.product_path_in_hdfs)
+        df_order.createOrReplaceTempView("tpcxai_order_serving")
+        df_lineitem.createOrReplaceTempView("tpcxai_lineitem_serving")
+        df_product.createOrReplaceTempView("tpcxai_product_serving")
+
+        uc8_sql = """
+        SELECT 
+            o_order_id,
+            department,
+            quantity,
+            SUM(quantity) AS scan_count,               
+            MIN(EXTRACT(DOW FROM date)) AS weekday     
+        FROM tpcxai_order_serving 
+        JOIN tpcxai_lineitem_serving ON o_order_id = li_order_id 
+        JOIN tpcxai_product_serving ON li_product_id = p_product_id
+        GROUP BY o_order_id, date, department, quantity
+        """
+
+        joined_df = self.spark.sql(uc8_sql)
+
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+
+        result_df = data.withColumn(
+            "predicted",
+            self.model_predictor("quantity", "scan_count", "weekday", "department"),
+        )
+        result_df.collect()
+        return result_df
+
+class TPCxAIUsecase8MLPipelineSparkHadoop(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        # np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "60g")
+            .config("spark.sql.legacy.parquet.nanosAsLong", "true")
+            .getOrCreate()
+        )
+        super(TPCxAIUsecase8MLPipelineSparkHadoop, self).__init__(
+            "tpcxai-usecase8-ml-sparkhadoop", num_loop=num_loop
+        )
+
+        from register_tpcxai_spark_func import uc8_trip_ml_classifier
+
+        self.model_predictor = uc8_trip_ml_classifier
 
         self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
         self.order_path_in_hdfs = os.path.join(self.data_path, "order_serving")
@@ -3406,7 +3588,166 @@ class TPCxAIUsecase08PipelineMadlib(Pipeline):
     def model_inference_impl(self, data):
         query_to_load_data = """select * from tpcxai_uc8_predictions;"""
         return utils.fetch_data_from_postgres_via_psycopg2(query_to_load_data)
+    
+class TPCxAIUsecase08PipelineMLMadlib(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase08PipelineMLMadlib, self).__init__(
+            "tpcxai-usecase08-ml-madlib", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
 
+        utils.execute_sql_query_via_psycopg2(
+            """
+            DROP TABLE IF EXISTS public.uc8_xgboost;
+            CREATE TABLE public.uc8_xgboost (
+              model BYTEA,             -- Binary data for the model
+              label_encoder BYTEA,     -- Binary data for the label encoder
+              features TEXT[],         -- Array of text strings for features
+              params_index INTEGER     -- Integer column for parameters index
+          );
+        """
+        )
+
+        self.model = pickle.load(open("../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost.pkl", "rb"))
+        self.xgboost_le = pickle.load(open("../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost_le.pkl", "rb"))
+        # load model into postgres 
+
+        params_index = 1
+
+        # Serialize model and label_encoder using pickle
+        serialized_model = pickle.dumps(self.model)
+        serialized_label_encoder = pickle.dumps(self.xgboost_le)
+
+        insert_query = """
+        INSERT INTO public.uc8_xgboost (model, label_encoder, features, params_index)
+        VALUES (%s, %s, %s, %s);
+        """
+        conn = utils.get_psycopg2_connection()
+        cur = conn.cursor()
+        # Execute the query with serialized data
+        features = ['department', 'quantity', 'scan_count', 'weekday']
+        cur.execute(insert_query, (serialized_model, serialized_label_encoder, features, params_index))
+        # Commit and close the connection
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        # register encoder
+        sql_to_register_encoder = """
+          CREATE OR REPLACE FUNCTION uc8_department_encoder(category TEXT)
+          RETURNS INT AS $$
+          DECLARE
+              category_list TEXT[] := ARRAY[
+                  'AUTOMOTIVE', 'BATH AND SHOWER', 'BEAUTY', 'BEDDING', 'BOYS WEAR',
+                  'CANDY, TOBACCO, COOKIES', 'CELEBRATION', 'COMM BREAD',
+                  'COOK AND DINE', 'DAIRY', 'DSD GROCERY', 'ELECTRONICS',
+                  'FABRICS AND CRAFTS', 'FINANCIAL SERVICES', 'FROZEN FOODS',
+                  'GIRLS WEAR, 4-6X  AND 7-14', 'GROCERY DRY GOODS', 'HARDWARE',
+                  'HOME DECOR', 'HOME MANAGEMENT', 'HORTICULTURE AND ACCESS',
+                  'HOUSEHOLD CHEMICALS/SUPP', 'HOUSEHOLD PAPER GOODS',
+                  'IMPULSE MERCHANDISE', 'INFANT APPAREL',
+                  'INFANT CONSUMABLE HARDLINES', 'JEWELRY AND SUNGLASSES',
+                  'LADIESWEAR', 'LAWN AND GARDEN', 'LIQUOR,WINE,BEER',
+                  'MEAT - FRESH & FROZEN', 'MEDIA AND GAMING', 'MENS WEAR',
+                  'OFFICE SUPPLIES', 'PAINT AND ACCESSORIES', 'PERSONAL CARE',
+                  'PETS AND SUPPLIES', 'PHARMACY OTC', 'PHARMACY RX',
+                  'PLAYERS AND ELECTRONICS', 'PRODUCE', 'SERVICE DELI', 'SHOES',
+                  'SPORTING GOODS', 'TOYS', 'WIRELESS'
+              ];
+              index INT;
+          BEGIN
+              -- Find the index of the category in the list
+              index := array_position(category_list, category);
+              
+              -- If not found, return -1
+              IF index IS NULL THEN
+                  RETURN -1;
+              ELSE
+                  RETURN index - 1; -- Convert 1-based index to 0-based index
+              END IF;
+          END;
+          $$ LANGUAGE plpgsql;
+        """
+
+        utils.execute_sql_query_via_psycopg2(sql_to_register_encoder)
+        
+
+        utils.execute_sql_query_via_psycopg2(
+            "DROP TABLE IF EXISTS tpcxai_uc8_predictions;"
+        )
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        query_to_get_inference_data = """
+        DROP TABLE IF EXISTS tpcxai_uc8_table_serving;
+
+        CREATE TABLE tpcxai_uc8_table_serving as (
+            SELECT
+            ROW_NUMBER() OVER () AS id,
+                department,
+                quantity,
+                scan_count,
+                weekday
+            FROM
+                (
+                    SELECT 
+                  o_order_id,
+                  uc8_department_encoder(department) as department,
+                  quantity,
+                  SUM(quantity) AS scan_count,                
+                  MIN(EXTRACT(DOW FROM date)) AS weekday     
+                FROM tpcxai_order_serving 
+                JOIN tpcxai_lineitem_serving ON o_order_id = li_order_id 
+                JOIN tpcxai_product_serving ON li_product_id = p_product_id
+                GROUP BY o_order_id, date, department, quantity
+                ) as t
+          limit 100
+        );
+        """
+
+        utils.execute_sql_query_via_psycopg2(query_to_get_inference_data)
+
+
+        query_to_run_model_inference = """
+        DROP TABLE IF EXISTS tpcxai_uc8_predictions;
+          SELECT madlib.madlib_keras_predict_byom('tpcxai_uc8_predictor',  
+                                          1,                           
+                                          'tpcxai_uc8_view',         
+                                          'id',                  
+                                          'x',
+                                          'tpcxai_uc8_predictions',      
+                                          'response',
+                                          FALSE,
+                                          NULL,
+                                          NULL
+          );
+        """
+
+        data = None
+        return data
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        query_to_run_model_inference = """
+        DROP TABLE IF EXISTS xgb_single_score_out, xgb_single_score_out_metrics, xgb_single_score_out_roc_curve;
+
+        SELECT madlib.xgboost_predict(
+            'tpcxai_uc8_table_serving',          -- test_table
+            'uc8_xgboost',   -- model_table
+            'xgb_single_score_out',    -- predict_output_table
+            'id'               -- id_column
+        );
+
+        """
+        utils.execute_sql_query_via_psycopg2(query_to_run_model_inference)
+        return None
 
 class TPCxAIUsecase10PipelineMadlib(Pipeline):
     def __init__(

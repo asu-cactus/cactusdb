@@ -1827,3 +1827,108 @@ void registerTPCxAIUC8ModelFunctions(
       true,
       catalog);
 };
+
+void registerTPCxAIUC8MLModelFunctions(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+
+  std::string xgboostModelPath =
+      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_ml_xgboost_model/0.txt";
+
+  optimization::registerVectorFunction(
+      "decision_tree_predict",
+      TreePrediction::signatures(),
+      std::make_unique<TreePrediction>(0, xgboostModelPath, 4, false),
+      {},
+      true,
+      catalog);
+
+  registerCustomType("tree_type", std::make_unique<TreeTypeFactories>());
+
+  optimization::registerVectorFunction(
+      "velox_decision_tree_predict",
+      VeloxTreePrediction::signatures(),
+      std::make_unique<VeloxTreePrediction>(4),
+      {},
+      true,
+      catalog);
+
+  optimization::registerVectorFunction(
+      "velox_decision_tree_construct",
+      VeloxTreeConstruction::signatures(),
+      std::make_unique<VeloxTreeConstruction>(),
+      {},
+      true,
+      catalog);
+
+  optimization::registerVectorFunction(
+      "decision_forest_predict",
+      TreePrediction::signatures(),
+      std::make_unique<ForestPrediction>(
+          "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_ml_xgboost_model",
+          4,
+          false),
+      {},
+      true,
+      catalog);
+
+  std::vector<std::string> departmentList = {
+      "AUTOMOTIVE",
+      "BATH AND SHOWER",
+      "BEAUTY",
+      "BEDDING",
+      "BOYS WEAR",
+      "CANDY, TOBACCO, COOKIES",
+      "CELEBRATION",
+      "COMM BREAD",
+      "COOK AND DINE",
+      "DAIRY",
+      "DSD GROCERY",
+      "ELECTRONICS",
+      "FABRICS AND CRAFTS",
+      "FINANCIAL SERVICES",
+      "FROZEN FOODS",
+      "GIRLS WEAR, 4-6X  AND 7-14",
+      "GROCERY DRY GOODS",
+      "HARDWARE",
+      "HOME DECOR",
+      "HOME MANAGEMENT",
+      "HORTICULTURE AND ACCESS",
+      "HOUSEHOLD CHEMICALS/SUPP",
+      "HOUSEHOLD PAPER GOODS",
+      "IMPULSE MERCHANDISE",
+      "INFANT APPAREL",
+      "INFANT CONSUMABLE HARDLINES",
+      "JEWELRY AND SUNGLASSES",
+      "LADIESWEAR",
+      "LAWN AND GARDEN",
+      "LIQUOR,WINE,BEER",
+      "MEAT - FRESH & FROZEN",
+      "MEDIA AND GAMING",
+      "MENS WEAR",
+      "OFFICE SUPPLIES",
+      "PAINT AND ACCESSORIES",
+      "PERSONAL CARE",
+      "PETS AND SUPPLIES",
+      "PHARMACY OTC",
+      "PHARMACY RX",
+      "PLAYERS AND ELECTRONICS",
+      "PRODUCE",
+      "SERVICE DELI",
+      "SHOES",
+      "SPORTING GOODS",
+      "TOYS",
+      "WIRELESS"};
+  std::unordered_map<std::string, int> departmentMapping;
+  for (int i = 0; i < departmentList.size(); i++) {
+    departmentMapping[departmentList[i]] = i;
+  }
+  optimization::registerVectorFunction(
+      "department_encoder",
+      StringEncoder::signatures(),
+      std::make_unique<StringEncoder>(std::move(departmentMapping)),
+      {},
+      true,
+      catalog);
+};

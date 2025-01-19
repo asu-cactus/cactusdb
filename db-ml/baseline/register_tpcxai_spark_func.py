@@ -88,6 +88,28 @@ def uc8_trip_classifier(
     return pd.Series(y)
 
 
+uc8_xgb_model = pickle.load(
+    open("../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost.pkl", "rb")
+)
+
+
+@pandas_udf(IntegerType())
+def uc8_trip_ml_classifier(
+    quantity: pd.Series,
+    scan_count: pd.Series,
+    weekday: pd.Series,
+    department: pd.Series,
+) -> pd.Series:
+    df_temp = pd.DataFrame(department.values)
+    department = le_uc8_dept.transform(df_temp[[0]].values).reshape(-1)
+
+    scan_count = scan_count.astype(int)
+    weekday = weekday.astype(int)
+    X = np.array([department, quantity.values, scan_count.values, weekday.values]).T
+    y = uc8_xgb_model.predict(X)
+    return pd.Series(y)
+
+
 uc10model = tf.keras.models.load_model(
     "../../resources/model/tpcxai_sf1/final/tf/usecase10.h5", compile=False
 )
