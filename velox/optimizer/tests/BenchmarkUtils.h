@@ -263,6 +263,278 @@ std::vector<std::vector<float>> loadHDF5Array(
   return result;
 };
 
+PlanBuilder setupTPCxAIQuery(
+    std::string queryType,
+    CataLog& cataLog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
+  std::string queryOptType =
+      getEnvVar("CD_VELOX_QUERY_OPT_TYPE"); // env used for ablation study of
+  PlanBuilder queryPlan;
+
+  auto finicialAccountDataRowType =
+      ROW({"fa_customer_sk", "transaction_limit"}, {BIGINT(), DOUBLE()});
+  auto finicialTransactionsDataRowType = ROW(
+      {"amount", "iban", "sender_id", "receiver_id", "transaction_id", "time"},
+      {DOUBLE(), VARCHAR(), BIGINT(), VARCHAR(), BIGINT(), VARCHAR()});
+  auto orderDataRowType =
+      ROW({"o_order_id", "o_customer_sk", "weekday", "date", "store"},
+          {BIGINT(), BIGINT(), VARCHAR(), VARCHAR(), BIGINT()});
+  auto lineitemDataRowType =
+      ROW({"li_order_id", "li_product_id", "quantity", "price"},
+          {BIGINT(), BIGINT(), BIGINT(), DOUBLE()});
+  auto productDataRowType = ROW(
+      {"p_product_id", "name", "department"}, {BIGINT(), VARCHAR(), VARCHAR()});
+  auto storeDeptDataRowType = ROW(
+      {"store", "department", "num_of_week"}, {BIGINT(), VARCHAR(), BIGINT()});
+  std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+  if (dataDirPrefix == "") {
+    // use default value:
+    dataDirPrefix =
+        "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
+  }
+
+  std::vector<std::string> finicialAccountDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "financial_account");
+  std::vector<std::string> finicialTransactionsDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "financial_transactions");
+  std::vector<std::string> orderDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "order");
+  std::vector<std::string> lineitemDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "lineitem");
+  std::vector<std::string> productDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "product");
+  std::vector<std::string> storeDeptDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "store_dept");
+
+  int finicialAccountNumRows, finicialAccountNumCols,
+      finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
+      orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
+      productNumCols, storeDeptNumRows, storeDeptNumCols;
+
+  readDataStats(
+      dataDirPrefix + "financial_account_stats.txt",
+      finicialAccountNumRows,
+      finicialAccountNumCols);
+  readDataStats(
+      dataDirPrefix + "financial_transactions_stats.txt",
+      finicialTransactionsNumRows,
+      finicialTransactionsNumCols);
+  readDataStats(dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
+  readDataStats(
+      dataDirPrefix + "lineitem_stats.txt", lineitemNumRows, lineitemNumCols);
+  readDataStats(
+      dataDirPrefix + "product_stats.txt", productNumRows, productNumCols);
+  readDataStats(
+      dataDirPrefix + "store_dept_stats.txt",
+      storeDeptNumRows,
+      storeDeptNumCols);
+  if (queryType.find("uc3") != std::string::npos) {
+    PlanNodeId readStoreDeptDataPlanNodeId;
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(storeDeptDataRowType, {}, "")
+            .capturePlanNodeId(readStoreDeptDataPlanNodeId)
+            .project({
+                "store",
+                "department",
+                "num_of_week",
+                "store_id_encoder(array_constructor(CAST(store as INTEGER))) as store_id_encoded",
+                "department_encoder(department) as department_encoded",
+                "CAST(num_of_week / 156 AS REAL) as num_of_week_norm",
+            })
+            .project(
+                {"store",
+                 "department",
+                 "num_of_week",
+                 "transform(concat(store_id_encoded, department_encoded), x-> CAST(x as REAL))  as features1",
+                 "array_constructor(num_of_week_norm) as features2"})
+            .project(
+                {"store",
+                 "department",
+                 "num_of_week",
+                 "concat(features1, features2) as features"})
+            .project(
+                {"store",
+                 "department",
+                 "num_of_week",
+                 "mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))))) as prediction"});
+    cataLog.setIdAddressMap(
+        readStoreDeptDataPlanNodeId,
+        storeDeptDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(readStoreDeptDataPlanNodeId, "store_dept");
+    Source storeDeptSrc = Source(
+        readStoreDeptDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(storeDeptNumRows, storeDeptNumCols)));
+    cataLog.addSource(std::make_shared<Source>(storeDeptSrc));
+
+  } else if (queryType.find("uc8") != std::string::npos) {
+    PlanNodeId readOrderDataPlanNodeId;
+    PlanNodeId readLineitemDataPlanNodeId;
+    PlanNodeId readProductDataPlanNodeId;
+
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(orderDataRowType, {}, "")
+            .capturePlanNodeId(readOrderDataPlanNodeId)
+            .project({
+                "o_order_id",
+                "store",
+                "CAST (date AS TIMESTAMP) AS date",
+            })
+            .project({
+                "o_order_id",
+                "store",
+                "date",
+                "day_of_week(date) as weekday",
+            })
+            .hashJoin(
+                {"o_order_id"},
+                {"li_order_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(lineitemDataRowType, {}, "")
+                    .capturePlanNodeId(readLineitemDataPlanNodeId)
+                    .planNode(),
+                "",
+                {"li_order_id",
+                 "li_product_id",
+                 "o_order_id",
+                 "quantity",
+                 "date",
+                 "weekday"})
+            .hashJoin(
+                {"li_product_id"},
+                {"p_product_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(productDataRowType, {}, "")
+                    .capturePlanNodeId(readProductDataPlanNodeId)
+                    .planNode(),
+                "",
+                {"li_order_id",
+                 "o_order_id",
+                 "quantity",
+                 "date",
+                 "department",
+                 "weekday"})
+            .partialAggregation(
+                {"o_order_id", "date", "department", "quantity"},
+                {"sum(quantity) as scan_count", "min(weekday) as weekday"})
+            .finalAggregation()
+            .project(
+                {"o_order_id",
+                 "date",
+                 "array_constructor(quantity, scan_count, weekday) as features",
+                 "department_encoder(department) as department_encoded"})
+            .project(
+                {"o_order_id",
+                 "date",
+                 "transform(concat(features, department_encoded), x-> CAST(x as REAL)) as features"})
+            .project(
+                {"o_order_id",
+                 "date",
+                 "softmax(mat_vector_add1_8(mat_mul1_7(relu(mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))))))))) as prediction"});
+    cataLog.setIdAddressMap(
+        readOrderDataPlanNodeId,
+        orderDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readLineitemDataPlanNodeId,
+        lineitemDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readProductDataPlanNodeId,
+        productDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
+    cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
+    cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+    Source orderSrc = Source(
+        readOrderDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(OutputStat(orderNumRows, orderNumCols)));
+    Source lineitemSrc = Source(
+        readLineitemDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(lineitemNumRows, lineitemNumCols)));
+    Source productSrc = Source(
+        readProductDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(productNumRows, productNumCols)));
+    cataLog.addSource(std::make_shared<Source>(orderSrc));
+    cataLog.addSource(std::make_shared<Source>(lineitemSrc));
+    cataLog.addSource(std::make_shared<Source>(productSrc));
+  } else if (queryType.find("uc10") != std::string::npos) {
+    PlanNodeId readFinancialAccountDataPlanNodeId;
+    PlanNodeId readFinancialTransactionsDataPlanNodeId;
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(finicialAccountDataRowType, {}, "")
+            .capturePlanNodeId(readFinancialAccountDataPlanNodeId)
+            .hashJoin(
+                {"fa_customer_sk"},
+                {"sender_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(finicialTransactionsDataRowType, {}, "")
+                    .capturePlanNodeId(readFinancialTransactionsDataPlanNodeId)
+                    .project(
+                        {"transaction_id",
+                         "sender_id",
+                         "CAST(hour(CAST(time AS TIMESTAMP)) as DOUBLE) as business_hour_norm",
+                         "amount"})
+                    .planNode(),
+                "",
+                {"transaction_id",
+                 "sender_id",
+                 "business_hour_norm",
+                 "amount",
+                 "transaction_limit"})
+            .project(
+                {"transaction_id",
+                 "amount / transaction_limit as amount_norm",
+                 "business_hour_norm"})
+            .project(
+                {"transaction_id",
+                 "transform(array_constructor(amount_norm, business_hour_norm), x-> CAST(X as REAL)) as features"})
+            .project(
+                {"transaction_id",
+                 "sigmoid(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))) as prediction"});
+    cataLog.setIdAddressMap(
+        readFinancialAccountDataPlanNodeId,
+        finicialAccountDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readFinancialTransactionsDataPlanNodeId,
+        finicialTransactionsDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(
+        readFinancialAccountDataPlanNodeId, "financial_account");
+    cataLog.addNodeIdRelationName(
+        readFinancialTransactionsDataPlanNodeId, "financial_transactions");
+    Source financialAccountSrc = Source(
+        readFinancialAccountDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(finicialAccountNumRows, finicialAccountNumCols)));
+    Source financialTransactionsSrc = Source(
+        readFinancialTransactionsDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(OutputStat(
+            finicialTransactionsNumRows, finicialTransactionsNumCols)));
+    cataLog.addSource(std::make_shared<Source>(financialAccountSrc));
+    cataLog.addSource(std::make_shared<Source>(financialTransactionsSrc));
+  } else {
+    throw std::runtime_error(
+        "[setupTPCxAIQuery] Unsupported query type: " + queryType);
+  }
+  return queryPlan;
+}
+
 PlanBuilder setupMovielensDBQuery(
     std::string queryType,
     CataLog& cataLog,
@@ -387,7 +659,7 @@ PlanBuilder setupMovielensDBQuery(
     PlanNodeId readRatingDataPlanNodeId1;
     PlanNodeId readRatingDataPlanNodeId2;
     if (queryOptType.empty() || queryOptType == "" ||
-        queryOptType == "fusion") {
+        queryOptType.find("fusion") != std::string::npos) {
       // default query
       auto readUserAvgRatingPlan =
           PlanBuilder(planNodeIdGenerator, pool_.get())
@@ -1090,7 +1362,6 @@ PlanBuilder setupMovielensDBQuery(
                    "argmax(softmax(mat_vector_add3_6(mat_mul3_5(relu(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(m_trending_features)))))))))) AS trending_prediction",
                    "u_final_interest_features",
                    "mt_relevance_score"})
-              .filter("trending_prediction = 1")
               .project(
                   {"u_user_id",
                    "u_age",
@@ -1098,28 +1369,38 @@ PlanBuilder setupMovielensDBQuery(
                    "u_gender_encoded",
                    "m_movie_id",
                    "argmax(softmax(mat_vector_add9_4(mat_mul9_3(relu(mat_vector_add9_2(mat_mul9_1(u_final_interest_features))))))) AS user_interest_prediction",
-                   "mt_relevance_score"})
-              .filter("user_interest_prediction = 1")
+                   "mt_relevance_score",
+                   "trending_prediction"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
                    "age_embedding(age_encoder(convert_int_array(u_age))) as u_age_embed",
                    "occupation_embedding(occupation_encoder(convert_int_array(u_occupation))) as u_occupation_embed",
                    "gender_embedding(u_gender_encoded) as u_gender_embed",
-                   "mt_relevance_score"})
+                   "mt_relevance_score",
+                   "trending_prediction",
+                   "user_interest_prediction"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
+                   "trending_prediction",
+                   "user_interest_prediction",
                    "relu(mat_vector_add11_2(mat_mul11_1(mt_relevance_score))) as bottom_mlp_out",
                    "concat(u_age_embed, u_occupation_embed, u_gender_embed) as categorical_features"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
+                   "trending_prediction",
+                   "user_interest_prediction",
                    "concat(bottom_mlp_out, categorical_features) as top_mlp_input"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
-                   "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(top_mlp_input))))))))) as top_mlp_out"});
+                   "trending_prediction",
+                   "user_interest_prediction",
+                   "relu(mat_vector_add12_6(mat_mul12_5(relu(mat_vector_add12_4(mat_mul12_3(relu(mat_vector_add12_2(mat_mul12_1(top_mlp_input))))))))) as top_mlp_out"})
+              .filter("trending_prediction = 1")
+              .filter("user_interest_prediction = 1");
     }
     if (queryOptType == "decomposition_pushdown") {
       auto movieQueryPlan =
@@ -1451,8 +1732,7 @@ PlanBuilder setupMovielensDBQuery(
                    "mt_relevance_score",
                    "m_popularity",
                    "m_vote_average",
-                   "m_genres"})
-              .filter("m_genres LIKE '\%Adventure\%'");
+                   "m_genres"});
       queryPlan =
           movieQueryPlan
               .nestedLoopJoin(
@@ -1532,6 +1812,7 @@ PlanBuilder setupMovielensDBQuery(
                    "user_movie_interest_pred",
                    "user_movie_rating_pred"})
               .filter("user_movie_interest_pred = 1")
+              .filter("m_genres LIKE '\%Adventure\%'")
               .filter("user_movie_rating_pred = 5");
 
     } else if (queryOptType.find("mlq3-pushdown") != std::string::npos) {
@@ -1781,9 +2062,15 @@ PlanBuilder setupMovielensDBQuery(
   return queryPlan;
 };
 
-std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
+std::vector<std::string> sampleUserMovieFilterExpr(
+    std::string filterTable,
+    int randomSeed = -1) {
   unsigned timestampSeed =
       std::chrono::system_clock::now().time_since_epoch().count();
+  if (randomSeed != -1) {
+    timestampSeed = randomSeed;
+  }
+
   RandomSampler randomSampler = RandomSampler(timestampSeed);
 
   std::vector<std::string> userGenderFilterExprs = {
@@ -1952,6 +2239,12 @@ std::vector<std::string> sampleUserMovieFilterExpr(std::string filterTable) {
 
 // Function to write a string to a file
 void writeStringToFile(const std::string& str, const std::string& filename) {
+  // Create the folder if it does not exist
+  std::filesystem::path folderPath =
+      std::filesystem::path(filename).parent_path();
+  if (!std::filesystem::exists(folderPath)) {
+    std::filesystem::create_directories(folderPath);
+  }
   // Open the file in write mode
   std::ofstream outfile(filename);
 
@@ -2251,7 +2544,9 @@ PlanBuilder heuristicQueryRewrite(
   auto planNode = plan.planNode();
   planState.getPossibleActions(planNode, cataLog);
   std::vector<std::pair<std::string, std::string>> pushDownRules =
-      planState.getActionPairsWithRule("MLDecompositionPushdownRewriteAction");
+      planState.getActionPairsWithRules(
+          {"MLDecompositionPushdownRewriteAction",
+           "MultiLayerUDF2TorchNNRewriteAction"});
   while (pushDownRules.size() > 0) {
     auto planNode = plan.planNode();
     std::pair<std::string, std::string> selectedAction =
@@ -2275,8 +2570,9 @@ PlanBuilder heuristicQueryRewrite(
         cataLog);
     planNode = plan.planNode();
     planState.getPossibleActions(planNode, cataLog);
-    pushDownRules = planState.getActionPairsWithRule(
-        "MLDecompositionPushdownRewriteAction");
+    pushDownRules = planState.getActionPairsWithRules(
+        {"MLDecompositionPushdownRewriteAction",
+         "MultiLayerUDF2TorchNNRewriteAction"});
   }
 
   if (verbose >= 2) {

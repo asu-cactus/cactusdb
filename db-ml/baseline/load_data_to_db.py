@@ -387,10 +387,10 @@ def load_llm_recommendation_data_to_postgres(num_user_data, num_movie_data):
     db = create_engine(conn_string)
     conn = db.connect()
 
-    movie_data = pd.read_csv("../../data/mr_movie_metadata.csv")
+    movie_data = pd.read_csv("/home/local/ASUAD/luluxie/velox/resources/data/mr_movie_metadata.csv")
     movie_data = utils.change_df_dtypes(movie_data).iloc[:num_movie_data]
 
-    user_data = pd.read_csv("../../data/mr_user_genre_ratings.csv")
+    user_data = pd.read_csv("/home/local/ASUAD/luluxie/velox/resources/data/mr_user_genre_ratings.csv")
     user_data = utils.change_df_dtypes(user_data).iloc[:num_user_data]
 
     user_data.to_sql("llm_recommend_user", db, index=False, if_exists="replace")
@@ -415,6 +415,7 @@ def main():
 
     args = parser.parse_args()
     dataset = args.dataset
+    utils.setup_postgres_for_evadb()
 
     if dataset == "all":
         load_movielens_to_postgres()
