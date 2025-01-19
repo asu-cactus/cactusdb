@@ -428,15 +428,28 @@ PlanBuilder setupTPCxAIQuery(
                 {"o_order_id",
                  "date",
                  "array_constructor(quantity, scan_count, weekday) as features",
-                 "department_encoder(department) as department_encoded"})
-            .project(
-                {"o_order_id",
-                 "date",
-                 "transform(concat(features, department_encoded), x-> CAST(x as REAL)) as features"})
-            .project(
-                {"o_order_id",
-                 "date",
-                 "softmax(mat_vector_add1_8(mat_mul1_7(relu(mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))))))))) as prediction"});
+                 "department_encoder(department) as department_encoded"});
+    if (queryType.find("ml") == std::string::npos) {
+      queryPlan
+          .project(
+              {"o_order_id",
+               "date",
+               "transform(concat(features, department_encoded), x-> CAST(x as REAL)) as features"})
+          .project(
+              {"o_order_id",
+               "date",
+               "softmax(mat_vector_add1_8(mat_mul1_7(relu(mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))))))))) as prediction"});
+    } else {
+      queryPlan =
+          queryPlan
+              .project(
+                  {"o_order_id",
+                   "date",
+                   "transform(concat(department_encoded, features), x-> CAST(x as REAL)) as features"})
+              .project(
+                  {"o_order_id", "date", "decision_forest_predict(features)"});
+    }
+
     cataLog.setIdAddressMap(
         readOrderDataPlanNodeId,
         orderDataPaths,

@@ -1805,6 +1805,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         registerTPCxAIUC3ModelFunctions(cataLog, pool_);
       } else if (queryTemplate == "uc8") {
         registerTPCxAIUC8ModelFunctions(cataLog, pool_);
+      } else if (queryTemplate == "uc8-ml") {
+        registerTPCxAIUC8MLModelFunctions(cataLog, pool_);
       } else if (queryTemplate == "uc10") {
         registerTPCxAIUC10ModelFunctions(cataLog, pool_);
       } else if (queryTemplate == "uc10-ml") {

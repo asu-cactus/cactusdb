@@ -12,6 +12,20 @@ import tempfile
 from openai import OpenAI
 import pyarrow.parquet as pq
 from psycopg2 import sql
+import shutil
+
+
+def create_folder(folder_path, overwrite=False):
+    """
+    Recreate a folder. If it exists, delete it first.
+
+    Args:
+      folder_path (str): The path to the folder to recreate.
+    """
+    if os.path.exists(folder_path):
+        if overwrite:
+            shutil.rmtree(folder_path)
+    os.makedirs(folder_path)
 
 
 def get_sys_num_threads():
@@ -78,6 +92,7 @@ def fetch_data_from_postgres_via_connectorx(sql):
         print(f"Error: {e}")
     return df
 
+
 def execute_sql_query_via_psycopg2(query, fetch_results=False):
     """
     Executes a SQL query using psycopg2.
@@ -101,10 +116,10 @@ def execute_sql_query_via_psycopg2(query, fetch_results=False):
         # Connect to the database
         connection = psycopg2.connect(**db_params)
         cursor = connection.cursor()
-        
+
         # Execute the SQL query
         cursor.execute(sql.SQL(query))
-        
+
         # Commit changes for DML queries (INSERT, UPDATE, DELETE)
         connection.commit()
 
