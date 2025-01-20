@@ -127,3 +127,18 @@ def uc10_fraud_ml_spark_predicator(
     y = uc10lr_model.predict(X)
 
     return pd.Series(y)
+
+
+with open("../../resources/model/tpcxai_sf1/final/tf/usecase7_svd.pkl", "rb") as f:
+    uc7svd_model = pickle.load(f)
+
+
+@pandas_udf(IntegerType())
+def uc07_svd_ml_spark_predicator(
+    user_id: pd.Series, product_id: pd.Series
+) -> pd.Series:
+    results = []
+    for u_id, p_id in zip(user_id, product_id):
+        results.append(uc7svd_model.predict(u_id, p_id).est)
+
+    return pd.Series(results)

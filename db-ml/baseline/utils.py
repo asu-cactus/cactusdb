@@ -380,7 +380,7 @@ def load_parquet_to_postgres(parquet_file, table_name, conn_params, show_schema=
         conn = psycopg2.connect(**conn_params)
         cur = conn.cursor()
         # Drop the table if it already exists
-        cur.execute("DROP TABLE IF EXISTS {}".format(table_name))
+        cur.execute("DROP TABLE IF EXISTS {} CASCADE".format(table_name))
         conn.commit()
         # Create the table
         cur.execute(create_table_query)
