@@ -2573,6 +2573,7 @@ class TPCxAIUsecase08PipelineTF(Pipeline):
     def model_inference_impl(self, data):
         return self.model(data)
 
+
 class TPCxAIUsecase08PipelineML(Pipeline):
     def __init__(
         self,
@@ -2582,7 +2583,12 @@ class TPCxAIUsecase08PipelineML(Pipeline):
             "tpcxai-usecase08-ml", num_loop=num_loop
         )
         self.postgres_conn_param = utils.get_connectorx_configuration()
-        self.model = pickle.load(open("../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost.pkl", "rb"))
+        self.model = pickle.load(
+            open(
+                "../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost.pkl",
+                "rb",
+            )
+        )
         self.le_dept = pickle.load(
             open("../../resources/model/tpcxai_sf1/final/tf/usecase8_le_dept.pkl", "rb")
         )
@@ -2657,6 +2663,7 @@ class TPCxAIUsecase10PipelineTF(Pipeline):
         data = self.model(data)
         return data
 
+
 class TPCxAIUsecase10MLPipelineTF(Pipeline):
 
     def __init__(
@@ -2666,7 +2673,9 @@ class TPCxAIUsecase10MLPipelineTF(Pipeline):
         super(TPCxAIUsecase10MLPipelineTF, self).__init__(
             "tpcxai-usecase10-ml-tf", num_loop=num_loop
         )
-        with open("../../resources/model/tpcxai_sf1/final/tf/usecase10_lr_model.h5", "rb") as f:
+        with open(
+            "../../resources/model/tpcxai_sf1/final/tf/usecase10_lr_model.h5", "rb"
+        ) as f:
             self.model = pickle.load(f)
 
     def loading_meta_impl(self):
@@ -2804,6 +2813,7 @@ class TPCxAIUsecase08PipelineEvaDB(Pipeline):
 
         result_df = self.cursor.query(query_to_fetch_serving_data).df()
         return result_df.values
+
 
 class TPCxAIUsecase08MLPipelineEvaDB(Pipeline):
 
@@ -2989,6 +2999,7 @@ class TPCxAIUsecase10MLPipelineEvaDB(Pipeline):
         result_df = self.cursor.query(query_to_fetch_serving_data).df()
         return result_df.values
 
+
 class TPCxAIUsecase3PipelineSparkHadoop(Pipeline):
     def __init__(
         self,
@@ -3106,6 +3117,7 @@ class TPCxAIUsecase8PipelineSparkHadoop(Pipeline):
         )
         result_df.collect()
         return result_df
+
 
 class TPCxAIUsecase8MLPipelineSparkHadoop(Pipeline):
     def __init__(
@@ -3289,7 +3301,7 @@ class TPCxAIUsecase10PipelineSparkMLHadoop(Pipeline):
         )
         result_df.collect()
         return result_df
-    
+
 
 class TPCxAIUsecase03PipelineMadlib(Pipeline):
     def __init__(
@@ -3404,9 +3416,7 @@ class TPCxAIUsecase03PipelineMadlib(Pipeline):
                   ) as t
           );
         """
-        utils.execute_sql_query_via_psycopg2(
-            sql_to_create_view_for_data_processing
-        )
+        utils.execute_sql_query_via_psycopg2(sql_to_create_view_for_data_processing)
 
         utils.execute_sql_query_via_psycopg2(
             "DROP TABLE IF EXISTS tpcxai_uc3_predictions;"
@@ -3551,9 +3561,7 @@ class TPCxAIUsecase08PipelineMadlib(Pipeline):
                   ) as t
           );
         """
-        utils.execute_sql_query_via_psycopg2(
-            sql_to_create_view_for_data_processing
-        )
+        utils.execute_sql_query_via_psycopg2(sql_to_create_view_for_data_processing)
 
         utils.execute_sql_query_via_psycopg2(
             "DROP TABLE IF EXISTS tpcxai_uc8_predictions;"
@@ -3588,7 +3596,8 @@ class TPCxAIUsecase08PipelineMadlib(Pipeline):
     def model_inference_impl(self, data):
         query_to_load_data = """select * from tpcxai_uc8_predictions;"""
         return utils.fetch_data_from_postgres_via_psycopg2(query_to_load_data)
-    
+
+
 class TPCxAIUsecase08PipelineMLMadlib(Pipeline):
     def __init__(
         self,
@@ -3611,9 +3620,19 @@ class TPCxAIUsecase08PipelineMLMadlib(Pipeline):
         """
         )
 
-        self.model = pickle.load(open("../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost.pkl", "rb"))
-        self.xgboost_le = pickle.load(open("../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost_le.pkl", "rb"))
-        # load model into postgres 
+        self.model = pickle.load(
+            open(
+                "../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost.pkl",
+                "rb",
+            )
+        )
+        self.xgboost_le = pickle.load(
+            open(
+                "../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost_le.pkl",
+                "rb",
+            )
+        )
+        # load model into postgres
 
         params_index = 1
 
@@ -3628,8 +3647,11 @@ class TPCxAIUsecase08PipelineMLMadlib(Pipeline):
         conn = utils.get_psycopg2_connection()
         cur = conn.cursor()
         # Execute the query with serialized data
-        features = ['department', 'quantity', 'scan_count', 'weekday']
-        cur.execute(insert_query, (serialized_model, serialized_label_encoder, features, params_index))
+        features = ["department", "quantity", "scan_count", "weekday"]
+        cur.execute(
+            insert_query,
+            (serialized_model, serialized_label_encoder, features, params_index),
+        )
         # Commit and close the connection
         conn.commit()
         cur.close()
@@ -3673,7 +3695,6 @@ class TPCxAIUsecase08PipelineMLMadlib(Pipeline):
         """
 
         utils.execute_sql_query_via_psycopg2(sql_to_register_encoder)
-        
 
         utils.execute_sql_query_via_psycopg2(
             "DROP TABLE IF EXISTS tpcxai_uc8_predictions;"
@@ -3712,7 +3733,6 @@ class TPCxAIUsecase08PipelineMLMadlib(Pipeline):
 
         utils.execute_sql_query_via_psycopg2(query_to_get_inference_data)
 
-
         query_to_run_model_inference = """
         DROP TABLE IF EXISTS tpcxai_uc8_predictions;
           SELECT madlib.madlib_keras_predict_byom('tpcxai_uc8_predictor',  
@@ -3748,6 +3768,7 @@ class TPCxAIUsecase08PipelineMLMadlib(Pipeline):
         """
         utils.execute_sql_query_via_psycopg2(query_to_run_model_inference)
         return None
+
 
 class TPCxAIUsecase10PipelineMadlib(Pipeline):
     def __init__(
@@ -3798,9 +3819,7 @@ class TPCxAIUsecase10PipelineMadlib(Pipeline):
               ON fa_customer_sk = sender_id
           );
         """
-        utils.execute_sql_query_via_psycopg2(
-            sql_to_create_view_for_data_processing
-        )
+        utils.execute_sql_query_via_psycopg2(sql_to_create_view_for_data_processing)
 
         utils.execute_sql_query_via_psycopg2(
             "DROP TABLE IF EXISTS tpcxai_uc10_predictions;"
@@ -3808,6 +3827,7 @@ class TPCxAIUsecase10PipelineMadlib(Pipeline):
 
     def loading_meta_impl(self):
         pass
+
     def data_loading_impl(self, batch_size):
         query_to_run_model_inference = """
         DROP TABLE IF EXISTS tpcxai_uc10_predictions;
@@ -3877,25 +3897,10 @@ class TPCxAIUsecase10MLPipelineMadlib(Pipeline):
         """
         )
 
-
     def loading_meta_impl(self):
         pass
-    
+
     def data_loading_impl(self, batch_size):
-
-      # DROP TABLE IF EXISTS tpcxai_uc10_table_serving;
-
-      #     CREATE TABLE tpcxai_uc10_table_serving as (
-      #       SELECT
-      #         transaction_id AS id,
-      #         ARRAY [
-      #                   (EXTRACT(HOUR FROM time) / 23.0)::real, 
-      #                   (amount / transaction_limit)::real
-      #                 ] AS x
-      #       FROM
-      #         tpcxai_financial_account_serving
-      #         JOIN tpcxai_financial_transactions_serving ON fa_customer_sk = sender_id
-      #     );
         query_to_gather_serving_data = """
 
           DROP VIEW IF EXISTS tpcxai_uc10_table_serving_view;
@@ -3927,3 +3932,430 @@ class TPCxAIUsecase10MLPipelineMadlib(Pipeline):
           tpcxai_uc10_table_serving_view;
         """
         return utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)
+
+
+class TPCxAIUsecase07MLPipelineML(Pipeline):
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase07MLPipelineML, self).__init__(
+            "tpcxai-usecase07-ml", num_loop=num_loop
+        )
+        with open(
+            "../../resources/model/tpcxai_sf1/final/tf/usecase7_svd.pkl", "rb"
+        ) as f:
+            self.model = pickle.load(f)
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # Use case 10, trainig query
+        query_to_fetch_serving_data = """
+        select user_id, product_id
+        from tpcxai_product_rating_serving
+        """
+
+        data = utils.fetch_data_from_postgres_via_connectorx(
+            query_to_fetch_serving_data
+        )
+        return data
+
+    def data_processing_impl(self, data):
+        X_features = data[["user_id", "product_id"]].values
+        return X_features
+
+    def model_inference_impl(self, data):
+        results = []
+        for i in range(len(data)):
+            user_id = data[i, 0]
+            product_id = data[i, 1]
+            results.append(self.model.predict(user_id, product_id).est)
+        return data
+
+
+class TPCxAIUsecase07MLPipelineMadlib(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase07MLPipelineMadlib, self).__init__(
+            "tpcxai-usecase07-ml-madlib", num_loop=num_loop
+        )
+        self.postgres_conn_param = utils.get_connectorx_configuration()
+
+        query_to_initialize = """
+        CREATE OR REPLACE PROCEDURE uc07_preprocess(schema VARCHAR(100), output_table VARCHAR(200))
+        LANGUAGE plpgsql
+        AS $$
+        declare
+            has_rating_column boolean;
+        BEGIN
+
+            EXECUTE format('
+            SELECT EXISTS (
+                  SELECT 1
+                  FROM information_schema.columns
+                  WHERE table_name = ''tpcxai_product_rating_training''
+                  AND table_schema = ''%I''
+                  AND column_name = ''rating''
+                  )', schema)
+            INTO has_rating_column;
+
+            EXECUTE FORMAT('DROP VIEW IF EXISTS %I', output_table);
+
+            IF has_rating_column THEN
+                EXECUTE FORMAT('CREATE OR REPLACE VIEW %I AS
+                                SELECT user_id + 1 AS user_id,
+                                      product_id,
+                                      CAST(rating AS FLOAT) AS rating
+                                FROM %I.tpcxai_product_rating_training', output_table, schema);
+            ELSE
+                EXECUTE FORMAT('CREATE OR REPLACE VIEW %I AS
+                                SELECT user_id + 1 AS user_id,
+                                      product_id
+                                FROM %I.tpcxai_product_rating_serving', output_table, schema);
+            END IF;
+        END;
+        $$;
+
+
+
+        drop procedure if exists uc07_train(adjust_params boolean);
+        CREATE OR REPLACE PROCEDURE uc07_train(input_table text, model text, adjust_params boolean DEFAULT true)
+        AS $$
+        DECLARE
+            numRows INTEGER;
+            numCols INTEGER;
+        BEGIN
+            execute format('Drop table if exists %I', model);
+            -- Get the number of rows
+            EXECUTE format('SELECT matrix_ndims[1] FROM (SELECT madlib.matrix_ndims(''%I'', ''row=user_id, col=product_id, val=rating'')) AS foo', input_table) INTO numRows;
+
+            -- Get the number of columns
+            EXECUTE format('SELECT matrix_ndims[2] FROM (SELECT madlib.matrix_ndims(''%I'', ''row=user_id, col=product_id, val=rating'')) AS foo', input_table) INTO numCols;
+
+            -- Execute lmf with adjusted parameters if adjust_params is true
+            IF adjust_params THEN
+                EXECUTE format('SELECT madlib.lmf_igd_run(%L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L)',
+                              model, -- output
+                              input_table, -- input
+                              'user_id', -- rows
+                              'product_id', -- cols
+                              'rating', -- values
+                              numRows, -- row dim
+                              numCols, -- col dim
+                              100, -- max rank (number of latent factors)
+                              0.005, -- step size (learning rate)
+                              0.1, -- scale_factor (initialization)
+                              20, -- num_iterations
+                              1e-4); -- tolerance
+            ELSE
+                EXECUTE format('SELECT madlib.lmf_igd_run(%L, %L, %L, %L, %L, %s, %s, %s)',
+                              model, -- output
+                              input_table, -- input
+                              'user_id', -- rows
+                              'product_id', -- cols
+                              'rating', -- values
+                              numRows, -- row dim
+                              numCols,
+                                20); -- col dim
+            END IF;
+        END;
+        $$ LANGUAGE plpgsql;
+
+        drop procedure if exists uc07_predict(input_table varchar, output_table varchar, model varchar);
+        CREATE OR REPLACE PROCEDURE uc07_predict(
+          input_table varchar,
+          model VARCHAR,
+          output_table VARCHAR
+        )
+        AS $$
+        DECLARE
+          avg NUMERIC;
+          max_user_id int;
+          max_product_id int;
+          matrix_u DOUBLE PRECISION[];
+          matrix_v DOUBLE PRECISION[];
+        BEGIN
+          -- Drop the output table if it exists
+          EXECUTE format('DROP TABLE IF EXISTS %I', output_table);
+
+          -- Create the output table
+          EXECUTE format('
+            CREATE TABLE %I (
+              user_id INTEGER,
+              product_id INTEGER,
+              prediction DOUBLE PRECISION
+            )',
+            output_table);
+
+          -- Retrieve the avg in case of missing product_id / user_id
+          SELECT avg(rating) FROM public.tpcxai_product_rating_training INTO avg;
+          SELECT max(user_id) FROM public.tpcxai_product_rating_training INTO max_user_id;
+          SELECT max(product_id) FROM public.tpcxai_product_rating_training INTO max_product_id;
+
+        -- Fetch the matrix_u and matrix_v from the model table
+          EXECUTE format('
+            SELECT matrix_u
+            FROM %I
+            WHERE id = 1
+          ', model)
+          INTO matrix_u;
+
+          EXECUTE format('
+            SELECT matrix_v
+            FROM %I
+            WHERE id = 1
+          ', model)
+          INTO matrix_v;
+
+          -- Calculate the dot product for all rows in the productrating table
+          EXECUTE format('
+            INSERT INTO %I (user_id, product_id, prediction)
+            SELECT
+              pr.user_id,
+              pr.product_id,
+              CASE
+                WHEN pr.user_id > %L OR pr.product_id > %L THEN %L
+                ELSE COALESCE(
+                  madlib.array_dot($1[pr.user_id:pr.user_id][1:100], $2[pr.product_id:pr.product_id][1:100]),
+                  %L
+                )
+              END AS prediction
+            FROM %I pr',
+            output_table, max_user_id, max_product_id, avg, avg, input_table)
+          USING matrix_u, matrix_v;
+
+          -- Adjust the prediction values based on the conditions
+          EXECUTE format('
+            UPDATE %I
+            SET prediction = CASE
+              WHEN prediction > 5 THEN 5
+              WHEN prediction < 1 THEN 1
+              ELSE ROUND(prediction)
+            END',
+            output_table);
+        END;
+        $$ LANGUAGE plpgsql;
+
+        create or replace procedure uc07_score(
+            prediction_table varchar,
+            output_table varchar)
+        as $$
+        declare
+            mae_result float;
+        begin
+            EXECUTE format('DROP TABLE IF EXISTS %I', output_table);
+            execute format('
+                    create table %I as (
+                    select l.user_id, l.product_id, l.rating as true_rating, p.prediction
+                        from score.productrating_labels l join
+                            %I p on l.user_id = p.user_id and l.product_id = p.product_id);
+                    ', output_table, prediction_table);
+
+            EXECUTE format('SELECT calculate_mae(%L, %L, %L)', output_table, 'true_rating', 'prediction') INTO mae_result;
+
+            INSERT INTO public.evaluation_results (usecase, evaluation_score)
+            VALUES ('07', mae_result);
+        end;
+        $$ language plpgsql;
+
+
+        create or replace procedure uc07_serve(output_table varchar)
+        language plpgsql
+        as $$
+        begin
+            call uc07_preprocess('serve', 'uc07_serve_preprocessed');
+            execute format('call uc07_predict(''uc07_serve_preprocessed'', ''uc07_model'', ''%I'');', output_table);
+        end;
+        $$;
+
+        CREATE OR REPLACE PROCEDURE public.uc07_predict_numpy(model text, predictions text)
+        LANGUAGE plpython3u
+        AS $procedure$
+          import numpy as np
+          import gc
+          
+          # Execute the query and fetch the results
+          result = plpy.execute("SELECT matrix_u, matrix_v FROM {model}".format(model=model))
+          #plpy.notice(result[0]['matrix_u'])
+          mat_u = np.array(result[0]['matrix_u'])
+          mat_v = np.array(result[0]['matrix_v'])
+          #plpy.notice((mat_u.shape))
+          #plpy.notice((mat_v.shape))
+          mat_prod = np.matmul(mat_u, mat_v.T)
+          plpy.notice((mat_prod.shape))
+          del mat_u
+          del mat_v
+          gc.collect()							# gc of matrices U and V
+          mat_prod = np.round(mat_prod)			# round
+          mat_prod = np.clip(mat_prod, 1, 5)	# clip to 1-5
+          gc.collect()							# gc of temp intermediate matrices
+
+          query = "DROP TABLE IF EXISTS public.{predictions}".format(predictions=predictions) #uc07_predictions_numpy
+          result = plpy.execute(query)
+          query = '''CREATE TABLE public.{predictions} (
+          unnest_row_id int4 NULL,
+          unnest_result _float8 NULL)'''.format(predictions=predictions)
+          result = plpy.execute(query)
+          query = "INSERT INTO public.{predictions} (unnest_row_id, unnest_result) VALUES ($1, $2)".format(predictions=predictions)
+          plan = plpy.prepare(query, ["integer", "float8[]"])
+          for i, row in enumerate(mat_prod):
+            plpy.execute(plan, [i+1, mat_prod[i]])
+          $procedure$;
+
+          CREATE OR REPLACE PROCEDURE uc07_predict_with_matrix_mult(model text, predictions text)
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            -- Use CTEs to avoid creating intermediate tables
+            drop table if exists lora_u;
+            drop table if exists lora_v;
+            EXECUTE format('Drop table if exists %I', predictions);
+            EXECUTE format('
+                create table lora_u AS (
+                    SELECT (madlib.array_unnest_2d_to_1d(matrix_u)).*
+                    FROM %I
+                    WHERE id = 1
+                );
+                create table lora_v AS (
+                    SELECT (madlib.array_unnest_2d_to_1d(matrix_v)).*
+                    FROM %I
+                    WHERE id = 1
+                );
+                SELECT madlib.matrix_mult(
+                    ''lora_u'', ''row=unnest_row_id, val=unnest_result'',
+                    ''lora_v'', ''row=unnest_row_id, val=unnest_result, trans=true'',
+                    %L
+                )', model, model, predictions);
+        END;
+        $$;
+        """
+        utils.execute_sql_query_via_psycopg2(query_to_initialize)
+
+        query_to_train_svd = """
+          CALL uc07_preprocess('public', 'uc07_train_preprocessed');
+          CALL uc07_train('uc07_train_preprocessed', 'uc07_model', false);
+        """
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+
+        query_to_preprocess = """
+          CALL uc07_preprocess('public', 'uc07_score_preprocessed');
+        """
+
+        data = utils.execute_sql_query_via_psycopg2(query_to_preprocess)
+        return data
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        query_to_run_model_inference = """
+          CALL uc07_predict('uc07_score_preprocessed', 'uc07_model', 'uc07_score_predictions');
+        """
+        return utils.execute_sql_query_via_psycopg2(query_to_run_model_inference)
+
+
+class TPCxAIUsecase07MLPipelineEvaDB(Pipeline):
+
+    def __del__(self):
+        self.cursor.query(
+            "USE postgres_data{DROP VIEW IF EXISTS evadb_tpcxai_uc7};"
+        ).df()
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase07MLPipelineEvaDB, self).__init__(
+            "tpcxai-usecase07-ml-evadb", num_loop=num_loop
+        )
+        # self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        utils.setup_postgres_for_evadb()
+        self.cursor = evadb.connect().cursor()
+
+        # deregister function
+        self.cursor.query("DROP FUNCTION IF EXISTS Model_UseCase07_ML_EVADB;").df()
+        # register function
+        self.cursor.query(
+            """
+            CREATE FUNCTION
+            IF NOT EXISTS Model_UseCase07_ML_EVADB
+            IMPL './function_tpcxai_evadb.py';
+            """
+        ).df()
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # TODO: implement data loading
+        return None
+
+    def data_processing_impl(self, data):
+        # TODO data processing
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        query_to_fetch_serving_data = "SELECT Model_UseCase07_ML_EVADB(user_id, product_id).label FROM postgres_data.tpcxai_product_rating_serving"
+        result_df = self.cursor.query(query_to_fetch_serving_data).df()
+        return result_df.values
+
+
+class TPCxAIUsecase07PipelineSparkMLHadoop(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        # np.save("evadb_ffnn_reg.npy", list_hidden_layer_sizes)
+        self.spark = (
+            SparkSession.builder.appName("ModelInference")
+            .config("spark.driver.memory", "60g")
+            .config("spark.sql.legacy.parquet.nanosAsLong", "true")
+            .getOrCreate()
+        )
+        super(TPCxAIUsecase07PipelineSparkMLHadoop, self).__init__(
+            "tpcxai-usecase07-sparkhadoop-ml", num_loop=num_loop
+        )
+
+        from register_tpcxai_spark_func import uc07_svd_ml_spark_predicator
+
+        self.model_predictor = uc07_svd_ml_spark_predicator
+
+        self.data_path = "hdfs://localhost:9900/user/velox/data/tpcxai/"
+        self.pr_path_in_hdfs = os.path.join(self.data_path, "product_rating_serving")
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        df_pr = self.spark.read.parquet(self.pr_path_in_hdfs)
+        df_pr.createOrReplaceTempView("tpcxai_product_rating_serving")
+
+        uc07_sql = """
+        select user_id, product_id from tpcxai_product_rating_serving;
+        """
+
+        joined_df = self.spark.sql(uc07_sql)
+
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+
+        result_df = data.withColumn(
+            "predicted", self.model_predictor("user_id", "product_id")
+        )
+        result_df.collect()
+        return result_df

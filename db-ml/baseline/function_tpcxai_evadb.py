@@ -384,3 +384,77 @@ class Model_UseCase10_ML_EVADB(AbstractFunction):
         self.num_batches += 1
         self.max_batch_size = max(self.max_batch_size, len(X_serve))
         return result_df
+
+
+class Model_UseCase07_ML_EVADB(AbstractFunction):
+
+    def __del__(self):
+        print(
+            "[INFO] Summarization of Model_UseCase07_ML_EVADB: # batch: {}, max_batch_size: {}".format(
+                self.num_batches, self.max_batch_size
+            )
+        )
+
+    def as_numpy(self, val) -> np.ndarray:
+        """
+        Given a tensor in GPU, detach and get the numpy output
+        Arguments:
+             val (Tensor): tensor to be converted
+        Returns:
+            np.ndarray: numpy array representation
+        """
+        return val.detach().cpu().numpy()
+
+    @property
+    def name(self) -> str:
+        return "Model_UseCase07_ML_EVADB"
+
+    @setup(cacheable=True, function_type="regression", batchable=True)
+    def setup(self):
+        with open(
+            "../../resources/model/tpcxai_sf1/final/tf/usecase7_svd.pkl", "rb"
+        ) as f:
+            self.model = pickle.load(f)
+        self.num_batches = 0
+        self.max_batch_size = 0
+
+    @property
+    def labels(self):
+        return []
+
+    @forward(
+        input_signatures=[
+            PandasDataframe(
+                columns=[
+                    "user_id",
+                    "product_id",
+                ],
+                column_types=[NdArrayType.INT32, NdArrayType.INT32],
+                column_shapes=[(None,), (None,)],
+            )
+        ],
+        output_signatures=[
+            PandasDataframe(
+                columns=["label"],
+                column_types=[
+                    NdArrayType.FLOAT32,
+                ],
+                column_shapes=[(None,)],
+            )
+        ],
+    )
+    def forward(self, data) -> pd.DataFrame:
+        results = []
+        for idx, row in data.iterrows():
+            user_id = row["user_id"]
+            product_id = row["product_id"]
+            results.append(self.model.predict(user_id, product_id).est)
+
+        result_df = pd.DataFrame(
+            {
+                "label": results,
+            }
+        )
+        self.num_batches += 1
+        self.max_batch_size = max(self.max_batch_size, len(data))
+        return result_df
