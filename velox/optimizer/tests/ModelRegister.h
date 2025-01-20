@@ -2,6 +2,7 @@
 
 #include <json/json.h>
 #include "velox/cost_model/CostEstimator.h"
+#include "velox/ml_functions/SVD.h"
 #include "velox/optimizer/Helper.h"
 #include "velox/optimizer/Mul2JoinAggRewriteAction.h"
 #include "velox/optimizer/PlanState.h"
@@ -1827,6 +1828,33 @@ void registerTPCxAIUC8ModelFunctions(
       true,
       catalog);
 };
+
+void registerTPCxAIUC7MLModelFunctions(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+
+  std::string svdModelPath =
+      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_svd.h5";
+  std::vector<std::vector<float>> bu = loadHDF5Array(svdModelPath, "bu");
+  std::vector<std::vector<float>> bi = loadHDF5Array(svdModelPath, "bi");
+  std::vector<std::vector<float>> pu = loadHDF5Array(svdModelPath, "pu");
+  std::vector<std::vector<float>> qi = loadHDF5Array(svdModelPath, "qi");
+  optimization::registerVectorFunction(
+      "svd",
+      SVD::signatures(),
+      std::make_unique<SVD>(
+          std::move(flattenVectorToPointer(bu)),
+          std::move(flattenVectorToPointer(bi)),
+          std::move(flattenVectorToPointer(pu)),
+          std::move(flattenVectorToPointer(qi)),
+          7071,
+          6818,
+          100),
+      {},
+      true,
+      catalog);
+}
 
 void registerTPCxAIUC8MLModelFunctions(
     CataLog& catalog,

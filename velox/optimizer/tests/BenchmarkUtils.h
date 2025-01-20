@@ -287,6 +287,8 @@ PlanBuilder setupTPCxAIQuery(
       {"p_product_id", "name", "department"}, {BIGINT(), VARCHAR(), VARCHAR()});
   auto storeDeptDataRowType = ROW(
       {"store", "department", "num_of_week"}, {BIGINT(), VARCHAR(), BIGINT()});
+  auto productRatingRowType =
+      ROW({"user_id", "product_id"}, {BIGINT(), BIGINT()});
   std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
 
   if (dataDirPrefix == "") {
@@ -307,11 +309,14 @@ PlanBuilder setupTPCxAIQuery(
       getFilePathsFromDir(dataDirPrefix + "product");
   std::vector<std::string> storeDeptDataPaths =
       getFilePathsFromDir(dataDirPrefix + "store_dept");
+  std::vector<std::string> productRatingDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "product_rating");
 
   int finicialAccountNumRows, finicialAccountNumCols,
       finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
       orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
-      productNumCols, storeDeptNumRows, storeDeptNumCols;
+      productNumCols, storeDeptNumRows, storeDeptNumCols, productRatingNumRows,
+      productRatingNumCols;
 
   readDataStats(
       dataDirPrefix + "financial_account_stats.txt",
@@ -330,6 +335,10 @@ PlanBuilder setupTPCxAIQuery(
       dataDirPrefix + "store_dept_stats.txt",
       storeDeptNumRows,
       storeDeptNumCols);
+  readDataStats(
+      dataDirPrefix + "product_rating_stats.txt",
+      productRatingNumRows,
+      productRatingNumCols);
   if (queryType.find("uc3") != std::string::npos) {
     PlanNodeId readStoreDeptDataPlanNodeId;
     queryPlan =
@@ -372,6 +381,30 @@ PlanBuilder setupTPCxAIQuery(
             OutputStat(storeDeptNumRows, storeDeptNumCols)));
     cataLog.addSource(std::make_shared<Source>(storeDeptSrc));
 
+  } else if (queryType.find("uc7-ml") != std::string::npos) {
+    PlanNodeId readProductRatingDataPlanNodeId;
+
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(productRatingRowType, {}, "")
+            .capturePlanNodeId(readProductRatingDataPlanNodeId)
+            .project(
+                {"CAST (user_id AS INTEGER) AS user_id",
+                 "CAST (product_id as INTEGER) AS product_id"})
+            .project(
+                {"user_id", "product_id", "svd(user_id, product_id) as pred"});
+    cataLog.setIdAddressMap(
+        readProductRatingDataPlanNodeId,
+        productRatingDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(
+        readProductRatingDataPlanNodeId, "product_rating");
+    Source productRatingSrc = Source(
+        readProductRatingDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(productRatingNumRows, productRatingNumCols)));
+    cataLog.addSource(std::make_shared<Source>(productRatingSrc));
   } else if (queryType.find("uc8") != std::string::npos) {
     PlanNodeId readOrderDataPlanNodeId;
     PlanNodeId readLineitemDataPlanNodeId;
