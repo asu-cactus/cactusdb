@@ -132,9 +132,9 @@ void ChatGPTTest::simpleTest() {
 
 void ChatGPTTest::LLMWithoutOptimization() {
   std::vector<std::string> userDataPaths =
-      getFilePathsFromDir("/home/velox/data/movie_recommendation/user");
+      getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/user");
   std::vector<std::string> movieDataPaths =
-      getFilePathsFromDir("/home/velox/data/movie_recommendation/movie");
+      getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/movie");
 
   // auto userDataRowType =
   //     ROW({"UserID",  "Action",          "Adventure", "Animation", "Comedy",
@@ -281,9 +281,9 @@ void ChatGPTTest::LLMWithoutOptimization() {
 
 void ChatGPTTest::LLMWithOptimization() {
   std::vector<std::string> userDataPaths =
-      getFilePathsFromDir("/home/velox/data/movie_recommendation/user");
+      getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/user");
   std::vector<std::string> movieDataPaths =
-      getFilePathsFromDir("/home/velox/data/movie_recommendation/movie");
+      getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/movie");
 
   // auto userDataRowType =
   //     ROW({"UserID",  "Action",          "Adventure", "Animation", "Comedy",

@@ -25,17 +25,6 @@ using namespace facebook::velox::memory;
 
 #define MAX_ALLOWED_CHATGPT_TRY 30
 
-// Function to count the number of words in a string
-int countWords(const std::string& str) {
-  std::istringstream iss(str);
-  int wordCount = 0;
-  std::string word;
-  while (iss >> word) {
-    ++wordCount;
-  }
-  return wordCount;
-}
-
 // Function to count the number of punctuation marks in a string
 int countPunctuation(const std::string& str) {
   int punctuationCount = 0;

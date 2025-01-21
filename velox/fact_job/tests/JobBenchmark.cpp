@@ -681,6 +681,8 @@ class JobBenchmark : HiveConnectorTestBase {
  std::unordered_map<std::string, PlanBuilder> getBaseTableSourcesQ29(std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
       std::unordered_map<std::string, PlanBuilder>
         sources; // with filters and projections pushed down;
+    
+    std::unordered_map<std::string, std::vector<std::string>> tabel2Columns;
 
     auto an_a = PlanBuilder(planNodeIdGenerator, pool_.get())
                     .values({tableName2RowVector["aka_name"]})
