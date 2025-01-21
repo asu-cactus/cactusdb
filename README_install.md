@@ -2,9 +2,9 @@
 
 It is recommended to automatically configure your development environment through docker. 
 
-Please go to check [Docker-README](./asu-doc/README.md) under asu-doc to set-up your docker environment.
+Please go to check [Docker-README](./docker-doc/README.md) under asu-doc to set-up your docker environment.
 
-Note: if still facing the issue of missing library, please go to check [Dockerfile](./asu-doc/Dockerfile) for the installation.
+Note: if still facing the issue of missing library, please go to check [Dockerfile](./docker-doc/Dockerfile) for the installation.
 
 # Installation
 ## xgboost C APIs

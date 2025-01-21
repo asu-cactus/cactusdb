@@ -13,6 +13,7 @@ from openai import OpenAI
 import pyarrow.parquet as pq
 from psycopg2 import sql
 import shutil
+import faiss
 
 
 def create_folder(folder_path, overwrite=False):
@@ -307,6 +308,36 @@ def get_openAI_client():
     return client
 
 
+def get_HF_key():
+    if not "HF_TOKEN" in os.environ:
+        raise Exception("Please set the HF_TOKEN environment variable.")
+    return os.environ["HF_TOKEN"]
+
+
+def hf_MiniLM_model(list_of_sentences):
+    # Hugging Face API endpoint
+    url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+
+    # Your API key
+    headers = {"Authorization": "Bearer {}".format(get_HF_key())}
+
+    # Input data (sentence for embedding)
+    data = {"inputs": list_of_sentences}
+
+    # Make the request
+    count_failures = 0
+    response = requests.post(url, headers=headers, json=data)
+    while response.status_code != 200:
+        count_failures += 1
+        response = requests.post(url, headers=headers, json=data)
+    embeddings = np.array(response.json())
+
+    num_input_token = np.sum([len(x.split()) for x in list_of_sentences])
+    num_output_token = np.sum([len(x) for x in embeddings])
+
+    return embeddings, num_input_token, num_output_token, count_failures
+
+
 def get_openAI_key():
     if not "OPENAI_API_KEY" in os.environ:
         raise Exception("Please set the OPENAI_API_KEY environment variable.")
@@ -420,3 +451,22 @@ def map_arrow_to_postgres(arrow_type):
         return "TIMESTAMP"
     else:
         raise ValueError(f"Unsupported type: {arrow_type}")
+
+
+def get_rag_reference(model):
+    movie_data = pd.read_csv(
+        "/home/velox/resources/data/llm/wiki_movie_plots_deduped.csv"
+    )
+    movie_data["augmented_text"] = movie_data["Title"] + " " + movie_data["Plot"]
+    embeddings = model.encode(movie_data["augmented_text"].tolist())
+
+    # embeddings = np.array(
+    #     [
+    #         np.array(model.encode(x + " " + y))
+    #         for x, y in zip(movie_data["Title"], movie_data["Plot"])
+    #     ]
+    # )
+    dimension = len(embeddings[0])
+    index = faiss.IndexFlatL2(dimension)
+    index.add(embeddings)
+    return index, movie_data
