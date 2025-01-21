@@ -39,7 +39,9 @@
 #include "velox/ml_functions/Embedding.h"
 #include "velox/ml_functions/Encoder.h"
 #include "velox/ml_functions/FraudDetectionFunctions.h"
+#include "velox/ml_functions/HuggingFaceServerless.h"
 #include "velox/ml_functions/NNBuilder.h"
+#include "velox/ml_functions/RAG.h"
 #include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
@@ -819,6 +821,41 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         catalog);
   }
 
+  void registerLLM2Functions(
+      CataLog& catalog,
+      std::shared_ptr<memory::MemoryPool> pool_) {
+    VectorMaker maker{pool_.get()};
+    std::cout << "[INFO]: Register LLM2 Function functions" << std::endl;
+
+    std::vector<std::string> document = readTextFile(
+        "/home/velox/resources/model/llm_mr/velox/rag_document.txt");
+
+    std::vector<std::vector<float>> documentEmbedding = loadHDF5Array(
+        "/home/velox/resources/model/llm_mr/velox/rag_document.h5",
+        "embedding");
+
+    optimization::registerVectorFunction(
+        "rag",
+        RAG::signatures(),
+        std::make_unique<RAG>(document, documentEmbedding, 384),
+        {},
+        true,
+        catalog);
+
+    std::string textEmbeddingExtractionMiniLMAPI =
+        "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2";
+
+    optimization::registerVectorFunction(
+        "hf_minilm_embedding_extractor",
+        HuggingFaceServerless::signatures(),
+        std::make_unique<HuggingFaceServerless>(
+            textEmbeddingExtractionMiniLMAPI,
+            HuggingFaceTaskType::TEXT_FEATURE_EXTRACTION),
+        {},
+        true,
+        catalog);
+  }
+
   void registerFraudDetectionFunctions(
       int numCols,
       CataLog& catalog,
@@ -1404,7 +1441,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       Source src = Source(p0, Source::Type::FILE, std::move(stat));
       cataLog.addSource(std::make_shared<Source>(src));
       cataLog.setFileSchema(p0, inputRowType);
-    } else if (model == "llm") {
+    } else if (model == "llm" || model == "llm-op") {
       std::vector<std::string> userDataPaths =
           getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/user");
       std::vector<std::string> movieDataPaths = getFilePathsFromDir(
@@ -1438,59 +1475,280 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       core::PlanNodeId readUserDataPlanNodeId;
       core::PlanNodeId readMoviewDataPlanNodeId;
 
-      myPlan =
-          PlanBuilder(planNodeIdGenerator, pool_.get())
-              .tableScan(userDataRowType, {}, "")
-              .capturePlanNodeId(readUserDataPlanNodeId)
-              .project(
-                  {"CAST(user_id AS VARCHAR) as user_id",
-                   "description AS user_description"})
-              .nestedLoopJoin(
-                  PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(movieDataRowType, {}, "")
-                      .capturePlanNodeId(readMoviewDataPlanNodeId)
-                      .project({
-                          "CAST(id AS VARCHAR) AS movie_id",
-                          "description AS movie_description",
-                          "llm_ffnn_minmax_scaler(convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count))) AS movie_description_array",
-                          "spoken_languages",
-                      })
-                      .planNode(),
-                  {"user_id",
-                   "movie_id",
-                   "user_description",
-                   "movie_description",
-                   "spoken_languages",
-                   "movie_description_array"})
-              .project(
-                  {"user_id",
-                   "movie_id",
-                   "spoken_languages",
-                   "movie_description_array",
-                   "CONCAT(user_id, user_description) AS user_description_processed",
-                   "CONCAT(movie_id, movie_description) AS movie_description_processed"})
-              .project(
-                  {"user_id",
-                   "movie_id",
-                   "spoken_languages",
-                   "movie_description_array",
-                   "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
-                   "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
-              .project(
-                  {"user_id",
-                   "movie_id",
-                   "spoken_languages",
-                   "movie_description_array",
-                   "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"})
-              .project({
-                  "user_id",
-                  "movie_id",
-                  "spoken_languages",
-                  "result",
-                  "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(movie_description_array))))))) AS trending_prediction",
-              })
-              .filter("spoken_languages LIKE '\%English\%'")
-              .filter("trending_prediction = 1");
+      if (model == "llm") {
+        myPlan =
+            PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(userDataRowType, {}, "")
+                .capturePlanNodeId(readUserDataPlanNodeId)
+                .project(
+                    {"CAST(user_id AS VARCHAR) as user_id",
+                     "description AS user_description"})
+                .nestedLoopJoin(
+                    PlanBuilder(planNodeIdGenerator, pool_.get())
+                        .tableScan(movieDataRowType, {}, "")
+                        .capturePlanNodeId(readMoviewDataPlanNodeId)
+                        .project({
+                            "CAST(id AS VARCHAR) AS movie_id",
+                            "description AS movie_description",
+                            "llm_ffnn_minmax_scaler(convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count))) AS movie_description_array",
+                            "spoken_languages",
+                        })
+                        .planNode(),
+                    {"user_id",
+                     "movie_id",
+                     "user_description",
+                     "movie_description",
+                     "spoken_languages",
+                     "movie_description_array"})
+                .project(
+                    {"user_id",
+                     "movie_id",
+                     "spoken_languages",
+                     "movie_description_array",
+                     "CONCAT(user_id, user_description) AS user_description_processed",
+                     "CONCAT(movie_id, movie_description) AS movie_description_processed"})
+                .project(
+                    {"user_id",
+                     "movie_id",
+                     "spoken_languages",
+                     "movie_description_array",
+                     "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
+                     "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
+                .project(
+                    {"user_id",
+                     "movie_id",
+                     "spoken_languages",
+                     "movie_description_array",
+                     "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"})
+                .project({
+                    "user_id",
+                    "movie_id",
+                    "spoken_languages",
+                    "result",
+                    "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(movie_description_array))))))) AS trending_prediction",
+                })
+                .filter("spoken_languages LIKE '\%English\%'")
+                .filter("trending_prediction = 1");
+      } else if (model == "llm-op") {
+        myPlan =
+            PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(userDataRowType, {}, "")
+                .capturePlanNodeId(readUserDataPlanNodeId)
+                .project(
+                    {"CAST(user_id AS VARCHAR) as user_id",
+                     "description AS user_description"})
+                .project(
+                    {"user_id",
+                     "CONCAT(user_id, user_description) AS user_description_processed"})
+                .project({
+                    "user_id",
+                    "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
+                })
+                .nestedLoopJoin(
+                    PlanBuilder(planNodeIdGenerator, pool_.get())
+                        .tableScan(movieDataRowType, {}, "")
+                        .capturePlanNodeId(readMoviewDataPlanNodeId)
+                        .filter("spoken_languages LIKE '\%English\%'")
+                        .project({
+                            "CAST(id AS VARCHAR) AS movie_id",
+                            "description AS movie_description",
+                            "llm_ffnn_minmax_scaler(convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count))) AS movie_description_array",
+                            "spoken_languages",
+                        })
+                        .project(
+                            {"movie_id",
+                             "movie_description",
+                             "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(movie_description_array))))))) AS trending_prediction",
+                             "spoken_languages"})
+                        .filter("trending_prediction = 1")
+                        .project({
+                            "movie_id",
+                            "CONCAT(movie_id, movie_description) AS movie_description_processed",
+                        })
+                        .project(
+                            {"movie_id",
+                             "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
+                        .planNode(),
+                    {"user_id",
+                     "movie_id",
+                     "user_description_summerized",
+                     "movie_description_summerized"})
+                .project(
+                    {"user_id",
+                     "movie_id",
+                     "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"});
+      }
+
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId,
+          userDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readMoviewDataPlanNodeId,
+          movieDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      std::shared_ptr<OutputStat> userStat =
+          std::make_shared<OutputStat>(OutputStat(numUser, 2));
+      std::shared_ptr<OutputStat> movieStat =
+          std::make_shared<OutputStat>(OutputStat(numMovies, 2));
+      Source userSrc =
+          Source(readUserDataPlanNodeId, Source::Type::FILE, userStat);
+      Source movieSrc =
+          Source(readMoviewDataPlanNodeId, Source::Type::FILE, movieStat);
+      cataLog.addSource(std::make_shared<Source>(userSrc));
+      cataLog.addSource(std::make_shared<Source>(movieSrc));
+    } else if (model == "llm2" || model == "llm2-op") {
+      std::vector<std::string> userDataPaths =
+          getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/user");
+      std::vector<std::string> movieDataPaths = getFilePathsFromDir(
+          "/home/velox/resources/data/parquet/llm_mr/movie");
+      auto userDataRowType =
+          ROW({"user_id", "description"}, {INTEGER(), VARCHAR()});
+      auto movieDataRowType =
+          ROW({"id",
+               "title",
+               "description",
+               "popularity",
+               "vote_average",
+               "vote_count",
+               "spoken_languages"},
+              {INTEGER(),
+               VARCHAR(),
+               VARCHAR(),
+               REAL(),
+               REAL(),
+               INTEGER(),
+               VARCHAR()});
+
+      std::string llmDataStatsFilePath =
+          "/home/velox/resources/data/parquet/llm_mr/llm_mr_statistics.txt";
+      std::ifstream llmStatistics(llmDataStatsFilePath);
+      if (!llmStatistics) {
+        throw std::runtime_error(
+            "Unable to open file: " + llmDataStatsFilePath);
+      }
+      // TODO: need more smart way to do this
+      std::string line1, line2;
+      int numUser, numMovies;
+      std::getline(llmStatistics, line1);
+      std::getline(llmStatistics, line2);
+      numUser = std::stoi(line1);
+      numMovies = std::stoi(line2);
+
+      core::PlanNodeId readUserDataPlanNodeId;
+      core::PlanNodeId readMoviewDataPlanNodeId;
+
+      if (model == "llm2") {
+        myPlan =
+            PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(userDataRowType, {}, "")
+                .capturePlanNodeId(readUserDataPlanNodeId)
+                .project(
+                    {"CAST(user_id AS VARCHAR) as user_id",
+                     "description AS user_description"})
+                .nestedLoopJoin(
+                    PlanBuilder(planNodeIdGenerator, pool_.get())
+                        .tableScan(movieDataRowType, {}, "")
+                        .capturePlanNodeId(readMoviewDataPlanNodeId)
+                        .project({
+                            "CAST(id AS VARCHAR) AS movie_id",
+                            "description AS movie_description",
+                            "title",
+                            "llm_ffnn_minmax_scaler(convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count))) AS movie_description_array",
+                            "spoken_languages",
+                        })
+                        .planNode(),
+                    {"user_id",
+                     "movie_id",
+                     "title",
+                     "user_description",
+                     "movie_description",
+                     "spoken_languages",
+                     "movie_description_array"})
+                .project({
+                    "user_id",
+                    "movie_id",
+                    "spoken_languages",
+                    "movie_description_array",
+                    "CONCAT(user_id, user_description) AS user_description_processed",
+                    "rag(hf_minilm_embedding_extractor(title)) AS movie_description_processed"
+                    //  "CONCAT(movie_id, movie_description) AS
+                    //  movie_description_processed"
+                })
+                .project(
+                    {"user_id",
+                     "movie_id",
+                     "spoken_languages",
+                     "movie_description_array",
+                     "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
+                     "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
+                .project(
+                    {"user_id",
+                     "movie_id",
+                     "spoken_languages",
+                     "movie_description_array",
+                     "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"})
+                .project({
+                    "user_id",
+                    "movie_id",
+                    "spoken_languages",
+                    "result",
+                    "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(movie_description_array))))))) AS trending_prediction",
+                })
+                .filter("spoken_languages LIKE '\%English\%'")
+                .filter("trending_prediction = 1");
+      } else if (model == "llm2-op") {
+        myPlan =
+            PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(userDataRowType, {}, "")
+                .capturePlanNodeId(readUserDataPlanNodeId)
+                .project(
+                    {"CAST(user_id AS VARCHAR) as user_id",
+                     "description AS user_description"})
+                .project(
+                    {"user_id",
+                     "CONCAT(user_id, user_description) AS user_description_processed"})
+                .project({
+                    "user_id",
+                    "chatgpt_server(user_description_processed, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description_summerized",
+                })
+                .nestedLoopJoin(
+                    PlanBuilder(planNodeIdGenerator, pool_.get())
+                        .tableScan(movieDataRowType, {}, "")
+                        .capturePlanNodeId(readMoviewDataPlanNodeId)
+                        .filter("spoken_languages LIKE '\%English\%'")
+                        .project({
+                            "CAST(id AS VARCHAR) AS movie_id",
+                            "hf_minilm_embedding_extractor(title) as title_embed",
+                            "description AS movie_description",
+                            "llm_ffnn_minmax_scaler(convert_double_array_to_float_array(array_constructor(popularity, vote_average, vote_count))) AS movie_description_array",
+                            "spoken_languages",
+                        })
+                        .project(
+                            {"movie_id",
+                             "title_embed",
+                             "movie_description",
+                             "argmax(softmax(mat_vector_add3_4(mat_mul3_3(relu(mat_vector_add3_2(mat_mul3_1(movie_description_array))))))) AS trending_prediction",
+                             "spoken_languages"})
+                        .filter("trending_prediction = 1")
+                        .project({
+                            "movie_id",
+                            "rag(title_embed) AS movie_description_processed",
+                        })
+                        .project(
+                            {"movie_id",
+                             "chatgpt_server(movie_description_processed, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description_summerized"})
+                        .planNode(),
+                    {"user_id",
+                     "movie_id",
+                     "user_description_summerized",
+                     "movie_description_summerized"})
+                .project(
+                    {"user_id",
+                     "movie_id",
+                     "chatgpt_recommender(user_description_summerized, movie_description_summerized, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.') AS result"});
+      }
+
       cataLog.setIdAddressMap(
           readUserDataPlanNodeId,
           userDataPaths,
@@ -1963,8 +2221,11 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       inputFilePaths = generateTwoTowerQueryData(numSamples, 6040, 3706, 1);
       featureSize = 2;
       std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
-    } else if (model == "llm") {
+    } else if (model == "llm" || model == "llm-op") {
       registerLLMFunctions(64, 2, 3, cataLog, pool_);
+    } else if (model == "llm2" || model == "llm2-op") {
+      registerLLMFunctions(64, 2, 3, cataLog, pool_);
+      registerLLM2Functions(cataLog, pool_);
     } else if (model == "fraud") {
       registerFraudDetectionFunctions(9, cataLog, pool_);
     } else if (model == "ml-q1") {

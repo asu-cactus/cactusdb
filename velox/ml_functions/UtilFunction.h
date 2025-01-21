@@ -400,3 +400,14 @@ T* flattenVectorToPointer(const std::vector<std::vector<T>>& vec2D) {
     size_t totalSize = 0;  // A local variable to hold the size if not provided by the caller
     return flattenVectorToPointer(vec2D, totalSize);
 }
+int countWords(const std::string& input) {
+    std::istringstream stream(input);
+    std::string word;
+    int count = 0;
+
+    while (stream >> word) {
+        ++count;
+    }
+
+    return count;
+}
