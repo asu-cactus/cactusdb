@@ -26,6 +26,7 @@ from pyspark.sql.types import ArrayType, FloatType, StringType, IntegerType
 from dssm_evadb import DSSM_Moel_Wrapper
 import pickle
 import multiprocessing as mp
+from sentence_transformers import SentenceTransformer
 
 
 def get_batch_sizes(num_samples, batch_size):
@@ -2282,7 +2283,7 @@ class LLMRecommendationPipelinePython(Pipeline):
 
         self.openAI_client = utils.get_openAI_client()
         self.llm_ffnn_model = tf.keras.models.load_model(
-            "/home/velox/resources/model/llm_mr/tf/llm_mr_ffnn.h5", compile=False
+            "/home/velox/resources/model/llm_mr/tf/llm_ffnn.h5", compile=False
         )
         self.min_max_scaler = pickle.load(
             open(
@@ -2337,7 +2338,7 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.metrics_additional["num_receive_tokens"] += np.sum(
             data["num_receive_token"]
         )
-        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
+        self.metrics_additional["num_failures"] += np.sum(data["num_failures"])
         self.timer.tic()
 
         data = parallelize_dataframe(
@@ -2350,7 +2351,7 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.metrics_additional["num_receive_tokens"] += np.sum(
             data["num_receive_token"]
         )
-        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
+        self.metrics_additional["num_failures"] += np.sum(data["num_failures"])
         self.timer.tic()
         data = parallelize_dataframe(data, None, self.prompt3, True, self.num_thread)
         # data.loc[:, "result"] = data.apply(lambda x: utils.chatgpt_server(self.openAI_client, "Summarized user statistics data (preference): " + x['user_description_summarized'] +". \n Summarized user movie metadata:  " + x['movie_description_summarized'] + self.prompt3), axis=1)
@@ -2360,9 +2361,42 @@ class LLMRecommendationPipelinePython(Pipeline):
         self.metrics_additional["num_receive_tokens"] += np.sum(
             data["num_receive_token"]
         )
-        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
+        self.metrics_additional["num_failures"] += np.sum(data["num_failures"])
 
         return data
+
+
+def get_rag_data(model, index, metadata, query, k=1):
+
+    query_embedding = model.encode(query)
+
+    # Top-k results
+    distances, indices = index.search(np.array([query_embedding]), k)
+
+    # Create a response
+    # retrieved_info = "\n".join(
+    #     [f"{metadata.iloc[r]['Title']}: {metadata.iloc[r]['Plot']}" for r in indices[0]]
+    # )
+    retrieved_info = "\n".join([metadata.iloc[r]["augmented_text"] for r in indices[0]])
+    return retrieved_info
+
+
+def get_rag_with_embed(index, metadata, list_of_query_embedding, k=1):
+    results = []
+
+    for query_embedding in list_of_query_embedding:
+        # Top-k results
+        distances, indices = index.search(np.array([query_embedding]), k)
+
+        # Create a response
+        # retrieved_info = "\n".join(
+        #     [f"{metadata.iloc[r]['Title']}: {metadata.iloc[r]['Plot']}" for r in indices[0]]
+        # )
+        retrieved_info = "\n".join(
+            [metadata.iloc[r]["augmented_text"] for r in indices[0]]
+        )
+        results.append(retrieved_info)
+    return results
 
 
 class LLMRecommendationPipeline2Python(Pipeline):
@@ -2385,13 +2419,25 @@ class LLMRecommendationPipeline2Python(Pipeline):
         )
         self.postgres_conn = utils.get_postgres_connection_config()
 
+        # load from pre-saved data
+        with open(
+            "/home/velox/resources/model/llm_mr/tf/llm2workload_data.pkl", "rb"
+        ) as f:
+            self.llm2_data = pickle.load(f)
+        self.rag_index = self.llm2_data["index"]
+        self.rag_metadata = self.llm2_data["movie_data"]
+        self.model = self.llm2_data["model"]
+
+        # self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        # self.rag_index, self.rag_metadata = utils.get_rag_reference(self.model)
+
         self.prompt1 = "Please summarize the users description. The following are the average ratings given by users to movies in each genre."
         self.prompt2 = "Please summarize the movies description. The following are the detailed information of the movie."
         self.prompt3 = "Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason."
 
         self.openAI_client = utils.get_openAI_client()
         self.llm_ffnn_model = tf.keras.models.load_model(
-            "/home/velox/resources/model/llm_mr/tf/llm_mr_ffnn.h5", compile=False
+            "/home/velox/resources/model/llm_mr/tf/llm_ffnn.h5", compile=False
         )
         self.min_max_scaler = pickle.load(
             open(
@@ -2415,6 +2461,7 @@ class LLMRecommendationPipeline2Python(Pipeline):
             id as movie_id,
             llm_m.description as movie_description,
             llm_m.popularity,
+            llm_m.title,
             llm_m.vote_average,
             llm_m.vote_count,
             llm_m.spoken_languages
@@ -2424,7 +2471,7 @@ class LLMRecommendationPipeline2Python(Pipeline):
           where
             llm_m.spoken_languages LIKE '%English%'
           limit
-            { }
+            {}
         """.format(
             batch_size
         )
@@ -2451,19 +2498,32 @@ class LLMRecommendationPipeline2Python(Pipeline):
         self.metrics_additional["num_receive_tokens"] += np.sum(
             data["num_receive_token"]
         )
-        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
+        self.metrics_additional["num_failures"] += np.sum(data["num_failures"])
         self.timer.tic()
 
-        data = parallelize_dataframe(
-            data, "movie_description", self.prompt2, False, self.num_thread
+        # data = parallelize_dataframe(
+        #    data, "movie_description", self.prompt2, False, self.num_thread
+        # )
+
+        embeddings, num_input_token, num_output_token, count_failures = (
+            utils.hf_MiniLM_model(data["title"].values.tolist())
         )
 
-        self.metrics_additional["t_llm2"] += self.timer.toc()
-        self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
-        self.metrics_additional["num_receive_tokens"] += np.sum(
-            data["num_receive_token"]
+        # data.loc[:, "query_embedding"] = embeddings
+        data.loc[:, "movie_description_summarized"] = get_rag_with_embed(
+            self.rag_index, self.rag_metadata, embeddings, 1
         )
-        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
+        # data.loc[:, "movie_description_summarized"] = data.apply(
+        #     lambda x: get_rag_data(
+        #         self.model, self.rag_index, self.rag_metadata, x["title"], 1
+        #     ),
+        #     axis=1,
+        # )
+
+        self.metrics_additional["t_llm2"] += self.timer.toc()
+        self.metrics_additional["num_send_tokens"] += num_input_token
+        self.metrics_additional["num_receive_tokens"] += num_output_token
+        self.metrics_additional["num_failures"] += count_failures
         self.timer.tic()
         data = parallelize_dataframe(data, None, self.prompt3, True, self.num_thread)
 
@@ -2472,7 +2532,7 @@ class LLMRecommendationPipeline2Python(Pipeline):
         self.metrics_additional["num_receive_tokens"] += np.sum(
             data["num_receive_token"]
         )
-        self.metrics_additional["num_falures"] += np.sum(data["num_failures"])
+        self.metrics_additional["num_failures"] += np.sum(data["num_failures"])
 
         return data
 
