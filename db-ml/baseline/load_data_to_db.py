@@ -33,6 +33,14 @@ def load_movielens_final_to_datastore():
         os.path.join(data_dir, "movie_tag_relevance.parquet")
     ).to_pandas()
 
+    utils.execute_sql_query_via_psycopg2(
+        """
+        DROP TABLE IF EXISTS movielens_user CASCADE;
+        DROP TABLE IF EXISTS movielens_movie CASCADE;
+        DROP TABLE IF EXISTS movielens_rating CASCADE;
+
+    """)
+
     df_user.to_sql("movielens_user", db, index=False, if_exists="replace")
     df_movie.to_sql("movielens_movie", db, index=False, if_exists="replace")
     df_rating.to_sql("movielens_rating", db, index=False, if_exists="replace")
@@ -45,7 +53,7 @@ def load_movielens_final_to_datastore():
     df_movie_tag_name = "movielens_movie_tag"
     db_connection = utils.get_psycopg2_connection()
     cursor = db_connection.cursor()
-    cursor.execute("DROP TABLE IF EXISTS {}".format(df_movie_tag_name))
+    cursor.execute("DROP TABLE IF EXISTS {} CASCADE".format(df_movie_tag_name))
     cursor.execute(
         """
                 CREATE TABLE IF NOT EXISTS {} (

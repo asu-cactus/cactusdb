@@ -337,7 +337,7 @@ class MovielensQ1PipelineDLCentric(Pipeline):
         sparse_features = ["user_id", "movie_id", "gender", "age", "occupation"]
         dense_features = ["user_mean_rating", "movie_mean_rating"]
         target = ["rating"]
-        device = "cuda:0"
+        device = "cpu"
         user_sparse_features, user_dense_features = [
             "user_id",
             "gender",
@@ -2424,9 +2424,14 @@ class LLMRecommendationPipeline2Python(Pipeline):
             "/home/velox/resources/model/llm_mr/tf/llm2workload_data.pkl", "rb"
         ) as f:
             self.llm2_data = pickle.load(f)
-        self.rag_index = self.llm2_data["index"]
+        # self.rag_index = self.llm2_data["index"]
         self.rag_metadata = self.llm2_data["movie_data"]
-        self.model = self.llm2_data["model"]
+        self.document_embedding = self.llm2_data["embeddings"]
+        import faiss
+        self.rag_index = faiss.IndexFlatL2(self.llm2_data["dimension"])
+        self.rag_index.add(self.document_embedding)
+
+        # self.model = self.llm2_data["model"]
 
         # self.model = SentenceTransformer("all-MiniLM-L6-v2")
         # self.rag_index, self.rag_metadata = utils.get_rag_reference(self.model)
