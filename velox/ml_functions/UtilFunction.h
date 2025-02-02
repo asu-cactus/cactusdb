@@ -73,6 +73,78 @@ class ChangeRating : public MLFunction {
  private:
 };
 
+class Classify : public MLFunction {
+ public:
+  Classify() {}
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+    
+    
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+    auto input = args[0];
+
+ 
+    int inputSize = rows.size();
+
+    std::vector<int> result(inputSize);
+    
+    // Cast input to ArrayVector
+    auto arrayVector = input->as<ArrayVector>();
+  
+
+    // Cast elements to FlatVector<float>
+    auto elementsVector = arrayVector->elements()->as<FlatVector<float>>();
+    
+    // Get offsets and sizes of the sub-arrays
+    auto offsets = arrayVector->offsets()->as<vector_size_t>();
+    auto sizes = arrayVector->sizes()->as<vector_size_t>();
+
+    // Process each sub-array
+    for (int i = 0; i < inputSize; i++) {
+        
+        // Get the index of the first element in the sub-array
+        int index = offsets[i];
+        
+        // Get the first element of the sub-array
+        float firstElement = elementsVector->valueAt(index);
+        
+        // Classify based on the first element
+        result[i] = (firstElement >= 0.5) ? 0 : 1;
+    }
+
+    // Create the output vector
+    VectorMaker maker{context.pool()};
+    output = maker.flatVector<int>(result, INTEGER());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {exec::FunctionSignatureBuilder()
+                .argumentType("ARRAY(REAL)")
+                .returnType("INTEGER")
+                .build()};
+  }
+
+  static std::string getName() {
+    return "classify";
+  }
+
+  float* getTensor() const override {
+    return nullptr;
+  }
+
+  void setWeight() {
+  }
+
+ private:
+};
+
+
 class ConvertToIntArray : public MLFunction {
  public:
   ConvertToIntArray() {
@@ -230,6 +302,71 @@ class ConvertDoubleToFloatArray : public MLFunction {
 
 
  private:
+};
+
+class ConvertStringToFloatArray : public MLFunction {
+ public:
+  ConvertStringToFloatArray() {}
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context, // Correct type: EvalCtx&
+      VectorPtr& output) const override {
+
+    // Ensure the output vector is writable
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+
+    // Get the input vector (assumed to be a FlatVector<StringView>)
+    auto input = args[0]->as<FlatVector<StringView>>();
+
+    // Prepare the result as a vector of vectors (each inner vector is a float array)
+    std::vector<std::vector<float>> result(rows.size());
+
+    // Iterate over the rows
+    rows.applyToSelected([&](auto row) {
+      // Get the input string for the current row
+      std::string inputString = input->valueAt(row).str();
+
+      // Split the string by commas
+      std::vector<std::string> stringValues;
+      folly::split(',', inputString, stringValues);
+
+      // Convert each substring to a float and store in the result
+      std::vector<float> floatValues;
+      for (const auto& str : stringValues) {
+        floatValues.push_back(std::stof(str));
+      }
+
+      // Store the float array in the result
+      result[row] = floatValues;
+    });
+
+    // Create the output array vector
+    VectorMaker maker(context.pool()); // Correct initialization
+    output = maker.arrayVector<float>(result, REAL());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {exec::FunctionSignatureBuilder()
+                .argumentType("VARCHAR") // Input is a string
+                .returnType("array(REAL)") // Output is an array of floats
+                .build()};
+  }
+
+  static std::string getName() {
+    return "convert_string_to_float_array";
+  }
+
+  float* getTensor() const override {
+    // FIXME: Implement if needed
+    return nullptr;
+  }
+
+  void setWeight() {
+    // FIXME: Implement if needed
+  }
 };
 
 class ConvertDoubleArrayToFloatArray : public MLFunction {

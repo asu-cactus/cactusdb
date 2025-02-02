@@ -391,7 +391,7 @@ void MLFunctionsTest::ffnn(int input_size, int layer1_size, int layer2_size) {
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     core::PlanNodeId p0;
   
-    //std::cout << compute << std::endl; 
+    std::cout << compute << std::endl; 
     auto plan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
                   .tableScan(asRowType(inputRowVector->type()))
                   .capturePlanNodeId(p0)

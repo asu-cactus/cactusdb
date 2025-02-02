@@ -50,9 +50,8 @@ class IntEncoder : public MLFunction {
         result[row] = {it->second};
       } else {
         // Handle missing keys if necessary.
-        result[row] = {-1};
-        LOG(WARNING) << "[WARNING] Missing key: " << userIdBeforeEncode
-                     << " mapping size: " << mapping_.size() << std::endl;
+        std::cout << "[ERROR] Missing key: " << userIdBeforeEncode
+                  << " mapping size: " << mapping_.size() << std::endl;
       }
     });
 
@@ -113,9 +112,8 @@ class StringEncoder : public MLFunction {
         result[row] = {it->second};
       } else {
         // Handle missing keys if necessary
-        result[row] = {-1};
-        LOG(WARNING) << "[WARNING] Missing key: " << val.getString()
-                     << std::endl;
+        result[row] = {0};
+        std::cout << "[ERROR] Missing key: " << val.getString() << std::endl;
       }
     });
 

@@ -1881,14 +1881,14 @@ void MLFunctionsTest::run(int numDriver, int memoryPoolSizeMB, int spillMemThres
   //  test_mat_add();
   //  test_relu();
   //  test_softmax()
-  test_argmax();
+  // test_argmax();
   //  test_dense_layer();
   //  test_torch_dense_layer_multithreading();
   //  test_mnist();
   //  test_multithreading();
   //  test_multithreading_oom();
   //  test_batching();
-  //  test_conv2d();
+   test_conv2d();
   //  test_deep_bench_conv1();
   //  test_land_cover_conv3();
   //  test_spill(numDriver, memoryPoolSizeMB, spillMemThresholdMB, enableSpill, repeatRun);

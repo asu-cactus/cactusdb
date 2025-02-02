@@ -24,42 +24,42 @@ find_package(xgboost REQUIRED)
 find_package(cpr REQUIRED)
 find_package(jsoncpp REQUIRED)
 
-add_executable(ml_functions_test tests/MLFunctionsTest.cpp)
-target_link_libraries(
-  ml_functions_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base 
-  velox_vector_fuzzer
-  openblas
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-)
+# add_executable(ml_functions_test tests/MLFunctionsTest.cpp)
+# target_link_libraries(
+#   ml_functions_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base 
+#   velox_vector_fuzzer
+#   openblas
+#   velox_dwio_parquet_reader
+#   ${TORCH_LIBRARIES}
+# )
 
-add_executable(nn_tests tests/NNTest.cpp)
-target_link_libraries(
-  nn_tests
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base 
-  velox_vector_fuzzer
-  openblas
-  ${TORCH_LIBRARIES}
-)
+# add_executable(nn_tests tests/NNTest.cpp)
+# target_link_libraries(
+#   nn_tests
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base 
+#   velox_vector_fuzzer
+#   openblas
+#   ${TORCH_LIBRARIES}
+# )
 
-# include tokenizer cpp as a sub directory
+# # include tokenizer cpp as a sub directory
 
 
 
@@ -103,248 +103,288 @@ set_target_properties(tokenizer_c PROPERTIES IMPORTED_LOCATION /home/velox/third
 # )
 
 
-add_executable(embedding_test tests/EmbeddingTest.cpp)
-target_link_libraries(
-  embedding_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base 
-  velox_vector_fuzzer
-  jsoncpp_lib
-  openblas
-  ${TORCH_LIBRARIES}
-  cpr::cpr
-)
-
-add_executable(two_tower_model_test tests/TwoTowerModelTest.cpp)
-target_link_libraries(
-  two_tower_model_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base 
-  velox_vector_fuzzer
-  openblas
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-)
-
-add_executable(two_tower_model_pipeline_test tests/TwoTowerModelPipelineTest.cpp)
-target_link_libraries(
-  two_tower_model_pipeline_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base 
-  velox_vector_fuzzer
-  openblas
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-)
-
-add_executable(decision_forest_prediction_test tests/DecisionForestTest.cpp)
-target_link_libraries(
-  decision_forest_prediction_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-)
-
-include_directories("/usr/include/hdf5/serial")
-include_directories("/home/h5cpp/build/src/h5cpp")
-
-find_package(h5cpp REQUIRED)
-find_package(HDF5 COMPONENTS C CXX HL REQUIRED)
-
-link_directories( ${HDF5_LIBRARY_DIRS} )
-include_directories( ${HDF5_INCLUDE_DIRS} )
-
-add_executable(fraud_detection_test tests/FraudDetectionTest.cpp)
-target_link_libraries(
-  fraud_detection_test
-  xgboost::xgboost
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-  h5cpp::h5cpp
-  hdf5_serial
-  ${HDF5_CXX_LIBRARIES}
-)
-
-add_executable(xgboost_test tests/XGBoostTest.cpp)
-target_link_libraries(
-  xgboost_test
-  xgboost::xgboost
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-)
-
-add_executable(ml_sql_test tests/MLSQLTest.cpp)
-target_link_libraries(
-  ml_sql_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-)
-
-add_executable(duckdb_optimizer_test tests/DuckDBOptimizerTest.cpp)
-target_link_libraries(
-  duckdb_optimizer_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-)
-
-add_executable(array_array_unnest_test tests/ArrayofArrayUnnestTest.cpp)
-target_link_libraries(
-  array_array_unnest_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-)
-
-add_executable(serialize_test tests/SerializeTest.cpp)
-target_link_libraries(
-  serialize_test
-  velox_aggregates
-  velox_type
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  velox_serialization
-  velox_hive_connector
-  velox_file
-  velox_core
-  velox_connector
-  velox_time
-  velox_codegen
-  velox_test_util
-  velox_arrow_bridge
-  velox_common_compression
-  ${TORCH_LIBRARIES}
-)
-
-add_executable(ml_kernel_benchmark tests/MLKernelBenchmarkTest.cpp)
-target_link_libraries(
-  ml_kernel_benchmark
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  ${TORCH_LIBRARIES}
-)
-
-add_executable(chatgpt_test tests/ChatGPTTest.cpp)
-target_link_libraries(
-  chatgpt_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base
-  velox_vector_fuzzer
-  velox_dwio_parquet_reader
-  jsoncpp_lib
-  openblas
-  ${TORCH_LIBRARIES}
-  cpr::cpr
-)
-
-# TODO: add or remove this unit test
-# add_executable(parquest_loader tests/TestParquetLoader.cpp)
+# add_executable(embedding_test tests/EmbeddingTest.cpp)
 # target_link_libraries(
-#   parquest_loader
-#   velox_dwio_parquet_reader
-#   velox_exec_test_lib
+#   embedding_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
 #   velox_exec
-#   velox_hive_connector
-#   velox_link_libs
-#   ${TEST_LINK_LIBS}
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base 
+#   velox_vector_fuzzer
+#   jsoncpp_lib
+#   openblas
+#   ${TORCH_LIBRARIES}
+#   cpr::cpr
+# )
+
+# add_executable(two_tower_model_test tests/TwoTowerModelTest.cpp)
+# target_link_libraries(
+#   two_tower_model_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base 
+#   velox_vector_fuzzer
+#   openblas
+#   velox_dwio_parquet_reader
 #   ${TORCH_LIBRARIES}
 # )
+
+
+add_executable(cnn_fraud_detection tests/cnn_fraud_detection.cpp)
+target_link_libraries(
+  cnn_fraud_detection
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base 
+  velox_vector_fuzzer
+  openblas
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+add_executable(cnn_fraud_detection_1 tests/CNNTest.cpp)
+target_link_libraries(
+  cnn_fraud_detection_1
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base 
+  velox_vector_fuzzer
+  openblas
+  velox_dwio_parquet_reader
+  ${TORCH_LIBRARIES}
+)
+
+
+# add_executable(two_tower_model_pipeline_test tests/TwoTowerModelPipelineTest.cpp)
+# target_link_libraries(
+#   two_tower_model_pipeline_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base 
+#   velox_vector_fuzzer
+#   openblas
+#   velox_dwio_parquet_reader
+#   ${TORCH_LIBRARIES}
+# )
+
+# add_executable(decision_forest_prediction_test tests/DecisionForestTest.cpp)
+# target_link_libraries(
+#   decision_forest_prediction_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base
+#   velox_vector_fuzzer
+#   velox_dwio_parquet_reader
+#   ${TORCH_LIBRARIES}
+# )
+
+# include_directories("/usr/include/hdf5/serial")
+# include_directories("/home/h5cpp/build/src/h5cpp")
+
+# find_package(h5cpp REQUIRED)
+# find_package(HDF5 COMPONENTS C CXX HL REQUIRED)
+
+# link_directories( ${HDF5_LIBRARY_DIRS} )
+# include_directories( ${HDF5_INCLUDE_DIRS} )
+
+# add_executable(fraud_detection_test tests/FraudDetectionTest.cpp)
+# target_link_libraries(
+#   fraud_detection_test
+#   xgboost::xgboost
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base
+#   velox_vector_fuzzer
+#   velox_dwio_parquet_reader
+#   ${TORCH_LIBRARIES}
+#   h5cpp::h5cpp
+#   hdf5_serial
+#   ${HDF5_CXX_LIBRARIES}
+# )
+
+# add_executable(xgboost_test tests/XGBoostTest.cpp)
+# target_link_libraries(
+#   xgboost_test
+#   xgboost::xgboost
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base
+#   velox_vector_fuzzer
+#   velox_dwio_parquet_reader
+#   ${TORCH_LIBRARIES}
+# )
+
+# add_executable(ml_sql_test tests/MLSQLTest.cpp)
+# target_link_libraries(
+#   ml_sql_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base
+#   velox_vector_fuzzer
+#   velox_dwio_parquet_reader
+#   ${TORCH_LIBRARIES}
+# )
+
+# add_executable(duckdb_optimizer_test tests/DuckDBOptimizerTest.cpp)
+# target_link_libraries(
+#   duckdb_optimizer_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base
+#   velox_vector_fuzzer
+#   velox_dwio_parquet_reader
+#   ${TORCH_LIBRARIES}
+# )
+
+# add_executable(array_array_unnest_test tests/ArrayofArrayUnnestTest.cpp)
+# target_link_libraries(
+#   array_array_unnest_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base
+#   velox_vector_fuzzer
+#   velox_dwio_parquet_reader
+#   ${TORCH_LIBRARIES}
+# )
+
+# add_executable(serialize_test tests/SerializeTest.cpp)
+# target_link_libraries(
+#   serialize_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_vector_fuzzer
+#   velox_dwio_parquet_reader
+#   velox_serialization
+#   velox_hive_connector
+#   velox_file
+#   velox_core
+#   velox_connector
+#   velox_time
+#   velox_codegen
+#   velox_test_util
+#   velox_arrow_bridge
+#   velox_common_compression
+#   ${TORCH_LIBRARIES}
+# )
+
+# add_executable(ml_kernel_benchmark tests/MLKernelBenchmarkTest.cpp)
+# target_link_libraries(
+#   ml_kernel_benchmark
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base
+#   velox_vector_fuzzer
+#   velox_dwio_parquet_reader
+#   ${TORCH_LIBRARIES}
+# )
+
+# add_executable(chatgpt_test tests/ChatGPTTest.cpp)
+# target_link_libraries(
+#   chatgpt_test
+#   velox_aggregates
+#   velox_type
+#   velox_vector
+#   velox_vector_test_lib
+#   velox_exec
+#   velox_exec_test_lib
+#   velox_tpch_connector
+#   velox_memory
+#   velox_common_base
+#   velox_vector_fuzzer
+#   velox_dwio_parquet_reader
+#   jsoncpp_lib
+#   openblas
+#   ${TORCH_LIBRARIES}
+#   cpr::cpr
+# )
+
+# # TODO: add or remove this unit test
+# # add_executable(parquest_loader tests/TestParquetLoader.cpp)
+# # target_link_libraries(
+# #   parquest_loader
+# #   velox_dwio_parquet_reader
+# #   velox_exec_test_lib
+# #   velox_exec
+# #   velox_hive_connector
+# #   velox_link_libs
+# #   ${TEST_LINK_LIBS}
+# #   ${TORCH_LIBRARIES}
+# # )
+
+

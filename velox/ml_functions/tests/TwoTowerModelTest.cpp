@@ -615,7 +615,7 @@ void TowTowerModelTest::testStringEncoder() {
                        "zipcode",
                        "title",
                        "genres"})
-                  //   .limit(0, numSamples, false)
+                    .limit(0, numSamples, false)
                   .planNode();
 
   std::shared_ptr<folly::Executor> executor =
@@ -653,8 +653,8 @@ void TowTowerModelTest::testStringEncoder() {
   auto result = readCursor(params, addSplits);
   auto data = result.second;
 
-  //   std::cout << "[INFO] loaded data: \n"
-  //             << data[0]->toString(0, data[0]->size()) << std::endl;
+    std::cout << "[INFO] loaded data: \n"
+              << data[0]->toString(0, data[0]->size()) << std::endl;
 
   std::unordered_map<std::string, int> genderMapping;
   genderMapping["F"] = 0;
@@ -3583,8 +3583,8 @@ int main(int argc, char** argv) {
   TowTowerModelTest demo;
   //   demo.testTwoTowerModelInference();
   //   demo.testDataProcessing();
-  // demo.testStringEncoder();
-  int numSamples = 5000;
+  demo.testStringEncoder();
+  int numSamples = 10;
   int numSplit = 2;
   if (argc >= 2) {
     numSamples = std::stoi(argv[1]);

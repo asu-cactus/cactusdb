@@ -805,77 +805,6 @@ class MatrixVectorAddition : public MLFunction {
   std::string weightsFile_;
 };
 
-class Sigmoid : public MLFunction {
- public:
-  Sigmoid() {}
-
-  // Sigmoid computation
-  float static sigmoidFunction(float x) {
-    return 1.0f / (1.0f + std::exp(-x));
-  }
-
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
-    BaseVector::ensureWritable(rows, type, context.pool(), output);
-    exec::DecodedArgs decodedArgs(rows, args, context);
-    auto decodedInput = decodedArgs.at(0);
-    auto numRows = rows.size();
-
-    auto inputArray = decodedInput->base()->as<ArrayVector>();
-    auto inputElements = inputArray->elements();
-    float* inputValues = inputElements->values()->asMutable<float>();
-    auto inputOffsets = inputArray->rawOffsets();
-    auto inputSizes = inputArray->rawSizes();
-
-    std::vector<std::vector<float>> result(numRows);
-
-    rows.applyToSelected([&](vector_size_t i) {
-      size_t mappedIndexInRowData = decodedInput->index(i);
-      size_t dataSize = inputSizes[mappedIndexInRowData];
-      size_t dataOffset = inputOffsets[mappedIndexInRowData];
-      std::vector<float> rowResult(dataSize);
-      std::transform(
-          inputValues + dataOffset,
-          inputValues + dataOffset + dataSize,
-          rowResult.data(),
-          sigmoidFunction);
-      result[i] = rowResult;
-    });
-    VectorMaker maker{context.pool()};
-    output = maker.arrayVector<float>(result, REAL());
-  }
-
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
-
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
-
-  std::string getFuncName() {
-    return getName();
-  };
-
-  static std::string getName() {
-    return "sigmoid";
-  };
-
-  CostEstimate getCost(std::vector<int> inputDims) {
-    std::vector<double> coefficientVector = getCoefficientVector(getName());
-    float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
-    return CostEstimate(cost, inputDims[0], inputDims[1]);
-  }
-};
-
 class Relu : public MLFunction {
  public:
   Relu() {}
@@ -1582,15 +1511,7 @@ class TorchDNN : public MLFunction {
 };
 
 namespace velox::dl {
-enum class KernelType {
-  MatMul,
-  MatAdd,
-  ReLU,
-  Softmax,
-  BatchNorm,
-  Argmax,
-  Sigmoid
-};
+enum class KernelType { MatMul, MatAdd, ReLU, Softmax, BatchNorm, Argmax };
 
 std::string kernelTypeToString(KernelType kernelType) {
   switch (kernelType) {
@@ -1606,8 +1527,6 @@ std::string kernelTypeToString(KernelType kernelType) {
       return "BatchNorm";
     case KernelType::Argmax:
       return "Argmax";
-    case KernelType::Sigmoid:
-      return "Sigmoid";
     default:
       return "Unknown";
   }
@@ -1681,8 +1600,6 @@ class TorchDNNV2 : public MLFunction {
         model_->push_back(batchNormLayer);
       } else if (kernelTypes[i] == velox::dl::KernelType::ReLU) {
         model_->push_back(torch::nn::ReLU());
-      } else if (kernelTypes[i] == velox::dl::KernelType::Sigmoid) {
-        model_->push_back(torch::nn::Sigmoid());
       } else if (kernelTypes[i] == velox::dl::KernelType::Softmax) {
         model_->push_back(torch::nn::Softmax(1));
       } else if (kernelTypes[i] == velox::dl::KernelType::Argmax) {
@@ -1704,110 +1621,39 @@ class TorchDNNV2 : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-    // Ensure output vector is writable.
-    context.ensureWritable(rows, type, output);
-    output->clearNulls(rows);
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-    // Perform matrix multiplication logic.
-    exec::DecodedArgs decodedArgs(rows, args, context);
-    auto decodedInput = decodedArgs.at(0);
-    auto inputArray = decodedInput->base()->as<ArrayVector>();
-    auto inputElements = inputArray->elements();
-    float* inputValues = inputElements->values()->asMutable<float>();
-    auto inputOffsets = inputArray->rawOffsets();
-    auto inputSizes = inputArray->rawSizes();
-
-    // The map between the row index in the input data and the row index in
-    // the output data.
-    std::map<vector_size_t, vector_size_t> rowMap;
-    // for efficient check
-    std::unordered_set<vector_size_t> uniqueRawIndexeSet;
-    // for iterating over the insert ordering
-    std::vector<vector_size_t> uniqueRawIndexeVector;
-    vector_size_t numUniqueRows = 0;
-    rows.applyToSelected([&](vector_size_t row) {
-      auto mappedIndexInRowData = decodedInput->index(row);
-      if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
-          uniqueRawIndexeSet.end()) {
-        // add it
-        rowMap[row] = numUniqueRows;
-        uniqueRawIndexeSet.insert(mappedIndexInRowData);
-        uniqueRawIndexeVector.push_back(mappedIndexInRowData);
-        ++numUniqueRows;
-      } else {
-        // already added
-        rowMap[row] = rowMap[mappedIndexInRowData];
-      }
-    });
-
-    int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
-    int rowIndex = 0;
-    for (auto rawIndex : uniqueRawIndexeVector) {
-      Eigen::Map<const Eigen::VectorXf> rowVector(
-          inputValues + inputOffsets[rawIndex], dims[0]);
-      inputMatrix.row(rowIndex++) = rowVector;
-    }
-
-    float* inputValues1 = inputMatrix.data();
-
+    auto input_elements = args[0]->as<ArrayVector>()->elements();
+    float* input_values = input_elements->values()->asMutable<float>();
     torch::Tensor input =
-        torch::from_blob(inputValues1, {numUniqueRows, dims[0]});
+        torch::from_blob(input_values, {rows.size(), dims[0]});
     torch::Tensor output_tensor = input;
 
     output_tensor =
         const_cast<torch::nn::Sequential&>(model_)->forward(output_tensor);
-    // Append results to the output vector.
+    VectorMaker maker{context.pool()};
+    VectorPtr& localResult = output;
+
     if (hasArgmax_) {
-      auto arrayOutput = output->asFlatVector<int>();
-      int* outputValues = arrayOutput->mutableRawValues<int>();
+      // convert to int
       auto int_tensor = output_tensor.to(torch::kInt);
-      int* dataInt = int_tensor.data_ptr<int>();
-
-      rows.applyToSelected([&](vector_size_t row) {
-        if (rowMap.find(row) == rowMap.end()) {
-          throw std::runtime_error(
-              "Mapped index not found for the result matrix.");
-        }
-        auto mappedIndexInResultMatrix = rowMap[row];
-        outputValues[row] = dataInt[mappedIndexInResultMatrix];
-      });
+      int* data = int_tensor.data_ptr<int>();
+      std::vector<int> results(data, data + rows.size());
+      output = maker.flatVector<int>(results, INTEGER());
+      // localResult = maker.flatVector<int>(results, INTEGER());
     } else {
-      auto arrayOutput = output->as<ArrayVector>();
-      auto sizes = arrayOutput->mutableSizes(rows.end());
-      auto rawSizes = sizes->asMutable<int32_t>();
-      auto offsets = arrayOutput->mutableOffsets(rows.end());
-      auto rawOffsets = offsets->asMutable<int32_t>();
-
-      // Initialize sizes and offsets to zero.
-      std::fill(rawSizes, rawSizes + rows.end(), 0);
-      std::fill(rawOffsets, rawOffsets + rows.end(), 0);
-
-      auto elementsOutput = arrayOutput->elements();
-      auto elementsPool = context.pool();
-      auto baseOffset = elementsOutput->size();
-      elementsOutput->resize(baseOffset + rows.end() * dims.back());
-
-      float* outputValues = elementsOutput->values()->asMutable<float>();
-      vector_size_t outputOffset = 0;
-      float* dataFloat = output_tensor.data_ptr<float>();
-
-      rows.applyToSelected([&](vector_size_t row) {
-        if (rowMap.find(row) == rowMap.end()) {
-          throw std::runtime_error(
-              "Mapped index not found for the result matrix.");
-        }
-        auto mappedIndexInResultMatrix = rowMap.at(row);
-        rawOffsets[row] = outputOffset;
-        rawSizes[row] = dims.back();
-        std::memcpy(
-            outputValues + outputOffset,
-            dataFloat + mappedIndexInResultMatrix * dims.back(),
-            dims.back() * sizeof(float));
-        outputOffset += dims.back();
-      });
-      arrayOutput->setElements(elementsOutput);
+      float* data = output_tensor.data_ptr<float>();
+      std::vector<std::vector<float>> results;
+      for (int i = 0; i < rows.size(); ++i) {
+        std::vector<float> result(
+            data + i * dims.back(), data + (i + 1) * dims.back());
+        results.push_back(result);
+      }
+      // localResult = maker.arrayVector<float>(results, REAL());
+      output = maker.arrayVector<float>(results, REAL());
     }
+
+    // context.moveOrCopyResult(localResult, rows, output);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -1869,241 +1715,6 @@ class TorchDNNV2 : public MLFunction {
   bool hasArgmax_;
   // std::vector<torch::nn::AnyModule> layers_;
 
-  torch::nn::Sequential model_;
-};
-
-class TorchDNNV2CUDA : public MLFunction {
- public:
-  TorchDNNV2CUDA(
-      std::vector<velox::dl::KernelType> kernelTypes,
-      std::vector<float*> weights,
-      std::vector<int> dimensions) {
-    // device_ = torch::Device(torch::kCUDA);
-    device_ = "cuda:0";
-    this->weights = weights;
-    // dims.size() = weights.size() + 1, dims[0] is the input dimension
-    dims = dimensions;
-    kernelTypes_ = kernelTypes;
-    int numOps = kernelTypes.size();
-    int weightIdx = 0;
-    hasArgmax_ = false;
-    model_ = torch::nn::Sequential();
-    assert(2 * numOps == dims.size());
-    for (int i = 0; i < numOps; ++i) {
-      if (kernelTypes[i] == velox::dl::KernelType::MatMul &&
-          kernelTypes[i + 1] == velox::dl::KernelType::MatAdd) {
-        auto denseLayer = torch::nn::Linear(dims[2 * i], dims[2 * i + 1]);
-        denseLayer->weight.set_data(
-            torch::from_blob(
-                weights[weightIdx++], {dims[2 * i], dims[2 * i + 1]})
-                .t());
-        denseLayer->bias.set_data(
-            torch::from_blob(weights[weightIdx++], {dims[2 * i + 1]}));
-        model_->push_back(denseLayer);
-      } else if (kernelTypes[i] == velox::dl::KernelType::MatAdd) {
-        // Do nothing, which is handled by creating a Dense Layer in the above
-        // code
-      } else if (kernelTypes[i] == velox::dl::KernelType::BatchNorm) {
-        auto batchNormLayer = torch::nn::BatchNorm1d(dims[2 * i]);
-        batchNormLayer->weight.set_data(
-            torch::from_blob(weights[weightIdx++], {dims[2 * i + 1]}));
-        batchNormLayer->bias.set_data(
-            torch::from_blob(weights[weightIdx++], {dims[2 * i + 1]}));
-        model_->push_back(batchNormLayer);
-      } else if (kernelTypes[i] == velox::dl::KernelType::ReLU) {
-        model_->push_back(torch::nn::ReLU());
-      } else if (kernelTypes[i] == velox::dl::KernelType::Sigmoid) {
-        model_->push_back(torch::nn::Sigmoid());
-      } else if (kernelTypes[i] == velox::dl::KernelType::Softmax) {
-        model_->push_back(torch::nn::Softmax(1));
-      } else if (kernelTypes[i] == velox::dl::KernelType::Argmax) {
-        model_->push_back(LibTorchArgmaxKernel(1));
-        hasArgmax_ = true;
-      } else {
-        throw std::runtime_error(fmt::format(
-            "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
-      }
-    }
-    // enable evaluation mode, this is required for inference, otherwise some
-    // module could failed, like dropout, batchnorm, etc.
-    model_->to(device_);
-    model_->eval();
-  }
-
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
-    // Ensure output vector is writable.
-    context.ensureWritable(rows, type, output);
-    output->clearNulls(rows);
-
-    // Perform matrix multiplication logic.
-    exec::DecodedArgs decodedArgs(rows, args, context);
-    auto decodedInput = decodedArgs.at(0);
-    auto inputArray = decodedInput->base()->as<ArrayVector>();
-    auto inputElements = inputArray->elements();
-    float* inputValues = inputElements->values()->asMutable<float>();
-    auto inputOffsets = inputArray->rawOffsets();
-    auto inputSizes = inputArray->rawSizes();
-
-    // The map between the row index in the input data and the row index in
-    // the output data.
-    std::map<vector_size_t, vector_size_t> rowMap;
-    // for efficient check
-    std::unordered_set<vector_size_t> uniqueRawIndexeSet;
-    // for iterating over the insert ordering
-    std::vector<vector_size_t> uniqueRawIndexeVector;
-    vector_size_t numUniqueRows = 0;
-    rows.applyToSelected([&](vector_size_t row) {
-      auto mappedIndexInRowData = decodedInput->index(row);
-      if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
-          uniqueRawIndexeSet.end()) {
-        // add it
-        rowMap[row] = numUniqueRows;
-        uniqueRawIndexeSet.insert(mappedIndexInRowData);
-        uniqueRawIndexeVector.push_back(mappedIndexInRowData);
-        ++numUniqueRows;
-      } else {
-        // already added
-        rowMap[row] = rowMap[mappedIndexInRowData];
-      }
-    });
-
-    int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
-    int rowIndex = 0;
-    for (auto rawIndex : uniqueRawIndexeVector) {
-      Eigen::Map<const Eigen::VectorXf> rowVector(
-          inputValues + inputOffsets[rawIndex], dims[0]);
-      inputMatrix.row(rowIndex++) = rowVector;
-    }
-
-    float* inputValues1 = inputMatrix.data();
-
-    torch::Tensor input =
-        torch::from_blob(inputValues1, {numUniqueRows, dims[0]});
-    torch::Tensor output_tensor = input;
-    output_tensor = output_tensor.to(device_);
-
-    output_tensor =
-        const_cast<torch::nn::Sequential&>(model_)->forward(output_tensor);
-    output_tensor = output_tensor.to(torch::kCPU);
-    // Append results to the output vector.
-
-    if (hasArgmax_) {
-      auto arrayOutput = output->asFlatVector<int>();
-      int* outputValues = arrayOutput->mutableRawValues<int>();
-      auto int_tensor = output_tensor.to(torch::kInt);
-      int* dataInt = int_tensor.data_ptr<int>();
-
-      rows.applyToSelected([&](vector_size_t row) {
-        if (rowMap.find(row) == rowMap.end()) {
-          throw std::runtime_error(
-              "Mapped index not found for the result matrix.");
-        }
-        auto mappedIndexInResultMatrix = rowMap[row];
-        outputValues[row] = dataInt[mappedIndexInResultMatrix];
-      });
-    } else {
-      auto arrayOutput = output->as<ArrayVector>();
-      auto sizes = arrayOutput->mutableSizes(rows.end());
-      auto rawSizes = sizes->asMutable<int32_t>();
-      auto offsets = arrayOutput->mutableOffsets(rows.end());
-      auto rawOffsets = offsets->asMutable<int32_t>();
-
-      // Initialize sizes and offsets to zero.
-      std::fill(rawSizes, rawSizes + rows.end(), 0);
-      std::fill(rawOffsets, rawOffsets + rows.end(), 0);
-
-      auto elementsOutput = arrayOutput->elements();
-      auto elementsPool = context.pool();
-      auto baseOffset = elementsOutput->size();
-      elementsOutput->resize(baseOffset + rows.end() * dims.back());
-      float* outputValues = elementsOutput->values()->asMutable<float>();
-      vector_size_t outputOffset = 0;
-
-      float* dataFloat = output_tensor.data_ptr<float>();
-
-      rows.applyToSelected([&](vector_size_t row) {
-        if (rowMap.find(row) == rowMap.end()) {
-          throw std::runtime_error(
-              "Mapped index not found for the result matrix.");
-        }
-        auto mappedIndexInResultMatrix = rowMap[row];
-        rawOffsets[row] = outputOffset;
-        rawSizes[row] = dims.back();
-        std::memcpy(
-            outputValues + outputOffset,
-            dataFloat + mappedIndexInResultMatrix * dims.back(),
-            dims.back() * sizeof(float));
-        outputOffset += dims.back();
-      });
-      arrayOutput->setElements(elementsOutput);
-    }
-  }
-
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {
-        exec::FunctionSignatureBuilder()
-            .returnType("array(REAL)")
-            .argumentType("array(REAL)")
-            .build(),
-        // Output flat vector of int when Argmax is applied
-        // Add an un-used argument to distinguish the signature
-        exec::FunctionSignatureBuilder()
-            .returnType("INTEGER")
-            .argumentType("array(REAL)")
-            .argumentType("INTEGER")
-            .build(),
-        exec::FunctionSignatureBuilder()
-            .returnType("INTEGER")
-            .argumentType("array(REAL)")
-            .argumentType("BIGINT")
-            .build()};
-  }
-
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
-
-  // Getter method for weights
-  const std::vector<float*>& getWeights() const {
-    return weights;
-  }
-
-  // Getter method for bias
-  const std::vector<float*>& getBias() const {
-    return bias;
-  }
-
-  std::string getFuncName() {
-    return getName();
-  };
-
-  static std::string getName() {
-    return "complexTorchNN_GPU";
-  };
-
-  std::vector<velox::dl::KernelType> getKernelTypes() const {
-    return kernelTypes_;
-  }
-
-  CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to compute cost based on dims
-    return CostEstimate(0, inputDims[0], inputDims[1]);
-  }
-
- private:
-  std::vector<float*> weights;
-  std::vector<float*> bias;
-  std::vector<velox::dl::KernelType> kernelTypes_;
-  bool hasArgmax_;
-  std::string device_;
-  // std::vector<torch::nn::AnyModule> layers_;
   torch::nn::Sequential model_;
 };
 
