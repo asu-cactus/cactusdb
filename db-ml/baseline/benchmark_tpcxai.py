@@ -159,6 +159,11 @@ def benchmark_tpcxai_usecase10_ml_madlib(num_loop=10, **kwargs):
     benchmark_result = benchmark_pipeline.run_pipeline()
     return benchmark_result
 
+def benchmark_tpcxai_usecase10_ml_systemds(num_loop=10, **kwargs):
+    benchmark_pipeline = pipeline.TPCxAIUsecase10MLPipelineSystemDS(num_loop=num_loop)
+    benchmark_result = benchmark_pipeline.run_pipeline()
+    return benchmark_result
+
 
 def benchmark_tpcxai():
     list_benchmark = []
@@ -166,10 +171,10 @@ def benchmark_tpcxai():
     # list_benchmark += [benchmark_tpcxai_usecase03_evadb]
     # list_benchmark += [benchmark_tpcxai_usecase03_sparkhadoop]
     # list_benchmark += [benchmark_tpcxai_usecase03_madlib]
-    list_benchmark += [benchmark_tpcxai_usecase07_ml]
-    list_benchmark += [benchmark_tpcxai_usecase07_ml_madlib]
-    list_benchmark += [benchmark_tpcxai_usecase07_ml_evadb]
-    list_benchmark += [benchmark_tpcxai_usecase07_ml_sparkhadoop]
+    # list_benchmark += [benchmark_tpcxai_usecase07_ml]
+    # list_benchmark += [benchmark_tpcxai_usecase07_ml_madlib]
+    # list_benchmark += [benchmark_tpcxai_usecase07_ml_evadb]
+    # list_benchmark += [benchmark_tpcxai_usecase07_ml_sparkhadoop]
     # list_benchmark += [benchmark_tpcxai_usecase08_tf]
     # list_benchmark += [benchmark_tpcxai_usecase08_evadb]
     # list_benchmark += [benchmark_tpcxai_usecase08_sparkhadoop]
@@ -183,6 +188,7 @@ def benchmark_tpcxai():
     # list_benchmark += [benchmark_tpcxai_usecase10_sparkhadoop]
     # list_benchmark += [benchmark_tpcxai_usecase10_madlib]
     # list_benchmark += [benchmark_tpcxai_usecase10_ml_tf]
+    list_benchmark += [benchmark_tpcxai_usecase10_ml_systemds]
     # list_benchmark += [benchmark_tpcxai_usecase10_ml_evadb]
     # list_benchmark += [benchmark_tpcxai_usecase10_ml_sparkhadoop]
     # list_benchmark += [benchmark_tpcxai_usecase10_ml_madlib]

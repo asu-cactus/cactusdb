@@ -2428,6 +2428,7 @@ class LLMRecommendationPipeline2Python(Pipeline):
         self.rag_metadata = self.llm2_data["movie_data"]
         self.document_embedding = self.llm2_data["embeddings"]
         import faiss
+
         self.rag_index = faiss.IndexFlatL2(self.llm2_data["dimension"])
         self.rag_index.add(self.document_embedding)
 
@@ -2764,6 +2765,73 @@ class TPCxAIUsecase10MLPipelineTF(Pipeline):
 
     def model_inference_impl(self, data):
         data = self.model.predict(data)
+        return data
+
+
+from systemds.context import SystemDSContext
+from systemds.examples.tutorials.adult import DataManager
+from systemds.operator.algorithm import multiLogReg
+from systemds.operator.algorithm import multiLogRegPredict
+
+
+class TPCxAIUsecase10MLPipelineSystemDS(Pipeline):
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase10MLPipelineSystemDS, self).__init__(
+            "tpcxai-usecase10-ml-systemds", num_loop=num_loop
+        )
+
+    def loading_meta_impl(self):
+        # train a model
+        # Use case 10, trainig query
+        query_to_fetch_training_data = """
+        select transaction_id, EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm, is_fraud
+        from tpcxai_financial_account_training join tpcxai_financial_transactions_training on fa_customer_sk=sender_id
+        limit 100
+        """
+        df = utils.fetch_data_from_postgres_via_connectorx(query_to_fetch_training_data)
+
+        X_features = df[["business_hour_norm", "amount_norm"]].values
+        y = df["is_fraud"].values.astype(int)
+
+        with SystemDSContext() as sds:
+            X = sds.from_numpy(X_features)
+            Y = sds.from_numpy(y)
+            # Train model
+            self.model = multiLogReg(X, Y, verbose=False)
+
+    def data_loading_impl(self, batch_size):
+        # Use case 10, trainig query
+        query_to_fetch_serving_data = """
+        select transaction_id, EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm
+        from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
+        """
+
+        data = utils.fetch_data_from_postgres_via_connectorx(
+            query_to_fetch_serving_data
+        )
+        return data
+
+    def data_processing_impl(self, data):
+        X_features = data[["business_hour_norm", "amount_norm"]].values
+        return X_features
+
+    def model_inference_impl(self, data):
+
+        with SystemDSContext() as sds:
+            # X_test = sds.from_numpy(X_serve)
+
+            # Apply model
+            X = sds.from_numpy(data)
+
+            [_, y_pred, acc] = multiLogRegPredict(X, self.model)
+
+            # # Confusion Matrix
+            # confusion_matrix_abs, _ = confusionMatrix(y_pred, Yt).compute()
+            data = y_pred.compute()
         return data
 
 
@@ -3792,26 +3860,10 @@ class TPCxAIUsecase08PipelineMLMadlib(Pipeline):
                 JOIN tpcxai_product_serving ON li_product_id = p_product_id
                 GROUP BY o_order_id, date, department, quantity
                 ) as t
-          limit 100
         );
         """
 
         utils.execute_sql_query_via_psycopg2(query_to_get_inference_data)
-
-        query_to_run_model_inference = """
-        DROP TABLE IF EXISTS tpcxai_uc8_predictions;
-          SELECT madlib.madlib_keras_predict_byom('tpcxai_uc8_predictor',  
-                                          1,                           
-                                          'tpcxai_uc8_view',         
-                                          'id',                  
-                                          'x',
-                                          'tpcxai_uc8_predictions',      
-                                          'response',
-                                          FALSE,
-                                          NULL,
-                                          NULL
-          );
-        """
 
         data = None
         return data
