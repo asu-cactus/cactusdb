@@ -4020,8 +4020,8 @@ class TPCxAIUsecase10MLPipelineMadlib(Pipeline):
     def data_loading_impl(self, batch_size):
         query_to_gather_serving_data = """
 
-          DROP VIEW IF EXISTS tpcxai_uc10_table_serving_view;
-          CREATE VIEW tpcxai_uc10_table_serving_view as (
+          DROP TABLE IF EXISTS tpcxai_uc10_table_serving_table;
+          CREATE TABLE tpcxai_uc10_table_serving_table as (
             SELECT
               transaction_id AS id,
               ARRAY [
@@ -4046,10 +4046,9 @@ class TPCxAIUsecase10MLPipelineMadlib(Pipeline):
           madlib.logregr_predict(coef, x)
         FROM
           uc10_logregr m,
-          tpcxai_uc10_table_serving_view;
+          tpcxai_uc10_table_serving_table;
         """
         return utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)
-
 
 class TPCxAIUsecase07MLPipelineML(Pipeline):
 
