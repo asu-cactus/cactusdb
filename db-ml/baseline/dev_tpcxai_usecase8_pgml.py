@@ -114,7 +114,7 @@ execute_query(query_create_func_trip_type_enc)
 
 # prepare training data
 query_to_fetch_training_data = """
-CREATE or replace view uc8_training_data as (
+CREATE OR REPLACE VIEW uc8_training_data as (
   SELECT department, quantity, scan_count, weekday, uc8_trip_type_encoder(trip_type) AS trip_type
   FROM (
     SELECT
@@ -133,7 +133,6 @@ ORDER BY random()
 LIMIT 100000
 );
 """
-
 execute_query(query_to_fetch_training_data)
 
 
@@ -176,7 +175,6 @@ CREATE OR REPLACE VIEW uc8_serving_data as (
                   ) as t
           );
 """
-execute_query("DROP VIEW IF EXISTS uc8_serving_data;")
 execute_query(query_to_fetch_serving_data)
 
 # Predict on test data
@@ -185,7 +183,3 @@ prediction = execute_query("""
 """, fetch=True)
 
 print("Prediction result:", prediction)
-
-
-
-
