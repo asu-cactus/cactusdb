@@ -27,7 +27,6 @@ from dssm_evadb import DSSM_Moel_Wrapper
 import pickle
 import multiprocessing as mp
 from sentence_transformers import SentenceTransformer
-import psycopg2
 
 
 def get_batch_sizes(num_samples, batch_size):
@@ -4492,19 +4491,8 @@ class TPCxAIUsecase10PipelinePGML(Pipeline):
         create or replace view uc10_serving_data as select transaction_id, ARRAY [(EXTRACT(HOUR FROM time) / 23)::real, (amount / transaction_limit)::real] AS features from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
         """
         
-        # Get the connection
-        conn = utils.get_psycopg2_connection()
-        try:
-            # Get the cursor
-            cursor = conn.cursor()
-            cursor.execute("DROP VIEW IF EXISTS uc10_serving_data;")
-            cursor.execute(query_to_fetch_serving_data)
-            
-            # Close the cursor and connection
-            cursor.close()
-            conn.close()
-        except (Exception, psycopg2.DatabaseError) as error:
-            print(f"Error: {error}")
+        # Prepare serving data
+        utils.execute_sql_query_via_psycopg2(query_to_fetch_serving_data)
         
 
     def loading_meta_impl(self):
@@ -4556,19 +4544,8 @@ class TPCxAIUsecase8PipelinePGML(Pipeline):
           );
         """
         
-        # Get the connection
-        conn = utils.get_psycopg2_connection()
-        try:
-            # Get the cursor
-            cursor = conn.cursor()
-            cursor.execute("DROP VIEW IF EXISTS uc8_serving_data;")
-            cursor.execute(query_to_fetch_serving_data)
-            
-            # Close the cursor and connection
-            cursor.close()
-            conn.close()
-        except (Exception, psycopg2.DatabaseError) as error:
-            print(f"Error: {error}")
+        # Prepare serving data
+        utils.execute_sql_query_via_psycopg2(query_to_fetch_serving_data)
         
 
     def loading_meta_impl(self):
