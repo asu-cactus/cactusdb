@@ -4475,3 +4475,111 @@ class TPCxAIUsecase07PipelineSparkMLHadoop(Pipeline):
         )
         result_df.collect()
         return result_df
+
+
+class TPCxAIUsecase10PipelinePGML(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase10PipelinePGML, self).__init__(
+            "tpcxai-usecase10-pgml", num_loop=num_loop
+        )
+        #self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # TODO: implement data loading
+        query_to_fetch_serving_data = """
+        create or replace view uc10_serving_data as select transaction_id, ARRAY [(EXTRACT(HOUR FROM time) / 23)::real, (amount / transaction_limit)::real] AS features from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
+        """
+        
+        connection = utils.get_psycopg2_connection()
+        try:
+            cursor = connection.cursor()
+        
+            cursor.query("DROP VIEW IF EXISTS uc10_serving_data;")
+            cursor.query(query_to_fetch_serving_data)
+            
+            # Close the cursor and connection
+            cursor.close()
+            connection.close()
+        except (Exception, psycopg2.DatabaseError) as error:
+            print(f"Error: {error}")
+        return None
+
+    def data_processing_impl(self, data):
+        # TODO data processing
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        query_prediction = "SELECT transaction_id, pgml.predict('uc10_logistic_model', features) as prediction from uc10_serving_data;"
+        result_data = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
+        return result_data
+
+
+class TPCxAIUsecase8PipelinePGML(Pipeline):
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase8PipelinePGML, self).__init__(
+            "tpcxai-usecase8-pgml", num_loop=num_loop
+        )
+        #self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # TODO: implement data loading
+        query_to_fetch_serving_data = """
+        CREATE OR REPLACE VIEW uc8_serving_data as (
+              SELECT o_order_id, ARRAY [(department)::real, (quantity)::real, (quantity)::real, (weekday)::real] AS features
+              FROM
+                  (
+                    SELECT
+                    o_order_id,
+                    uc8_department_encoder(department) as department,
+                    quantity,
+                    SUM(quantity) AS scan_count,
+                    MIN(EXTRACT(DOW FROM date)) AS weekday
+                  FROM tpcxai_order_serving
+                  JOIN tpcxai_lineitem_serving ON o_order_id = li_order_id
+                  JOIN tpcxai_product_serving ON li_product_id = p_product_id
+                  GROUP BY o_order_id, date, department, quantity
+                  ) as t
+          );
+        """
+        
+        connection = utils.get_psycopg2_connection()
+        try:
+            cursor = connection.cursor()
+        
+            cursor.query("DROP VIEW IF EXISTS uc8_serving_data;")
+            cursor.query(query_to_fetch_serving_data)
+            
+            # Close the cursor and connection
+            cursor.close()
+            connection.close()
+        except (Exception, psycopg2.DatabaseError) as error:
+            print(f"Error: {error}")
+        return None
+
+    def data_processing_impl(self, data):
+        # TODO data processing
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        query_prediction = "SELECT o_order_id, pgml.predict('uc8_xgboost_model', features) as prediction from uc8_serving_data;"
+        result_data = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
+        return result_data
+        
