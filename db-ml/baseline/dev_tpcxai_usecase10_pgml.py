@@ -49,10 +49,9 @@ create_pgml_extension()
 
 # prepare training data
 query_to_fetch_training_data = """
-create view uc10_training_data as select EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm, is_fraud
+create or replace view uc10_training_data as select EXTRACT(HOUR FROM time) / 23 as business_hour_norm, amount / transaction_limit as amount_norm, is_fraud
 from tpcxai_financial_account_training join tpcxai_financial_transactions_training on fa_customer_sk=sender_id
 """
-
 execute_query(query_to_fetch_training_data)
 
 
@@ -73,7 +72,6 @@ print("Model Trained successfully")
 query_to_fetch_serving_data = """
 create or replace view uc10_serving_data as select transaction_id, ARRAY [(EXTRACT(HOUR FROM time) / 23)::real, (amount / transaction_limit)::real] AS features from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
 """
-execute_query("DROP VIEW IF EXISTS uc10_serving_data;")
 execute_query(query_to_fetch_serving_data)
 
 # Predict on test data
@@ -82,7 +80,3 @@ prediction = execute_query("""
 """, fetch=True)
 
 print("Prediction result:", prediction)
-
-
-
-
