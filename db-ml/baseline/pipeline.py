@@ -27,6 +27,10 @@ from dssm_evadb import DSSM_Moel_Wrapper
 import pickle
 import multiprocessing as mp
 from sentence_transformers import SentenceTransformer
+from systemds.context import SystemDSContext
+from systemds.examples.tutorials.adult import DataManager
+from systemds.operator.algorithm import multiLogReg
+from systemds.operator.algorithm import multiLogRegPredict
 
 
 def get_batch_sizes(num_samples, batch_size):
@@ -2768,10 +2772,7 @@ class TPCxAIUsecase10MLPipelineTF(Pipeline):
         return data
 
 
-from systemds.context import SystemDSContext
-from systemds.examples.tutorials.adult import DataManager
-from systemds.operator.algorithm import multiLogReg
-from systemds.operator.algorithm import multiLogRegPredict
+
 
 
 class TPCxAIUsecase10MLPipelineSystemDS(Pipeline):
@@ -4091,6 +4092,61 @@ class TPCxAIUsecase07MLPipelineML(Pipeline):
             results.append(self.model.predict(user_id, product_id).est)
         return data
 
+class TPCxAIUsecase07MLPipelineSystemDS(Pipeline):
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super(TPCxAIUsecase07MLPipelineSystemDS, self).__init__(
+            "tpcxai-usecase07-systemds", num_loop=num_loop
+        )
+        with open(
+            "../../resources/model/tpcxai_sf1/final/tf/usecase7_svd.pkl", "rb"
+        ) as f:
+            self.model = pickle.load(f)
+
+        self.bu = self.model.bu 
+        self.bi = self.model.bi
+        self.pu = self.model.pu
+        self.qi = self.model.qi
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        # Use case 10, trainig query
+        query_to_fetch_serving_data = """
+        select user_id, product_id
+        from tpcxai_product_rating_serving
+        """
+
+        data = utils.fetch_data_from_postgres_via_connectorx(
+            query_to_fetch_serving_data
+        )
+        return data
+
+    def data_processing_impl(self, data):
+        X_features = data[["user_id", "product_id"]].values
+        return X_features
+
+    def model_inference_impl(self, data):
+        results = []
+        with SystemDSContext() as sds:
+          bu_m = sds.from_numpy(self.bu)
+          bi_m = sds.from_numpy(self.bi)
+          pu_m = sds.from_numpy(self.pu)
+          qi_m = sds.from_numpy(self.qi)
+          input_m = sds.from_numpy(data)
+          num_input = input_m.nRow().compute()
+
+          # for i in tqdm(range(5)):
+          for i in tqdm(range(num_input)):
+            user_id = data[i,0]
+            product_id = data[i,1]
+            results.append((bu_m[user_id] + bi_m[product_id] + (pu_m[user_id] * qi_m[product_id]).sum()).compute())
+        return results
+
 
 class TPCxAIUsecase07MLPipelineMadlib(Pipeline):
     def __init__(
@@ -4356,6 +4412,8 @@ class TPCxAIUsecase07MLPipelineMadlib(Pipeline):
           CALL uc07_preprocess('public', 'uc07_train_preprocessed');
           CALL uc07_train('uc07_train_preprocessed', 'uc07_model', false);
         """
+
+        utils.execute_sql_query_via_psycopg2(query_to_train_svd)
 
     def loading_meta_impl(self):
         pass
