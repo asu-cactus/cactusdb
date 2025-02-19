@@ -1438,7 +1438,7 @@ int main(int argc, char** argv) {
   bench.modelOperators = operators;
 
   std::cout << "Performing Join" << std::endl;
-  bool ret = bench.createAndExecuteQuery("ci", "rt", "ci_role_id", "rt_id", 50, 50, 3);
+  bool ret = bench.createAndExecuteQuery("ci", "rt", "ci_role_id", "rt_id", 50, 50, 1);
 
   return ret;
 }
