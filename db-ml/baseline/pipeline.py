@@ -4508,7 +4508,11 @@ class TPCxAIUsecase10PipelinePGML(Pipeline):
 
     def model_inference_impl(self, data):
         # TODO model inference
-        query_prediction = "SELECT transaction_id, pgml.predict('uc10_logistic_model', features) as prediction from uc10_serving_data;"
+        #non-batch prediction query
+        #query_prediction = "SELECT transaction_id, pgml.predict('uc10_logistic_model', features) as prediction from uc10_serving_data;"
+        
+        #batch prediction query
+        query_prediction = "SELECT pgml.predict_batch('uc10_logistic_model', array_agg(features)) as prediction from uc10_serving_data;"
         result_df = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
         return result_df.values
 
@@ -4561,7 +4565,11 @@ class TPCxAIUsecase8PipelinePGML(Pipeline):
 
     def model_inference_impl(self, data):
         # TODO model inference
-        query_prediction = "SELECT o_order_id, pgml.predict('uc8_xgboost_model', features) as prediction from uc8_serving_data;"
+        #non-batch prediction query
+        #query_prediction = "SELECT o_order_id, pgml.predict('uc8_xgboost_model', features) as prediction from uc8_serving_data;"
+        
+        #batch prediction query
+        query_prediction = "SELECT pgml.predict_batch('uc8_xgboost_model', array_agg(features)) as prediction from uc8_serving_data;"
         result_df = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
         return result_df.values
 
