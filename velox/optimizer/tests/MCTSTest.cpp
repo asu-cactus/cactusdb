@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <torch/torch.h>
 #include <folly/init/Init.h>
+#include <torch/torch.h>
 #include <iostream>
 #include <random>
 #include <string>
@@ -36,26 +36,12 @@
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 #include "velox/expression/VectorFunction.h"
-// #include "velox/functions/Macros.h"
 #include "velox/functions/Registerer.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-// #include "velox/ml_functions/BatchNorm.h"
-// #include "velox/ml_functions/ChatGPT.h"
-// #include "velox/ml_functions/ComplexLayer.h"
-// #include "velox/ml_functions/Concat.h"
-// #include "velox/ml_functions/CosineSimilarity.h"
-// #include "velox/ml_functions/Dropout.h"
-// #include "velox/ml_functions/Embedding.h"
-// #include "velox/ml_functions/Encoder.h"
-// #include "velox/ml_functions/FraudDetectionFunctions.h"
-// #include "velox/ml_functions/HuggingFaceServerless.h"
-// #include "velox/ml_functions/NNBuilder.h"
 #include "velox/ml_functions/FraudDetectionFunctions.h"
-#include "velox/ml_functions/functions.h"
-// #include "velox/ml_functions/RAG.h"
-// #include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/UtilFunction.h"
+#include "velox/ml_functions/functions.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/Expressions.h"
 #include "velox/parse/ExpressionsParser.h"
@@ -1779,6 +1765,68 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           Source(readMoviewDataPlanNodeId, Source::Type::FILE, movieStat);
       cataLog.addSource(std::make_shared<Source>(userSrc));
       cataLog.addSource(std::make_shared<Source>(movieSrc));
+    } else if (model == "llm3-op" || model == "llm3") {
+      auto movieDataRowType =
+          ROW({"m_movie_id",
+               "m_title",
+               "m_genres",
+               "m_spoken_languages",
+               "m_popularity",
+               "m_vote_average",
+               "m_vote_count",
+               "m_overview"},
+              {INTEGER(),
+               VARCHAR(),
+               VARCHAR(),
+               VARCHAR(),
+               REAL(),
+               REAL(),
+               INTEGER(),
+               VARCHAR()});
+      std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+      if (dataDirPrefix == "") {
+        // use default value:
+        dataDirPrefix = "/home/velox/resources/data/parquet/movielens/final/";
+      }
+      std::vector<std::string> movieDataPaths =
+          getFilePathsFromDir(dataDirPrefix + "movie");
+      int movieNumRows, movieNumCols;
+      readDataStats(
+          dataDirPrefix + "movie_stats.txt", movieNumRows, movieNumCols);
+
+      core::PlanNodeId readMoviewDataPlanNodeId;
+      if (model == "llm3") {
+        myPlan =
+            PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(movieDataRowType, {}, "")
+                .capturePlanNodeId(readMoviewDataPlanNodeId)
+                .project(
+                    {"m_movie_id",
+                     "m_genres",
+                     "chatgpt_server(m_title, 'Please return the country where this movie was produced:') AS country_of_produce",
+                     "chatgpt_server(m_title, 'Please return the year this movie was released:') AS year_of_release"})
+                .filter("m_genres LIKE '\%Action\%'");
+      } else if (model == "llm3-op") {
+        myPlan =
+            PlanBuilder(planNodeIdGenerator, pool_.get())
+                .tableScan(movieDataRowType, {}, "")
+                .capturePlanNodeId(readMoviewDataPlanNodeId)
+                .filter("m_genres LIKE '\%Action\%'")
+                .project(
+                    {"m_movie_id",
+                     "chatgpt_server(m_title, 'Please return the country where this movie was produced:') AS country_of_produce",
+                     "chatgpt_server(m_title, 'Please return the year this movie was released:') AS year_of_release"});
+      }
+      cataLog.setIdAddressMap(
+          readMoviewDataPlanNodeId,
+          movieDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      std::shared_ptr<OutputStat> movieStat =
+          std::make_shared<OutputStat>(OutputStat(movieNumRows, movieNumCols));
+      Source movieSrc =
+          Source(readMoviewDataPlanNodeId, Source::Type::FILE, movieStat);
+      cataLog.addSource(std::make_shared<Source>(movieSrc));
     } else if (model == "two-tower") {
       core::PlanNodeId readQueryDataPlanNodeId;
       core::PlanNodeId readUserDataPlanNodeId;
@@ -2233,7 +2281,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       inputFilePaths = generateTwoTowerQueryData(numSamples, 6040, 3706, 1);
       featureSize = 2;
       std::cout << "inputDataPaths : " << inputFilePaths << std::endl;
-    } else if (model == "llm" || model == "llm-op") {
+    } else if (
+        model == "llm" || model == "llm-op" || model == "llm3" ||
+        model == "llm3-op") {
       registerLLMFunctions(64, 2, 3, cataLog, pool_);
     } else if (model == "llm2" || model == "llm2-op") {
       registerLLMFunctions(64, 2, 3, cataLog, pool_);
