@@ -1,8 +1,23 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include <torch/torch.h>
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
 #include <boost/program_options.hpp>
 #include <folly/init/Init.h>
 #include <gflags/gflags.h>
-#include <torch/torch.h>
 #include <random>
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
@@ -14,15 +29,8 @@
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/ml_functions/BatchNorm.h"
-#include "velox/ml_functions/ComplexLayer.h"
-#include "velox/ml_functions/Concat.h"
-#include "velox/ml_functions/CosineSimilarity.h"
-#include "velox/ml_functions/Dropout.h"
-#include "velox/ml_functions/Embedding.h"
-#include "velox/ml_functions/Encoder.h"
-#include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/UtilFunction.h"
+#include "velox/ml_functions/functions.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
 
@@ -272,26 +280,28 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     return myPlan;
   }
 
-  PlanBuilder getTorchDNNPlan(int batchSize, int featureSize, int layer1Size, int layer2Size) {
+  PlanBuilder getTorchDNNPlan(
+      int batchSize,
+      int featureSize,
+      int layer1Size,
+      int layer2Size) {
     VectorMaker maker{pool_.get()};
     std::vector<std::vector<float>> inputValue =
         randomGenerator.genFloat2dVector(batchSize, featureSize);
     auto inputValueVector = maker.arrayVector<float>(inputValue, REAL());
 
-    float* w1Weight = randomGenerator.genFloat1dArray(featureSize*layer1Size);
+    float* w1Weight = randomGenerator.genFloat1dArray(featureSize * layer1Size);
     float* w1Bias = randomGenerator.genFloat1dArray(layer1Size);
-    float* w2Weight = randomGenerator.genFloat1dArray(layer1Size*layer2Size);
+    float* w2Weight = randomGenerator.genFloat1dArray(layer1Size * layer2Size);
     float* w2Bias = randomGenerator.genFloat1dArray(layer2Size);
     std::vector<float*> weights = {w1Weight, w2Weight};
     std::vector<float*> bias = {w1Bias, w2Bias};
     std::vector<int> dims = {featureSize, layer1Size, layer2Size};
 
-
     registerVectorFunction(
-                          "torchDNN",
-                          TorchDNN::signatures(),
-                          std::make_unique<TorchDNN>(
-                              weights, bias, dims));
+        "torchDNN",
+        TorchDNN::signatures(),
+        std::make_unique<TorchDNN>(weights, bias, dims));
 
     auto inputRowVector = maker.rowVector({"x"}, {inputValueVector});
 
@@ -301,7 +311,11 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     return myPlan;
   }
 
-  PlanBuilder getTorchDNNKernelPlan(std::string kernel, int batchSize, int featureSize, int outputSize) {
+  PlanBuilder getTorchDNNKernelPlan(
+      std::string kernel,
+      int batchSize,
+      int featureSize,
+      int outputSize) {
     VectorMaker maker{pool_.get()};
     std::vector<std::vector<float>> inputValue =
         randomGenerator.genFloat2dVector(batchSize, featureSize);
@@ -310,9 +324,9 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     float* w1Weight;
     float* w1Bias;
     std::vector<int> dims;
-    
+
     if (kernel == "Dense") {
-      w1Weight = randomGenerator.genFloat1dArray(featureSize*outputSize);
+      w1Weight = randomGenerator.genFloat1dArray(featureSize * outputSize);
       w1Bias = randomGenerator.genFloat1dArray(outputSize);
       dims = {featureSize, outputSize};
     } else if (kernel == "Relu" || kernel == "Softmax") {
@@ -323,13 +337,11 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     }
     // std::vector<float*> weights = {w1Weight, w2Weight};
     // std::vector<float*> bias = {w1Bias, w2Bias};
-     
 
     registerVectorFunction(
-                          "torchDNNKernel",
-                          TorchDNNKernel::signatures(),
-                          std::make_unique<TorchDNNKernel>(
-                              kernel, w1Weight, w1Bias, dims));
+        "torchDNNKernel",
+        TorchDNNKernel::signatures(),
+        std::make_unique<TorchDNNKernel>(kernel, w1Weight, w1Bias, dims));
 
     auto inputRowVector = maker.rowVector({"x"}, {inputValueVector});
 
@@ -445,9 +457,7 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     return myPlan;
   }
 
-  PlanBuilder getRowNumber(
-      int lIndexMax,
-      int dim1) {
+  PlanBuilder getRowNumber(int lIndexMax, int dim1) {
     VectorMaker maker{pool_.get()};
     std::vector<int> leftIds = randomGenerator.genIntRange(0, lIndexMax);
     std::vector<std::vector<float>> leftMatrix =
@@ -457,8 +467,7 @@ class DLKernelBenchmarkTest : public HiveConnectorTestBase {
     auto leftMatrixVector = maker.arrayVector<float>(leftMatrix, REAL());
 
     RowVectorPtr leftRowVector =
-          maker.rowVector({"l_id", "m1"}, {leftIdVector, leftMatrixVector});
-
+        maker.rowVector({"l_id", "m1"}, {leftIdVector, leftMatrixVector});
 
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
 
@@ -621,7 +630,7 @@ int main(int argc, char** argv) {
     }
     dlKernelBenchmark.benchmarkKernel(
         kernel, batchSize, featureSize, dim2, verbose, numRepeat);
-  } else if (mode == "TorchNN" && model != "") { 
+  } else if (mode == "TorchNN" && model != "") {
     int layer1Size = FLAGS_l1size;
     int layer2Size = FLAGS_l2size;
 
@@ -637,8 +646,15 @@ int main(int argc, char** argv) {
                  layer2Size)
           << std::endl;
     }
-    dlKernelBenchmark.benchmarkTorchNN(model, batchSize, featureSize, layer1Size, layer2Size, verbose, numRepeat);
-  
+    dlKernelBenchmark.benchmarkTorchNN(
+        model,
+        batchSize,
+        featureSize,
+        layer1Size,
+        layer2Size,
+        verbose,
+        numRepeat);
+
   } else if (mode == "DB" && op != "") {
     bool reverseOrder = FLAGS_reverse_order;
     int lIndexMax = FLAGS_l_max_index;

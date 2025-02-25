@@ -1,3 +1,20 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include "torch/torch.h"
+#include "velox/optimizer/Helper.h"
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
 #include <fcntl.h>
 #include <folly/init/Init.h>
@@ -31,17 +48,7 @@
 #include "velox/functions/Registerer.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/ml_functions/BatchNorm.h"
-#include "velox/ml_functions/ChatGPT.h"
-#include "velox/ml_functions/ComplexLayer.h"
-#include "velox/ml_functions/Concat.h"
-#include "velox/ml_functions/CosineSimilarity.h"
-#include "velox/ml_functions/Dropout.h"
-#include "velox/ml_functions/Embedding.h"
-#include "velox/ml_functions/Encoder.h"
 #include "velox/ml_functions/FraudDetectionFunctions.h"
-#include "velox/ml_functions/NNBuilder.h"
-#include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/Expressions.h"
@@ -55,7 +62,6 @@
 #include <json/json.h>
 #include "velox/cost_model/CostEstimator.h"
 #include "velox/cost_model/Stat.h"
-#include "velox/optimizer/Helper.h"
 #include "velox/optimizer/Mul2JoinAggRewriteAction.h"
 #include "velox/optimizer/PlanState.h"
 #include "velox/optimizer/Register.h"

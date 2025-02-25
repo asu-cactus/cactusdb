@@ -1,20 +1,45 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
-#include <cblas.h>
 #include <torch/torch.h>
 #include <Eigen/Dense>
 #include <chrono>
 #include <filesystem>
-#include "velox/cost_model/CostEstimate.h"
-#include "velox/cost_model/UdfCostCoefficient.h"
-#include "velox/exec/Task.h"
-#include "velox/expression/Expr.h"
-#include "velox/expression/VectorFunction.h"
-#include "velox/vector/DictionaryVector.h"
+#include "BaseFunction.h"
+#include "BatchNorm.h"
+#include "ChatGPT.h"
+#include "ComplexLayer.h"
+#include "Concat.h"
+#include "CosineSimilarity.h"
+#include "DecisionForest.h"
+#include "DecisionTree.h"
+#include "DotProduct.h"
+#include "Dropout.h"
+#include "Embedding.h"
+#include "Encoder.h"
+#include "HuggingFaceServerless.h"
+#include "HuggingFaceTokenizer.h"
+#include "PositionEncoding.h"
+#include "RAG.h"
+#include "SequencePooling.h"
+#include "XGBoost.h"
+#include "velox/vector/tests/utils/VectorMaker.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
-using namespace facebook::velox::exec::test;
-using namespace facebook::velox::memory;
 
 /*
     TODO
@@ -33,41 +58,41 @@ using namespace facebook::velox::memory;
 */
 
 // TODO: Refactor
-class MLFunction : public exec::VectorFunction {
- public:
-  virtual ~MLFunction() = default;
+// class MLFunction : public exec::VectorFunction {
+//  public:
+//   virtual ~MLFunction() = default;
 
-  virtual float* getTensor() const = 0;
+//   virtual float* getTensor() const = 0;
 
-  virtual std::vector<int> getDims() {
-    return dims;
-  }
+//   virtual std::vector<int> getDims() {
+//     return dims;
+//   }
 
-  virtual std::string getFuncName() {
-    return "";
-  }
+//   virtual std::string getFuncName() {
+//     return "";
+//   }
 
-  virtual int getNumDims() {
-    return dims.size();
-  }
+//   virtual int getNumDims() {
+//     return dims.size();
+//   }
 
-  virtual CostEstimate getCost(std::vector<int> inputDims) {
-    return CostEstimate(0, inputDims[0], inputDims[1]);
-  }
+//   virtual CostEstimate getCost(std::vector<int> inputDims) {
+//     return CostEstimate(0, inputDims[0], inputDims[1]);
+//   }
 
- protected:
-  std::vector<int> dims;
-  double getWeightedCost(std::string name, float cost) {
-    std::vector<double> coefficient =
-        UdfCostCoefficient::getInstance().getCoefficient(name);
-    // FIXME
-    return 0;
-    // return coefficient[0] * cost;
-  }
-  std::vector<double> getCoefficientVector(std::string name) {
-    return UdfCostCoefficient::getInstance().getCoefficient(name);
-  }
-};
+//  protected:
+//   std::vector<int> dims;
+//   double getWeightedCost(std::string name, float cost) {
+//     std::vector<double> coefficient =
+//         UdfCostCoefficient::getInstance().getCoefficient(name);
+//     // FIXME
+//     return 0;
+//     // return coefficient[0] * cost;
+//   }
+//   std::vector<double> getCoefficientVector(std::string name) {
+//     return UdfCostCoefficient::getInstance().getCoefficient(name);
+//   }
+// };
 
 class MatrixMultiply : public MLFunction {
  public:
@@ -1657,6 +1682,12 @@ class TorchDNNV2 : public MLFunction {
     int weightIdx = 0;
     hasArgmax_ = false;
     model_ = torch::nn::Sequential();
+    if (2 * numOps != dims.size()) {
+      throw std::runtime_error(fmt::format(
+          "Mismatched number of  2*kernel types and dimensions: {} vs {}",
+          2 * numOps,
+          dims.size()));
+    }
     assert(2 * numOps == dims.size());
     for (int i = 0; i < numOps; ++i) {
       if (kernelTypes[i] == velox::dl::KernelType::MatMul &&

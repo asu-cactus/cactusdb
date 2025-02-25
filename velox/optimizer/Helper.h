@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
+#include "velox/ml_functions/functions.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
 
 using namespace facebook::velox::exec;

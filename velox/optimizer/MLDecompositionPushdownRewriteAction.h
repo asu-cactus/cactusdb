@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -229,7 +229,7 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
             // Check if target exist in the expression
             if (exprStr.find(target) != std::string::npos) {
               // Capture the data src
-              std::vector<string> matchedDataSources =
+              std::vector<std::string> matchedDataSources =
                   findDataSrcFromExpr(exprStr);
 
               // Find the pushdown node for the target expression
@@ -497,7 +497,7 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
           std::shared_ptr<const core::PlanNode> pushdownPlanNode;
           if (exprStr.find(target) != std::string::npos) {
             // Capture the data src
-            std::vector<string> matchedDataSources =
+            std::vector<std::string> matchedDataSources =
                 findDataSrcFromExpr(exprStr);
 
             findPushdownNodeId(
