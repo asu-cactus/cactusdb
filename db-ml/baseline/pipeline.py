@@ -2231,7 +2231,7 @@ def pd_func_recommend_description(df, prompt):
             lambda x: utils.chatgpt_server_restfulAPI(
                 "Summarized user statistics data (preference): "
                 + x["user_description_summarized"]
-                + ". \n Summarized user movie metadata:  "
+                + ". \n Summarized movie metadata:  "
                 + x["movie_description_summarized"]
                 + prompt,
             ),
@@ -2367,6 +2367,154 @@ class LLMRecommendationPipelinePython(Pipeline):
         )
         self.metrics_additional["num_failures"] += np.sum(data["num_failures"])
 
+        return data
+
+
+class LLMMovieInfoRetrievalPipelinePython(Pipeline):
+    def __init__(
+        self,
+        num_user=5,
+        num_movie=10,
+        num_loop=10,
+    ):
+
+        super(LLMMovieInfoRetrievalPipelinePython, self).__init__(
+            "llm-movie-info-retrieval_python",
+            num_sample=num_user * num_movie,
+            num_loop=num_loop,
+        )
+        self.postgres_conn = utils.get_postgres_connection_config()
+
+        self.prompt1 = "Please return the country where this movie was produced:"
+        self.prompt2 = "Please return the year this movie was released:"
+
+        self.openAI_client = utils.get_openAI_client()
+        self.timer = utils.Timer()
+        self.num_thread = int(os.environ.get("NUM_THREADS", 8))
+
+    def loading_meta_impl(self):
+        self.metrics_additional["t_llm1"] = 0
+        self.metrics_additional["t_llm2"] = 0
+
+    def data_loading_impl(self, batch_size):
+        join_query = """
+            select * from movielens_movie where m_genres LIKE '%Action%'
+        """.format(
+            batch_size
+        )
+        joined_df = utils.fetch_data_from_postgres_via_connectorx(join_query)
+        return joined_df
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+
+        self.timer.tic()
+        data.loc[:, "country_product"] = data["m_title"]
+        data.loc[:, "year_release"] = data["m_title"]
+        data = parallelize_dataframe(
+            data, "country_product", self.prompt1, False, self.num_thread
+        )
+        self.metrics_additional["t_llm1"] += self.timer.toc()
+        self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
+        self.metrics_additional["num_receive_tokens"] += np.sum(
+            data["num_receive_token"]
+        )
+        self.metrics_additional["num_failures"] += np.sum(data["num_failures"])
+        self.timer.tic()
+
+        data = parallelize_dataframe(
+            data, "year_release", self.prompt2, False, self.num_thread
+        )
+
+        self.metrics_additional["t_llm2"] += self.timer.toc()
+        self.metrics_additional["num_send_tokens"] += np.sum(data["num_send_token"])
+        self.metrics_additional["num_receive_tokens"] += np.sum(
+            data["num_receive_token"]
+        )
+        self.metrics_additional["num_failures"] += np.sum(data["num_failures"])
+        self.timer.tic()
+
+        self.metrics_additional["t_llm3"] += self.timer.toc()
+        return data
+
+
+import blendsql
+from blendsql.models import Model
+from blendsql.ingredients import QAIngredient
+from blendsql.db import PostgreSQL
+
+
+class LLMMovieInfoRetrievalPipelineBlendSQL(Pipeline):
+    def __init__(
+        self,
+        num_user=5,
+        num_movie=10,
+        num_loop=10,
+    ):
+
+        super(LLMMovieInfoRetrievalPipelineBlendSQL, self).__init__(
+            "llm-movie-info-retrieval_blendsql",
+            num_sample=num_user * num_movie,
+            num_loop=num_loop,
+        )
+        self.postgres_conn = utils.get_postgres_connection_config()
+
+        self.prompt1 = "Please return country where this movie was produced:"
+        self.prompt2 = "Please return the year this movie was released:"
+
+        self.openAI_client = utils.get_openAI_client()
+        self.timer = utils.Timer()
+        self.num_thread = int(os.environ.get("NUM_THREADS", 8))
+
+        self.postgre_db = PostgreSQL("postgresdb:postgresdb@localhost:5432/postgresdb")
+        self.postgre_db.__class__.__name__ = "Postgres"
+
+        self.blend = lambda query, *args, **kwargs: blendsql.blend(
+            query,
+            db=self.postgre_db,
+            ingredients={
+                blendsql.LLMQA,
+                blendsql.RAGQA,
+                blendsql.LLMMap,
+                blendsql.LLMJoin,
+            },
+            # This model can be changed, according to what your personal setup is
+            default_model=kwargs.get(
+                "model", blendsql.models.AzurePhiModel(env="", caching=True)
+            ),
+            verbose=True,
+        )
+
+    def loading_meta_impl(self):
+        self.metrics_additional["t_llm1"] = 0
+        self.metrics_additional["t_llm2"] = 0
+
+    def data_loading_impl(self, batch_size):
+        return None
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+
+        self.timer.tic()
+
+        smoothie = self.blend(
+            """
+            select m_title, {{LLMMAP('Please return the country where this movie was produced::', 'movielens_movie::m_title')}} AS country_of_produce,
+            {{LLMMAP('Please return the year this movie was released:', 'movielens_movie::m_title')}} AS year_of_release
+              from movielens_movie where m_genres LIKE '%Action%';
+            """,
+            db=self.postgre_db,
+            model=blendsql.models.OpenaiLLM("gpt-3.5-turbo", caching=False, env="."),
+        )
+        # print(f"Finished in {smoothie.meta.process_time_seconds} seconds")
+        data = smoothie.df
+        self.metrics_additional["num_send_tokens"] += smoothie.meta.prompt_tokens
+
+        self.metrics_additional["t_llm1"] += self.timer.toc()
         return data
 
 
@@ -2770,9 +2918,6 @@ class TPCxAIUsecase10MLPipelineTF(Pipeline):
     def model_inference_impl(self, data):
         data = self.model.predict(data)
         return data
-
-
-
 
 
 class TPCxAIUsecase10MLPipelineSystemDS(Pipeline):
@@ -4051,6 +4196,7 @@ class TPCxAIUsecase10MLPipelineMadlib(Pipeline):
         """
         return utils.fetch_data_from_postgres_via_psycopg2(query_to_run_model_inference)
 
+
 class TPCxAIUsecase07MLPipelineML(Pipeline):
 
     def __init__(
@@ -4092,6 +4238,7 @@ class TPCxAIUsecase07MLPipelineML(Pipeline):
             results.append(self.model.predict(user_id, product_id).est)
         return data
 
+
 class TPCxAIUsecase07MLPipelineSystemDS(Pipeline):
 
     def __init__(
@@ -4106,7 +4253,7 @@ class TPCxAIUsecase07MLPipelineSystemDS(Pipeline):
         ) as f:
             self.model = pickle.load(f)
 
-        self.bu = self.model.bu 
+        self.bu = self.model.bu
         self.bi = self.model.bi
         self.pu = self.model.pu
         self.qi = self.model.qi
@@ -4133,18 +4280,24 @@ class TPCxAIUsecase07MLPipelineSystemDS(Pipeline):
     def model_inference_impl(self, data):
         results = []
         with SystemDSContext() as sds:
-          bu_m = sds.from_numpy(self.bu)
-          bi_m = sds.from_numpy(self.bi)
-          pu_m = sds.from_numpy(self.pu)
-          qi_m = sds.from_numpy(self.qi)
-          input_m = sds.from_numpy(data)
-          num_input = input_m.nRow().compute()
+            bu_m = sds.from_numpy(self.bu)
+            bi_m = sds.from_numpy(self.bi)
+            pu_m = sds.from_numpy(self.pu)
+            qi_m = sds.from_numpy(self.qi)
+            input_m = sds.from_numpy(data)
+            num_input = input_m.nRow().compute()
 
-          # for i in tqdm(range(5)):
-          for i in tqdm(range(num_input)):
-            user_id = data[i,0]
-            product_id = data[i,1]
-            results.append((bu_m[user_id] + bi_m[product_id] + (pu_m[user_id] * qi_m[product_id]).sum()).compute())
+            # for i in tqdm(range(5)):
+            for i in tqdm(range(num_input)):
+                user_id = data[i, 0]
+                product_id = data[i, 1]
+                results.append(
+                    (
+                        bu_m[user_id]
+                        + bi_m[product_id]
+                        + (pu_m[user_id] * qi_m[product_id]).sum()
+                    ).compute()
+                )
         return results
 
 
@@ -4543,15 +4696,14 @@ class TPCxAIUsecase10PipelinePGML(Pipeline):
         super(TPCxAIUsecase10PipelinePGML, self).__init__(
             "tpcxai-usecase10-pgml", num_loop=num_loop
         )
-        #self.postgres_conn_param = utils.get_connectorx_configuration()
+        # self.postgres_conn_param = utils.get_connectorx_configuration()
         # TODO: init
         query_to_fetch_serving_data = """
         create or replace view uc10_serving_data as select transaction_id, ARRAY [(EXTRACT(HOUR FROM time) / 23)::real, (amount / transaction_limit)::real] AS features from tpcxai_financial_account_serving join tpcxai_financial_transactions_serving on fa_customer_sk=sender_id
         """
-        
+
         # Prepare serving data
         utils.execute_sql_query_via_psycopg2(query_to_fetch_serving_data)
-        
 
     def loading_meta_impl(self):
         pass
@@ -4566,15 +4718,13 @@ class TPCxAIUsecase10PipelinePGML(Pipeline):
 
     def model_inference_impl(self, data):
         # TODO model inference
-        #non-batch prediction query
-        #query_prediction = "SELECT transaction_id, pgml.predict('uc10_logistic_model', features) as prediction from uc10_serving_data;"
-        
-        #batch prediction query
+        # non-batch prediction query
+        # query_prediction = "SELECT transaction_id, pgml.predict('uc10_logistic_model', features) as prediction from uc10_serving_data;"
+
+        # batch prediction query
         query_prediction = "SELECT pgml.predict_batch('uc10_logistic_model', array_agg(features)) as prediction from uc10_serving_data;"
         result_df = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
         return result_df.values
-
-
 
 
 class TPCxAIUsecase8PipelinePGML(Pipeline):
@@ -4585,7 +4735,7 @@ class TPCxAIUsecase8PipelinePGML(Pipeline):
         super(TPCxAIUsecase8PipelinePGML, self).__init__(
             "tpcxai-usecase8-pgml", num_loop=num_loop
         )
-        #self.postgres_conn_param = utils.get_connectorx_configuration()
+        # self.postgres_conn_param = utils.get_connectorx_configuration()
         # TODO: init
         query_to_fetch_serving_data = """
         CREATE OR REPLACE VIEW uc8_serving_data as (
@@ -4605,10 +4755,9 @@ class TPCxAIUsecase8PipelinePGML(Pipeline):
                   ) as t
           );
         """
-        
+
         # Prepare serving data
         utils.execute_sql_query_via_psycopg2(query_to_fetch_serving_data)
-        
 
     def loading_meta_impl(self):
         pass
@@ -4623,12 +4772,10 @@ class TPCxAIUsecase8PipelinePGML(Pipeline):
 
     def model_inference_impl(self, data):
         # TODO model inference
-        #non-batch prediction query
-        #query_prediction = "SELECT o_order_id, pgml.predict('uc8_xgboost_model', features) as prediction from uc8_serving_data;"
-        
-        #batch prediction query
+        # non-batch prediction query
+        # query_prediction = "SELECT o_order_id, pgml.predict('uc8_xgboost_model', features) as prediction from uc8_serving_data;"
+
+        # batch prediction query
         query_prediction = "SELECT pgml.predict_batch('uc8_xgboost_model', array_agg(features)) as prediction from uc8_serving_data;"
         result_df = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
         return result_df.values
-
-        
