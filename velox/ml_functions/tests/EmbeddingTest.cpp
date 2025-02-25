@@ -1,23 +1,26 @@
-// TODO: Resolve dependencies
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #define EIGEN_USE_BLAS
 
 #include <folly/init/Init.h>
-#include <torch/torch.h>
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/ml_functions/BatchNorm.h"
-#include "velox/ml_functions/Concat.h"
-#include "velox/ml_functions/CosineSimilarity.h"
-#include "velox/ml_functions/DotProduct.h"
-#include "velox/ml_functions/Dropout.h"
-#include "velox/ml_functions/Embedding.h"
-#include "velox/ml_functions/Encoder.h"
-#include "velox/ml_functions/HuggingFaceServerless.h"
-#include "velox/ml_functions/PositionEncoding.h"
-#include "velox/ml_functions/SequencePooling.h"
+#include "velox/ml_functions/functions.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
-#include "velox/optimizer/Helper.h"
 #include "velox/parse/TypeResolver.h"
 
 using namespace facebook::velox;
@@ -26,7 +29,30 @@ using namespace facebook::velox::exec;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::core;
 
-// Utility function to generate random float/int values
+std::vector<facebook::velox::RowVectorPtr> splitRowVectorIntoBatches(
+    facebook::velox::RowVectorPtr inputVector,
+    size_t batchSize) {
+  // Total number of rows in the input RowVector
+  size_t totalRows = inputVector->size();
+
+  // Result vector to hold all the batches
+  std::vector<RowVectorPtr> batches;
+
+  // Split the input RowVector into batches
+  for (size_t start = 0; start < totalRows; start += batchSize) {
+    // Calculate the size of the current batch
+    size_t currentBatchSize = std::min(batchSize, totalRows - start);
+
+    // Slice the RowVector directly
+    RowVectorPtr batch = std::dynamic_pointer_cast<RowVector>(
+        inputVector->slice(start, currentBatchSize));
+
+    // Add the batch to the result
+    batches.push_back(batch);
+  }
+
+  return batches;
+}
 
 class EmbeddingTest : public HiveConnectorTestBase {
  public:
@@ -511,8 +537,7 @@ void EmbeddingTest::testCosineSimilarity() {
       {"in1", "in2", "id"},
       {indicesArrayVector1, indicesArrayVector2, indicesArrayVector3});
 
-  auto inputRowVectorBatches =
-      optimization::splitRowVectorIntoBatches(inputRowVector, 2);
+  auto inputRowVectorBatches = splitRowVectorIntoBatches(inputRowVector, 2);
   std::cout << "[INFO] Number of Batches: " << inputRowVectorBatches.size()
             << std::endl;
 

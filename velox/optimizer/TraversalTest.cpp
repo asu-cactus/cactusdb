@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 #include <folly/init/Init.h>
-#include <torch/torch.h>
 #include <random>
 #include <fcntl.h>
 #include <unistd.h>
@@ -43,7 +42,6 @@
 #include "velox/ml_functions/VeloxDecisionTree.h"
 #include "velox/core/ITypedExpr.h"
 
-using namespace std;
 using namespace ml;
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -227,7 +225,7 @@ public:
 
 	std::vector<std::string> pathVectors;
 
-        string forestFolderPath = "resources/model/fraud_xgboost_10_8";
+  std::string forestFolderPath = "resources/model/fraud_xgboost_10_8";
 
         Forest::vectorizeForestFolder(forestFolderPath, pathVectors);
 
@@ -303,7 +301,7 @@ public:
 
          if (myUDF) {
 
-              std::shared_ptr<ForestPrediction> myMLUDF = dynamic_pointer_cast<ForestPrediction>(myUDF);
+              std::shared_ptr<ForestPrediction> myMLUDF = std::dynamic_pointer_cast<ForestPrediction>(myUDF);
 
               if (myMLUDF) {
 
@@ -333,7 +331,7 @@ public:
 
          if (myUDF) {
 
-             std::shared_ptr<MLFunction> myMLUDF = dynamic_pointer_cast<MLFunction>(myUDF);
+             std::shared_ptr<MLFunction> myMLUDF = std::dynamic_pointer_cast<MLFunction>(myUDF);
 
              if (myMLUDF) {
 

@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
+# Copyright (c) 2025 ASU Cactus Lab.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,26 +13,23 @@
 # limitations under the License.
 
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
-# find_package(Torch REQUIRED)
 set(Torch_DIR "$HOME/libtorch")
 
-# set(Torch_DIR "/home/local/ASUAD/qlin36/libtorch/share/cmake/Torch")
 
 find_package(Torch REQUIRED)
+
+include_directories(/home/velox/third_party/tokenizers-cpp/include)
+include_directories(/home/velox/third_party/tokenizers-cpp/src)
+
+add_library(tokenizer_cpp STATIC IMPORTED)
+add_library(tokenizer_c STATIC IMPORTED)
+set_target_properties(tokenizer_cpp PROPERTIES IMPORTED_LOCATION /home/velox/third_party/tokenizers-cpp/example/build/tokenizers/libtokenizers_cpp.a)
+set_target_properties(tokenizer_c PROPERTIES IMPORTED_LOCATION /home/velox/third_party/tokenizers-cpp/example/build/tokenizers/libtokenizers_c.a)
+
+
 
 add_executable(nn_test tests/NNTests.cpp)
 target_link_libraries(
   nn_test
-  velox_aggregates
-  velox_type
-  velox_vector
-  velox_vector_test_lib
-  velox_exec
-  velox_exec_test_lib
-  velox_tpch_connector
-  velox_memory
-  velox_common_base 
-  velox_vector_fuzzer
-  openblas
-  ${TORCH_LIBRARIES}
+  ml_functions
 )

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,35 +14,18 @@
  * limitations under the License.
  */
 #include <folly/init/Init.h>
-#include <torch/torch.h>
-#include <random>
-#include <fcntl.h>
-#include <unistd.h>
-#include <iostream>
-#include <memory>
-#include <cmath>
-#include <stdlib.h>
-#include <string>
-#include <cstdlib>
-#include <cstring>
-#include <boost/interprocess/sync/interprocess_semaphore.hpp>
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/ml_functions/DecisionTree.h"
-#include "velox/ml_functions/XGBoost.h"
-#include "velox/ml_functions/tests/MLTestUtility.h"
+#include "velox/ml_functions/functions.h"
 #include "velox/parse/TypeResolver.h"
-#include "velox/ml_functions/VeloxDecisionTree.h"
 
-using namespace std;
 using namespace ml;
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::core;
-
 
 class XGBoostTest : public HiveConnectorTestBase {
  public:
@@ -56,12 +39,13 @@ class XGBoostTest : public HiveConnectorTestBase {
     // Register type resolver with DuckDB SQL parser.
     parse::registerTypeResolver();
     // HiveConnectorTestBase::SetUp();
-    //parquet::registerParquetReaderFactory();
+    // parquet::registerParquetReaderFactory();
 
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
+            ->newConnector(
+                kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
 
     // SetUp();
@@ -75,7 +59,11 @@ class XGBoostTest : public HiveConnectorTestBase {
 
   void testingForestPredictSmall(std::string forestPath);
 
-  ArrayVectorPtr parseCSVFile(VectorMaker & maker, std::string filePath, int numRows, int numCols);
+  ArrayVectorPtr parseCSVFile(
+      VectorMaker& maker,
+      std::string filePath,
+      int numRows,
+      int numCols);
 
   void SetUp() override {
     // TODO: not used for now
@@ -87,9 +75,7 @@ class XGBoostTest : public HiveConnectorTestBase {
     HiveConnectorTestBase::TearDown();
   }
 
-  void TestBody() override {
-  }
-
+  void TestBody() override {}
 
   static void waitForFinishedDrivers(const std::shared_ptr<exec::Task>& task) {
     while (!task->isFinished()) {
@@ -102,32 +88,29 @@ class XGBoostTest : public HiveConnectorTestBase {
           std::thread::hardware_concurrency())};
   std::shared_ptr<core::QueryCtx> queryCtx_{
       std::make_shared<core::QueryCtx>(executor_.get())};
-  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
+  std::shared_ptr<memory::MemoryPool> pool_{
+      memory::MemoryManager::getInstance()->addLeafPool()};
   VectorMaker maker{pool_.get()};
 };
 
 void XGBoostTest::registerFunctions(std::string forestPath) {
-
-  std::cout <<"To register function for XGBoostPrediction" << std::endl;
+  std::cout << "To register function for XGBoostPrediction" << std::endl;
 
   exec::registerVectorFunction(
       "xgboost_predict",
       XGBoostPrediction::signatures(),
       std::make_unique<XGBoostPrediction>(forestPath.c_str(), 28));
-
 }
 
-
 void XGBoostTest::testingForestPredictSmall(std::string forestPath) {
-
   int num_rows = 10;
   int num_cols = 28;
-  int size = num_rows*num_cols;
+  int size = num_rows * num_cols;
 
   std::vector<std::vector<float>> inputVectors;
-  for(int i=0; i < num_rows; i++){
+  for (int i = 0; i < num_rows; i++) {
     std::vector<float> inputVector;
-    for(int j=0; j < num_cols; j++){
+    for (int j = 0; j < num_cols; j++) {
       inputVector.push_back(-2.0);
     }
     inputVectors.push_back(inputVector);
@@ -139,84 +122,89 @@ void XGBoostTest::testingForestPredictSmall(std::string forestPath) {
   registerFunctions(forestPath);
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
-                  .values({inputRowVector})
-                  .project({"xgboost_predict(x)"})
-                              .planNode();
+                    .values({inputRowVector})
+                    .project({"xgboost_predict(x)"})
+                    .planNode();
 
-  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  auto results = exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
+  std::chrono::steady_clock::time_point begin =
+      std::chrono::steady_clock::now();
+  auto results =
+      exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  std::cout << "Time for XGBoost Prediction with Small Data (sec) = " <<  (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) /1000000.0 << std::endl;
+  std::cout << "Time for XGBoost Prediction with Small Data (sec) = "
+            << (std::chrono::duration_cast<std::chrono::microseconds>(
+                    end - begin)
+                    .count()) /
+          1000000.0
+            << std::endl;
   std::cout << "Results:" << results->toString() << std::endl;
   std::cout << results->toString(0, results->size()) << std::endl;
 }
 
+ArrayVectorPtr XGBoostTest::parseCSVFile(
+    VectorMaker& maker,
+    std::string filePath,
+    int numRows,
+    int numCols) {
+  int size = numRows * numCols;
 
-ArrayVectorPtr XGBoostTest::parseCSVFile(VectorMaker & maker, std::string filePath, int numRows, int numCols) {
+  std::cout << "Loading tensor of size " << size << " from " << filePath
+            << std::endl;
 
-    int size = numRows * numCols;
+  std::ifstream file(filePath.c_str());
 
-    std::cout << "Loading tensor of size " << size << " from " << filePath << std::endl;
+  std::vector<std::vector<float>> inputArrayVector;
 
-    std::ifstream file(filePath.c_str());
+  int index = 0;
 
-    std::vector<std::vector<float>> inputArrayVector;
+  std::string line;
 
-    
-    int index = 0;
-    
-    std::string line;
-    
-    while (numRows--) { // Read a line from the file
+  while (numRows--) { // Read a line from the file
 
-        std::vector<float> curRow(numCols);
-	
-        std::getline(file, line);
+    std::vector<float> curRow(numCols);
 
-        std::istringstream iss(line); // Create an input string stream from the line
+    std::getline(file, line);
 
-        std::string numberStr;
+    std::istringstream iss(line); // Create an input string stream from the line
 
-	int colIndex = 0;
+    std::string numberStr;
 
-        while (std::getline(iss, numberStr, ',')) { // Read each number separated by comma
-						    //
-            float number = std::stof(numberStr);    // Convert the string to float
+    int colIndex = 0;
 
-	    if (colIndex < numCols)					    
+    while (std::getline(
+        iss, numberStr, ',')) { // Read each number separated by comma
+                                //
+      float number = std::stof(numberStr); // Convert the string to float
 
-                curRow[colIndex] = number;
+      if (colIndex < numCols)
 
-	    colIndex ++;
+        curRow[colIndex] = number;
 
-        }
-
-	inputArrayVector.push_back(curRow);
+      colIndex++;
     }
 
-    file.close();
+    inputArrayVector.push_back(curRow);
+  }
 
-    ArrayVectorPtr tensor = maker.arrayVector<float>(inputArrayVector);
-    
-    return tensor;
+  file.close();
 
-} 
+  ArrayVectorPtr tensor = maker.arrayVector<float>(inputArrayVector);
 
+  return tensor;
+}
 
 void XGBoostTest::run() {
-
-  string forestPath = "resources/model/fraud_xgboost_10_8.json";
+  std::string forestPath = "resources/model/fraud_xgboost_10_8.json";
 
   std::ifstream file(forestPath.c_str());
 
   if (file.good()) {
-
-      testingForestPredictSmall(forestPath);
+    testingForestPredictSmall(forestPath);
   } else {
-  
-      std::cout << "Please make sure you run the code from the velox root directory. (e.g., ./_build/release/velox/ml_functions/xgboost_test)" << std::endl;
-      exit(1);
-
+    std::cout
+        << "Please make sure you run the code from the velox root directory. (e.g., ./_build/release/velox/ml_functions/xgboost_test)"
+        << std::endl;
+    exit(1);
   }
 }
 

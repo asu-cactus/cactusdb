@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include "BaseFunction.h"
 #include "velox/common/base/VeloxException.h"
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
@@ -31,11 +32,9 @@
 #include "velox/functions/Registerer.h"
 #include "velox/functions/prestosql/tests/utils/FunctionBaseTest.h"
 #include "velox/ml_functions/DecisionTree.h"
-#include "velox/ml_functions/functions.h"
 #include "velox/type/OpaqueCustomTypes.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
-using namespace std;
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
@@ -65,7 +64,6 @@ class TreeType : public OpaqueType {
     return "tree_type";
   }
 };
-
 
 struct TreeT {
   using type = std::shared_ptr<Tree>;

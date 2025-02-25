@@ -1,9 +1,24 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
-#include <iostream>
-#include "functions.h"
 #include <Eigen/Dense>
-#include <filesystem>
 #include <cmath>
+#include <filesystem>
+#include <iostream>
+#include "BaseFunction.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
@@ -19,8 +34,7 @@ using namespace facebook::velox::memory;
 
 class ChangeRating : public MLFunction {
  public:
-  ChangeRating() {
-  }
+  ChangeRating() {}
 
   void apply(
       const SelectivityVector& rows,
@@ -28,7 +42,6 @@ class ChangeRating : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     auto input = args[0];
@@ -42,7 +55,7 @@ class ChangeRating : public MLFunction {
     std::vector<int> result(rows.size());
 
     for (int i = 0; i < inputSize; i++) {
-        result[i] = (inputValues[i] >= 3) ? 1 : 0;      
+      result[i] = (inputValues[i] >= 3) ? 1 : 0;
     }
 
     VectorMaker maker{context.pool()};
@@ -69,14 +82,12 @@ class ChangeRating : public MLFunction {
     //
   }
 
-
  private:
 };
 
 class ConvertToIntArray : public MLFunction {
  public:
-  ConvertToIntArray() {
-  }
+  ConvertToIntArray() {}
 
   void apply(
       const SelectivityVector& rows,
@@ -84,7 +95,6 @@ class ConvertToIntArray : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     auto input = args[0];
@@ -95,7 +105,7 @@ class ConvertToIntArray : public MLFunction {
     std::vector<std::vector<int>> result(rows.size(), std::vector<int>(1));
 
     for (int i = 0; i < inputSize; i++) {
-        result[i][0] = inputValues[i];
+      result[i][0] = inputValues[i];
     }
 
     VectorMaker maker{context.pool()};
@@ -122,14 +132,12 @@ class ConvertToIntArray : public MLFunction {
     //
   }
 
-
  private:
 };
 
 class ConvertToFloatArray : public MLFunction {
  public:
-  ConvertToFloatArray() {
-  }
+  ConvertToFloatArray() {}
 
   void apply(
       const SelectivityVector& rows,
@@ -137,18 +145,18 @@ class ConvertToFloatArray : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     auto input = args[0];
-    float* inputValues = input->as<FlatVector<float>>()->values()->asMutable<float>();
+    float* inputValues =
+        input->as<FlatVector<float>>()->values()->asMutable<float>();
 
     int inputSize = rows.size();
 
     std::vector<std::vector<float>> result(rows.size(), std::vector<float>(1));
 
     for (int i = 0; i < inputSize; i++) {
-        result[i][0] = inputValues[i];
+      result[i][0] = inputValues[i];
     }
 
     VectorMaker maker{context.pool()};
@@ -175,14 +183,12 @@ class ConvertToFloatArray : public MLFunction {
     //
   }
 
-
  private:
 };
 
 class ConvertDoubleToFloatArray : public MLFunction {
  public:
-  ConvertDoubleToFloatArray() {
-  }
+  ConvertDoubleToFloatArray() {}
 
   void apply(
       const SelectivityVector& rows,
@@ -190,18 +196,18 @@ class ConvertDoubleToFloatArray : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     auto input = args[0];
-    double* inputValues = input->as<FlatVector<double>>()->values()->asMutable<double>();
+    double* inputValues =
+        input->as<FlatVector<double>>()->values()->asMutable<double>();
 
     int inputSize = rows.size();
 
     std::vector<std::vector<float>> result(rows.size(), std::vector<float>(1));
 
     for (int i = 0; i < inputSize; i++) {
-        result[i][0] = inputValues[i];
+      result[i][0] = inputValues[i];
     }
 
     VectorMaker maker{context.pool()};
@@ -228,14 +234,12 @@ class ConvertDoubleToFloatArray : public MLFunction {
     //
   }
 
-
  private:
 };
 
 class ConvertDoubleArrayToFloatArray : public MLFunction {
  public:
-  ConvertDoubleArrayToFloatArray() {
-  }
+  ConvertDoubleArrayToFloatArray() {}
 
   void apply(
       const SelectivityVector& rows,
@@ -243,7 +247,6 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     // Decoder is required to handle address error, reference code:
@@ -254,34 +257,39 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
     auto decodedInputArray = inputHolder.get();
     auto baseInputArray =
         decodedInputArray->base()->as<ArrayVector>()->elements();
-    
+
     double* inputValues = baseInputArray->values()->asMutable<double>();
 
     // There is a tricky thing here, rows.size() return the number of raw inputs
-    // while rows.countSelected() return the number of selected rows (after filtering)
-    // the second one should be used for computation and the numElements is mapped to the
-    // rows.countSelected() instead of rows.size(). If using the following code, the size
-    // of the result vector should be mapped to the rows.size() otherwise the returned 
-    // vector won't be aligned with the selected inputs. Another workaround is to use
-    // rows.applyToSelected() to iterate over the selected rows for computation, which is
-    // temporarily marked as #TODO.
+    // while rows.countSelected() return the number of selected rows (after
+    // filtering) the second one should be used for computation and the
+    // numElements is mapped to the rows.countSelected() instead of rows.size().
+    // If using the following code, the size of the result vector should be
+    // mapped to the rows.size() otherwise the returned vector won't be aligned
+    // with the selected inputs. Another workaround is to use
+    // rows.applyToSelected() to iterate over the selected rows for computation,
+    // which is temporarily marked as #TODO.
 
     int numRawInput = rows.size();
     int numInput = rows.countSelected();
     int numElements = baseInputArray->size();
     int sizeOfArray = numElements / numInput;
 
-    std::vector<std::vector<float>> result(numRawInput, std::vector<float>(sizeOfArray));
+    std::vector<std::vector<float>> result(
+        numRawInput, std::vector<float>(sizeOfArray));
     int processedIndex = 0;
     for (int i = 0; i < numRawInput; i++) {
       if (!rows.isValid(i)) {
         // Skip invalid rows
         continue;
       }
-      // inputValues only has the length equal to the number of selected rows, so we another
-      // index to access the inputValues, which is processedIndex
-      std::transform(inputValues + processedIndex * sizeOfArray, inputValues + (processedIndex + 1) * sizeOfArray, result[i].begin(),
-                       [](double val) { return static_cast<float>(val); });
+      // inputValues only has the length equal to the number of selected rows,
+      // so we another index to access the inputValues, which is processedIndex
+      std::transform(
+          inputValues + processedIndex * sizeOfArray,
+          inputValues + (processedIndex + 1) * sizeOfArray,
+          result[i].begin(),
+          [](double val) { return static_cast<float>(val); });
       processedIndex++;
     }
 
@@ -305,7 +313,7 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
           toSourceRow[offset] = row;
 
           offset += numArgs;
-    }); 
+    });
     */
   }
 
@@ -329,10 +337,8 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
     //
   }
 
-
  private:
 };
-
 
 std::string LoadBytesFromFile(const std::string& path) {
   std::ifstream fs(path, std::ios::in | std::ios::binary);
@@ -350,9 +356,9 @@ std::string LoadBytesFromFile(const std::string& path) {
 }
 
 bool stringToBool(const std::string& str) {
-    std::string lowerStr = str;
-    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
-    return (lowerStr == "true");
+  std::string lowerStr = str;
+  std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
+  return (lowerStr == "true");
 }
 
 std::string getEnvVar(std::string const& key) {
@@ -374,40 +380,43 @@ void readDataStats(const std::string& path, int& numRows, int& numCols) {
 }
 
 template <typename T>
-T* flattenVectorToPointer(const std::vector<std::vector<T>>& vec2D, size_t& totalSize) {
-    // Calculate total size in one pass
-    totalSize = 0;
-    for (const auto& row : vec2D) {
-        totalSize += row.size();
-    }
+T* flattenVectorToPointer(
+    const std::vector<std::vector<T>>& vec2D,
+    size_t& totalSize) {
+  // Calculate total size in one pass
+  totalSize = 0;
+  for (const auto& row : vec2D) {
+    totalSize += row.size();
+  }
 
-    // Allocate memory for the flattened array
-    T* flatArray = new T[totalSize];
+  // Allocate memory for the flattened array
+  T* flatArray = new T[totalSize];
 
-    // Flatten the 2D vector into the 1D array
-    T* ptr = flatArray;
-    for (const auto& row : vec2D) {
-        std::copy(row.begin(), row.end(), ptr);
-        ptr += row.size();
-    }
+  // Flatten the 2D vector into the 1D array
+  T* ptr = flatArray;
+  for (const auto& row : vec2D) {
+    std::copy(row.begin(), row.end(), ptr);
+    ptr += row.size();
+  }
 
-    return flatArray;
+  return flatArray;
 }
 
 // Overloaded version without totalSize (default)
 template <typename T>
 T* flattenVectorToPointer(const std::vector<std::vector<T>>& vec2D) {
-    size_t totalSize = 0;  // A local variable to hold the size if not provided by the caller
-    return flattenVectorToPointer(vec2D, totalSize);
+  size_t totalSize =
+      0; // A local variable to hold the size if not provided by the caller
+  return flattenVectorToPointer(vec2D, totalSize);
 }
 int countWords(const std::string& input) {
-    std::istringstream stream(input);
-    std::string word;
-    int count = 0;
+  std::istringstream stream(input);
+  std::string word;
+  int count = 0;
 
-    while (stream >> word) {
-        ++count;
-    }
+  while (stream >> word) {
+    ++count;
+  }
 
-    return count;
+  return count;
 }

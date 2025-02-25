@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,14 @@
 #pragma once
 #include <map>
 #include <string>
+#include "velox/core/PlanNode.h"
 #include "velox/cost_model/Source.h"
+#include "velox/dwio/common/Options.h"
+#include "velox/exec/tests/utils/TempFilePath.h"
+#include "velox/type/Type.h"
 
+using namespace facebook::velox;
+using namespace facebook::velox::exec::test;
 
 // Function to split a string based on a delimiter
 std::vector<std::string> splitString(const std::string& str, char delimiter) {
@@ -644,7 +650,8 @@ class CataLog {
         columnType = "Numerical";
       } else if (child->typeKind() == TypeKind::VARCHAR) {
         // Handle VARCHAR type
-        if (columnName.find("title") == std::string::npos && columnName.find("overview") == std::string::npos) {
+        if (columnName.find("title") == std::string::npos &&
+            columnName.find("overview") == std::string::npos) {
           // skip title columns
           auto stringVector = child->asFlatVector<StringView>();
           processCategoricalColumn(
