@@ -1,61 +1,33 @@
-<img src="static/logo.svg" alt="Velox logo" width="50%" align="center" />
+# CactusDB Early Release for VLDB Submission
 
-Velox is a C++ database acceleration library which provides reusable,
-extensible, and high-performance data processing components. These components
-can be reused to build compute engines focused on different analytical
-workloads, including batch, interactive, stream processing, and AI/ML.
-Velox was created by Facebook and it is currently developed in partnership with
-Intel, ByteDance, and Ahana.
+Note: This is an early release of the CactusDB codebase for VLDB reviewers. An official release will be available soon.
 
-In common usage scenarios, Velox takes a fully optimized query plan as input
-and performs the described computation. Considering Velox does not provide a
-SQL parser, a dataframe layer, or a query optimizer, it is usually not meant
-to be used directly by end-users; rather, it is mostly used by developers
-integrating and optimizing their compute engines.
+CactusDB is UDF-centric database, built-on top of Meta's high performance database engine, [Velox](https://github.com/facebookincubator/velox). It enables the co-optimization of SQL query nested with model inference.
 
-Velox provides the following high-level components:
+## Getting Started
 
-* **Type**: a generic typing system that supports scalar, complex, and nested
-  types, such as structs, maps, arrays, tensors, etc.
-* **Vector**: an [Arrow-compatible columnar memory layout
-  module](https://facebookincubator.github.io/velox/develop/vectors.html),
-  which provides multiple encodings, such as Flat, Dictionary, Constant,
-  Sequence/RLE, and Bias, in addition to a lazy materialization pattern and
-  support for out-of-order writes.
-* **Expression Eval**: a [fully vectorized expression evaluation
-  engine](https://facebookincubator.github.io/velox/develop/expression-evaluation.html)
-  that allows expressions to be efficiently executed on top of Vector/Arrow
-  encoded data.
-* **Function Packages**: sets of vectorized function implementations following
-  the Presto and Spark semantic.
-* **Operators**: implementation of common data processing operators such as
-  scans, projection, filtering, groupBy, orderBy, shuffle, [hash
-  join](https://facebookincubator.github.io/velox/develop/joins.html), unnest,
-  and more.
-* **I/O**: a generic connector interface that allows different file formats
-  (ORC/DWRF and Parquet) and storage adapters (S3, HDFS, local files) to be
-  used.
-* **Network Serializers**: an interface where different wire protocols can be
-  implemented, used for network communication, supporting
-  [PrestoPage](https://prestodb.io/docs/current/develop/serialized-page.html)
-  and Spark's UnsafeRow.
-* **Resource Management**: a collection of primitives for handling
-  computational resources, such as [memory
-  arenas](https://facebookincubator.github.io/velox/develop/arena.html) and
-  buffer management, tasks, drivers, and thread pools for CPU and thread
-  execution, spilling, and caching.
+### Environment
 
-Velox is extensible and allows developers to define their own engine-specific
-specializations, including:
+We recommend using the provided Dockerfile to set up the environment. See the[Docker setup guide](/docker-doc/README.md) for more details. Alternatively, you can manually install the dependecies by following the instructions [here](#TODO).We support and test the CactusDB on Linux(x86) and MacOS(Apple Silcion). CactusDB has been tested and supports Linux (x86) and macOS (Apple Silicon). For Windows users, we recommend using Docker with Windows Subsystem for Linux (WSL).
 
-1. Custom types
-2. [Simple and vectorized functions](https://facebookincubator.github.io/velox/develop/scalar-functions.html)
-3. [Aggregate functions](https://facebookincubator.github.io/velox/develop/aggregate-functions.html)
-4. Operators
-5. File formats
-6. Storage adapters
-7. Network serializers
+### Data and Models
 
+Run the following commands to download the datasets and models used in our paper. The resources will be extracted into the `resources` directory.
+
+```bash
+#TODO
+
+```
+
+## Run Baselines
+
+<!-- TODO -->
+
+## Run Ours
+
+<!-- TODO -->
+
+<!-- 
 ## Examples
 
 Examples of extensibility and integration with different component APIs [can be
@@ -170,4 +142,4 @@ Please reach out to **velox@meta.com** to get access to Velox Slack Channel.
 ## License
 
 Velox is licensed under the Apache 2.0 License. A copy of the license
-[can be found here.](LICENSE)
+[can be found here.](LICENSE) -->
