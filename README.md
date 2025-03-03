@@ -6,9 +6,47 @@ CactusDB is UDF-centric database, built-on top of Meta's high performance databa
 
 ## Getting Started
 
-### Environment
+### Dependencies
 
-We recommend using the provided Dockerfile to set up the environment. See the[Docker setup guide](/docker-doc/README.md) for more details. Alternatively, you can manually install the dependecies by following the instructions [here](#TODO).We support and test the CactusDB on Linux(x86) and MacOS(Apple Silcion). CactusDB has been tested and supports Linux (x86) and macOS (Apple Silicon). For Windows users, we recommend using Docker with Windows Subsystem for Linux (WSL).
+The following dependencies are required to run the CactusDB and other baselines.
+
+```
+LibTorch (LibTorch_CUDA)
+PostgreSQL
+EvaDB
+tokenizers-cpp
+Spark
+Eigen
+Catch2
+h5cpp
+cpr
+xgboost
+hadoop
+Madlib
+PostgresML
+```
+
+To manually install the dependencies, please refer to [**this**](/INSTALL_DEPENDENCIES.md) file for more details.
+
+### Set-Up Through Docker
+
+We recommend using the provided Dockerfile to set up the environment. See the[Docker setup guide](/docker-doc/README.md) for more details. Alternatively, you can manually install the dependecies by following the instructions [here](/INSTALL_DEPENDENCIES.md).We support and test the CactusDB on Linux(x86) and MacOS(Apple Silcion). CactusDB has been tested and supports Linux (x86) and macOS (Apple Silicon). For Windows users, we recommend using Docker with Windows Subsystem for Linux (WSL).
+
+### Compile CactusDB
+After configuraing all the dependencies, you can compile the CactusDB by following the commands:
+
+```bash
+# Run Velox setup-ubuntu to install other dependencies
+./scripts/setup-ubuntu.sh
+# Compile Velox in release mode
+make release
+# Install Python libraries for baselines
+pip install -r db-ml/baseline/requirements.txt
+# Compile CactusDB at the root folder
+make release
+```
+
+**Note:** If you are using an ARM chip, you need to set `CPU_TARGET="aarch64"` before running setup-ubuntu.sh.
 
 ### Data and Models
 
@@ -24,6 +62,23 @@ Run the following commands to download the datasets and models used in our paper
 <!-- TODO -->
 
 ## Run Ours
+
+
+
+
+## FAQ
+
+- If Spark/Hadoop is not started, run the following commands:
+```bash
+service ssh start
+start-all.sh
+```
+
+- The compilation is killed and used all the resources:
+Please try to reduce the number of threads if the compilation takes all the memory and gets killed.
+```bash
+export NUM_THREADS=4
+```
 
 <!-- TODO -->
 

@@ -8,15 +8,13 @@ This file provides detailed instructions for installing the dependencies manuall
 - [EvaDB](#evadb)
 - [Spark](#spark)
 - [Eigen](#eigen)
-- [Catch2 \&\& H5CPP](#catch2--h5cpp)
+- [Catch2 \& H5CPP](#catch2--h5cpp)
 - [CPR (C++ HTTP Requests Library)](#cpr-c-http-requests-library)
 - [DuckDB](#duckdb)
 - [Hadoop](#hadoop)
 - [Madlib](#madlib)
 - [PostgresML](#postgresml)
 - [tokenizers-cpp](#tokenizers-cpp)
-
-
 
 ### PostgreSQL
 
@@ -50,14 +48,13 @@ git clone --recursive https://github.com/dmlc/xgboost \
     && cd build \
     && cmake .. \
     && make install .
-
 ```
 
 ### LibTorch C APIs
 
 #### CPU-only Installation
 
-Download the pre-build file from torch website and set the corresponding environment parameter.
+Download the pre-built file from the Torch website and set the corresponding environment parameter.
 
 ```bash
 wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.5.1%2Bcpu.zip
@@ -65,13 +62,13 @@ unzip libtorch-cxx11-abi-shared-with-deps-2.5.1+cpu.zip
 export Torch_DIR=PATH_TO_LIBTORCH_ROOT
 ```
 
-Note: if you are run arm-based OS, it is recommend to build library from source hence we have not tested on the pre-build files for arm-based instances. You can try following command to build the project:
+Note: If you are running an ARM-based OS, it is recommended to build the library from source as we have not tested the pre-built files for ARM-based instances. You can try the following command to build the project:
 
 ```bash
 git clone https://github.com/pytorch/pytorch.git
 cd pytorch
 python3 setup.py install
-# modify the path correspondingly
+# Modify the path correspondingly
 export Caffe2_DIR=/usr/local/lib/python3.10/dist-packages/torch/share/cmake/Caffe2
 export Torch_DIR=/usr/local/lib/python3.10/dist-packages/torch/share/cmake/Torch
 ```
@@ -88,7 +85,7 @@ export Torch_DIR=PATH_TO_LIBTORCH_ROOT
 
 ### EvaDB
 
-EvaDB itself does not natively support datatype: `ARRAY` in the PostgreSQL. We provide a patch to support that, please install it by following the instructions:
+EvaDB itself does not natively support the datatype `ARRAY` in PostgreSQL. We provide a patch to support that, please install it by following the instructions:
 
 ```bash
 git clone https://github.com/lixi-zhou/evadb.git
@@ -109,7 +106,7 @@ pip install pyspark
 
 ### Eigen
 
-Eigen can be installed directly through `apt-get update && apt-get install -y libeigen3-dev`. While we also find that the Eigen library may needs to be manually linked to the include folder through the following command:
+Eigen can be installed directly through `apt-get update && apt-get install -y libeigen3-dev`. However, the Eigen library may need to be manually linked to the include folder through the following command:
 
 ```bash
 cd /usr/include
@@ -117,12 +114,12 @@ ln -sf eigen3/Eigen Eigen
 ln -sf eigen3/unsupported unsupported
 ```
 
-### Catch2 && H5CPP
+### Catch2 & H5CPP
 
-Catch2 is the dependency for the h5cpp, a library to load H5 file into C+ program.
+Catch2 is a dependency for H5CPP, a library to load H5 files into C++ programs.
 
 ```bash
-# install catch2
+# Install Catch2
 git clone https://github.com/catchorg/Catch2.git \
   && cd Catch2 \
   && cmake -Bbuild -H. -DBUILD_TESTING=OFF \
@@ -132,13 +129,13 @@ git clone https://github.com/ess-dmsc/h5cpp.git \
   && cd h5cpp \
   && mkdir build \
   && cd build \
-  && cmake .. -DH5CPP_CONAN=DISABLE\
+  && cmake .. -DH5CPP_CONAN=DISABLE \
   && make install
 ```
 
 ### CPR (C++ HTTP Requests Library)
 
-Cpr library is used for RESTFul API request.
+CPR library is used for RESTful API requests.
 
 ```bash
 git clone https://github.com/libcpr/cpr.git \
@@ -155,7 +152,7 @@ wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
     && cd duckdb-0.8.1 \
     && mkdir build && cd build \
     && CMAKE_FLAGS="-DBUILD_UNITTESTS=OFF -DENABLE_SANITIZER=OFF -DENABLE_UBSAN=OFF -DBUILD_SHELL=OFF -DEXPORT_DLL_SYMBOLS=OFF" \
-    && cmake ${CMAKE_FLAGS}  .. \
+    && cmake ${CMAKE_FLAGS} .. \
     && make install -j 16
 ```
 
@@ -200,7 +197,7 @@ $HADOOP_HOME/bin/hdfs namenode -format
 
 ### Madlib
 
-The latest Madlib has the issues of xgboost model inference and loading tensorflow model. We provide a patch for that and can be installed through the following commands:
+The latest Madlib has issues with XGBoost model inference and loading TensorFlow models. We provide a patch for that and it can be installed through the following commands:
 
 ```bash
 apt-get install postgresql-plpython3-14 -y
@@ -216,26 +213,26 @@ export PATH=$PATH:/usr/lib/postgresql/14/bin
 
 ### PostgresML
 
-PostgresML can be installed from source code or using apt-get in Ubuntu.
+PostgresML can be installed from source code or using `apt-get` in Ubuntu.
 
 https://postgresml.org/docs/open-source/pgml/developers/self-hosting/building-from-source
 
 ```bash
 cargo install cargo-pgrx --version 0.12.9
 cargo pgrx install
-
 ```
 
-Note: Need to add the followign to `/etc/postgresql/14/main/postgresql.conf`
+Note: Add the following to `/etc/postgresql/14/main/postgresql.conf`
 
 `shared_preload_libraries = 'pgml'`
 
-if pgml is not found, needs to set the absolute path to the pgml.so, for example:
+If `pgml` is not found, set the absolute path to the `pgml.so`, for example:
 `shared_preload_libraries = '/usr/lib/postgresql/14/lib/pgml.so'`.
 
 https://postgresml.org/docs/open-source/pgml/developers/installation#dependencies
 
 ### tokenizers-cpp
+
 Due to known issues with incorporating the linked libraries into our CMakeLists file, we are still investigating the problem. Currently, we are using the built shared objects for our program.
 
 ```bash
