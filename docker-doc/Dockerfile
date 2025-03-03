@@ -52,6 +52,8 @@ RUN apt-get update && apt-get install -y \
     catch2 \
     openjdk-11-jdk \
     openssh-server \
+    libomp-dev \
+    lld \
     openssh-client && \
     pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2 && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -71,11 +73,6 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | s
     && sudo apt update \
     && sudo apt install gh -y
 ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-# TODO: add support of CUDA, still some issues there
-# RUN wget https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run
-# RUN chmod +x ./cuda_11.8.0_520.61.05_linux.run && ./cuda_11.8.0_520.61.05_linux.run --silent
-# # install cudnn
-# RUN apt-get install -y libnccl3-dev
 
 # set-up catch2 (required for h5cpp)
 WORKDIR /home
@@ -111,8 +108,8 @@ RUN echo "service postgresql start" >> /etc/bash.bashrc
 
 
 WORKDIR /home
-RUN wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.0.1%2Bcpu.zip
-RUN unzip libtorch-cxx11-abi-shared-with-deps-2.0.1+cpu.zip
+RUN wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.5.1%2Bcpu.zip
+RUN unzip libtorch-cxx11-abi-shared-with-deps-2.5.1+cpu.zip
 ENV Torch_DIR=/home/libtorch
 # set up evadb
 WORKDIR /home
@@ -204,7 +201,7 @@ RUN git remote add upstream https://github.com/facebookincubator/velox.git
 RUN git remote set-url --push upstream no_push
 
 # set num threads for compilation
-ENV NUM_THREADS=16
+ENV NUM_THREADS=8
 
 # download data
 # RUN mkdir data
