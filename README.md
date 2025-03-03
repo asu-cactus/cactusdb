@@ -1,39 +1,38 @@
 # CactusDB Early Release for VLDB Submission
 
-Note: This is an early release of the CactusDB codebase for VLDB reviewers. An official release will be available soon.
+**Note:** This is an early release of the CactusDB codebase for VLDB reviewers. An official release will be available soon.
 
-CactusDB is UDF-centric database, built-on top of Meta's high performance database engine, [Velox](https://github.com/facebookincubator/velox). It enables the co-optimization of SQL query nested with model inference.
+CactusDB is a UDF-centric database built on top of Meta's high-performance database engine, [Velox](https://github.com/facebookincubator/velox). It enables the co-optimization of SQL queries nested with model inference.
 
 ## Getting Started
 
 ### Dependencies
 
-The following dependencies are required to run the CactusDB and other baselines.
+The following dependencies are required to run CactusDB and other baselines:
 
-```
-LibTorch (LibTorch_CUDA)
-PostgreSQL
-EvaDB
-tokenizers-cpp
-Spark
-Eigen
-Catch2
-h5cpp
-cpr
-xgboost
-hadoop
-Madlib
-PostgresML
-```
+- LibTorch (LibTorch_CUDA)
+- PostgreSQL
+- EvaDB
+- tokenizers-cpp
+- Spark
+- Eigen
+- Catch2
+- h5cpp
+- cpr
+- xgboost
+- hadoop
+- Madlib
+- PostgresML
 
-To manually install the dependencies, please refer to [**this**](/INSTALL_DEPENDENCIES.md) file for more details.
+To manually install the dependencies, please refer to [this file](/INSTALL_DEPENDENCIES.md) for more details.
 
 ### Set-Up Through Docker
 
-We recommend using the provided Dockerfile to set up the environment. See the[Docker setup guide](/docker-doc/README.md) for more details. Alternatively, you can manually install the dependecies by following the instructions [here](/INSTALL_DEPENDENCIES.md).We support and test the CactusDB on Linux(x86) and MacOS(Apple Silcion). CactusDB has been tested and supports Linux (x86) and macOS (Apple Silicon). For Windows users, we recommend using Docker with Windows Subsystem for Linux (WSL).
+We recommend using the provided Dockerfile to set up the environment. See the [Docker setup guide](/docker-doc/README.md) for more details. Alternatively, you can manually install the dependencies by following the instructions [here](/INSTALL_DEPENDENCIES.md). CactusDB has been tested and supports Linux (x86) and macOS (Apple Silicon). For Windows users, we recommend using Docker with Windows Subsystem for Linux (WSL).
 
 ### Compile CactusDB
-After configuraing all the dependencies, you can compile the CactusDB by following the commands:
+
+After configuring all the dependencies, you can compile CactusDB by following these commands:
 
 ```bash
 # Run Velox setup-ubuntu to install other dependencies
@@ -53,32 +52,30 @@ make release
 Run the following commands to download the datasets and models used in our paper. The resources will be extracted into the `resources` directory.
 
 ```bash
-#TODO
-
+# TODO: Add commands to download datasets and models
 ```
 
 ## Run Baselines
 
-<!-- TODO -->
+<!-- TODO: Add instructions to run baselines -->
 
 ## Run Ours
 
-
-
+<!-- TODO: Add instructions to run your specific implementation -->
 
 ## FAQ
 
-- If Spark/Hadoop is not started, run the following commands:
-```bash
-service ssh start
-start-all.sh
-```
+- **If Spark/Hadoop is not started, run the following commands:**
+  ```bash
+  service ssh start
+  start-all.sh
+  ```
 
-- The compilation is killed and used all the resources:
-Please try to reduce the number of threads if the compilation takes all the memory and gets killed.
-```bash
-export NUM_THREADS=4
-```
+- **The compilation is killed and used all the resources:**
+  Please try to reduce the number of threads if the compilation takes all the memory and gets killed.
+  ```bash
+  export NUM_THREADS=4
+  ```
 
 <!-- TODO -->
 
