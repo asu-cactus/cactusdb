@@ -4286,18 +4286,29 @@ class TPCxAIUsecase07MLPipelineSystemDS(Pipeline):
             qi_m = sds.from_numpy(self.qi)
             input_m = sds.from_numpy(data)
             num_input = input_m.nRow().compute()
+            num_user = len(self.bu)
+            num_product = len(self.bi)
 
             # for i in tqdm(range(5)):
             for i in tqdm(range(num_input)):
-                user_id = data[i, 0]
-                product_id = data[i, 1]
-                results.append(
-                    (
-                        bu_m[user_id]
-                        + bi_m[product_id]
-                        + (pu_m[user_id] * qi_m[product_id]).sum()
-                    ).compute()
-                )
+                try:
+                    user_id = data[i, 0]
+                    product_id = data[i, 1]
+                    if user_id >= num_user or product_id >= num_product:
+                        results.append(0)
+                    else:
+                        results.append(
+                            (
+                                bu_m[user_id]
+                                + bi_m[product_id]
+                                + (pu_m[user_id] * qi_m[product_id]).sum()
+                            ).compute()
+                        )
+                except Exception as e:
+                    print(
+                        f"Error processing user_id: {user_id}, product_id: {product_id}. Error: {e}"
+                    )
+                    results.append(0)
         return results
 
 
@@ -4728,6 +4739,14 @@ class TPCxAIUsecase10PipelinePGML(Pipeline):
 
 
 class TPCxAIUsecase8PipelinePGML(Pipeline):
+    def __del__(self):
+        utils.execute_sql_query_via_psycopg2(
+            """
+          DROP VIEW IF EXISTS uc8_serving_data CASCADE;
+        
+        """
+        )
+
     def __init__(
         self,
         num_loop=10,
@@ -4763,11 +4782,9 @@ class TPCxAIUsecase8PipelinePGML(Pipeline):
         pass
 
     def data_loading_impl(self, batch_size):
-        # TODO: implement data loading
         return None
 
     def data_processing_impl(self, data):
-        # TODO data processing
         return data
 
     def model_inference_impl(self, data):
