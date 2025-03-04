@@ -4,6 +4,19 @@
 
 CactusDB is a UDF-centric database built on top of Meta's high-performance database engine, [Velox](https://github.com/facebookincubator/velox). It enables the co-optimization of SQL queries nested with model inference.
 
+- [CactusDB Early Release for VLDB Submission](#cactusdb-early-release-for-vldb-submission)
+  - [Getting Started](#getting-started)
+    - [Dependencies](#dependencies)
+    - [Set-Up Through Docker](#set-up-through-docker)
+    - [Compile CactusDB](#compile-cactusdb)
+    - [Data and Models](#data-and-models)
+  - [Run Baselines](#run-baselines)
+  - [Run Ours](#run-ours)
+  - [Development Guide](#development-guide)
+  - [FAQ](#faq)
+
+
+
 ## Getting Started
 
 ### Dependencies
@@ -52,16 +65,35 @@ make release
 Run the following commands to download the datasets and models used in our paper. The resources will be extracted into the `resources` directory.
 
 ```bash
-# TODO: Add commands to download datasets and models
+pip install gdown -U
+gdown 1Fpb_jGpkxb7d5ZBC8Uqnq25uEgfOc7yV
+unzip resources.zip -d resources
 ```
 
 ## Run Baselines
+
+To run the baseline models, follow these steps:
+
+1. Ensure all dependencies are installed as per the [installation guide](/INSTALL_DEPENDENCIES.md).
+2. Download the datasets and models as described above.
+3. Navigate to the `db-ml/baseline` directory.
+4. Execute the following command to run the baselines:
+
+```bash
+python run_baselines.py
+```
+
+For more detailed instructions, refer to the [baseline README](/db-ml/baseline/README.md).
 
 <!-- TODO: Add instructions to run baselines -->
 
 ## Run Ours
 
 <!-- TODO: Add instructions to run your specific implementation -->
+
+## Development Guide
+
+Please check [this file](/DEVELOP_GUIDE.md) to see the supported ML kernels and how to implement the pipeline within CactusDB.
 
 ## FAQ
 

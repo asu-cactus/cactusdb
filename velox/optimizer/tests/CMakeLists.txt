@@ -29,25 +29,20 @@ add_library(tokenizer_c STATIC IMPORTED)
 set_target_properties(tokenizer_cpp PROPERTIES IMPORTED_LOCATION /home/velox/third_party/tokenizers-cpp/example/build/tokenizers/libtokenizers_cpp.a)
 set_target_properties(tokenizer_c PROPERTIES IMPORTED_LOCATION /home/velox/third_party/tokenizers-cpp/example/build/tokenizers/libtokenizers_c.a)
 
-
-
-
 link_directories(${HDF5_LIBRARY_DIRS})
 include_directories(${HDF5_INCLUDE_DIRS})
 include_directories(/home/faiss/build/faiss/CMakeFiles/faiss_avx2.dir)
 
-add_executable(mcts_test MCTSTest.cpp)
-
-
+add_executable(ablation_study_test AblationStudyTest.cpp)
 
 target_link_libraries(
-  mcts_test
+  ablation_study_test
   ml_functions
   OpenMP::OpenMP_CXX
   /home/faiss/build/faiss/libfaiss_avx2.so
 )
 
-add_dependencies(mcts_test ml_functions)
+add_dependencies(ablation_study_test ml_functions)
 
 add_executable(profile_query_generator ProfileQueryGenerator.cpp)
 target_link_libraries(

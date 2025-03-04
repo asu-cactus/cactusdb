@@ -67,9 +67,9 @@ using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
-class IntegratedMCTSTest : public HiveConnectorTestBase {
+class AblationStudyTest : public HiveConnectorTestBase {
  public:
-  IntegratedMCTSTest() {
+  AblationStudyTest() {
     // Register Presto scalar functions.
     functions::prestosql::registerAllScalarFunctions();
 
@@ -101,7 +101,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     tempDirPath_ = exec::test::TempDirectoryPath::create();
   }
 
-  ~IntegratedMCTSTest() {
+  ~AblationStudyTest() {
     TearDown();
   }
 
@@ -2948,7 +2948,7 @@ int main(int argc, char** argv) {
   int verbose = FLAGS_verbose;
   int blockSize = FLAGS_block_size;
   bool getCost = FLAGS_cost;
-  IntegratedMCTSTest demo;
+  AblationStudyTest demo;
 
   // available single benchmark mode: mul2joinAgg, udf2torchNN,
   // mul2joinAggHorizontal
