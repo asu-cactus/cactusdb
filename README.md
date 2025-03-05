@@ -11,7 +11,7 @@ CactusDB is a UDF-centric database built on top of Meta's high-performance datab
     - [Compile CactusDB](#compile-cactusdb)
     - [Data and Models](#data-and-models)
   - [Run Baselines](#run-baselines)
-  - [Run Ours](#run-ours)
+  - [Run CactusDB](#run-cactusdb)
   - [Development Guide](#development-guide)
   - [FAQ](#faq)
 
@@ -72,6 +72,17 @@ unzip resources.zip -d resources
 
 ## Run Baselines
 
+The implementation of baselines is located under the [db-ml/baseline](/db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
+
+Before running the baseline benchmarks for different workloads, load the data into the datastore by executing the following command:
+
+```bash
+cd db-ml/baseline
+# Specify the dataset you want to load with the parameter: dataset, or pass 'all' to load all data.
+python load_data_to_db.py --dataset=XX  # tpcxai, movielens_final, etc.
+```
+
+
 To run the baseline models, follow these steps:
 
 1. Ensure all dependencies are installed as per the [installation guide](/INSTALL_DEPENDENCIES.md).
@@ -83,11 +94,20 @@ To run the baseline models, follow these steps:
 python run_baselines.py
 ```
 
+We have developed several benchmark scripts to run different workloads. For example, you can run all the baselines on the MovieLens recommendation workloads using the following command:
+
+```bash
+python benchmark_movielens.py
+```
+
+You can configure the baselines by modifying the `benchmark_movielens.py` file. For more details on the benchmark scripts, refer to the [baseline README](./db-ml/baseline/README.md).
+
+
 For more detailed instructions, refer to the [baseline README](/db-ml/baseline/README.md).
 
 <!-- TODO: Add instructions to run baselines -->
 
-## Run Ours
+## Run CactusDB
 
 <!-- TODO: Add instructions to run your specific implementation -->
 
