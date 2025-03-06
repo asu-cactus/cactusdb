@@ -10,10 +10,16 @@ CactusDB is a UDF-centric database built on top of Meta's high-performance datab
     - [Set-Up Through Docker](#set-up-through-docker)
     - [Compile CactusDB](#compile-cactusdb)
     - [Data and Models](#data-and-models)
-  - [Run Baselines](#run-baselines)
-  - [Run CactusDB](#run-cactusdb)
+  - [Example](#example)
+    - [Two-Tower-based Recommendation Workloads](#two-tower-based-recommendation-workloads)
+    - [Run on Baselines](#run-on-baselines)
+    - [Run on CactusDB](#run-on-cactusdb)
+  - [Other Workloads](#other-workloads)
+    - [Run Baselines](#run-baselines)
+    - [Run CactusDB](#run-cactusdb)
   - [Development Guide](#development-guide)
   - [FAQ](#faq)
+  - [License](#license)
 
 
 
@@ -38,6 +44,9 @@ The following dependencies are required to run CactusDB and other baselines:
 - PostgresML
 
 To manually install the dependencies, please refer to [this file](/INSTALL_DEPENDENCIES.md) for more details.
+
+> **Note:** Some paths of the loaded data are hard-coded for the Docker environment. Please modify these paths as necessary when running the code. We are currently working on refactoring this.
+
 
 ### Set-Up Through Docker
 
@@ -70,7 +79,45 @@ gdown 1Fpb_jGpkxb7d5ZBC8Uqnq25uEgfOc7yV
 unzip resources.zip -d resources
 ```
 
-## Run Baselines
+## Example
+
+### Two-Tower-based Recommendation Workloads
+
+Dataset Schema:
+![MovieLens-Table](./imgs/ML-Table.png)
+
+Query:
+The following figures shows the query tree of Q1 in the MovieLens Recommendation workloads.
+![MovieLens-Q1](./imgs/ML-Q1.png)
+
+### Run on Baselines
+
+The implementation of baselines is located under the [db-ml/baseline](/db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
+
+```bash
+cd db-ml/baseline
+# Load the MovieLens datasets into the Postgres
+python load_data_to_db.py --dataset=movielens_recommendation
+# Run recommendation workloads on baselines.
+python benchmark_movielens.py
+```
+
+### Run on CactusDB
+
+After compiling the CactusDB, `cd _build/release/velox/optimizer/tests`. You can run the with, without optimization, or abalation study by using the following commands.
+```bash
+# set the optimization type by setting the CD_VELOX_QUERY_OPT_TYPE variable, with following options:
+# CD_VELOX_QUERY_OPT_TYPE= : w/o optimization
+# CD_VELOX_QUERY_OPT_TYPE=mlq1-ffnn_pushdown_n_reorder : pushdown the trending movie dnn
+# CD_VELOX_QUERY_OPT_TYPE=mlq1-fusion: fuse the ML kernels
+# CD_VELOX_QUERY_OPT_TYPE=mlq1-optimized : final optimized plan
+export CD_VELOX_QUERY_OPT_TYPE=XXX
+./ablation_study_test -mode=ablation -model=ml-q1
+```
+
+## Other Workloads
+
+### Run Baselines
 
 The implementation of baselines is located under the [db-ml/baseline](/db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
 
@@ -79,19 +126,7 @@ Before running the baseline benchmarks for different workloads, load the data in
 ```bash
 cd db-ml/baseline
 # Specify the dataset you want to load with the parameter: dataset, or pass 'all' to load all data.
-python load_data_to_db.py --dataset=XX  # tpcxai, movielens_final, etc.
-```
-
-
-To run the baseline models, follow these steps:
-
-1. Ensure all dependencies are installed as per the [installation guide](/INSTALL_DEPENDENCIES.md).
-2. Download the datasets and models as described above.
-3. Navigate to the `db-ml/baseline` directory.
-4. Execute the following command to run the baselines:
-
-```bash
-python run_baselines.py
+python load_data_to_db.py --dataset=XX  # tpcxai, movielens_recommendation, etc.
 ```
 
 We have developed several benchmark scripts to run different workloads. For example, you can run all the baselines on the MovieLens recommendation workloads using the following command:
@@ -102,14 +137,11 @@ python benchmark_movielens.py
 
 You can configure the baselines by modifying the `benchmark_movielens.py` file. For more details on the benchmark scripts, refer to the [baseline README](./db-ml/baseline/README.md).
 
-
 For more detailed instructions, refer to the [baseline README](/db-ml/baseline/README.md).
 
-<!-- TODO: Add instructions to run baselines -->
+### Run CactusDB
 
-## Run CactusDB
-
-<!-- TODO: Add instructions to run your specific implementation -->
+To run other workloads on CactusDB, please refer to the [**this file**](./velox/optimizer/tests/README.md).
 
 ## Development Guide
 
@@ -129,121 +161,11 @@ Please check [this file](/DEVELOP_GUIDE.md) to see the supported ML kernels and 
   export NUM_THREADS=4
   ```
 
-<!-- TODO -->
-
-<!-- 
-## Examples
-
-Examples of extensibility and integration with different component APIs [can be
-found here](velox/examples)
-
-## Documentation
-
-Developer guides detailing many aspects of the library, in addition to the list
-of available functions [can be found here.](https://facebookincubator.github.io/velox)
-
-Blog posts are available [here](https://velox-lib.io/blog).
-
-## Getting Started
-
-We provide scripts to help developers setup and install Velox dependencies.
-
-### Get the Velox Source
-```
-git clone --recursive https://github.com/facebookincubator/velox.git
-cd velox
-# if you are updating an existing checkout
-git submodule sync --recursive
-git submodule update --init --recursive
-```
-
-### Setting up on macOS
-
-Once you have checked out Velox, on an Intel MacOS machine you can setup and then build like so:
-
-```shell
-$ ./scripts/setup-macos.sh 
-$ make
-```
-
-On an M1 MacOS machine you can build like so:
-
-```shell
-$ CPU_TARGET="arm64" ./scripts/setup-macos.sh
-$ CPU_TARGET="arm64" make
-```
-
-You can also produce intel binaries on an M1, use `CPU_TARGET="sse"` for the above.
-
-### Setting up on aarch64 Linux (Ubuntu 20.04 or later)
-
-On an aarch64 based machine, you can build like so:
-
-```shell
-$ CPU_TARGET="aarch64" ./scripts/setup-ubuntu.sh
-$ CPU_TARGET="aarch64" make
-```
-
-### Setting up on x86_64 Linux (Ubuntu 20.04 or later)
-
-Once you have checked out Velox, you can setup and build like so:
-
-```shell
-$ ./scripts/setup-ubuntu.sh 
-$ make
-```
-
-### Building Velox
-
-Run `make` in the root directory to compile the sources. For development, use
-`make debug` to build a non-optimized debug version, or `make release` to build
-an optimized version.  Use `make unittest` to build and run tests.
-
-Note that,
-* Velox requires a compiler at the minimum GCC 9.0 or Clang 14.0.
-* Velox requires the CPU to support instruction sets:
-  * bmi
-  * bmi2
-  * f16c
-* Velox tries to use the following (or equivalent) instruction sets where available:
-  * On Intel CPUs
-    * avx  
-    * avx2
-    * sse
-  * On ARM
-    * Neon
-    * Neon64
-
-### Building Velox with docker-compose
-
-If you don't want to install the system dependencies required to build Velox,
-you can also build and run tests for Velox on a docker container
-using [docker-compose](https://docs.docker.com/compose/).
-Use the following commands:
-
-```shell
-$ docker-compose build ubuntu-cpp
-$ docker-compose run --rm ubuntu-cpp
-```
-If you want to increase or decrease the number of threads used when building Velox
-you can override the `NUM_THREADS` environment variable by doing:
-```shell
-$ docker-compose run -e NUM_THREADS=<NUM_THREADS_TO_USE> --rm ubuntu-cpp
-```
-
-## Contributing
-
-Check our [contributing guide](CONTRIBUTING.md) to learn about how to
-contribute to the project.
-
-## Community
-
-The main communication channel with the Velox OSS community is through the
-[the Velox-OSS Slack workspace](http://velox-oss.slack.com). 
-Please reach out to **velox@meta.com** to get access to Velox Slack Channel.
-
 
 ## License
 
-Velox is licensed under the Apache 2.0 License. A copy of the license
-[can be found here.](LICENSE) -->
+CactusDB is licensed under the Apache 2.0 License, the same as Velox. You can find a copy of the license [here](LICENSE).
+
+<!-- TODO -->
+
+

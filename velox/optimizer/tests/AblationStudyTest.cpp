@@ -2217,7 +2217,7 @@ class AblationStudyTest : public HiveConnectorTestBase {
     return myPlan;
   }
 
-  void testIntegratedMCTS(
+  void testAblationStudy(
       std::string model,
       int featureSize,
       int numSamples,
@@ -2922,7 +2922,7 @@ class AblationStudyTest : public HiveConnectorTestBase {
   std::map<int, folly::dynamic> queryPlanCaches_;
 };
 
-DEFINE_string(mode, "mcts", "Mode: mcts or benchmark");
+DEFINE_string(mode, "ablation", "Mode: ablation or benchmark");
 DEFINE_string(model, "ffnn", "Model: ffnn, df, two-tower, llm");
 DEFINE_bool(rewrite, true, "Whether  rewrite");
 DEFINE_int32(num_repeat, 1, "Number of repeat run");
@@ -2952,8 +2952,8 @@ int main(int argc, char** argv) {
 
   // available single benchmark mode: mul2joinAgg, udf2torchNN,
   // mul2joinAggHorizontal
-  if (mode == "mcts") {
-    demo.testIntegratedMCTS(
+  if (mode == "ablation") {
+    demo.testAblationStudy(
         model, featureSize, numSample, repeatRun, blockSize, verbose);
   } else {
     // Benchmark a single rewrite action

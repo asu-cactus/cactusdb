@@ -16,7 +16,7 @@ import concurrent.futures
 import multiprocessing
 
 
-def load_movielens_final_to_datastore():
+def load_movielens_recommendation_to_datastore():
     conn_string = utils.get_postgres_connection_config()
     db = create_engine(conn_string)
     conn = db.connect()
@@ -405,8 +405,6 @@ def load_llm_recommendation_data_to_postgres(num_user_data, num_movie_data):
     user_data.to_sql("llm_recommend_user", db, index=False, if_exists="replace")
     movie_data.to_sql("llm_recommend_movie", db, index=False, if_exists="replace")
 
-    # data = utils.convert_df_int64_to_int32(data)
-
     print("[INFO] load llm recommendation data to postgres success!")
 
 
@@ -429,12 +427,14 @@ def main():
     if dataset == "all":
         load_movielens_to_postgres()
         load_ffnn_data_to_postgres()
+        load_movielens_recommendation_to_datastore()
+        load_tpcxai_final_to_datastore()
     elif dataset == "movielens":
         load_movielens_to_postgres()
     elif dataset == "ffnn":
         load_ffnn_data_to_postgres()
-    elif dataset == "movielens_final":
-        load_movielens_final_to_datastore()
+    elif dataset == "movielens_recommendation":
+        load_movielens_recommendation_to_datastore()
     elif dataset == "tpcxai":
         load_tpcxai_final_to_datastore()
 
