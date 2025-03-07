@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,9 @@
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/ml_functions/functions.h"
+#include "velox/ml_functions/BaseFunction.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
-using namespace std;
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
@@ -99,11 +98,11 @@ class Tree {
       if ((line.size() == 0) || (line.find("graph") != std::string::npos) ||
           (line.find("}") != std::string::npos)) {
       } else {
-        if (line.find("->") != string::npos) {
+        if (line.find("->") != std::string::npos) {
           relationships.push_back(line);
-        } else if (line.find("leaf") != string::npos) {
+        } else if (line.find("leaf") != std::string::npos) {
           leafNodes.push_back(line);
-        } else if (line.find("label") != string::npos) {
+        } else if (line.find("label") != std::string::npos) {
           innerNodes.push_back(line);
         } else {
           // skip the case of empty line, somehow it won't be captured by the
@@ -125,13 +124,14 @@ class Tree {
 
     // Constructing inner nodes
     for (int i = 0; i < innerNodes.size(); ++i) {
-      const string& currentLine = innerNodes[i];
+      const std::string& currentLine = innerNodes[i];
       int nodeID;
       int indexID;
       float threshold;
 
       // To get nodeID
-      if ((findEndPosition = currentLine.find("[ label")) != string::npos) {
+      if ((findEndPosition = currentLine.find("[ label")) !=
+          std::string::npos) {
         nodeID = std::stoi(currentLine.substr(4, findEndPosition - 1 - 4));
       } else {
         LOG(ERROR) << "[ERROR] Error in extracting inner node nodeID\n";
@@ -139,8 +139,8 @@ class Tree {
       }
 
       // To get nodeIndex
-      if ((findStartPosition = currentLine.find("f")) != string::npos &&
-          (findEndPosition = currentLine.find("<")) != string::npos) {
+      if ((findStartPosition = currentLine.find("f")) != std::string::npos &&
+          (findEndPosition = currentLine.find("<")) != std::string::npos) {
         indexID = std::stoi(currentLine.substr(
             findStartPosition + 1, findEndPosition - findStartPosition - 1));
       } else {
@@ -149,8 +149,8 @@ class Tree {
       }
 
       // To get threshold
-      if ((findStartPosition = currentLine.find("<")) != string::npos &&
-          (findEndPosition = currentLine.find("\" ]")) != string::npos) {
+      if ((findStartPosition = currentLine.find("<")) != std::string::npos &&
+          (findEndPosition = currentLine.find("\" ]")) != std::string::npos) {
         threshold = std::stod(currentLine.substr(
             findStartPosition + 1, findEndPosition - findStartPosition - 1));
       } else {
@@ -178,11 +178,11 @@ class Tree {
     // Constructing leaf nodes
     for (int i = 0; i < leafNodes.size(); ++i) {
       // Construct leaf nodes
-      const string& currentLine = leafNodes[i];
+      const std::string& currentLine = leafNodes[i];
       int nodeID;
       float leafValue = -1.0f;
 
-      if ((findEndPosition = currentLine.find("[")) != string::npos) {
+      if ((findEndPosition = currentLine.find("[")) != std::string::npos) {
         nodeID = std::stoi(currentLine.substr(4, findEndPosition - 1 - 4));
       } else {
         LOG(ERROR) << "[ERROR] Error in extracting leaf node nodeID\n";
@@ -191,8 +191,9 @@ class Tree {
 
       // Output Class of XGBoost always a Double/Float. ProbabilityValue for
       // Classification, ResultValue for Regression
-      if ((findStartPosition = currentLine.find("leaf=")) != string::npos &&
-          (findEndPosition = currentLine.find("\" ]")) != string::npos) {
+      if ((findStartPosition = currentLine.find("leaf=")) !=
+              std::string::npos &&
+          (findEndPosition = currentLine.find("\" ]")) != std::string::npos) {
         leafValue = std::stod(currentLine.substr(
             findStartPosition + 5,
             findEndPosition - 3 - findStartPosition - 5));
@@ -266,7 +267,8 @@ class Tree {
           : tree[curIndex].rightChild;
     }
     float result = (float)(tree[curIndex].leafValue);
-    //std::cout << curBase << ":" << this->treeId << "=" << result << std::endl;
+    // std::cout << curBase << ":" << this->treeId << "=" << result <<
+    // std::endl;
     return result;
   }
 
@@ -391,4 +393,4 @@ class TreePrediction : public MLFunction {
   bool hasMissing;
 };
 
-} // namespace 
+} // namespace ml

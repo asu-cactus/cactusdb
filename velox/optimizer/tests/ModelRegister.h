@@ -2,6 +2,7 @@
 
 #include <json/json.h>
 #include "velox/cost_model/CostEstimator.h"
+#include "velox/ml_functions/SVD.h"
 #include "velox/optimizer/Helper.h"
 #include "velox/optimizer/Mul2JoinAggRewriteAction.h"
 #include "velox/optimizer/PlanState.h"
@@ -1505,6 +1506,42 @@ void registerTPCxAIUC10ModelFunctions(
       "relu", Relu::signatures(), std::make_unique<Relu>(), {}, true, catalog);
 };
 
+void registerTPCxAIUC10MLModelFunctions(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+
+  std::string ffnnModelPath =
+      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase10_lr_model_weight.h5";
+  std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
+  std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
+
+  optimization::registerVectorFunction(
+      "mat_mul1_1",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(w1)), 2, 1),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "mat_vector_add1_2",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(b1)), 1),
+      {},
+      true,
+      catalog);
+
+  optimization::registerVectorFunction(
+      "sigmoid",
+      Sigmoid::signatures(),
+      std::make_unique<Sigmoid>(),
+      {},
+      true,
+      catalog);
+};
+
 void registerTPCxAIUC3ModelFunctions(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
@@ -1731,6 +1768,138 @@ void registerTPCxAIUC8ModelFunctions(
       catalog);
   optimization::registerVectorFunction(
       "relu", Relu::signatures(), std::make_unique<Relu>(), {}, true, catalog);
+
+  std::vector<std::string> departmentList = {
+      "AUTOMOTIVE",
+      "BATH AND SHOWER",
+      "BEAUTY",
+      "BEDDING",
+      "BOYS WEAR",
+      "CANDY, TOBACCO, COOKIES",
+      "CELEBRATION",
+      "COMM BREAD",
+      "COOK AND DINE",
+      "DAIRY",
+      "DSD GROCERY",
+      "ELECTRONICS",
+      "FABRICS AND CRAFTS",
+      "FINANCIAL SERVICES",
+      "FROZEN FOODS",
+      "GIRLS WEAR, 4-6X  AND 7-14",
+      "GROCERY DRY GOODS",
+      "HARDWARE",
+      "HOME DECOR",
+      "HOME MANAGEMENT",
+      "HORTICULTURE AND ACCESS",
+      "HOUSEHOLD CHEMICALS/SUPP",
+      "HOUSEHOLD PAPER GOODS",
+      "IMPULSE MERCHANDISE",
+      "INFANT APPAREL",
+      "INFANT CONSUMABLE HARDLINES",
+      "JEWELRY AND SUNGLASSES",
+      "LADIESWEAR",
+      "LAWN AND GARDEN",
+      "LIQUOR,WINE,BEER",
+      "MEAT - FRESH & FROZEN",
+      "MEDIA AND GAMING",
+      "MENS WEAR",
+      "OFFICE SUPPLIES",
+      "PAINT AND ACCESSORIES",
+      "PERSONAL CARE",
+      "PETS AND SUPPLIES",
+      "PHARMACY OTC",
+      "PHARMACY RX",
+      "PLAYERS AND ELECTRONICS",
+      "PRODUCE",
+      "SERVICE DELI",
+      "SHOES",
+      "SPORTING GOODS",
+      "TOYS",
+      "WIRELESS"};
+  std::unordered_map<std::string, int> departmentMapping;
+  for (int i = 0; i < departmentList.size(); i++) {
+    departmentMapping[departmentList[i]] = i;
+  }
+  optimization::registerVectorFunction(
+      "department_encoder",
+      StringEncoder::signatures(),
+      std::make_unique<StringEncoder>(std::move(departmentMapping)),
+      {},
+      true,
+      catalog);
+};
+
+void registerTPCxAIUC7MLModelFunctions(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+
+  std::string svdModelPath =
+      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_svd.h5";
+  std::vector<std::vector<float>> bu = loadHDF5Array(svdModelPath, "bu");
+  std::vector<std::vector<float>> bi = loadHDF5Array(svdModelPath, "bi");
+  std::vector<std::vector<float>> pu = loadHDF5Array(svdModelPath, "pu");
+  std::vector<std::vector<float>> qi = loadHDF5Array(svdModelPath, "qi");
+  optimization::registerVectorFunction(
+      "svd",
+      SVD::signatures(),
+      std::make_unique<SVD>(
+          std::move(flattenVectorToPointer(bu)),
+          std::move(flattenVectorToPointer(bi)),
+          std::move(flattenVectorToPointer(pu)),
+          std::move(flattenVectorToPointer(qi)),
+          7071,
+          6818,
+          100),
+      {},
+      true,
+      catalog);
+}
+
+void registerTPCxAIUC8MLModelFunctions(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+
+  std::string xgboostModelPath =
+      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_ml_xgboost_model/0.txt";
+
+  optimization::registerVectorFunction(
+      "decision_tree_predict",
+      TreePrediction::signatures(),
+      std::make_unique<TreePrediction>(0, xgboostModelPath, 4, false),
+      {},
+      true,
+      catalog);
+
+  registerCustomType("tree_type", std::make_unique<TreeTypeFactories>());
+
+  optimization::registerVectorFunction(
+      "velox_decision_tree_predict",
+      VeloxTreePrediction::signatures(),
+      std::make_unique<VeloxTreePrediction>(4),
+      {},
+      true,
+      catalog);
+
+  optimization::registerVectorFunction(
+      "velox_decision_tree_construct",
+      VeloxTreeConstruction::signatures(),
+      std::make_unique<VeloxTreeConstruction>(),
+      {},
+      true,
+      catalog);
+
+  optimization::registerVectorFunction(
+      "decision_forest_predict",
+      TreePrediction::signatures(),
+      std::make_unique<ForestPrediction>(
+          "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_ml_xgboost_model",
+          4,
+          false),
+      {},
+      true,
+      catalog);
 
   std::vector<std::string> departmentList = {
       "AUTOMOTIVE",

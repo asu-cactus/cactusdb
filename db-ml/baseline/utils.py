@@ -12,6 +12,21 @@ import tempfile
 from openai import OpenAI
 import pyarrow.parquet as pq
 from psycopg2 import sql
+import shutil
+import faiss
+
+
+def create_folder(folder_path, overwrite=False):
+    """
+    Recreate a folder. If it exists, delete it first.
+
+    Args:
+      folder_path (str): The path to the folder to recreate.
+    """
+    if os.path.exists(folder_path):
+        if overwrite:
+            shutil.rmtree(folder_path)
+    os.makedirs(folder_path)
 
 
 def get_sys_num_threads():
@@ -77,6 +92,54 @@ def fetch_data_from_postgres_via_connectorx(sql):
     except Exception as e:
         print(f"Error: {e}")
     return df
+
+
+def execute_sql_query_via_psycopg2(query, fetch_results=False):
+    """
+    Executes a SQL query using psycopg2.
+
+    Args:
+        query (str): The SQL query to execute.
+        fetch_results (bool): Whether to fetch and return the query results (default is False).
+
+    Returns:
+        list: Query results if fetch_results is True, otherwise None.
+    """
+    connection = None
+    db_params = {
+        "dbname": "postgresdb",
+        "user": "postgresdb",
+        "password": "postgresdb",
+        "host": "localhost",
+        "port": "5432",
+    }
+    try:
+        # Connect to the database
+        connection = psycopg2.connect(**db_params)
+        cursor = connection.cursor()
+
+        # Execute the SQL query
+        cursor.execute(sql.SQL(query))
+
+        # Commit changes for DML queries (INSERT, UPDATE, DELETE)
+        connection.commit()
+
+        # Fetch and return results if required
+        if fetch_results:
+            results = cursor.fetchall()
+            return results
+
+    except psycopg2.Error as e:
+        print(f"Error while executing query: {e}")
+        connection.rollback()
+    finally:
+        # Close the cursor and connection
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+    return None
 
 
 # TODO: in the future, fetching results from DB should utilize connectorx
@@ -245,6 +308,36 @@ def get_openAI_client():
     return client
 
 
+def get_HF_key():
+    if not "HF_TOKEN" in os.environ:
+        raise Exception("Please set the HF_TOKEN environment variable.")
+    return os.environ["HF_TOKEN"]
+
+
+def hf_MiniLM_model(list_of_sentences):
+    # Hugging Face API endpoint
+    url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+
+    # Your API key
+    headers = {"Authorization": "Bearer {}".format(get_HF_key())}
+
+    # Input data (sentence for embedding)
+    data = {"inputs": list_of_sentences}
+
+    # Make the request
+    count_failures = 0
+    response = requests.post(url, headers=headers, json=data)
+    while response.status_code != 200:
+        count_failures += 1
+        response = requests.post(url, headers=headers, json=data)
+    embeddings = np.array(response.json())
+
+    num_input_token = np.sum([len(x.split()) for x in list_of_sentences])
+    num_output_token = np.sum([len(x) for x in embeddings])
+
+    return embeddings, num_input_token, num_output_token, count_failures
+
+
 def get_openAI_key():
     if not "OPENAI_API_KEY" in os.environ:
         raise Exception("Please set the OPENAI_API_KEY environment variable.")
@@ -318,7 +411,7 @@ def load_parquet_to_postgres(parquet_file, table_name, conn_params, show_schema=
         conn = psycopg2.connect(**conn_params)
         cur = conn.cursor()
         # Drop the table if it already exists
-        cur.execute("DROP TABLE IF EXISTS {}".format(table_name))
+        cur.execute("DROP TABLE IF EXISTS {} CASCADE".format(table_name))
         conn.commit()
         # Create the table
         cur.execute(create_table_query)
@@ -358,3 +451,22 @@ def map_arrow_to_postgres(arrow_type):
         return "TIMESTAMP"
     else:
         raise ValueError(f"Unsupported type: {arrow_type}")
+
+
+def get_rag_reference(model):
+    movie_data = pd.read_csv(
+        "/home/velox/resources/data/llm/wiki_movie_plots_deduped.csv"
+    )
+    movie_data["augmented_text"] = movie_data["Title"] + " " + movie_data["Plot"]
+    embeddings = model.encode(movie_data["augmented_text"].tolist())
+
+    # embeddings = np.array(
+    #     [
+    #         np.array(model.encode(x + " " + y))
+    #         for x, y in zip(movie_data["Title"], movie_data["Plot"])
+    #     ]
+    # )
+    dimension = len(embeddings[0])
+    index = faiss.IndexFlatL2(dimension)
+    index.add(embeddings)
+    return index, movie_data

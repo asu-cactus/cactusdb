@@ -1,173 +1,171 @@
-<img src="static/logo.svg" alt="Velox logo" width="50%" align="center" />
+# CactusDB Early Release for VLDB Submission
 
-Velox is a C++ database acceleration library which provides reusable,
-extensible, and high-performance data processing components. These components
-can be reused to build compute engines focused on different analytical
-workloads, including batch, interactive, stream processing, and AI/ML.
-Velox was created by Facebook and it is currently developed in partnership with
-Intel, ByteDance, and Ahana.
+**Note:** This is an early release of the CactusDB codebase for VLDB reviewers. An official release will be available soon.
 
-In common usage scenarios, Velox takes a fully optimized query plan as input
-and performs the described computation. Considering Velox does not provide a
-SQL parser, a dataframe layer, or a query optimizer, it is usually not meant
-to be used directly by end-users; rather, it is mostly used by developers
-integrating and optimizing their compute engines.
+CactusDB is a UDF-centric database built on top of Meta's high-performance database engine, [Velox](https://github.com/facebookincubator/velox). It enables the co-optimization of SQL queries nested with model inference.
 
-Velox provides the following high-level components:
+- [CactusDB Early Release for VLDB Submission](#cactusdb-early-release-for-vldb-submission)
+  - [Getting Started](#getting-started)
+    - [Dependencies](#dependencies)
+    - [Set-Up Through Docker](#set-up-through-docker)
+    - [Compile CactusDB](#compile-cactusdb)
+    - [Data and Models](#data-and-models)
+  - [Example](#example)
+    - [Two-Tower-based Recommendation Workloads](#two-tower-based-recommendation-workloads)
+    - [Run on Baselines](#run-on-baselines)
+    - [Run on CactusDB](#run-on-cactusdb)
+  - [Other Workloads](#other-workloads)
+    - [Run Baselines](#run-baselines)
+    - [Run CactusDB](#run-cactusdb)
+  - [Development Guide](#development-guide)
+  - [FAQ](#faq)
+  - [License](#license)
 
-* **Type**: a generic typing system that supports scalar, complex, and nested
-  types, such as structs, maps, arrays, tensors, etc.
-* **Vector**: an [Arrow-compatible columnar memory layout
-  module](https://facebookincubator.github.io/velox/develop/vectors.html),
-  which provides multiple encodings, such as Flat, Dictionary, Constant,
-  Sequence/RLE, and Bias, in addition to a lazy materialization pattern and
-  support for out-of-order writes.
-* **Expression Eval**: a [fully vectorized expression evaluation
-  engine](https://facebookincubator.github.io/velox/develop/expression-evaluation.html)
-  that allows expressions to be efficiently executed on top of Vector/Arrow
-  encoded data.
-* **Function Packages**: sets of vectorized function implementations following
-  the Presto and Spark semantic.
-* **Operators**: implementation of common data processing operators such as
-  scans, projection, filtering, groupBy, orderBy, shuffle, [hash
-  join](https://facebookincubator.github.io/velox/develop/joins.html), unnest,
-  and more.
-* **I/O**: a generic connector interface that allows different file formats
-  (ORC/DWRF and Parquet) and storage adapters (S3, HDFS, local files) to be
-  used.
-* **Network Serializers**: an interface where different wire protocols can be
-  implemented, used for network communication, supporting
-  [PrestoPage](https://prestodb.io/docs/current/develop/serialized-page.html)
-  and Spark's UnsafeRow.
-* **Resource Management**: a collection of primitives for handling
-  computational resources, such as [memory
-  arenas](https://facebookincubator.github.io/velox/develop/arena.html) and
-  buffer management, tasks, drivers, and thread pools for CPU and thread
-  execution, spilling, and caching.
 
-Velox is extensible and allows developers to define their own engine-specific
-specializations, including:
-
-1. Custom types
-2. [Simple and vectorized functions](https://facebookincubator.github.io/velox/develop/scalar-functions.html)
-3. [Aggregate functions](https://facebookincubator.github.io/velox/develop/aggregate-functions.html)
-4. Operators
-5. File formats
-6. Storage adapters
-7. Network serializers
-
-## Examples
-
-Examples of extensibility and integration with different component APIs [can be
-found here](velox/examples)
-
-## Documentation
-
-Developer guides detailing many aspects of the library, in addition to the list
-of available functions [can be found here.](https://facebookincubator.github.io/velox)
-
-Blog posts are available [here](https://velox-lib.io/blog).
 
 ## Getting Started
 
-We provide scripts to help developers setup and install Velox dependencies.
+### Dependencies
 
-### Get the Velox Source
-```
-git clone --recursive https://github.com/facebookincubator/velox.git
-cd velox
-# if you are updating an existing checkout
-git submodule sync --recursive
-git submodule update --init --recursive
-```
+The following dependencies are required to run CactusDB and other baselines:
 
-### Setting up on macOS
+- LibTorch (LibTorch_CUDA)
+- PostgreSQL
+- EvaDB
+- tokenizers-cpp
+- Spark
+- Eigen
+- Catch2
+- h5cpp
+- cpr
+- xgboost
+- hadoop
+- Madlib
+- PostgresML
 
-Once you have checked out Velox, on an Intel MacOS machine you can setup and then build like so:
+To manually install the dependencies, please refer to [this file](/INSTALL_DEPENDENCIES.md) for more details.
 
-```shell
-$ ./scripts/setup-macos.sh 
-$ make
-```
+> **Note:** Some paths of the loaded data are hard-coded for the Docker environment. Please modify these paths as necessary when running the code. We are currently working on refactoring this.
 
-On an M1 MacOS machine you can build like so:
 
-```shell
-$ CPU_TARGET="arm64" ./scripts/setup-macos.sh
-$ CPU_TARGET="arm64" make
-```
+### Set-Up Through Docker
 
-You can also produce intel binaries on an M1, use `CPU_TARGET="sse"` for the above.
+We recommend using the provided Dockerfile to set up the environment. See the [Docker setup guide](/docker-doc/README.md) for more details. Alternatively, you can manually install the dependencies by following the instructions [here](/INSTALL_DEPENDENCIES.md). CactusDB has been tested and supports Linux (x86) and macOS (Apple Silicon). For Windows users, we recommend using Docker with Windows Subsystem for Linux (WSL).
 
-### Setting up on aarch64 Linux (Ubuntu 20.04 or later)
+### Compile CactusDB
 
-On an aarch64 based machine, you can build like so:
+After configuring all the dependencies, you can compile CactusDB by following these commands:
 
-```shell
-$ CPU_TARGET="aarch64" ./scripts/setup-ubuntu.sh
-$ CPU_TARGET="aarch64" make
-```
-
-### Setting up on x86_64 Linux (Ubuntu 20.04 or later)
-
-Once you have checked out Velox, you can setup and build like so:
-
-```shell
-$ ./scripts/setup-ubuntu.sh 
-$ make
+```bash
+# Run Velox setup-ubuntu to install other dependencies
+./scripts/setup-ubuntu.sh
+# Compile Velox in release mode
+make release
+# Install Python libraries for baselines
+pip install -r db-ml/baseline/requirements.txt
+# Compile CactusDB at the root folder
+make release
 ```
 
-### Building Velox
+**Note:** If you are using an ARM chip, you need to set `CPU_TARGET="aarch64"` before running setup-ubuntu.sh.
 
-Run `make` in the root directory to compile the sources. For development, use
-`make debug` to build a non-optimized debug version, or `make release` to build
-an optimized version.  Use `make unittest` to build and run tests.
+### Data and Models
 
-Note that,
-* Velox requires a compiler at the minimum GCC 9.0 or Clang 14.0.
-* Velox requires the CPU to support instruction sets:
-  * bmi
-  * bmi2
-  * f16c
-* Velox tries to use the following (or equivalent) instruction sets where available:
-  * On Intel CPUs
-    * avx  
-    * avx2
-    * sse
-  * On ARM
-    * Neon
-    * Neon64
+Run the following commands to download the datasets and models used in our paper. The resources will be extracted into the `resources` directory.
 
-### Building Velox with docker-compose
-
-If you don't want to install the system dependencies required to build Velox,
-you can also build and run tests for Velox on a docker container
-using [docker-compose](https://docs.docker.com/compose/).
-Use the following commands:
-
-```shell
-$ docker-compose build ubuntu-cpp
-$ docker-compose run --rm ubuntu-cpp
-```
-If you want to increase or decrease the number of threads used when building Velox
-you can override the `NUM_THREADS` environment variable by doing:
-```shell
-$ docker-compose run -e NUM_THREADS=<NUM_THREADS_TO_USE> --rm ubuntu-cpp
+```bash
+pip install gdown -U
+gdown 1Fpb_jGpkxb7d5ZBC8Uqnq25uEgfOc7yV
+unzip resources.zip -d resources
 ```
 
-## Contributing
+## Example
 
-Check our [contributing guide](CONTRIBUTING.md) to learn about how to
-contribute to the project.
+### Two-Tower-based Recommendation Workloads
 
-## Community
+Dataset Schema:
+![MovieLens-Table](./imgs/ML-Table.png)
 
-The main communication channel with the Velox OSS community is through the
-[the Velox-OSS Slack workspace](http://velox-oss.slack.com). 
-Please reach out to **velox@meta.com** to get access to Velox Slack Channel.
+Query:
+The following figures shows the query tree of Q1 in the MovieLens Recommendation workloads.
+![MovieLens-Q1](./imgs/ML-Q1.png)
+
+### Run on Baselines
+
+The implementation of baselines is located under the [db-ml/baseline](/db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
+
+```bash
+cd db-ml/baseline
+# Load the MovieLens datasets into the Postgres
+python load_data_to_db.py --dataset=movielens_recommendation
+# Run recommendation workloads on baselines.
+python benchmark_movielens.py
+```
+
+### Run on CactusDB
+
+After compiling the CactusDB, `cd _build/release/velox/optimizer/tests`. You can run the with, without optimization, or abalation study by using the following commands.
+```bash
+# set the optimization type by setting the CD_VELOX_QUERY_OPT_TYPE variable, with following options:
+# CD_VELOX_QUERY_OPT_TYPE= : w/o optimization
+# CD_VELOX_QUERY_OPT_TYPE=mlq1-ffnn_pushdown_n_reorder : pushdown the trending movie dnn
+# CD_VELOX_QUERY_OPT_TYPE=mlq1-fusion: fuse the ML kernels
+# CD_VELOX_QUERY_OPT_TYPE=mlq1-optimized : final optimized plan
+export CD_VELOX_QUERY_OPT_TYPE=XXX
+./ablation_study_test -mode=ablation -model=ml-q1
+```
+
+## Other Workloads
+
+### Run Baselines
+
+The implementation of baselines is located under the [db-ml/baseline](/db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
+
+Before running the baseline benchmarks for different workloads, load the data into the datastore by executing the following command:
+
+```bash
+cd db-ml/baseline
+# Specify the dataset you want to load with the parameter: dataset, or pass 'all' to load all data.
+python load_data_to_db.py --dataset=XX  # tpcxai, movielens_recommendation, etc.
+```
+
+We have developed several benchmark scripts to run different workloads. For example, you can run all the baselines on the MovieLens recommendation workloads using the following command:
+
+```bash
+python benchmark_movielens.py
+```
+
+You can configure the baselines by modifying the `benchmark_movielens.py` file. For more details on the benchmark scripts, refer to the [baseline README](./db-ml/baseline/README.md).
+
+For more detailed instructions, refer to the [baseline README](/db-ml/baseline/README.md).
+
+### Run CactusDB
+
+To run other workloads on CactusDB, please refer to the [**this file**](./velox/optimizer/tests/README.md).
+
+## Development Guide
+
+Please check [this file](/DEVELOP_GUIDE.md) to see the supported ML kernels and how to implement the pipeline within CactusDB.
+
+## FAQ
+
+- **If Spark/Hadoop is not started, run the following commands:**
+  ```bash
+  service ssh start
+  start-all.sh
+  ```
+
+- **The compilation is killed and used all the resources:**
+  Please try to reduce the number of threads if the compilation takes all the memory and gets killed.
+  ```bash
+  export NUM_THREADS=4
+  ```
 
 
 ## License
 
-Velox is licensed under the Apache 2.0 License. A copy of the license
-[can be found here.](LICENSE)
+CactusDB is licensed under the Apache 2.0 License, the same as Velox. You can find a copy of the license [here](LICENSE).
+
+<!-- TODO -->
+
+

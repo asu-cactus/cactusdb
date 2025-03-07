@@ -1,3 +1,19 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 #include <cpr/cpr.h>
 #include <fmt/format.h>
@@ -9,7 +25,7 @@
 #include <iomanip>
 #include <iostream>
 #include <thread>
-#include "functions.h"
+#include "BaseFunction.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
@@ -24,17 +40,6 @@ using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
 #define MAX_ALLOWED_CHATGPT_TRY 30
-
-// Function to count the number of words in a string
-int countWords(const std::string& str) {
-  std::istringstream iss(str);
-  int wordCount = 0;
-  std::string word;
-  while (iss >> word) {
-    ++wordCount;
-  }
-  return wordCount;
-}
 
 // Function to count the number of punctuation marks in a string
 int countPunctuation(const std::string& str) {

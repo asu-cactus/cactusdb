@@ -1,5 +1,6 @@
 #pragma once
 #include <iostream>
+#include <sstream>
 #include <string>
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
@@ -263,6 +264,82 @@ std::vector<std::vector<float>> loadHDF5Array(
   return result;
 };
 
+
+std::vector<std::string> readTextFile(const std::string& filename) {
+    std::vector<std::string> lines;
+    std::ifstream file(filename);
+
+    if (!file.is_open()) {
+        throw std::runtime_error("Could not open file: " + filename);
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        lines.push_back(line);
+    }
+
+    file.close();
+    return lines;
+}
+
+std::vector<std::string> loadHDF5StringArray(
+    const std::string& filename,
+    const std::string& datasetName) {
+  if (!std::filesystem::exists(filename)) {
+    throw std::runtime_error("File not found: " + filename);
+  }
+  H5::H5File file(filename, H5F_ACC_RDONLY);
+  H5::DataSet dataset = file.openDataSet(datasetName);
+  H5::DataSpace dataspace = dataset.getSpace();
+
+  // Get the number of dimensions
+  int rank = dataspace.getSimpleExtentNdims();
+
+  // Allocate space for the dimensions
+  std::vector<hsize_t> dims(rank);
+
+  // Get the dataset dimensions
+  dataspace.getSimpleExtentDims(dims.data(), nullptr);
+
+  size_t rows;
+  size_t cols;
+
+  if (rank == 1) {
+    rows = dims[0];
+    cols = 1;
+  } else if (rank == 2) {
+    rows = dims[0];
+    cols = dims[1];
+  } else {
+    throw std::runtime_error("Unsupported rank: " + std::to_string(rank));
+  }
+
+  // Read data into a 1D vector of strings
+  std::vector<std::string> flatData(rows * cols);
+  
+  // Assuming the data is stored as fixed-size strings or strings encoded in a way that can be read as a single block
+  dataset.read(flatData.data(), H5::PredType::C_S1);  // C_S1 for string types
+  
+  // Convert to 2D vector if the dataset is 2-dimensional
+  std::vector<std::string> result;
+  if (rank == 1) {
+    result = std::move(flatData);
+  } else if (rank == 2) {
+    for (size_t i = 0; i < rows; ++i) {
+      for (size_t j = 0; j < cols; ++j) {
+        result.push_back(flatData[i * cols + j]);
+      }
+    }
+  }
+
+  // Close the dataset and file
+  dataset.close();
+  file.close();
+
+  return result;
+}
+
+
 PlanBuilder setupTPCxAIQuery(
     std::string queryType,
     CataLog& cataLog,
@@ -287,6 +364,8 @@ PlanBuilder setupTPCxAIQuery(
       {"p_product_id", "name", "department"}, {BIGINT(), VARCHAR(), VARCHAR()});
   auto storeDeptDataRowType = ROW(
       {"store", "department", "num_of_week"}, {BIGINT(), VARCHAR(), BIGINT()});
+  auto productRatingRowType =
+      ROW({"user_id", "product_id"}, {BIGINT(), BIGINT()});
   std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
 
   if (dataDirPrefix == "") {
@@ -307,11 +386,14 @@ PlanBuilder setupTPCxAIQuery(
       getFilePathsFromDir(dataDirPrefix + "product");
   std::vector<std::string> storeDeptDataPaths =
       getFilePathsFromDir(dataDirPrefix + "store_dept");
+  std::vector<std::string> productRatingDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "product_rating");
 
   int finicialAccountNumRows, finicialAccountNumCols,
       finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
       orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
-      productNumCols, storeDeptNumRows, storeDeptNumCols;
+      productNumCols, storeDeptNumRows, storeDeptNumCols, productRatingNumRows,
+      productRatingNumCols;
 
   readDataStats(
       dataDirPrefix + "financial_account_stats.txt",
@@ -330,6 +412,10 @@ PlanBuilder setupTPCxAIQuery(
       dataDirPrefix + "store_dept_stats.txt",
       storeDeptNumRows,
       storeDeptNumCols);
+  readDataStats(
+      dataDirPrefix + "product_rating_stats.txt",
+      productRatingNumRows,
+      productRatingNumCols);
   if (queryType.find("uc3") != std::string::npos) {
     PlanNodeId readStoreDeptDataPlanNodeId;
     queryPlan =
@@ -372,6 +458,30 @@ PlanBuilder setupTPCxAIQuery(
             OutputStat(storeDeptNumRows, storeDeptNumCols)));
     cataLog.addSource(std::make_shared<Source>(storeDeptSrc));
 
+  } else if (queryType.find("uc7-ml") != std::string::npos) {
+    PlanNodeId readProductRatingDataPlanNodeId;
+
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(productRatingRowType, {}, "")
+            .capturePlanNodeId(readProductRatingDataPlanNodeId)
+            .project(
+                {"CAST (user_id AS INTEGER) AS user_id",
+                 "CAST (product_id as INTEGER) AS product_id"})
+            .project(
+                {"user_id", "product_id", "svd(user_id, product_id) as pred"});
+    cataLog.setIdAddressMap(
+        readProductRatingDataPlanNodeId,
+        productRatingDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(
+        readProductRatingDataPlanNodeId, "product_rating");
+    Source productRatingSrc = Source(
+        readProductRatingDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(productRatingNumRows, productRatingNumCols)));
+    cataLog.addSource(std::make_shared<Source>(productRatingSrc));
   } else if (queryType.find("uc8") != std::string::npos) {
     PlanNodeId readOrderDataPlanNodeId;
     PlanNodeId readLineitemDataPlanNodeId;
@@ -428,15 +538,28 @@ PlanBuilder setupTPCxAIQuery(
                 {"o_order_id",
                  "date",
                  "array_constructor(quantity, scan_count, weekday) as features",
-                 "department_encoder(department) as department_encoded"})
-            .project(
-                {"o_order_id",
-                 "date",
-                 "transform(concat(features, department_encoded), x-> CAST(x as REAL)) as features"})
-            .project(
-                {"o_order_id",
-                 "date",
-                 "softmax(mat_vector_add1_8(mat_mul1_7(relu(mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))))))))) as prediction"});
+                 "department_encoder(department) as department_encoded"});
+    if (queryType.find("ml") == std::string::npos) {
+      queryPlan
+          .project(
+              {"o_order_id",
+               "date",
+               "transform(concat(features, department_encoded), x-> CAST(x as REAL)) as features"})
+          .project(
+              {"o_order_id",
+               "date",
+               "softmax(mat_vector_add1_8(mat_mul1_7(relu(mat_vector_add1_6(mat_mul1_5(relu(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))))))))) as prediction"});
+    } else {
+      queryPlan =
+          queryPlan
+              .project(
+                  {"o_order_id",
+                   "date",
+                   "transform(concat(department_encoded, features), x-> CAST(x as REAL)) as features"})
+              .project(
+                  {"o_order_id", "date", "decision_forest_predict(features)"});
+    }
+
     cataLog.setIdAddressMap(
         readOrderDataPlanNodeId,
         orderDataPaths,
@@ -500,10 +623,17 @@ PlanBuilder setupTPCxAIQuery(
                  "business_hour_norm"})
             .project(
                 {"transaction_id",
-                 "transform(array_constructor(amount_norm, business_hour_norm), x-> CAST(X as REAL)) as features"})
-            .project(
-                {"transaction_id",
-                 "sigmoid(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))) as prediction"});
+                 "transform(array_constructor(amount_norm, business_hour_norm), x-> CAST(X as REAL)) as features"});
+    if (queryType.find("ml") == std::string::npos) {
+      queryPlan = queryPlan.project(
+          {"transaction_id",
+           "sigmoid(mat_vector_add1_4(mat_mul1_3(relu(mat_vector_add1_2(mat_mul1_1(features)))))) as prediction"});
+    } else {
+      queryPlan = queryPlan.project(
+          {"transaction_id",
+           "sigmoid(mat_vector_add1_2(mat_mul1_1(features))) as prediction"});
+    }
+
     cataLog.setIdAddressMap(
         readFinancialAccountDataPlanNodeId,
         finicialAccountDataPaths,

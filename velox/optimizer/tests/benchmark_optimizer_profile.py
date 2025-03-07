@@ -93,8 +93,7 @@ def sample_model_structure(num_layer, model_scale):
         middle_layer_range = (512, 1024)
         output_layer_range = (3, 10)
     elif model_scale == "large":
-        input_layer_range = (5000, 10000)
-        # input_layer_range = (50000, 100000)
+        input_layer_range = (1000, 10000)
         middle_layer_range = (512, 2048)
         output_layer_range = (10, 100)
 
@@ -216,24 +215,27 @@ if __name__ == "__main__":
     # Generate permutations based on the query template
     effective_run_configs = []
     for query_template in list_query_template:
-      if query_template == "user":
-        for num_user in list_num_user:
-          effective_run_configs.append((query_template, num_user, 1, 1))
-      elif query_template == "movie":
-        for num_movie in list_num_movie:
-          effective_run_configs.append((query_template, 1, num_movie, 1))
-      elif query_template == "movie_user":
-        for num_user in list_num_user:
-          for num_movie in list_num_movie:
-            effective_run_configs.append((query_template, num_user, num_movie, 1))
-      elif query_template == "movie_user_tag":
-        for num_user in list_num_user:
-          for num_movie in list_num_movie:
-            for num_tag in list_num_tag:
-              effective_run_configs.append((query_template, num_user, num_movie, num_tag))
+        if query_template == "user":
+            for num_user in list_num_user:
+                effective_run_configs.append((query_template, num_user, 1, 1))
+        elif query_template == "movie":
+            for num_movie in list_num_movie:
+                effective_run_configs.append((query_template, 1, num_movie, 1))
+        elif query_template == "movie_user":
+            for num_user in list_num_user:
+                for num_movie in list_num_movie:
+                    effective_run_configs.append(
+                        (query_template, num_user, num_movie, 1)
+                    )
+        elif query_template == "movie_user_tag":
+            for num_user in list_num_user:
+                for num_movie in list_num_movie:
+                    for num_tag in list_num_tag:
+                        effective_run_configs.append(
+                            (query_template, num_user, num_movie, num_tag)
+                        )
 
     run_configs = effective_run_configs
-
 
     # random.shuffle(run_configs)
     result_df = None

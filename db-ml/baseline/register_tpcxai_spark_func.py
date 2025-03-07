@@ -88,16 +88,57 @@ def uc8_trip_classifier(
     return pd.Series(y)
 
 
+uc8_xgb_model = pickle.load(
+    open("../../resources/model/tpcxai_sf1/final/tf/usecase8_ml_xgboost.pkl", "rb")
+)
+
+
+@pandas_udf(IntegerType())
+def uc8_trip_ml_classifier(
+    quantity: pd.Series,
+    scan_count: pd.Series,
+    weekday: pd.Series,
+    department: pd.Series,
+) -> pd.Series:
+    df_temp = pd.DataFrame(department.values)
+    department = le_uc8_dept.transform(df_temp[[0]].values).reshape(-1)
+
+    scan_count = scan_count.astype(int)
+    weekday = weekday.astype(int)
+    X = np.array([department, quantity.values, scan_count.values, weekday.values]).T
+    y = uc8_xgb_model.predict(X)
+    return pd.Series(y)
+
+
 uc10model = tf.keras.models.load_model(
     "../../resources/model/tpcxai_sf1/final/tf/usecase10.h5", compile=False
 )
 
 
+with open("../../resources/model/tpcxai_sf1/final/tf/usecase10_lr_model.h5", "rb") as f:
+    uc10lr_model = pickle.load(f)
+
+
 @pandas_udf(IntegerType())
-def uc10_fraud_spark_predicator(
+def uc10_fraud_ml_spark_predicator(
     business_hour_norm: pd.Series, amount_norm: pd.Series
 ) -> pd.Series:
     X = np.array([business_hour_norm.values, amount_norm.values]).T
-    y = np.argmax(uc10model(X), axis=1)
+    y = uc10lr_model.predict(X)
 
     return pd.Series(y)
+
+
+with open("../../resources/model/tpcxai_sf1/final/tf/usecase7_svd.pkl", "rb") as f:
+    uc7svd_model = pickle.load(f)
+
+
+@pandas_udf(IntegerType())
+def uc07_svd_ml_spark_predicator(
+    user_id: pd.Series, product_id: pd.Series
+) -> pd.Series:
+    results = []
+    for u_id, p_id in zip(user_id, product_id):
+        results.append(uc7svd_model.predict(u_id, p_id).est)
+
+    return pd.Series(results)

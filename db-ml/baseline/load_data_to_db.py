@@ -16,7 +16,7 @@ import concurrent.futures
 import multiprocessing
 
 
-def load_movielens_final_to_datastore():
+def load_movielens_recommendation_to_datastore():
     conn_string = utils.get_postgres_connection_config()
     db = create_engine(conn_string)
     conn = db.connect()
@@ -33,6 +33,14 @@ def load_movielens_final_to_datastore():
         os.path.join(data_dir, "movie_tag_relevance.parquet")
     ).to_pandas()
 
+    utils.execute_sql_query_via_psycopg2(
+        """
+        DROP TABLE IF EXISTS movielens_user CASCADE;
+        DROP TABLE IF EXISTS movielens_movie CASCADE;
+        DROP TABLE IF EXISTS movielens_rating CASCADE;
+
+    """)
+
     df_user.to_sql("movielens_user", db, index=False, if_exists="replace")
     df_movie.to_sql("movielens_movie", db, index=False, if_exists="replace")
     df_rating.to_sql("movielens_rating", db, index=False, if_exists="replace")
@@ -45,7 +53,7 @@ def load_movielens_final_to_datastore():
     df_movie_tag_name = "movielens_movie_tag"
     db_connection = utils.get_psycopg2_connection()
     cursor = db_connection.cursor()
-    cursor.execute("DROP TABLE IF EXISTS {}".format(df_movie_tag_name))
+    cursor.execute("DROP TABLE IF EXISTS {} CASCADE".format(df_movie_tag_name))
     cursor.execute(
         """
                 CREATE TABLE IF NOT EXISTS {} (
@@ -141,6 +149,7 @@ def load_tpcxai_final_to_datastore():
         "financial_account",
         "financial_transactions",
         "store_dept",
+        "product_rating",
     ]
 
     conn_params = utils.get_connectorx_configuration()
@@ -387,16 +396,14 @@ def load_llm_recommendation_data_to_postgres(num_user_data, num_movie_data):
     db = create_engine(conn_string)
     conn = db.connect()
 
-    movie_data = pd.read_csv("/home/velox/resources/data/mr_movie_metadata.csv")
+    movie_data = pd.read_csv("/home/velox/resources/data/llm/mr_movie_metadata.csv")
     movie_data = utils.change_df_dtypes(movie_data).iloc[:num_movie_data]
 
-    user_data = pd.read_csv("/home/velox/resources/data/mr_user_genre_ratings.csv")
+    user_data = pd.read_csv("/home/velox/resources/data/llm/mr_user_genre_ratings.csv")
     user_data = utils.change_df_dtypes(user_data).iloc[:num_user_data]
 
     user_data.to_sql("llm_recommend_user", db, index=False, if_exists="replace")
     movie_data.to_sql("llm_recommend_movie", db, index=False, if_exists="replace")
-
-    # data = utils.convert_df_int64_to_int32(data)
 
     print("[INFO] load llm recommendation data to postgres success!")
 
@@ -420,12 +427,14 @@ def main():
     if dataset == "all":
         load_movielens_to_postgres()
         load_ffnn_data_to_postgres()
+        load_movielens_recommendation_to_datastore()
+        load_tpcxai_final_to_datastore()
     elif dataset == "movielens":
         load_movielens_to_postgres()
     elif dataset == "ffnn":
         load_ffnn_data_to_postgres()
-    elif dataset == "movielens_final":
-        load_movielens_final_to_datastore()
+    elif dataset == "movielens_recommendation":
+        load_movielens_recommendation_to_datastore()
     elif dataset == "tpcxai":
         load_tpcxai_final_to_datastore()
 

@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
 #include <fcntl.h>
 #include <folly/init/Init.h>
@@ -32,11 +47,7 @@
 #include "velox/expression/VectorFunction.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/ml_functions/Concat.h"
-#include "velox/ml_functions/DecisionTree.h"
 #include "velox/ml_functions/NNBuilder.h"
-#include "velox/ml_functions/VeloxDecisionTree.h"
-#include "velox/ml_functions/XGBoost.h"
 #include "velox/ml_functions/functions.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
@@ -44,7 +55,6 @@
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/FlatVector.h"
 
-using namespace std;
 using namespace ml;
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -160,7 +170,7 @@ class JobBenchmark : HiveConnectorTestBase {
 
     std::cout << tableName << std::endl;
 
-    std::unordered_map<std::string, std::vector<string>> colName2colHeader;
+    std::unordered_map<std::string, std::vector<std::string>> colName2colHeader;
 
     std::unordered_map<std::string, std::vector<int>> colName2colType;
 
@@ -679,9 +689,12 @@ class JobBenchmark : HiveConnectorTestBase {
     AND cct2.id = cc.status_id;
     */
 
- std::unordered_map<std::string, PlanBuilder> getBaseTableSourcesQ29(std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
-      std::unordered_map<std::string, PlanBuilder>
+  std::unordered_map<std::string, PlanBuilder> getBaseTableSourcesQ29(
+      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
+    std::unordered_map<std::string, PlanBuilder>
         sources; // with filters and projections pushed down;
+
+    std::unordered_map<std::string, std::vector<std::string>> tabel2Columns;
 
     auto an_a = PlanBuilder(planNodeIdGenerator, pool_.get())
                     .values({tableName2RowVector["aka_name"]})
@@ -696,7 +709,8 @@ class JobBenchmark : HiveConnectorTestBase {
             .values({tableName2RowVector["complete_cast"]})
             .project({"movie_id", "subject_id", "status_id", "cc_features"});
     //  .capturePlanNodeId(completeCastNodeId1)
-    tabel2Columns["cc"] = {"movie_id", "subject_id", "status_id", "cc_features"};
+    tabel2Columns["cc"] = {
+        "movie_id", "subject_id", "status_id", "cc_features"};
 
     sources["cc"] = cc_a;
 
@@ -741,11 +755,8 @@ class JobBenchmark : HiveConnectorTestBase {
                  "person_role_id",
                  "ci_features"});
     //  .capturePlanNodeId(castInfoNodeId)
-    tabel2Columns["ci"] = {"movie_id",
-                 "person_id",
-                 "role_id",
-                 "person_role_id",
-                 "ci_features"};
+    tabel2Columns["ci"] = {
+        "movie_id", "person_id", "role_id", "person_role_id", "ci_features"};
 
     sources["ci"] = ci_a;
 
@@ -854,7 +865,6 @@ class JobBenchmark : HiveConnectorTestBase {
 
     return sources;
   }
-
 
   bool constructSQLQuery29(
       PlanBuilder& planBuilder,
