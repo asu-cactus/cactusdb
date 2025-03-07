@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 #include "velox/core/Expressions.h"
 #include "velox/core/ITypedExpr.h"
 #include "velox/core/PlanNode.h"
+#include "velox/ml_functions/BatchNorm.h"
 #include "velox/ml_functions/NNBuilder.h"
 #include "velox/optimizer/Helper.h"
 

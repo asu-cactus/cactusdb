@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,17 +19,17 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
+#include "velox/ml_functions/BaseFunction.h"
 #include "velox/ml_functions/DecisionTree.h"
-#include "velox/ml_functions/functions.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
-using namespace std;
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;

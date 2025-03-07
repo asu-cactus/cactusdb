@@ -79,13 +79,13 @@ def benchmark_movielens_q3_sparkhadoop(num_loop=10, **kwargs):
 
 def benchmark_movielens():
     list_benchmark = []
-    # list_benchmark += [benchmark_movielens_q1_dl]
-    # list_benchmark += [benchmark_movielens_q1_evadb]
-    # list_benchmark += [benchmark_movielens_q1_sparkhdoop]
-    # list_benchmark += [benchmark_movielens_q2_dl]
-    # list_benchmark += [benchmark_movielens_q2_evadb]
-    # list_benchmark += [benchmark_movielens_q2_sparkhadoop]
-    # list_benchmark += [benchmark_movielens_q3_dl]
+    list_benchmark += [benchmark_movielens_q1_dl]
+    list_benchmark += [benchmark_movielens_q1_evadb]
+    list_benchmark += [benchmark_movielens_q1_sparkhdoop]
+    list_benchmark += [benchmark_movielens_q2_dl]
+    list_benchmark += [benchmark_movielens_q2_evadb]
+    list_benchmark += [benchmark_movielens_q2_sparkhadoop]
+    list_benchmark += [benchmark_movielens_q3_dl]
     list_benchmark += [benchmark_movielens_q3_evadb]
     list_benchmark += [benchmark_movielens_q3_sparkhadoop]
 

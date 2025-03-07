@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
 #include <cpr/cpr.h>
 #include <json/json.h>
@@ -5,21 +20,17 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <iostream>
-#include "functions.h"
+#include "BaseFunction.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
+#include "velox/ml_functions/UtilFunction.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
-
-std::string getEnvVar(std::string const& key) {
-  char const* val = getenv(key.c_str());
-  return val == NULL ? std::string() : std::string(val);
-}
 
 enum HuggingFaceTaskType {
   TEXT_CLASSIFICATION,
@@ -38,6 +49,30 @@ class HuggingFaceServerless : public MLFunction {
       throw std::runtime_error(fmt::format(
           "[ERROR] HuggingFace token is not set, please set HF_TOKEN"));
     }
+    inputTokenNumber_ = 0;
+    outputTokenNumber_ = 0;
+    numFailures_ = 0;
+  }
+
+  ~HuggingFaceServerless() {
+    std::string filename = "huggingfaceServerless.log";
+    std::ofstream file(filename, std::ios::app);
+    if (!file) {
+      std::cerr << "Unable to open file: " << filename << std::endl;
+      return;
+    }
+    // Get the current time
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+
+    // Write the timestamp to the file
+    file << std::put_time(std::localtime(&now_c), "%Y-%m-%d %H:%M:%S") << " ";
+
+    // Write the uint64_t values to the file
+    file << "[HuggingFaceServerless] # Input:" << inputTokenNumber_
+         << " # Output: " << outputTokenNumber_
+         << " # NumFailure: " << numFailures_ << std::endl;
+    file.close();
   }
 
   void apply(
@@ -54,7 +89,7 @@ class HuggingFaceServerless : public MLFunction {
 
     cpr::Header headers{{"Authorization", fmt::format("Bearer {}", apiToken_)}};
 
-    std::vector<std::vector<float>> result;
+    std::vector<std::vector<float>> result(numInputs);
 
     // Limit of number of inputs can be sent to serverless API at once
     // HuggingFace itself suggest maximum number is 10K, sometime the API
@@ -66,9 +101,13 @@ class HuggingFaceServerless : public MLFunction {
     // "inputs": ["Sentence 1", "Sentence 2"],
     std::string strInputs = "[";
     int accuInputCount = 0;
+    int insertedDataIdx = 0;
     for (int i = 0; i < numInputs; i++) {
       std::string valString =
           std::string(decodedStringInput->valueAt<StringView>(i));
+      const_cast<uint64_t&>(inputTokenNumber_) =
+          inputTokenNumber_ + countWords(valString);
+
       strInputs += "\"" + valString + "\"";
       accuInputCount += 1;
 
@@ -88,6 +127,7 @@ class HuggingFaceServerless : public MLFunction {
           // The response text can be parsed as json objects,
           // it should be a list of result for each input
           auto jsonObj = nlohmann::json::parse(response.text);
+          int processedEmbeddingCount = 0;
           for (const auto& innerVector : jsonObj) {
             // iterate response for each sample
             if (taskType_ == HuggingFaceTaskType::TEXT_CLASSIFICATION) {
@@ -105,24 +145,47 @@ class HuggingFaceServerless : public MLFunction {
                 }
                 floatVector[dataIdx] = value["score"];
               }
-              result.push_back(floatVector);
+              result[insertedDataIdx++] = floatVector;
             } else if (
                 taskType_ == HuggingFaceTaskType::TEXT_FEATURE_EXTRACTION) {
-              auto returnedEmbedding = innerVector[0];
-              int processedEmbeddingCount = 0;
-              // FIXME sometimes it returns unfixed number of embeeding, need
-              // further investigation
-              for (const auto& value : returnedEmbedding) {
+              if (processedEmbeddingCount == accuInputCount) {
+                break;
+              }
+              // Need a case-by-case handling for different model
+              if (apiURL_.find("all-MiniLM") != std::string::npos) {
+                auto returnedEmbedding = innerVector;
                 std::vector<float> embeddingVector;
-                for (const auto& val : value) {
+                for (const auto& val : returnedEmbedding) {
                   embeddingVector.push_back(val);
                 }
+                const_cast<uint64_t&>(outputTokenNumber_) =
+                    outputTokenNumber_ + embeddingVector.size();
                 processedEmbeddingCount += 1;
-                result.push_back(embeddingVector);
+                result[insertedDataIdx++] = embeddingVector;
                 if (processedEmbeddingCount == accuInputCount) {
                   break;
                 }
+              } else {
+                auto returnedEmbedding = innerVector[0];
+                // FIXME sometimes it returns unfixed number of embeeding, need
+                // further investigation
+                for (const auto& value : returnedEmbedding) {
+                  // std::cout << "[DEBUG]: " << value << std::endl;
+                  std::vector<float> embeddingVector;
+                  for (const auto& val : value) {
+                    embeddingVector.push_back(val);
+                  }
+                  processedEmbeddingCount += 1;
+                  result[insertedDataIdx++] = embeddingVector;
+                  if (processedEmbeddingCount == accuInputCount) {
+                    break;
+                  }
+                }
               }
+              // std::cout << "[DEBUG]: i: " << i << " innerVector.size: " <<
+              // innerVector.size() << std::endl; std::cout << "[DEBUG]: i: " <<
+              // i << " innerVector[0].size: " << innerVector[0].size() <<
+              // std::endl; auto returnedEmbedding = innerVector[0];
             } else {
               throw std::runtime_error(fmt::format(
                   "Current HuggingFace Task Type {} is not supported",
@@ -134,7 +197,7 @@ class HuggingFaceServerless : public MLFunction {
           std::cerr << "Error in fetchting the results: "
                     << response.error.message << std::endl;
           for (int l = 0; i < accuInputCount; i++) {
-            result.push_back({0.0});
+            result[insertedDataIdx++] = {0.0};
           }
         }
 
@@ -172,4 +235,7 @@ class HuggingFaceServerless : public MLFunction {
   std::string apiURL_;
   std::string apiToken_;
   HuggingFaceTaskType taskType_;
+  uint64_t inputTokenNumber_;
+  uint64_t outputTokenNumber_;
+  uint64_t numFailures_;
 };
