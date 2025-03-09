@@ -145,7 +145,7 @@ To run other workloads on CactusDB, please refer to the [**this file**](./velox/
 
 ## Development Guide
 
-Please check [this file](/DEVELOP_GUIDE.md) to see the supported ML kernels and how to implement the pipeline within CactusDB.
+Please check [this file](/DEVELOP_GUIDE.md) to see the supported ML kernels and how to implement the pipeline within CactusDB. Other functions/APIs can be checked through [**this link**](https://asu-cactus.github.io/CactusDB_Doc/annotated.html)
 
 ## FAQ
 
