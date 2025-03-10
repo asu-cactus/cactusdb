@@ -1,19 +1,20 @@
-/*
- * Copyright (c) 2025 ASU Cactus Lab.
- *
+/**
+ * @file
+ * @brief Implementation of a dropout layer for machine learning.
+ * @copyright Copyright (c) 2025 ASU Cactus Lab.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * http://www.apache.org/licenses/LICENSE-2.0
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
+
 #include <cmath>
 #include <iostream>
 #include "BaseFunction.h"
@@ -27,11 +28,16 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
-// Implementation of embedding layer where the embedding is stored as a 2-D
-// array: numEmbedding*embeddingDims, lookup takes a int vector as indices
-
+/**
+ * @class Dropout
+ * @brief Implements a dropout layer for machine learning, which randomly sets input values to zero during training.
+ */
 class Dropout : public MLFunction {
  public:
+  /**
+   * @brief Constructor for Dropout.
+   * @param p The probability of dropping out an input value (setting it to zero).
+   */
   Dropout(float p) {
     p_ = p;
     // std::random_device device;
@@ -40,6 +46,14 @@ class Dropout : public MLFunction {
     // bool outcome = coin_flip(gen);
   }
 
+  /**
+   * @brief Applies the dropout function to the input data.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -78,6 +92,10 @@ class Dropout : public MLFunction {
     output = maker.arrayVector<float>(result, REAL());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("array(REAL)")
@@ -85,21 +103,33 @@ class Dropout : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "dropout";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // FIXME
     return nullptr;
   }
 
+  /**
+   * @brief Sets the dropout probability.
+   * @param p The probability of dropping out an input value (setting it to zero).
+   */
   void setWeight(float p) {
     p_ = p;
   }
 
  private:
-  float p_;
-  std::mt19937 gen_;
-  std::bernoulli_distribution bernoulli_;
+  float p_; ///< The probability of dropping out an input value.
+  std::mt19937 gen_; ///< Random number generator.
+  std::bernoulli_distribution bernoulli_; ///< Bernoulli distribution for dropout.
 };

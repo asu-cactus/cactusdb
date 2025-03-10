@@ -1,59 +1,86 @@
-/*
- * Copyright (c) 2025 ASU Cactus Lab.
+/**
+ * @class MLFunction
+ * @brief A base class for machine learning functions, inheriting from Velox's VectorFunction.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * This class provides a common interface for machine learning functions, including methods for
+ * retrieving tensors, dimensions, and cost estimates. It also includes utility methods for
+ * calculating weighted costs and retrieving cost coefficients.
  */
-#pragma once
-#include "velox/cost_model/CostEstimate.h"
-#include "velox/cost_model/UdfCostCoefficient.h"
-#include "velox/exec/Task.h"
-#include "velox/expression/Expr.h"
-#include "velox/expression/VectorFunction.h"
-
-using namespace facebook::velox;
-
 class MLFunction : public exec::VectorFunction {
- public:
-  virtual ~MLFunction() = default;
+public:
+    /**
+     * @brief Virtual destructor.
+     */
+    virtual ~MLFunction() = default;
 
-  virtual float* getTensor() const = 0;
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to the tensor data.
+     */
+    virtual float* getTensor() const = 0;
 
-  virtual std::vector<int> getDims() {
-    return dims;
-  }
+    /**
+     * @brief Returns the dimensions of the function.
+     *
+     * @return A vector containing the dimensions.
+     */
+    virtual std::vector<int> getDims() {
+        return dims;
+    }
 
-  virtual std::string getFuncName() {
-    return "";
-  }
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    virtual std::string getFuncName() {
+        return "";
+    }
 
-  virtual int getNumDims() {
-    return dims.size();
-  }
+    /**
+     * @brief Returns the number of dimensions of the function.
+     *
+     * @return The number of dimensions.
+     */
+    virtual int getNumDims() {
+        return dims.size();
+    }
 
-  virtual CostEstimate getCost(std::vector<int> inputDims) {
-    return CostEstimate(0, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying the function.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    virtual CostEstimate getCost(std::vector<int> inputDims) {
+        return CostEstimate(0, inputDims[0], inputDims[1]);
+    }
 
- protected:
-  std::vector<int> dims;
-  double getWeightedCost(std::string name, float cost) {
-    std::vector<double> coefficient =
-        UdfCostCoefficient::getInstance().getCoefficient(name);
-    // FIXME
-    return 0;
-    // return coefficient[0] * cost;
-  }
-  std::vector<double> getCoefficientVector(std::string name) {
-    return UdfCostCoefficient::getInstance().getCoefficient(name);
-  }
+protected:
+    std::vector<int> dims; ///< Dimensions of the function.
+
+    /**
+     * @brief Calculates the weighted cost of the function.
+     *
+     * @param name The name of the function.
+     * @param cost The base cost of the function.
+     * @return The weighted cost as a double.
+     */
+    double getWeightedCost(std::string name, float cost) {
+        std::vector<double> coefficient =
+            UdfCostCoefficient::getInstance().getCoefficient(name);
+        // FIXME: Implement weighted cost calculation.
+        return 0;
+    }
+
+    /**
+     * @brief Retrieves the cost coefficients for the function.
+     *
+     * @param name The name of the function.
+     * @return A vector of cost coefficients.
+     */
+    std::vector<double> getCoefficientVector(std::string name) {
+        return UdfCostCoefficient::getInstance().getCoefficient(name);
+    }
 };

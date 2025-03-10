@@ -13,38 +13,50 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#pragma once
-#include <Eigen/Dense>
-#include <cmath>
-#include <iostream>
-#include "velox/ml_functions/BaseFunction.h"
-
-using namespace facebook::velox;
-
-// Implementation of embedding layer where the embedding is stored as a 2-D
-// array: numEmbedding*embeddingDims, lookup takes a int vector as indices
-
+/**
+ * @class BatchNorm1D
+ * @brief A class that implements 1D batch normalization, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply 1D batch normalization to an input array.
+ * Batch normalization normalizes the input by subtracting the mean and dividing by the standard deviation,
+ * then scales and shifts the result using learned weights and biases.
+ */
 class BatchNorm1D : public MLFunction {
- public:
-  BatchNorm1D(float* weights, float* bias, int numDims, float eps = 1e-05) {
-    // Create a deep copy of the weights
-    weights_ = new float[numDims];
-    bias_ = new float[numDims];
-    std::memcpy(weights_, weights, numDims * sizeof(float));
-    std::memcpy(bias_, bias, numDims * sizeof(float));
-    // weights_ = weights;
-    // bias_ = bias;
-    eps_ = eps;
-    dims.push_back(numDims);
-  }
+public:
+    /**
+     * @brief Constructor that initializes the batch normalization operation with weights, biases, and dimensions.
+     *
+     * @param weights A pointer to the weight matrix for scaling.
+     * @param bias A pointer to the bias vector for shifting.
+     * @param numDims The number of dimensions (features) in the input.
+     * @param eps A small value added to the variance to avoid division by zero (default: 1e-05).
+     */
+    BatchNorm1D(float* weights, float* bias, int numDims, float eps = 1e-05) {
+        weights_ = new float[numDims];
+        bias_ = new float[numDims];
+        std::memcpy(weights_, weights, numDims * sizeof(float));
+        std::memcpy(bias_, bias, numDims * sizeof(float));
+        eps_ = eps;
+        dims.push_back(numDims);
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies 1D batch normalization to the input array.
+     *
+     * This method processes the input array, applies batch normalization, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
     output->clearNulls(rows);
     auto arrayOutput = output->as<ArrayVector>();
@@ -131,50 +143,88 @@ class BatchNorm1D : public MLFunction {
     });
 
     arrayOutput->setElements(elementsOutput);
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .argumentType("array(REAL)")
-                .returnType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .argumentType("array(REAL)")
+                    .returnType("array(REAL)")
+                    .build()};
+    }
 
-  // TODO: add get and set for bias or we have a better way to store the two
-  // parameters in a single file
-  float* getTensor() const override {
-    return weights_;
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to the weight matrix.
+     */
+    float* getTensor() const override {
+        return weights_;
+    }
 
-  float* getWeight() {
-    return weights_;
-  }
+    /**
+     * @brief Returns the weights of the batch normalization.
+     *
+     * @return A pointer to the weight matrix.
+     */
+    float* getWeight() {
+        return weights_;
+    }
 
-  float* getBias() {
-    return bias_;
-  }
+    /**
+     * @brief Returns the biases of the batch normalization.
+     *
+     * @return A pointer to the bias vector.
+     */
+    float* getBias() {
+        return bias_;
+    }
 
-  static std::string getName() {
-    return "batch_norm_1d";
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    static std::string getName() {
+        return "batch_norm_1d";
+    }
 
-  std::string getWeightsFile() {
-    return weightsFile_;
-  }
+    /**
+     * @brief Returns the path to the weights file.
+     *
+     * @return The path to the weights file as a string.
+     */
+    std::string getWeightsFile() {
+        return weightsFile_;
+    }
 
-  void setWeights(float* weights) {
-    weights_ = weights;
-  }
+    /**
+     * @brief Sets the weights for the batch normalization.
+     *
+     * @param weights A pointer to the new weight matrix.
+     */
+    void setWeights(float* weights) {
+        weights_ = weights;
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
-    return CostEstimate(0, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying batch normalization.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        return CostEstimate(0, inputDims[0], inputDims[1]);
+    }
 
- private:
-  float* weights_;
-  float* bias_;
-  float eps_;
-  std::string weightsFile_;
-  std::string biasFile_;
+private:
+    float* weights_; ///< Pointer to the weight matrix for scaling.
+    float* bias_;    ///< Pointer to the bias vector for shifting.
+    float eps_;      ///< Small value added to the variance to avoid division by zero.
+    std::string weightsFile_; ///< Path to the weights file.
+    std::string biasFile_;    ///< Path to the biases file.
 };

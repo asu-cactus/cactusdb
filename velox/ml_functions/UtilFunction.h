@@ -1,19 +1,20 @@
-/*
- * Copyright (c) 2025 ASU Cactus Lab.
- *
+/**
+ * @file
+ * @brief Implementation of utility functions and classes for machine learning tasks.
+ * @copyright Copyright (c) 2025 ASU Cactus Lab.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * http://www.apache.org/licenses/LICENSE-2.0
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
+
 #include <Eigen/Dense>
 #include <cmath>
 #include <filesystem>
@@ -29,13 +30,25 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
-// Implementation of embedding layer where the embedding is stored as a 2-D
-// array: numEmbedding*embeddingDims, lookup takes a int vector as indices
-
+/**
+ * @class ChangeRating
+ * @brief Implements a function to change ratings to binary values.
+ */
 class ChangeRating : public MLFunction {
  public:
+  /**
+   * @brief Default constructor for ChangeRating.
+   */
   ChangeRating() {}
 
+  /**
+   * @brief Applies the function to change ratings to binary values.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -46,9 +59,6 @@ class ChangeRating : public MLFunction {
 
     auto input = args[0];
     int* inputValues = input->as<FlatVector<int>>()->values()->asMutable<int>();
-
-    // auto inputFeatures = args[0]->as<ArrayVector>()->elements();
-    // int* inputValues = inputFeatures->values()->asMutable<int>();
 
     int inputSize = rows.size();
 
@@ -62,6 +72,10 @@ class ChangeRating : public MLFunction {
     output = maker.flatVector<int>(result, INTEGER());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("INTEGER")
@@ -69,26 +83,50 @@ class ChangeRating : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "change_rating";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // FIXME
     return nullptr;
   }
 
+  /**
+   * @brief Sets the weight for the function.
+   */
   void setWeight() {
     //
   }
-
- private:
 };
 
+/**
+ * @class ConvertToIntArray
+ * @brief Implements a function to convert an integer vector to an integer array.
+ */
 class ConvertToIntArray : public MLFunction {
  public:
+  /**
+   * @brief Default constructor for ConvertToIntArray.
+   */
   ConvertToIntArray() {}
 
+  /**
+   * @brief Applies the function to convert an integer vector to an integer array.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -112,6 +150,10 @@ class ConvertToIntArray : public MLFunction {
     output = maker.arrayVector<int>(result, INTEGER());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("INTEGER")
@@ -119,26 +161,50 @@ class ConvertToIntArray : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "convert_int_array";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // FIXME
     return nullptr;
   }
 
+  /**
+   * @brief Sets the weight for the function.
+   */
   void setWeight() {
     //
   }
-
- private:
 };
 
+/**
+ * @class ConvertToFloatArray
+ * @brief Implements a function to convert a float vector to a float array.
+ */
 class ConvertToFloatArray : public MLFunction {
  public:
+  /**
+   * @brief Default constructor for ConvertToFloatArray.
+   */
   ConvertToFloatArray() {}
 
+  /**
+   * @brief Applies the function to convert a float vector to a float array.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -163,6 +229,10 @@ class ConvertToFloatArray : public MLFunction {
     output = maker.arrayVector<float>(result, REAL());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("REAL")
@@ -170,26 +240,50 @@ class ConvertToFloatArray : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "convert_float_array";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // FIXME
     return nullptr;
   }
 
+  /**
+   * @brief Sets the weight for the function.
+   */
   void setWeight() {
     //
   }
-
- private:
 };
 
+/**
+ * @class ConvertDoubleToFloatArray
+ * @brief Implements a function to convert a double vector to a float array.
+ */
 class ConvertDoubleToFloatArray : public MLFunction {
  public:
+  /**
+   * @brief Default constructor for ConvertDoubleToFloatArray.
+   */
   ConvertDoubleToFloatArray() {}
 
+  /**
+   * @brief Applies the function to convert a double vector to a float array.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -214,6 +308,10 @@ class ConvertDoubleToFloatArray : public MLFunction {
     output = maker.arrayVector<float>(result, REAL());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("DOUBLE")
@@ -221,26 +319,50 @@ class ConvertDoubleToFloatArray : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "convert_double_to_float_array";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // FIXME
     return nullptr;
   }
 
+  /**
+   * @brief Sets the weight for the function.
+   */
   void setWeight() {
     //
   }
-
- private:
 };
 
+/**
+ * @class ConvertDoubleArrayToFloatArray
+ * @brief Implements a function to convert a double array to a float array.
+ */
 class ConvertDoubleArrayToFloatArray : public MLFunction {
  public:
+  /**
+   * @brief Default constructor for ConvertDoubleArrayToFloatArray.
+   */
   ConvertDoubleArrayToFloatArray() {}
 
+  /**
+   * @brief Applies the function to convert a double array to a float array.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -260,16 +382,6 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
 
     double* inputValues = baseInputArray->values()->asMutable<double>();
 
-    // There is a tricky thing here, rows.size() return the number of raw inputs
-    // while rows.countSelected() return the number of selected rows (after
-    // filtering) the second one should be used for computation and the
-    // numElements is mapped to the rows.countSelected() instead of rows.size().
-    // If using the following code, the size of the result vector should be
-    // mapped to the rows.size() otherwise the returned vector won't be aligned
-    // with the selected inputs. Another workaround is to use
-    // rows.applyToSelected() to iterate over the selected rows for computation,
-    // which is temporarily marked as #TODO.
-
     int numRawInput = rows.size();
     int numInput = rows.countSelected();
     int numElements = baseInputArray->size();
@@ -283,8 +395,6 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
         // Skip invalid rows
         continue;
       }
-      // inputValues only has the length equal to the number of selected rows,
-      // so we another index to access the inputValues, which is processedIndex
       std::transform(
           inputValues + processedIndex * sizeOfArray,
           inputValues + (processedIndex + 1) * sizeOfArray,
@@ -294,29 +404,14 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
     }
 
     VectorMaker maker{context.pool()};
-    // output = maker.arrayVector<float>(result, REAL());
     auto localResult = maker.arrayVector<float>(result, REAL());
     context.moveOrCopyResult(localResult, rows, output);
-
-    /*
-    auto  arrayResult = output->as<ArrayVector>();
-    auto sizes = arrayResult->mutableSizes(rows.end());
-    auto rawSizes = sizes->asMutable<int32_t>();
-    auto offsets = arrayResult->mutableOffsets(rows.end());
-    auto rawOffsets = offsets->asMutable<int32_t>();
-    auto elementsResult = arrayResult->elements();
-    rows.applyToSelected([&](vector_size_t row) {
-          rawSizes[row] = numArgs;
-          rawOffsets[row] = offset;
-
-          targetRows.setValid(offset, true);
-          toSourceRow[offset] = row;
-
-          offset += numArgs;
-    });
-    */
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("array(DOUBLE)")
@@ -324,22 +419,36 @@ class ConvertDoubleArrayToFloatArray : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "convert_double_array_to_float_array";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // FIXME
     return nullptr;
   }
 
+  /**
+   * @brief Sets the weight for the function.
+   */
   void setWeight() {
     //
   }
-
- private:
 };
 
+/**
+ * @brief Loads bytes from a file into a string.
+ * @param path Path to the file.
+ * @return A string containing the file's contents.
+ */
 std::string LoadBytesFromFile(const std::string& path) {
   std::ifstream fs(path, std::ios::in | std::ios::binary);
   if (fs.fail()) {
@@ -355,17 +464,33 @@ std::string LoadBytesFromFile(const std::string& path) {
   return data;
 }
 
+/**
+ * @brief Converts a string to a boolean value.
+ * @param str The string to convert.
+ * @return The boolean value corresponding to the string.
+ */
 bool stringToBool(const std::string& str) {
   std::string lowerStr = str;
   std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
   return (lowerStr == "true");
 }
 
+/**
+ * @brief Retrieves the value of an environment variable.
+ * @param key The name of the environment variable.
+ * @return The value of the environment variable, or an empty string if not found.
+ */
 std::string getEnvVar(std::string const& key) {
   char const* val = getenv(key.c_str());
   return val == NULL ? std::string() : std::string(val);
 }
 
+/**
+ * @brief Reads the number of rows and columns from a data statistics file.
+ * @param path Path to the data statistics file.
+ * @param numRows Reference to store the number of rows.
+ * @param numCols Reference to store the number of columns.
+ */
 void readDataStats(const std::string& path, int& numRows, int& numCols) {
   std::ifstream file(path);
   if (!file.is_open()) {
@@ -379,6 +504,13 @@ void readDataStats(const std::string& path, int& numRows, int& numCols) {
   numCols = std::stoi(line);
 }
 
+/**
+ * @brief Flattens a 2D vector into a 1D array.
+ * @tparam T The type of elements in the vector.
+ * @param vec2D The 2D vector to flatten.
+ * @param totalSize Reference to store the total size of the flattened array.
+ * @return A pointer to the flattened array.
+ */
 template <typename T>
 T* flattenVectorToPointer(
     const std::vector<std::vector<T>>& vec2D,
@@ -402,13 +534,24 @@ T* flattenVectorToPointer(
   return flatArray;
 }
 
-// Overloaded version without totalSize (default)
+/**
+ * @brief Flattens a 2D vector into a 1D array (overloaded version without totalSize).
+ * @tparam T The type of elements in the vector.
+ * @param vec2D The 2D vector to flatten.
+ * @return A pointer to the flattened array.
+ */
 template <typename T>
 T* flattenVectorToPointer(const std::vector<std::vector<T>>& vec2D) {
   size_t totalSize =
       0; // A local variable to hold the size if not provided by the caller
   return flattenVectorToPointer(vec2D, totalSize);
 }
+
+/**
+ * @brief Counts the number of words in a string.
+ * @param input The input string.
+ * @return The number of words in the string.
+ */
 int countWords(const std::string& input) {
   std::istringstream stream(input);
   std::string word;

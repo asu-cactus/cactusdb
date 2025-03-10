@@ -1,19 +1,20 @@
-/*
- * Copyright (c) 2025 ASU Cactus Lab.
- *
+/**
+ * @file
+ * @brief Implementation of a Hugging Face serverless API integration for machine learning tasks.
+ * @copyright Copyright (c) 2025 ASU Cactus Lab.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * http://www.apache.org/licenses/LICENSE-2.0
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
+
 #include <cpr/cpr.h>
 #include <json/json.h>
 #include <nlohmann/json.hpp>
@@ -32,15 +33,28 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
+/**
+ * @enum HuggingFaceTaskType
+ * @brief Enumeration of supported Hugging Face task types.
+ */
 enum HuggingFaceTaskType {
-  TEXT_CLASSIFICATION,
-  IMAGE_CLASSIFICATION,
-  REGRESSION,
-  TEXT_FEATURE_EXTRACTION
+  TEXT_CLASSIFICATION,      ///< Text classification task.
+  IMAGE_CLASSIFICATION,     ///< Image classification task.
+  REGRESSION,               ///< Regression task.
+  TEXT_FEATURE_EXTRACTION   ///< Text feature extraction task.
 };
 
+/**
+ * @class HuggingFaceServerless
+ * @brief Implements a machine learning function that interacts with Hugging Face's serverless API.
+ */
 class HuggingFaceServerless : public MLFunction {
  public:
+  /**
+   * @brief Constructor for HuggingFaceServerless.
+   * @param apiURL The URL of the Hugging Face serverless API.
+   * @param taskType The type of task to perform (e.g., text classification, feature extraction).
+   */
   HuggingFaceServerless(std::string apiURL, HuggingFaceTaskType taskType) {
     apiURL_ = apiURL;
     taskType_ = taskType;
@@ -54,6 +68,10 @@ class HuggingFaceServerless : public MLFunction {
     numFailures_ = 0;
   }
 
+  /**
+   * @brief Destructor for HuggingFaceServerless.
+   * Logs input/output token counts and failure statistics to a file.
+   */
   ~HuggingFaceServerless() {
     std::string filename = "huggingfaceServerless.log";
     std::ofstream file(filename, std::ios::app);
@@ -75,6 +93,14 @@ class HuggingFaceServerless : public MLFunction {
     file.close();
   }
 
+  /**
+   * @brief Applies the Hugging Face serverless API function to the input data.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -92,9 +118,8 @@ class HuggingFaceServerless : public MLFunction {
     std::vector<std::vector<float>> result(numInputs);
 
     // Limit of number of inputs can be sent to serverless API at once
-    // HuggingFace itself suggest maximum number is 10K, sometime the API
-    // itself is busy and cannot work. Try reduce the limit or deploy a
-    // dedicated endpoint
+    // HuggingFace itself suggests a maximum number of 10K, but the API
+    // may be busy and fail. Try reducing the limit or deploy a dedicated endpoint.
     const int HF_SERVERLESS_INPUT_LIMIT = 5000;
 
     // HuggingFace inputs are formatted as follows:
@@ -114,7 +139,7 @@ class HuggingFaceServerless : public MLFunction {
       if (i != (numInputs - 1) && accuInputCount != HF_SERVERLESS_INPUT_LIMIT) {
         strInputs += ",";
       } else {
-        // need to post the inputs to huggingface serverless api and get results
+        // Need to post the inputs to Hugging Face serverless API and get results
         strInputs += "]";
         auto huggingFaceInputs = "{\"inputs\": " + strInputs + "}";
 
@@ -124,18 +149,18 @@ class HuggingFaceServerless : public MLFunction {
             cpr::Header{headers});
 
         if (response.status_code == 200) {
-          // The response text can be parsed as json objects,
-          // it should be a list of result for each input
+          // The response text can be parsed as JSON objects,
+          // it should be a list of results for each input
           auto jsonObj = nlohmann::json::parse(response.text);
           int processedEmbeddingCount = 0;
           for (const auto& innerVector : jsonObj) {
-            // iterate response for each sample
+            // Iterate response for each sample
             if (taskType_ == HuggingFaceTaskType::TEXT_CLASSIFICATION) {
               std::vector<float> floatVector(3);
               for (const auto& value : innerVector) {
                 int dataIdx = 0;
-                // TODO: Different model comes with different return value name
-                // need more work here to handle such things
+                // TODO: Different models come with different return value names
+                // Need more work here to handle such cases
                 if (value["label"] == "positive") {
                   dataIdx = 0;
                 } else if (value["label"] == "neutral") {
@@ -151,7 +176,7 @@ class HuggingFaceServerless : public MLFunction {
               if (processedEmbeddingCount == accuInputCount) {
                 break;
               }
-              // Need a case-by-case handling for different model
+              // Need case-by-case handling for different models
               if (apiURL_.find("all-MiniLM") != std::string::npos) {
                 auto returnedEmbedding = innerVector;
                 std::vector<float> embeddingVector;
@@ -167,10 +192,9 @@ class HuggingFaceServerless : public MLFunction {
                 }
               } else {
                 auto returnedEmbedding = innerVector[0];
-                // FIXME sometimes it returns unfixed number of embeeding, need
-                // further investigation
+                // FIXME: Sometimes it returns an unfixed number of embeddings,
+                // need further investigation
                 for (const auto& value : returnedEmbedding) {
-                  // std::cout << "[DEBUG]: " << value << std::endl;
                   std::vector<float> embeddingVector;
                   for (const auto& val : value) {
                     embeddingVector.push_back(val);
@@ -182,10 +206,6 @@ class HuggingFaceServerless : public MLFunction {
                   }
                 }
               }
-              // std::cout << "[DEBUG]: i: " << i << " innerVector.size: " <<
-              // innerVector.size() << std::endl; std::cout << "[DEBUG]: i: " <<
-              // i << " innerVector[0].size: " << innerVector[0].size() <<
-              // std::endl; auto returnedEmbedding = innerVector[0];
             } else {
               throw std::runtime_error(fmt::format(
                   "Current HuggingFace Task Type {} is not supported",
@@ -194,14 +214,14 @@ class HuggingFaceServerless : public MLFunction {
           }
         } else {
           // Handle error cases
-          std::cerr << "Error in fetchting the results: "
+          std::cerr << "Error in fetching the results: "
                     << response.error.message << std::endl;
           for (int l = 0; i < accuInputCount; i++) {
             result[insertedDataIdx++] = {0.0};
           }
         }
 
-        // reset
+        // Reset
         strInputs = "[";
         accuInputCount = 0;
       }
@@ -211,31 +231,49 @@ class HuggingFaceServerless : public MLFunction {
     output = maker.arrayVector<float>(result, REAL());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("VARCHAR")
                 .returnType("array(REAL)")
                 .build()};
   }
+
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "huggingface";
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:
-  std::string apiURL_;
-  std::string apiToken_;
-  HuggingFaceTaskType taskType_;
-  uint64_t inputTokenNumber_;
-  uint64_t outputTokenNumber_;
-  uint64_t numFailures_;
+  std::string apiURL_; ///< URL of the Hugging Face serverless API.
+  std::string apiToken_; ///< API token for Hugging Face.
+  HuggingFaceTaskType taskType_; ///< Type of task to perform.
+  uint64_t inputTokenNumber_; ///< Number of input tokens processed.
+  uint64_t outputTokenNumber_; ///< Number of output tokens generated.
+  uint64_t numFailures_; ///< Number of API failures encountered.
 };

@@ -13,47 +13,42 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#pragma once
-#include <Eigen/Dense>
-#include <cmath>
-#include <iostream>
-#include "BaseFunction.h"
-#include "velox/exec/tests/utils/AssertQueryBuilder.h"
-#include "velox/exec/tests/utils/PlanBuilder.h"
-#include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/functions/lib/LambdaFunctionUtil.h"
-#include "velox/functions/lib/RowsTranslationUtil.h"
-#include "velox/vector/tests/utils/VectorMaker.h"
-#include "velox/vector/tests/utils/VectorTestBase.h"
-
-using namespace facebook::velox;
-using namespace facebook::velox::test;
-using namespace facebook::velox::exec::test;
-using namespace facebook::velox::memory;
-
-// Implementation of embedding layer where the embedding is stored as a 2-D
-// array: numEmbedding*embeddingDims, lookup takes a int vector as indices
-
+/**
+ * @class CosineSimilarity
+ * @brief A class that computes the cosine similarity between two input arrays, inheriting from MLFunction.
+ *
+ * This class provides functionality to calculate the cosine similarity between two arrays of real numbers (floats).
+ * Cosine similarity measures the cosine of the angle between two vectors, providing a value between -1 and 1.
+ */
 class CosineSimilarity : public MLFunction {
- public:
-  CosineSimilarity(int dim) {
-    dims.push_back(dim);
-  }
+public:
+    /**
+     * @brief Constructor that initializes the cosine similarity computation with the dimension of the input arrays.
+     *
+     * @param dim The dimension (number of features) of the input arrays.
+     */
+    CosineSimilarity(int dim) {
+        dims.push_back(dim);
+    }
 
-  // TODO: add support of loading from disk file
-  // BatchNorm1D(std::string weightsFile, int numEmbeddings, int embeddingDims)
-  // {
-  //   weightsFile_ = weightsFile;
-  //   dims.push_back(numEmbeddings);
-  //   dims.push_back(embeddingDims);
-  // }
-
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the cosine similarity computation to the input arrays.
+     *
+     * This method processes the input arrays, computes the cosine similarity between corresponding vectors,
+     * and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the two input arrays).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the cosine similarity results will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     BaseVector* left = args[0].get();
@@ -100,49 +95,49 @@ class CosineSimilarity : public MLFunction {
 
     VectorMaker maker{context.pool()};
     output = maker.flatVector<float>(resultVector, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .argumentType("array(REAL)")
-                .argumentType("array(REAL)")
-                .returnType("REAL")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .argumentType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .returnType("REAL")
+                    .build()};
+    }
 
-  // TODO: add get and set for bias or we have a better way to store the two
-  // parameters in a single file
-  // float* getTensor() const override {
-  //   return weights_;
-  // }
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string ("cosine_similarity").
+     */
+    static std::string getName() {
+        return "cosine_similarity";
+    }
 
-  static std::string getName() {
-    return "cosine_similarity";
-  };
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A null pointer (no tensor is associated with this function).
+     */
+    float* getTensor() const override {
+        return nullptr;
+    }
 
-  // std::string getWeightsFile() {
-  //   return weightsFile_;
-  // }
+    /**
+     * @brief Estimates the computational cost of applying the cosine similarity computation.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        return CostEstimate(0, inputDims[0], inputDims[1]);
+    }
 
-  // void setWeights(float* weights) {
-  //   weights_ = weights;
-  // }
-
-  float* getTensor() const override {
-    // TODO: need to implement
-    return nullptr;
-  }
-
-  CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
-    return CostEstimate(0, inputDims[0], inputDims[1]);
-  }
-
- private:
-  std::vector<int> dims;
-  // float* weights_;
-  // float* bias_;
-  // float eps_;
-  // std::string weightsFile_;
-  // std::string biasFile_;
+private:
+    std::vector<int> dims; ///< Dimensions of the input arrays.
 };

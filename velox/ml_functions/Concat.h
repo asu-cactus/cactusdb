@@ -13,36 +13,45 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#pragma once
-#include <Eigen/Dense>
-#include <cmath>
-#include <iostream>
-#include "BaseFunction.h"
-#include "velox/exec/tests/utils/AssertQueryBuilder.h"
-#include "velox/exec/tests/utils/PlanBuilder.h"
-#include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/vector/tests/utils/VectorTestBase.h"
-
-using namespace facebook::velox;
-using namespace facebook::velox::test;
-using namespace facebook::velox::exec::test;
-using namespace facebook::velox::memory;
-
+/**
+ * @class Concat
+ * @brief A class that implements a concatenation operation for two input arrays, inheriting from MLFunction.
+ *
+ * This class provides functionality to concatenate two input arrays along the feature dimension.
+ * It is designed to handle arrays of real numbers (floats).
+ */
 class Concat : public MLFunction {
- public:
-  Concat(int input1Dims, int input2Dims) {
-    input1Dims_ = input1Dims;
-    input2Dims_ = input2Dims;
-    LOG(ERROR)
-        << "[ERROR UDF-CONCAT] Bug exists in the apply function when decoding the right input arrays of filtered rows. Use built-in concat instead!";
-  }
+public:
+    /**
+     * @brief Constructor that initializes the concatenation operation with input dimensions.
+     *
+     * @param input1Dims The number of dimensions (features) in the first input array.
+     * @param input2Dims The number of dimensions (features) in the second input array.
+     */
+    Concat(int input1Dims, int input2Dims) {
+        input1Dims_ = input1Dims;
+        input2Dims_ = input2Dims;
+        LOG(ERROR) << "[ERROR UDF-CONCAT] Bug exists in the apply function when decoding the right input arrays of filtered rows. Use built-in concat instead!";
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the concatenation operation to the input arrays.
+     *
+     * This method processes the input arrays, concatenates them along the feature dimension,
+     * and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the two input arrays).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the concatenated result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     // Decoder is required to handle address error, reference code:
@@ -89,31 +98,50 @@ class Concat : public MLFunction {
 
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(results, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .argumentType("array(REAL)")
-                .argumentType("array(REAL)")
-                .returnType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .argumentType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .returnType("array(REAL)")
+                    .build()};
+    }
 
-  static std::string getName() {
-    return "concat";
-  }
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string ("concat").
+     */
+    static std::string getName() {
+        return "concat";
+    }
 
-  float* getTensor() const override {
-    // TODO: need to implement
-    return nullptr;
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A null pointer (no tensor is associated with this function).
+     */
+    float* getTensor() const override {
+        return nullptr;
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
-    return CostEstimate(0, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying the concatenation operation.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        return CostEstimate(0, inputDims[0], inputDims[1]);
+    }
 
- private:
-  int input1Dims_;
-  int input2Dims_;
+private:
+    int input1Dims_; ///< Number of dimensions (features) in the first input array.
+    int input2Dims_; ///< Number of dimensions (features) in the second input array.
 };

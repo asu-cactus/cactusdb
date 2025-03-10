@@ -13,6 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+/**
+ * @file functions.h
+ * @brief Header file containing various machine learning functions and utilities.
+ *
+ * This file defines a collection of classes and functions for performing
+ * machine learning operations such as matrix multiplication, addition,
+ * activation functions, and more. It also includes utility functions for
+ * cost estimation and tensor manipulation.
+ */
+
 #pragma once
 #include <torch/torch.h>
 #include <Eigen/Dense>
@@ -54,7 +65,6 @@ using namespace facebook::velox::test;
    into atomic linear algebra
     // focus on weight
     9. GRU -> not interesting
-
 */
 
 // TODO: Refactor
@@ -94,22 +104,49 @@ using namespace facebook::velox::test;
 //   }
 // };
 
+/**
+ * @class MatrixMultiply
+ * @brief Class for performing matrix multiplication.
+ *
+ * This class implements matrix multiplication and provides methods to apply the
+ * operation, retrieve tensor data, and estimate computational cost.
+ */
 class MatrixMultiply : public MLFunction {
  public:
+  /**
+   * @brief Constructor for MatrixMultiply.
+   * @param weights A pointer to the weight matrix.
+   * @param num_rows The number of rows in the weight matrix.
+   * @param num_cols The number of columns in the weight matrix.
+   */
   MatrixMultiply(float* weights, int num_rows, int num_cols) {
-    // Create a deep copy of the weights
+    // Create a deep copy of the weights.
     weights_ = new float[num_rows * num_cols];
     std::memcpy(weights_, weights, num_rows * num_cols * sizeof(float));
     dims.push_back(num_rows);
     dims.push_back(num_cols);
   }
 
+  /**
+   * @brief Constructor for MatrixMultiply.
+   * @param weightsFile The file containing the weight matrix.
+   * @param num_rows The number of rows in the weight matrix.
+   * @param num_cols The number of columns in the weight matrix.
+   */
   MatrixMultiply(std::string weightsFile, int num_rows, int num_cols) {
     weightsFile_ = weightsFile;
     dims.push_back(num_rows);
     dims.push_back(num_cols);
   }
 
+  /**
+   * @brief Apply the matrix multiplication operation.
+   * @param rows The selectivity vector indicating which rows to process.
+   * @param args The input arguments.
+   * @param outputType The type of the output vector.
+   * @param context The evaluation context.
+   * @param output The output vector.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -118,13 +155,13 @@ class MatrixMultiply : public MLFunction {
       VectorPtr& output) const override {
     bool use_gpu = false;
     if (args.size() == 2) {
-      // an optional parameter can be passed to enable the GPU for mat_mul
+      // An optional parameter can be passed to enable the GPU for matrix multiplication.
       use_gpu = args[1]->as<ConstantVector<bool>>()->valueAt(0);
     }
     if (use_gpu) {
-      // TODO: implementation of matrix multiplication in GPU
+      // TODO: Implement GPU matrix multiplication.
       throw std::runtime_error(
-          "GPU implementation of Matrix Multiple is not implemented.");
+          "GPU implementation of Matrix Multiplication is not implemented.");
     } else {
       // Ensure output vector is writable.
       context.ensureWritable(rows, outputType, output);
@@ -151,25 +188,24 @@ class MatrixMultiply : public MLFunction {
       auto inputOffsets = inputArray->rawOffsets();
       auto inputSizes = inputArray->rawSizes();
 
-      // The map between the row index in the input data and the row index in
-      // the output data.
+      // The map between the row index in the input data and the row index in the output data.
       std::map<vector_size_t, vector_size_t> rowMap;
-      // for efficient check
+      // For efficient check.
       std::unordered_set<vector_size_t> uniqueRawIndexeSet;
-      // for iterating over the insert ordering
+      // For iterating over the insert ordering.
       std::vector<vector_size_t> uniqueRawIndexeVector;
       vector_size_t numUniqueRows = 0;
       rows.applyToSelected([&](vector_size_t row) {
         auto mappedIndexInRowData = decodedInput->index(row);
         if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
             uniqueRawIndexeSet.end()) {
-          // add it
+          // Add it.
           rowMap[row] = numUniqueRows;
           uniqueRawIndexeSet.insert(mappedIndexInRowData);
           uniqueRawIndexeVector.push_back(mappedIndexInRowData);
           ++numUniqueRows;
         } else {
-          // already added
+          // Already added.
           rowMap[row] = rowMap[mappedIndexInRowData];
         }
       });
@@ -201,7 +237,6 @@ class MatrixMultiply : public MLFunction {
               "Mapped index not found for the result matrix.");
         }
         auto mappedIndexInResultMatrix = rowMap[row];
-        // auto mappedIndexInRawData = decodedInput->index(row);
         rawOffsets[row] = outputOffset;
         rawSizes[row] = dims[1];
         std::memcpy(
@@ -215,13 +250,17 @@ class MatrixMultiply : public MLFunction {
     }
   }
 
+  /**
+   * @brief Get the function signatures for matrix multiplication.
+   * @return A vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {
         exec::FunctionSignatureBuilder()
             .returnType("array(REAL)")
             .argumentType("array(REAL)")
             .build(),
-        // supports with additional flag: use_gpu
+        // Supports an additional flag: use_gpu.
         exec::FunctionSignatureBuilder()
             .returnType("array(REAL)")
             .argumentType("array(REAL)")
@@ -229,26 +268,51 @@ class MatrixMultiply : public MLFunction {
             .build()};
   }
 
+  /**
+   * @brief Get the tensor data associated with this function.
+   * @return A pointer to the tensor data.
+   */
   float* getTensor() const override {
     return weights_;
   }
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   std::string getFuncName() {
     return getName();
   };
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   static std::string getName() {
     return "mat_mul";
   };
 
+  /**
+   * @brief Get the weights file associated with this function.
+   * @return A string representing the weights file path.
+   */
   std::string getWeightsFile() {
     return weightsFile_;
   }
 
+  /**
+   * @brief Set the weights for this function.
+   * @param weights A pointer to the weight matrix.
+   */
   void setWeights(float* weights) {
     weights_ = weights;
   }
 
+  /**
+   * @brief Estimate the computational cost of the function.
+   * @param inputDims The dimensions of the input data.
+   * @return A CostEstimate object representing the estimated cost.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     int factor1 = inputDims[0];
@@ -261,20 +325,41 @@ class MatrixMultiply : public MLFunction {
   }
 
  private:
-  float* weights_;
-  std::string weightsFile_;
+  float* weights_; ///< Pointer to the weight matrix.
+  std::string weightsFile_; ///< Path to the weights file.
 };
 
+/**
+ * @class MatrixMultiply_b
+ * @brief Class for performing blocked matrix multiplication.
+ *
+ * This class implements matrix multiplication in a blocked manner, which is useful
+ * for optimizing performance on large matrices.
+ */
 class MatrixMultiply_b : public MLFunction {
  public:
+  /**
+   * @brief Constructor for MatrixMultiply_b.
+   * @param num_rows The number of rows in the matrix.
+   * @param num_cols The number of columns in the matrix.
+   * @param num_samples The number of samples.
+   * @param blocks The number of blocks for partitioning the matrix.
+   */
   MatrixMultiply_b(int num_rows, int num_cols, int num_samples, int blocks) {
     dims.push_back(num_rows);
     dims.push_back(num_cols);
     dims.push_back(num_samples);
     dims.push_back(blocks);
-    // weights_ = weights;
   }
 
+  /**
+   * @brief Apply the blocked matrix multiplication operation.
+   * @param rows The selectivity vector indicating which rows to process.
+   * @param args The input arguments.
+   * @param type The type of the output vector.
+   * @param context The evaluation context.
+   * @param output The output vector.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -331,6 +416,10 @@ class MatrixMultiply_b : public MLFunction {
     output = arrayOfArrays;
   }
 
+  /**
+   * @brief Get the function signatures for blocked matrix multiplication.
+   * @return A vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .returnType("array(array(REAL))")
@@ -339,31 +428,65 @@ class MatrixMultiply_b : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Get the tensor data associated with this function.
+   * @return A pointer to the tensor data.
+   */
   float* getTensor() const override {
     return weights_;
   }
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   std::string getFuncName() {
     return getName();
   };
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   static std::string getName() {
     return "mat_mul_block";
   };
 
  private:
-  float* weights_;
+  float* weights_; ///< Pointer to the weight matrix.
 };
 
+
+/**
+ * @class MatrixMultiply_h
+ * @brief Class for performing matrix multiplication with a hierarchical approach.
+ *
+ * This class implements matrix multiplication using a hierarchical approach,
+ * which is useful for optimizing performance on large matrices by breaking
+ * the computation into smaller blocks.
+ */
 class MatrixMultiply_h : public MLFunction {
  public:
+  /**
+   * @brief Constructor for MatrixMultiply_h.
+   * @param num_rows The number of rows in the matrix.
+   * @param num_cols The number of columns in the matrix.
+   * @param block_size The size of each block for hierarchical computation.
+   */
   MatrixMultiply_h(int num_rows, int num_cols, int block_size) {
     dims.push_back(num_rows);
     dims.push_back(num_cols);
     dims.push_back(block_size);
-    // weights_ = weights;
   }
 
+  /**
+   * @brief Apply the hierarchical matrix multiplication operation.
+   * @param rows The selectivity vector indicating which rows to process.
+   * @param args The input arguments.
+   * @param outputType The type of the output vector.
+   * @param context The evaluation context.
+   * @param output The output vector.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -385,6 +508,7 @@ class MatrixMultiply_h : public MLFunction {
     auto elementsOutput = arrayOutput->elements();
     auto elementsPool = context.pool();
     VectorMaker maker{context.pool()};
+
     // Validate input arguments
     VELOX_CHECK_EQ(
         args.size(), 2, "Blocked-based matrix multiply requires 2 inputs");
@@ -416,13 +540,13 @@ class MatrixMultiply_h : public MLFunction {
       auto mappedIndexInRowData = decodedInput1->index(row);
       if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
           uniqueRawIndexeSet.end()) {
-        // add it
+        // Add it.
         rowMap[row] = numUniqueRows;
         uniqueRawIndexeSet.insert(mappedIndexInRowData);
         uniqueRawIndexeVector.push_back(mappedIndexInRowData);
         ++numUniqueRows;
       } else {
-        // already added
+        // Already added.
         rowMap[row] = rowMap[mappedIndexInRowData];
       }
     });
@@ -465,6 +589,10 @@ class MatrixMultiply_h : public MLFunction {
     arrayOutput->setElements(elementsOutput);
   }
 
+  /**
+   * @brief Get the function signatures for hierarchical matrix multiplication.
+   * @return A vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .returnType("array(REAL)")
@@ -473,18 +601,35 @@ class MatrixMultiply_h : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Get the tensor data associated with this function.
+   * @return A pointer to the tensor data.
+   */
   float* getTensor() const override {
     return weights_;
   }
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   std::string getFuncName() {
     return getName();
   };
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   static std::string getName() {
     return "mat_mul_h";
   };
 
+  /**
+   * @brief Estimate the computational cost of the function.
+   * @param inputDims The dimensions of the input data.
+   * @return A CostEstimate object representing the estimated cost.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     std::vector<double> coefficientVector = getCoefficientVector("mat_mul");
     int factor1 = inputDims[0];
@@ -497,11 +642,25 @@ class MatrixMultiply_h : public MLFunction {
   }
 
  private:
-  float* weights_;
+  float* weights_; ///< Pointer to the weight matrix.
 };
-
+/**
+ * @class MatrixMultiply_Block
+ * @brief Class for performing blocked matrix multiplication.
+ *
+ * This class implements matrix multiplication using a blocked approach,
+ * which is useful for optimizing performance on large matrices by breaking
+ * the computation into smaller blocks.
+ */
 class MatrixMultiply_Block : public MLFunction {
  public:
+  /**
+   * @brief Constructor for MatrixMultiply_Block.
+   * @param num_rows The number of rows in the matrix.
+   * @param num_cols The number of columns in the matrix.
+   * @param num_samples The number of samples.
+   * @param blocks The number of blocks for partitioning the matrix.
+   */
   MatrixMultiply_Block(
       int num_rows,
       int num_cols,
@@ -511,9 +670,16 @@ class MatrixMultiply_Block : public MLFunction {
     dims.push_back(num_cols);
     dims.push_back(num_samples);
     dims.push_back(blocks);
-    // weights_ = weights;
   }
 
+  /**
+   * @brief Apply the blocked matrix multiplication operation.
+   * @param rows The selectivity vector indicating which rows to process.
+   * @param args The input arguments.
+   * @param type The type of the output vector.
+   * @param context The evaluation context.
+   * @param output The output vector.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -524,7 +690,6 @@ class MatrixMultiply_Block : public MLFunction {
         ArrayType(std::make_shared<ArrayType>(ArrayType(REAL())));
     BaseVector::ensureWritable(
         rows, std::make_shared<ArrayType>(elementType), context.pool(), output);
-    // BaseVector::ensureWritable(rows, type, context.pool(), output);
     VectorMaker maker{context.pool()};
 
     BaseVector* left = args[0].get();
@@ -542,16 +707,14 @@ class MatrixMultiply_Block : public MLFunction {
     float* input_values_v = baseLeftArray->values()->asMutable<float>();
     float* input_values_w = baseRightArray->values()->asMutable<float>();
 
-    // std::vector<std::vector<float>> result(1,
-    // std::vector<float>(dims[1]*dims[2])); //6000*500
     Eigen::Map<
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        m1(input_values_v, dims[2], dims[0]); // 3*2
+        m1(input_values_v, dims[2], dims[0]);
     Eigen::Map<
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        m2(input_values_w, dims[0], dims[1]); // 2*5
+        m2(input_values_w, dims[0], dims[1]);
     Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m =
-        m1 * m2; // 3*5
+        m1 * m2;
 
     std::vector<std::vector<float>> result;
     for (int i = 0; i < m.rows(); i++) {
@@ -563,6 +726,10 @@ class MatrixMultiply_Block : public MLFunction {
     output = arrayOfArrays;
   }
 
+  /**
+   * @brief Get the function signatures for blocked matrix multiplication.
+   * @return A vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .returnType("array(array(REAL))")
@@ -571,37 +738,70 @@ class MatrixMultiply_Block : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Get the tensor data associated with this function.
+   * @return A pointer to the tensor data.
+   */
   float* getTensor() const override {
     return weights_;
   }
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   std::string getFuncName() {
     return getName();
   };
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   static std::string getName() {
     return "mat_mul_block";
   };
 
  private:
-  float* weights_;
+  float* weights_; ///< Pointer to the weight matrix.
 };
-
-// there is no need to pass any parameter here since dimensions can be figured
-// out from the input can the optimiser figure out the dimensions from the
-// context?
+/**
+ * @class MatrixAddition
+ * @brief Class for performing matrix addition.
+ *
+ * This class implements matrix addition, which adds two matrices element-wise.
+ * It supports both in-place addition and addition with a weight matrix.
+ */
 class MatrixAddition : public MLFunction {
  public:
+  /**
+   * @brief Constructor for MatrixAddition.
+   * @param weights A pointer to the weight matrix.
+   * @param num_cols The number of columns in the matrix.
+   */
   MatrixAddition(float* weights, int num_cols) {
     weights_ = weights;
     dims.push_back(num_cols);
   }
 
+  /**
+   * @brief Constructor for MatrixAddition.
+   * @param weightsFile The file containing the weight matrix.
+   * @param num_cols The number of columns in the matrix.
+   */
   MatrixAddition(std::string weightsFile, int num_cols) {
     weightsFile_ = weightsFile;
     dims.push_back(num_cols);
   }
 
+  /**
+   * @brief Apply the matrix addition operation.
+   * @param rows The selectivity vector indicating which rows to process.
+   * @param args The input arguments.
+   * @param type The type of the output vector.
+   * @param context The evaluation context.
+   * @param output The output vector.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -620,32 +820,9 @@ class MatrixAddition : public MLFunction {
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
         m2(weights_, rows.size(), dims[0]);
 
-    // std::cout << "Matrix shapes MatAdd" << std::endl;
-    // std::cout << "Matrix shape: " << m1.rows() << " x " << m1.cols() <<
-    // std::endl; std::cout << "Matrix shape: " << m2.rows() << " x " <<
-    // m2.cols() << std::endl;
-
-    // std::chrono::steady_clock::time_point begin =
-    // std::chrono::steady_clock::now();
     Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m =
         m1 + m2;
-    // std::chrono::steady_clock::time_point end =
-    // std::chrono::steady_clock::now();
 
-    // std::cout << "Time difference for Mat Add(sec) = " <<
-    // (std::chrono::duration_cast<std::chrono::microseconds>(end -
-    // begin).count()) /1000000.0 << std::endl;
-    // std::cout << m << std::endl;
-
-    int result_size = m.size();
-    float* data = m.data();
-
-    // std::vector<std::vector<float>> result(rows.size(),
-    // std::vector<float>(dims[0])); for (int i = 0; i < rows.size(); ++i) {
-    //     for (int j = 0; j < dims[0]; ++j) {
-    //         result[i][j] = m(i,j);
-    //     }
-    // }
     std::vector<std::vector<float>> result;
     for (int i = 0; i < m.rows(); i++) {
       std::vector<float> row(m.row(i).data(), m.row(i).data() + m.cols());
@@ -655,6 +832,10 @@ class MatrixAddition : public MLFunction {
     output = maker.arrayVector<float>(result, REAL());
   }
 
+  /**
+   * @brief Get the function signatures for matrix addition.
+   * @return A vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .returnType("array(REAL)")
@@ -662,60 +843,112 @@ class MatrixAddition : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Get the tensor data associated with this function.
+   * @return A pointer to the tensor data.
+   */
   float* getTensor() const override {
     return weights_;
   }
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   std::string getFuncName() {
     return getName();
   };
 
+  /**
+   * @brief Get the name of the function.
+   * @return A string representing the function name.
+   */
   static std::string getName() {
     return "mat_add";
   };
 
+  /**
+   * @brief Get the weights file associated with this function.
+   * @return A string representing the weights file path.
+   */
   std::string getWeightsFile() {
     return weightsFile_;
   }
 
+  /**
+   * @brief Set the weights for this function.
+   * @param weights A pointer to the weight matrix.
+   */
   void setWeights(float* weights) {
     weights_ = weights;
   }
 
+  /**
+   * @brief Estimate the computational cost of the function.
+   * @param inputDims The dimensions of the input data.
+   * @return A CostEstimate object representing the estimated cost.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
-
     return CostEstimate(cost, inputDims[0], inputDims[1]);
   }
 
  private:
-  float* weights_;
-  std::string weightsFile_;
+  float* weights_; ///< Pointer to the weight matrix.
+  std::string weightsFile_; ///< Path to the weights file.
 };
-
-// TODO: add future support to implement matrix addition in one class
-// matrix addition, matrix addition brodcast by row/col
+/**
+ * @class MatrixVectorAddition
+ * @brief A class that performs matrix-vector addition, inheriting from MLFunction.
+ *
+ * This class provides functionality to add a vector to each row of a matrix.
+ * It supports initialization with either a raw array of weights or a file containing weights.
+ * The `apply` method performs the matrix-vector addition operation and writes the result to the output vector.
+ */
 class MatrixVectorAddition : public MLFunction {
- public:
-  MatrixVectorAddition(float* weights, int num_cols) {
-    // Create a deep copy of the weights
-    weights_ = new float[num_cols];
-    std::memcpy(weights_, weights, num_cols * sizeof(float));
-    dims.push_back(num_cols);
-  }
+public:
+    /**
+     * @brief Constructor that initializes the class with a raw array of weights.
+     *
+     * @param weights A pointer to a float array containing the weights (vector values).
+     * @param num_cols The number of columns in the matrix (and size of the vector).
+     */
+    MatrixVectorAddition(float* weights, int num_cols) {
+        // Create a deep copy of the weights
+        weights_ = new float[num_cols];
+        std::memcpy(weights_, weights, num_cols * sizeof(float));
+        dims.push_back(num_cols);
+    }
 
-  MatrixVectorAddition(std::string weightsFile, int num_cols) {
-    weightsFile_ = weightsFile;
-    dims.push_back(num_cols);
-  }
+    /**
+     * @brief Constructor that initializes the class with a file containing weights.
+     *
+     * @param weightsFile The path to the file containing the weights.
+     * @param num_cols The number of columns in the matrix (and size of the vector).
+     */
+    MatrixVectorAddition(std::string weightsFile, int num_cols) {
+        weightsFile_ = weightsFile;
+        dims.push_back(num_cols);
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the matrix-vector addition operation.
+     *
+     * This method performs the matrix-vector addition for the selected rows and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input matrix).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
     output->clearNulls(rows);
     auto arrayOutput = output->as<ArrayVector>();
@@ -809,42 +1042,110 @@ class MatrixVectorAddition : public MLFunction {
     return weights_;
   }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  static std::string getName() {
-    return "mat_add";
-  };
+    /**
+     * @brief Returns the tensor (weights) associated with this function.
+     *
+     * @return A pointer to the float array containing the weights.
+     */
+    float* getTensor() const override {
+        return weights_;
+    }
 
-  std::string getWeightsFile() {
-    return weightsFile_;
-  }
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    };
 
-  void setWeights(float* weights) {
-    weights_ = weights;
-  }
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    static std::string getName() {
+        return "mat_add";
+    };
 
- private:
-  float* weights_;
-  std::string weightsFile_;
+    /**
+     * @brief Returns the path to the weights file.
+     *
+     * @return The path to the weights file as a string.
+     */
+    std::string getWeightsFile() {
+        return weightsFile_;
+    }
+
+    /**
+     * @brief Sets the weights for the function.
+     *
+     * @param weights A pointer to a float array containing the new weights.
+     */
+    void setWeights(float* weights) {
+        weights_ = weights;
+    }
+
+private:
+    float* weights_;          ///< Pointer to the weights (vector values).
+    std::string weightsFile_; ///< Path to the file containing the weights.
+    std::vector<int> dims;    ///< Dimensions of the matrix (e.g., number of columns).
 };
-
+/**
+ * @class Sigmoid
+ * @brief A class that implements the Sigmoid activation function, inheriting from MLFunction.
+ *
+ * The Sigmoid function maps input values to a range between 0 and 1. This class provides functionality
+ * to apply the Sigmoid function element-wise to an input array and produce an output array.
+ */
 class Sigmoid : public MLFunction {
- public:
-  Sigmoid() {}
+public:
+    /**
+     * @brief Default constructor.
+     */
+    Sigmoid() {}
 
-  // Sigmoid computation
-  float static sigmoidFunction(float x) {
-    return 1.0f / (1.0f + std::exp(-x));
-  }
+    /**
+     * @brief Computes the Sigmoid function for a single input value.
+     *
+     * @param x The input value.
+     * @return The result of the Sigmoid function: 1.0f / (1.0f + exp(-x)).
+     */
+    static float sigmoidFunction(float x) {
+        return 1.0f / (1.0f + std::exp(-x));
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the Sigmoid function to the input array.
+     *
+     * This method processes the input array, applies the Sigmoid function element-wise, and stores the result
+     * in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
     exec::DecodedArgs decodedArgs(rows, args, context);
     auto decodedInput = decodedArgs.at(0);
@@ -872,49 +1173,101 @@ class Sigmoid : public MLFunction {
     });
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(result, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for Sigmoid).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "sigmoid";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("sigmoid").
+     */
+    static std::string getName() {
+        return "sigmoid";
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    std::vector<double> coefficientVector = getCoefficientVector(getName());
-    float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
-    return CostEstimate(cost, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying the Sigmoid function.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        std::vector<double> coefficientVector = getCoefficientVector(getName());
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
 };
-
+/**
+ * @class Relu
+ * @brief A class that implements the Rectified Linear Unit (ReLU) activation function, inheriting from MLFunction.
+ *
+ * The ReLU function returns the input value if it is positive; otherwise, it returns 0. This class provides
+ * functionality to apply the ReLU function element-wise to an input array and produce an output array.
+ */
 class Relu : public MLFunction {
- public:
-  Relu() {}
+public:
+    /**
+     * @brief Default constructor.
+     */
+    Relu() {}
 
-  float static reluFunction(float x) {
-    return (x > 0.0f) ? x : 0.0f;
-  }
+    /**
+     * @brief Computes the ReLU function for a single input value.
+     *
+     * @param x The input value.
+     * @return The result of the ReLU function: max(0, x).
+     */
+    static float reluFunction(float x) {
+        return (x > 0.0f) ? x : 0.0f;
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the ReLU function to the input array.
+     *
+     * This method processes the input array, applies the ReLU function element-wise, and stores the result
+     * in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
     exec::DecodedArgs decodedArgs(rows, args, context);
     auto decodedInput = decodedArgs.at(0);
@@ -942,45 +1295,91 @@ class Relu : public MLFunction {
     });
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(result, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for ReLU).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "relu";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("relu").
+     */
+    static std::string getName() {
+        return "relu";
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    std::vector<double> coefficientVector = getCoefficientVector(getName());
-    float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
-    return CostEstimate(cost, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying the ReLU function.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        std::vector<double> coefficientVector = getCoefficientVector(getName());
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
 };
 
+/**
+ * @class Softmax
+ * @brief A class that implements the Softmax activation function, inheriting from MLFunction.
+ *
+ * The Softmax function converts a vector of values into a probability distribution, where the values sum to 1.
+ * This class provides functionality to apply the Softmax function to an input array and produce an output array.
+ */
 class Softmax : public MLFunction {
- public:
-  Softmax() {}
+public:
+    /**
+     * @brief Default constructor.
+     */
+    Softmax() {}
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the Softmax function to the input array.
+     *
+     * This method processes the input array, applies the Softmax function, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
     output->clearNulls(rows);
     auto arrayOutput = output->as<ArrayVector>();
@@ -1062,45 +1461,90 @@ class Softmax : public MLFunction {
     });
 
     arrayOutput->setElements(elementsOutput);
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for Softmax).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "softmax";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("softmax").
+     */
+    static std::string getName() {
+        return "softmax";
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    std::vector<double> coefficientVector = getCoefficientVector(getName());
-    float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
-    return CostEstimate(cost, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying the Softmax function.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        std::vector<double> coefficientVector = getCoefficientVector(getName());
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
 };
-
+/**
+ * @class Argmax
+ * @brief A class that implements the Argmax function, inheriting from MLFunction.
+ *
+ * The Argmax function returns the index of the maximum value in a vector. This class provides functionality
+ * to apply the Argmax function to an input array and produce an output array of indices.
+ */
 class Argmax : public MLFunction {
- public:
-  Argmax() {}
+public:
+    /**
+     * @brief Default constructor.
+     */
+    Argmax() {}
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the Argmax function to the input array.
+     *
+     * This method processes the input array, applies the Argmax function, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
     auto arrayOutput = output->asFlatVector<int>();
 
@@ -1168,49 +1612,92 @@ class Argmax : public MLFunction {
       LOG(INFO) << "[INFO] Label Distributions: Key: " << pair.first
                 << ", Value: " << pair.second << std::endl;
     }
+    }
 
-    // There could be a more efficient way to do this
-    // Ref: https://stackoverflow.com/a/41384560
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("INTEGER")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("INTEGER")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for Argmax).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("argmax").
+     */
+    static std::string getName() {
+        return "argmax";
+    }
 
-  static std::string getName() {
-    return "argmax";
-  };
-
-  CostEstimate getCost(std::vector<int> inputDims) {
-    std::vector<double> coefficientVector = getCoefficientVector(getName());
-    float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
-    return CostEstimate(cost, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying the Argmax function.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        std::vector<double> coefficientVector = getCoefficientVector(getName());
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
 };
-
+/**
+ * @class MinMaxScaler
+ * @brief A class that implements Min-Max scaling, inheriting from MLFunction.
+ *
+ * Min-Max scaling normalizes input data to a specified range (typically [0, 1]) using the formula:
+ * \[
+ * X_{\text{scaled}} = \frac{X - X_{\text{min}}}{X_{\text{max}} - X_{\text{min}}}
+ * \]
+ * This class supports initialization with either raw arrays of min/max values or a file containing these values.
+ */
 class MinMaxScaler : public MLFunction {
- public:
-  MinMaxScaler(float* scalerMinValues, float* scalerMaxValues, int numCols) {
-    scalerMinValues_ = new float[numCols];
-    scalerMaxValues_ = new float[numCols];
-    std::memcpy(scalerMinValues_, scalerMinValues, numCols * sizeof(float));
-    std::memcpy(scalerMaxValues_, scalerMaxValues, numCols * sizeof(float));
-    numCols_ = numCols;
-  }
+public:
+    /**
+     * @brief Constructor that initializes the scaler with raw arrays of min and max values.
+     *
+     * @param scalerMinValues A pointer to a float array containing the minimum values for each feature.
+     * @param scalerMaxValues A pointer to a float array containing the maximum values for each feature.
+     * @param numCols The number of features (columns) in the input data.
+     */
+    MinMaxScaler(float* scalerMinValues, float* scalerMaxValues, int numCols) {
+        scalerMinValues_ = new float[numCols];
+        scalerMaxValues_ = new float[numCols];
+        std::memcpy(scalerMinValues_, scalerMinValues, numCols * sizeof(float));
+        std::memcpy(scalerMaxValues_, scalerMaxValues, numCols * sizeof(float));
+        numCols_ = numCols;
+    }
 
-  MinMaxScaler(std::string minMaxScalerDataPath) {
+    /**
+     * @brief Constructor that initializes the scaler with a file containing min and max values.
+     *
+     * @param minMaxScalerDataPath The path to the file containing min and max values.
+     */
+    MinMaxScaler(std::string minMaxScalerDataPath) {
     std::vector<float> scalerMinVector;
     std::vector<float> scalerMaxVector;
 
@@ -1252,14 +1739,25 @@ class MinMaxScaler : public MLFunction {
         scalerMinValues_, scalerMinVector.data(), numCols_ * sizeof(float));
     std::memcpy(
         scalerMaxValues_, scalerMaxVector.data(), numCols_ * sizeof(float));
-  }
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies Min-Max scaling to the input array.
+     *
+     * This method processes the input array, applies Min-Max scaling, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     output->clearNulls(rows);
@@ -1344,54 +1842,102 @@ class MinMaxScaler : public MLFunction {
       outputOffset += numCols;
     });
     arrayOutput->setElements(elementsOutput);
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for MinMaxScaler).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "min_max_scaler";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("min_max_scaler").
+     */
+    static std::string getName() {
+        return "min_max_scaler";
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    std::vector<double> coefficientVector = getCoefficientVector(getName());
-    float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
-    return CostEstimate(cost, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying Min-Max scaling.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        std::vector<double> coefficientVector = getCoefficientVector(getName());
+        float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
 
- private:
-  float* scalerMinValues_;
-  float* scalerMaxValues_;
-  int numCols_;
+private:
+    float* scalerMinValues_; ///< Pointer to the array of minimum values.
+    float* scalerMaxValues_; ///< Pointer to the array of maximum values.
+    int numCols_;            ///< Number of features (columns) in the input data.
 };
-
+/**
+ * @class TorchDNN2Level
+ * @brief A class that implements a 2-level deep neural network using PyTorch, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply a 2-level dense neural network with ReLU activation and softmax output.
+ */
 class TorchDNN2Level : public MLFunction {
- public:
-  TorchDNN2Level(float** weights, float** bias, std::vector<int> dimensions) {
-    this->weights = weights;
-    this->bias = bias;
-    dims = dimensions;
-  }
+public:
+    /**
+     * @brief Constructor that initializes the neural network with weights and biases.
+     *
+     * @param weights A pointer to an array of pointers to weight matrices.
+     * @param bias A pointer to an array of pointers to bias vectors.
+     * @param dimensions A vector containing the dimensions of the neural network layers.
+     */
+    TorchDNN2Level(float** weights, float** bias, std::vector<int> dimensions) {
+        this->weights = weights;
+        this->bias = bias;
+        dims = dimensions;
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the 2-level neural network to the input array.
+     *
+     * This method processes the input array, applies the neural network, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
     torch::nn::Linear dense1(dims[0], dims[1]);
@@ -1435,67 +1981,123 @@ class TorchDNN2Level : public MLFunction {
     }
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(results, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for TorchDNN2Level).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  // Getter method for weights
-  float** getWeights() const {
-    return weights;
-  }
+    /**
+     * @brief Returns the weights of the neural network.
+     *
+     * @return A pointer to an array of pointers to weight matrices.
+     */
+    float** getWeights() const {
+        return weights;
+    }
 
-  // Getter method for bias
-  float** getBias() const {
-    return bias;
-  }
+    /**
+     * @brief Returns the biases of the neural network.
+     *
+     * @return A pointer to an array of pointers to bias vectors.
+     */
+    float** getBias() const {
+        return bias;
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "torch_dnn";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("torch_dnn").
+     */
+    static std::string getName() {
+        return "torch_dnn";
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    float cost = getWeightedCost(
-        getName(), inputDims[0] * inputDims[1] * dims[0] * dims[1]);
-    return CostEstimate(cost, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying the neural network.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        float cost = getWeightedCost(
+            getName(), inputDims[0] * inputDims[1] * dims[0] * dims[1]);
+        return CostEstimate(cost, inputDims[0], inputDims[1]);
+    }
 
- private:
-  float** weights;
-  float** bias;
+private:
+    float** weights; ///< Pointer to an array of pointers to weight matrices.
+    float** bias;    ///< Pointer to an array of pointers to bias vectors.
+    std::vector<int> dims; ///< Dimensions of the neural network layers.
 };
-
-// This class is deprecating and current code will be refactored to TorchDNNV2.
+/**
+ * @class TorchDNN
+ * @brief A class that implements a deep neural network using PyTorch, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply a multi-layer neural network with ReLU activations and softmax output.
+ */
 class TorchDNN : public MLFunction {
- public:
-  TorchDNN(
-      std::vector<float*> weights,
-      std::vector<float*> bias,
-      std::vector<int> dimensions) {
-    this->weights = weights;
-    this->bias = bias;
-    dims = dimensions;
-  }
+public:
+    /**
+     * @brief Constructor that initializes the neural network with weights, biases, and layer dimensions.
+     *
+     * @param weights A vector of pointers to weight matrices for each layer.
+     * @param bias A vector of pointers to bias vectors for each layer.
+     * @param dimensions A vector containing the dimensions of the neural network layers.
+     */
+    TorchDNN(
+        std::vector<float*> weights,
+        std::vector<float*> bias,
+        std::vector<int> dimensions) {
+        this->weights = weights;
+        this->bias = bias;
+        dims = dimensions;
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the neural network to the input array.
+     *
+     * This method processes the input array, applies the neural network, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     std::vector<torch::nn::Linear> dense_layers;
     std::vector<torch::Tensor> weights_tensors;
     std::vector<torch::Tensor> bias_tensors;
@@ -1541,40 +2143,72 @@ class TorchDNN : public MLFunction {
 
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(results, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for TorchDNN).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  // Getter method for weights
-  const std::vector<float*>& getWeights() const {
-    return weights;
-  }
+    /**
+     * @brief Returns the weights of the neural network.
+     *
+     * @return A vector of pointers to weight matrices.
+     */
+    const std::vector<float*>& getWeights() const {
+        return weights;
+    }
 
-  // Getter method for bias
-  const std::vector<float*>& getBias() const {
-    return bias;
-  }
+    /**
+     * @brief Returns the biases of the neural network.
+     *
+     * @return A vector of pointers to bias vectors.
+     */
+    const std::vector<float*>& getBias() const {
+        return bias;
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "torchnn";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("torchnn").
+     */
+    static std::string getName() {
+        return "torchnn";
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to compute cost based on dims
+    /**
+     * @brief Estimates the computational cost of applying the neural network.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     uint64_t factor1 = inputDims[0] * dims[0] * dims[1];
     uint64_t factor2 = inputDims[0] * dims[1] * dims[2];
@@ -1599,24 +2233,38 @@ class TorchDNN : public MLFunction {
     // factor2, coefficientVector[1] * factor2);
 
     return CostEstimate(cost, inputDims[0], dims[2]);
-  }
+    }
 
- private:
-  std::vector<float*> weights;
-  std::vector<float*> bias;
+private:
+    std::vector<float*> weights; ///< Vector of pointers to weight matrices.
+    std::vector<float*> bias;    ///< Vector of pointers to bias vectors.
+    std::vector<int> dims;       ///< Dimensions of the neural network layers.
 };
-
+/**
+ * @namespace velox::dl
+ * @brief Namespace for deep learning-related utilities and kernels.
+ */
 namespace velox::dl {
+
+/**
+ * @enum KernelType
+ * @brief Enumeration of kernel types used in deep learning operations.
+ */
 enum class KernelType {
-  MatMul,
-  MatAdd,
-  ReLU,
-  Softmax,
-  BatchNorm,
-  Argmax,
-  Sigmoid
+  MatMul,   ///< Matrix multiplication kernel.
+  MatAdd,   ///< Matrix addition kernel.
+  ReLU,     ///< Rectified Linear Unit activation kernel.
+  Softmax,  ///< Softmax activation kernel.
+  BatchNorm,///< Batch normalization kernel.
+  Argmax,   ///< Argmax operation kernel.
+  Sigmoid   ///< Sigmoid activation kernel.
 };
 
+/**
+ * @brief Converts a KernelType enum value to its string representation.
+ * @param kernelType The kernel type to convert.
+ * @return A string representing the kernel type.
+ */
 std::string kernelTypeToString(KernelType kernelType) {
   switch (kernelType) {
     case KernelType::MatMul:
@@ -1638,6 +2286,12 @@ std::string kernelTypeToString(KernelType kernelType) {
   }
 }
 
+/**
+ * @brief Overloads the `<<` operator for KernelType.
+ * @param os The output stream.
+ * @param kernelType The kernel type to stream.
+ * @return The output stream with the kernel type string representation.
+ */
 std::ostream& operator<<(std::ostream& os, KernelType kernelType) {
   switch (kernelType) {
     case KernelType::MatMul:
@@ -1656,28 +2310,30 @@ std::ostream& operator<<(std::ostream& os, KernelType kernelType) {
       return os << "Unknown";
   }
 }
-}; // namespace velox::dl
 
-struct LibTorchArgmaxKernel : torch::nn::Module {
-  int64_t dim;
-
-  LibTorchArgmaxKernel(int64_t dim_) : dim(dim_) {}
-
-  torch::Tensor forward(torch::Tensor x) {
-    return torch::argmax(x, dim);
-  }
-};
-
+} // namespace velox::dl
+/**
+ * @class TorchDNNV2
+ * @brief A class that implements a configurable deep neural network using PyTorch, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply a neural network with configurable layers (e.g., MatMul, ReLU, Softmax, etc.).
+ */
 class TorchDNNV2 : public MLFunction {
- public:
-  TorchDNNV2(
-      std::vector<velox::dl::KernelType> kernelTypes,
-      std::vector<float*> weights,
-      std::vector<int> dimensions) {
-    this->weights = weights;
-    // dims.size() = weights.size() + 1, dims[0] is the input dimension
-    dims = dimensions;
-    kernelTypes_ = kernelTypes;
+public:
+    /**
+     * @brief Constructor that initializes the neural network with kernel types, weights, and dimensions.
+     *
+     * @param kernelTypes A vector of KernelType specifying the types of layers in the network.
+     * @param weights A vector of pointers to weight matrices for each layer.
+     * @param dimensions A vector containing the dimensions of the neural network layers.
+     */
+    TorchDNNV2(
+        std::vector<velox::dl::KernelType> kernelTypes,
+        std::vector<float*> weights,
+        std::vector<int> dimensions) {
+        this->weights = weights;
+        dims = dimensions;
+        kernelTypes_ = kernelTypes;
     int numOps = kernelTypes.size();
     int weightIdx = 0;
     hasArgmax_ = false;
@@ -1727,15 +2383,25 @@ class TorchDNNV2 : public MLFunction {
     // enable evaluation mode, this is required for inference, otherwise some
     // module could failed, like dropout, batchnorm, etc.
     model_->eval();
-  }
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
-    // Ensure output vector is writable.
+    /**
+     * @brief Applies the neural network to the input array.
+     *
+     * This method processes the input array, applies the neural network, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     context.ensureWritable(rows, type, output);
     output->clearNulls(rows);
 
@@ -1839,82 +2505,125 @@ class TorchDNNV2 : public MLFunction {
       });
       arrayOutput->setElements(elementsOutput);
     }
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {
-        exec::FunctionSignatureBuilder()
-            .returnType("array(REAL)")
-            .argumentType("array(REAL)")
-            .build(),
-        // Output flat vector of int when Argmax is applied
-        // Add an un-used argument to distinguish the signature
-        exec::FunctionSignatureBuilder()
-            .returnType("INTEGER")
-            .argumentType("array(REAL)")
-            .argumentType("INTEGER")
-            .build(),
-        exec::FunctionSignatureBuilder()
-            .returnType("INTEGER")
-            .argumentType("array(REAL)")
-            .argumentType("BIGINT")
-            .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {
+            exec::FunctionSignatureBuilder()
+                .returnType("array(REAL)")
+                .argumentType("array(REAL)")
+                .build(),
+            exec::FunctionSignatureBuilder()
+                .returnType("INTEGER")
+                .argumentType("array(REAL)")
+                .argumentType("INTEGER")
+                .build(),
+            exec::FunctionSignatureBuilder()
+                .returnType("INTEGER")
+                .argumentType("array(REAL)")
+                .argumentType("BIGINT")
+                .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for TorchDNNV2).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  // Getter method for weights
-  const std::vector<float*>& getWeights() const {
-    return weights;
-  }
+    /**
+     * @brief Returns the weights of the neural network.
+     *
+     * @return A vector of pointers to weight matrices.
+     */
+    const std::vector<float*>& getWeights() const {
+        return weights;
+    }
 
-  // Getter method for bias
-  const std::vector<float*>& getBias() const {
-    return bias;
-  }
+    /**
+     * @brief Returns the biases of the neural network.
+     *
+     * @return A vector of pointers to bias vectors.
+     */
+    const std::vector<float*>& getBias() const {
+        return bias;
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "complexTorchNN";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("complexTorchNN").
+     */
+    static std::string getName() {
+        return "complexTorchNN";
+    }
 
-  std::vector<velox::dl::KernelType> getKernelTypes() const {
-    return kernelTypes_;
-  }
+    /**
+     * @brief Returns the kernel types used in the neural network.
+     *
+     * @return A vector of KernelType specifying the types of layers.
+     */
+    std::vector<velox::dl::KernelType> getKernelTypes() const {
+        return kernelTypes_;
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to compute cost based on dims
-    return CostEstimate(0, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying the neural network.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        return CostEstimate(0, inputDims[0], inputDims[1]);
+    }
 
- private:
-  std::vector<float*> weights;
-  std::vector<float*> bias;
-  std::vector<velox::dl::KernelType> kernelTypes_;
-  bool hasArgmax_;
-  // std::vector<torch::nn::AnyModule> layers_;
-
-  torch::nn::Sequential model_;
+private:
+    std::vector<float*> weights; ///< Vector of pointers to weight matrices.
+    std::vector<float*> bias;    ///< Vector of pointers to bias vectors.
+    std::vector<velox::dl::KernelType> kernelTypes_; ///< Types of layers in the network.
+    bool hasArgmax_; ///< Flag indicating if the network includes an Argmax layer.
+    torch::nn::Sequential model_; ///< PyTorch sequential model representing the neural network.
 };
-
+/**
+ * @class TorchDNNV2CUDA
+ * @brief A class that implements a configurable deep neural network using PyTorch with CUDA support, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply a neural network with configurable layers (e.g., MatMul, ReLU, Softmax, etc.) on a CUDA device.
+ */
 class TorchDNNV2CUDA : public MLFunction {
- public:
-  TorchDNNV2CUDA(
-      std::vector<velox::dl::KernelType> kernelTypes,
-      std::vector<float*> weights,
-      std::vector<int> dimensions) {
-    // device_ = torch::Device(torch::kCUDA);
-    device_ = "cuda:0";
-    this->weights = weights;
-    // dims.size() = weights.size() + 1, dims[0] is the input dimension
-    dims = dimensions;
-    kernelTypes_ = kernelTypes;
+public:
+    /**
+     * @brief Constructor that initializes the neural network with kernel types, weights, and dimensions.
+     *
+     * @param kernelTypes A vector of KernelType specifying the types of layers in the network.
+     * @param weights A vector of pointers to weight matrices for each layer.
+     * @param dimensions A vector containing the dimensions of the neural network layers.
+     */
+    TorchDNNV2CUDA(
+        std::vector<velox::dl::KernelType> kernelTypes,
+        std::vector<float*> weights,
+        std::vector<int> dimensions) {
+        device_ = "cuda:0"; // Initialize CUDA device.
+        this->weights = weights;
+        dims = dimensions;
+        kernelTypes_ = kernelTypes;
     int numOps = kernelTypes.size();
     int weightIdx = 0;
     hasArgmax_ = false;
@@ -1959,15 +2668,25 @@ class TorchDNNV2CUDA : public MLFunction {
     // module could failed, like dropout, batchnorm, etc.
     model_->to(device_);
     model_->eval();
-  }
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
-    // Ensure output vector is writable.
+    /**
+     * @brief Applies the neural network to the input array using CUDA.
+     *
+     * This method processes the input array, applies the neural network on a CUDA device, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     context.ensureWritable(rows, type, output);
     output->clearNulls(rows);
 
@@ -2074,89 +2793,147 @@ class TorchDNNV2CUDA : public MLFunction {
       });
       arrayOutput->setElements(elementsOutput);
     }
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {
-        exec::FunctionSignatureBuilder()
-            .returnType("array(REAL)")
-            .argumentType("array(REAL)")
-            .build(),
-        // Output flat vector of int when Argmax is applied
-        // Add an un-used argument to distinguish the signature
-        exec::FunctionSignatureBuilder()
-            .returnType("INTEGER")
-            .argumentType("array(REAL)")
-            .argumentType("INTEGER")
-            .build(),
-        exec::FunctionSignatureBuilder()
-            .returnType("INTEGER")
-            .argumentType("array(REAL)")
-            .argumentType("BIGINT")
-            .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {
+            exec::FunctionSignatureBuilder()
+                .returnType("array(REAL)")
+                .argumentType("array(REAL)")
+                .build(),
+            exec::FunctionSignatureBuilder()
+                .returnType("INTEGER")
+                .argumentType("array(REAL)")
+                .argumentType("INTEGER")
+                .build(),
+            exec::FunctionSignatureBuilder()
+                .returnType("INTEGER")
+                .argumentType("array(REAL)")
+                .argumentType("BIGINT")
+                .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for TorchDNNV2CUDA).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  // Getter method for weights
-  const std::vector<float*>& getWeights() const {
-    return weights;
-  }
+    /**
+     * @brief Returns the weights of the neural network.
+     *
+     * @return A vector of pointers to weight matrices.
+     */
+    const std::vector<float*>& getWeights() const {
+        return weights;
+    }
 
-  // Getter method for bias
-  const std::vector<float*>& getBias() const {
-    return bias;
-  }
+    /**
+     * @brief Returns the biases of the neural network.
+     *
+     * @return A vector of pointers to bias vectors.
+     */
+    const std::vector<float*>& getBias() const {
+        return bias;
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "complexTorchNN_GPU";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("complexTorchNN_GPU").
+     */
+    static std::string getName() {
+        return "complexTorchNN_GPU";
+    }
 
-  std::vector<velox::dl::KernelType> getKernelTypes() const {
-    return kernelTypes_;
-  }
+    /**
+     * @brief Returns the kernel types used in the neural network.
+     *
+     * @return A vector of KernelType specifying the types of layers.
+     */
+    std::vector<velox::dl::KernelType> getKernelTypes() const {
+        return kernelTypes_;
+    }
 
-  CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to compute cost based on dims
-    return CostEstimate(0, inputDims[0], inputDims[1]);
-  }
+    /**
+     * @brief Estimates the computational cost of applying the neural network.
+     *
+     * @param inputDims A vector containing the dimensions of the input.
+     * @return A CostEstimate object representing the estimated cost.
+     */
+    CostEstimate getCost(std::vector<int> inputDims) {
+        return CostEstimate(0, inputDims[0], inputDims[1]);
+    }
 
- private:
-  std::vector<float*> weights;
-  std::vector<float*> bias;
-  std::vector<velox::dl::KernelType> kernelTypes_;
-  bool hasArgmax_;
-  std::string device_;
-  // std::vector<torch::nn::AnyModule> layers_;
-  torch::nn::Sequential model_;
+private:
+    std::vector<float*> weights; ///< Vector of pointers to weight matrices.
+    std::vector<float*> bias;    ///< Vector of pointers to bias vectors.
+    std::vector<velox::dl::KernelType> kernelTypes_; ///< Types of layers in the network.
+    bool hasArgmax_; ///< Flag indicating if the network includes an Argmax layer.
+    std::string device_; ///< CUDA device identifier (e.g., "cuda:0").
+    torch::nn::Sequential model_; ///< PyTorch sequential model representing the neural network.
 };
-
+/**
+ * @class TorchDNNKernel
+ * @brief A class that implements a single-layer neural network kernel using PyTorch, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply a single-layer neural network with configurable kernel types (e.g., Dense, ReLU, Softmax).
+ */
 class TorchDNNKernel : public MLFunction {
- public:
-  TorchDNNKernel(
-      std::string kernel,
-      float* weights,
-      float* bias,
-      std::vector<int> dimensions) {
-    this->kernel = kernel;
-    this->weights = weights;
-    this->bias = bias;
-    dims = dimensions;
-  }
+public:
+    /**
+     * @brief Constructor that initializes the neural network kernel with weights, biases, and dimensions.
+     *
+     * @param kernel The type of kernel (e.g., "Dense", "ReLU", "Softmax").
+     * @param weights A pointer to the weight matrix.
+     * @param bias A pointer to the bias vector.
+     * @param dimensions A vector containing the dimensions of the neural network layer.
+     */
+    TorchDNNKernel(
+        std::string kernel,
+        float* weights,
+        float* bias,
+        std::vector<int> dimensions) {
+        this->kernel = kernel;
+        this->weights = weights;
+        this->bias = bias;
+        dims = dimensions;
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the neural network kernel to the input array.
+     *
+     * This method processes the input array, applies the neural network kernel, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     std::vector<torch::nn::Linear> dense_layers;
     std::vector<torch::Tensor> weights_tensors;
     std::vector<torch::Tensor> bias_tensors;
@@ -2198,61 +2975,113 @@ class TorchDNNKernel : public MLFunction {
 
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(results, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for TorchDNNKernel).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  // Getter method for weights
-  const float* getWeights() const {
-    return weights;
-  }
+    /**
+     * @brief Returns the weights of the neural network kernel.
+     *
+     * @return A pointer to the weight matrix.
+     */
+    const float* getWeights() const {
+        return weights;
+    }
 
-  // Getter method for bias
-  const float* getBias() const {
-    return bias;
-  }
+    /**
+     * @brief Returns the biases of the neural network kernel.
+     *
+     * @return A pointer to the bias vector.
+     */
+    const float* getBias() const {
+        return bias;
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "torchnn_kernel";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("torchnn_kernel").
+     */
+    static std::string getName() {
+        return "torchnn_kernel";
+    }
 
- private:
-  float* weights;
-  float* bias;
-  std::string kernel;
+private:
+    float* weights; ///< Pointer to the weight matrix.
+    float* bias;    ///< Pointer to the bias vector.
+    std::string kernel; ///< Type of kernel (e.g., "Dense", "ReLU", "Softmax").
+    std::vector<int> dims; ///< Dimensions of the neural network layer.
 };
 
+/**
+ * @class TorchDNN_Multi
+ * @brief A class that implements a multi-layer deep neural network using PyTorch, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply a multi-layer neural network with ReLU activations and softmax output.
+ */
 class TorchDNN_Multi : public MLFunction {
- public:
-  TorchDNN_Multi(
-      std::vector<float*> weights,
-      std::vector<float*> bias,
-      std::vector<int> dimensions) {
-    this->weights = weights;
-    this->bias = bias;
-    dims = dimensions;
-  }
+public:
+    /**
+     * @brief Constructor that initializes the neural network with weights, biases, and layer dimensions.
+     *
+     * @param weights A vector of pointers to weight matrices for each layer.
+     * @param bias A vector of pointers to bias vectors for each layer.
+     * @param dimensions A vector containing the dimensions of the neural network layers.
+     */
+    TorchDNN_Multi(
+        std::vector<float*> weights,
+        std::vector<float*> bias,
+        std::vector<int> dimensions) {
+        this->weights = weights;
+        this->bias = bias;
+        dims = dimensions;
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the multi-layer neural network to the input array.
+     *
+     * This method processes the input array, applies the neural network, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     std::vector<torch::nn::Linear> dense_layers;
     std::vector<torch::Tensor> weights_tensors;
     std::vector<torch::Tensor> bias_tensors;
@@ -2298,43 +3127,86 @@ class TorchDNN_Multi : public MLFunction {
 
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(results, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for TorchDNN_Multi).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  // Getter method for weights
-  const std::vector<float*>& getWeights() const {
-    return weights;
-  }
+    /**
+     * @brief Returns the weights of the neural network.
+     *
+     * @return A vector of pointers to weight matrices.
+     */
+    const std::vector<float*>& getWeights() const {
+        return weights;
+    }
 
-  // Getter method for bias
-  const std::vector<float*>& getBias() const {
-    return bias;
-  }
+    /**
+     * @brief Returns the biases of the neural network.
+     *
+     * @return A vector of pointers to bias vectors.
+     */
+    const std::vector<float*>& getBias() const {
+        return bias;
+    }
 
- private:
-  std::vector<float*> weights;
-  std::vector<float*> bias;
+private:
+    std::vector<float*> weights; ///< Vector of pointers to weight matrices.
+    std::vector<float*> bias;    ///< Vector of pointers to bias vectors.
+    std::vector<int> dims;       ///< Dimensions of the neural network layers.
 };
-
+/**
+ * @class Convolute
+ * @brief A class for performing 2D convolution operations as part of a machine learning function.
+ *
+ * This class implements a 2D convolution operation using Eigen for matrix operations.
+ * It supports multi-channel inputs and filters, and produces multi-channel outputs.
+ */
 class Convolute : public MLFunction {
  public:
+  /**
+   * @brief Constructs a new Convolute object.
+   * @param weights A pointer to the filter weights.
+   * @param dims_ An array of dimensions describing the filters and input:
+   *              - dims_[0]: Number of filters.
+   *              - dims_[1]: Filter height.
+   *              - dims_[2]: Filter width.
+   *              - dims_[3]: Number of input channels.
+   *              - dims_[4]: Input height.
+   *              - dims_[5]: Input width.
+   */
   Convolute(float* weights, int* dims_) {
     weights_ = weights;
     for (int i = 0; i < 6; i++)
       dims.push_back(dims_[i]);
   }
 
+  /**
+   * @brief Applies the 2D convolution operation to the input data.
+   * @param rows A SelectivityVector indicating which rows to process.
+   * @param args A vector of input arguments (only the first argument is used).
+   * @param type The type of the output vector.
+   * @param context The evaluation context.
+   * @param output The output vector where the results will be stored.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -2398,34 +3270,6 @@ class Convolute : public MLFunction {
       }
     }
 
-    // #pragma omp parallel for
-    // for (int s = 0; s < rows.size(); s++) {
-    //     for (int f = 0; f < dims[0]; f++) {
-    //         // Pre-calculate filter offset
-    //         int filter_offset = f * output_height * output_width;
-    //         for (int c = 0; c < dims[3]; c++) {
-    //             // Map input and filter data
-    //             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic,
-    //             Eigen::Dynamic, Eigen::RowMajor>> input(input_values + s *
-    //             input_size + c * input_channel_size, input_height,
-    //             input_width); Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic,
-    //             Eigen::Dynamic, Eigen::RowMajor>> kernel(weights_ + f *
-    //             filter_size + c * filter_channel_size, dims[1], dims[2]);
-
-    //             // Convolution operation
-    //             for (int i = 0; i < output_height; ++i) {
-    //                 int output_row_offset = i * output_width;
-    //                 for (int j = 0; j < output_width; ++j) {
-    //                     // Compute dot product using Eigen operations
-    //                     results[s][filter_offset + output_row_offset + j] +=
-    //                     (input.block(i, j, dims[1],
-    //                     dims[2]).cwiseProduct(kernel)).sum();
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
     std::chrono::steady_clock::time_point end =
         std::chrono::steady_clock::now();
     std::cout << "Time for conv2d (sec) = "
@@ -2439,6 +3283,10 @@ class Convolute : public MLFunction {
     output = maker.arrayVector<float>(results, REAL());
   }
 
+  /**
+   * @brief Returns the function signatures for the convolution operation.
+   * @return A vector of shared pointers to FunctionSignature objects.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .returnType("array(REAL)")
@@ -2446,36 +3294,71 @@ class Convolute : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the filter weights tensor.
+   * @return A pointer to the filter weights.
+   */
   float* getTensor() const override {
     return weights_;
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return A string representing the function name.
+   */
   std::string getFuncName() {
     return "conv2d";
   };
 
+  /**
+   * @brief Returns the name of the function.
+   * @return A string representing the function name.
+   */
   static std::string getName() {
     return "conv2d";
   };
 
  private:
-  float* weights_;
+  float* weights_; ///< Pointer to the filter weights.
+  std::vector<int> dims; ///< Dimensions of the filters and input.
 };
-
+/**
+ * @class TorchConvolute
+ * @brief A class that implements a 2D convolution operation using PyTorch, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply a 2D convolution operation to an input array using PyTorch.
+ */
 class TorchConvolute : public MLFunction {
- public:
-  TorchConvolute(float* weights, int* dims_) {
-    weights_ = weights;
-    for (int i = 0; i < 6; i++)
-      dims.push_back(dims_[i]);
-  }
+public:
+    /**
+     * @brief Constructor that initializes the convolution operation with weights and dimensions.
+     *
+     * @param weights A pointer to the weight matrix for the convolution.
+     * @param dims_ An array containing the dimensions of the convolution operation.
+     */
+    TorchConvolute(float* weights, int* dims_) {
+        weights_ = weights;
+        for (int i = 0; i < 6; i++)
+            dims.push_back(dims_[i]);
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the 2D convolution operation to the input array using PyTorch.
+     *
+     * This method processes the input array, applies the convolution, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
     BaseVector::ensureWritable(rows, type, context.pool(), output);
@@ -2520,49 +3403,91 @@ class TorchConvolute : public MLFunction {
     output = maker.arrayVector<float>(results, REAL());
     std::chrono::steady_clock::time_point end =
         std::chrono::steady_clock::now();
-    // std::cout << "Time for conv2d (sec) = " <<
-    // (std::chrono::duration_cast<std::chrono::microseconds>(end -
-    // begin).count()) /1000000.0 << std::endl;
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  float* getTensor() const override {
-    return weights_;
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to the weight matrix for the convolution.
+     */
+    float* getTensor() const override {
+        return weights_;
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "torchconv2d";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("torchconv2d").
+     */
+    static std::string getName() {
+        return "torchconv2d";
+    }
 
- private:
-  float* weights_;
+private:
+    float* weights_; ///< Pointer to the weight matrix for the convolution.
+    std::vector<int> dims; ///< Dimensions of the convolution operation.
 };
 
+/**
+ * @class TorchCNN
+ * @brief A class that implements a convolutional neural network (CNN) using PyTorch, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply a CNN to an input array using PyTorch.
+ */
 class TorchCNN : public MLFunction {
- public:
-  TorchCNN(float* weights, float* bias, int* dims_) {
-    weights_ = weights;
-    bias_ = bias;
-    for (int i = 0; i < 7; i++)
-      dims.push_back(dims_[i]);
-  }
+public:
+    /**
+     * @brief Constructor that initializes the CNN with weights, biases, and dimensions.
+     *
+     * @param weights A pointer to the weight matrix for the convolution.
+     * @param bias A pointer to the bias vector for the convolution.
+     * @param dims_ An array containing the dimensions of the CNN.
+     */
+    TorchCNN(float* weights, float* bias, int* dims_) {
+        weights_ = weights;
+        bias_ = bias;
+        for (int i = 0; i < 7; i++)
+            dims.push_back(dims_[i]);
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies the CNN to the input array using PyTorch.
+     *
+     * This method processes the input array, applies the CNN, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     std::chrono::steady_clock::time_point begin =
         std::chrono::steady_clock::now();
     BaseVector::ensureWritable(rows, type, context.pool(), output);
@@ -2643,57 +3568,106 @@ class TorchCNN : public MLFunction {
     output = maker.arrayVector<float>(results, REAL());
     std::chrono::steady_clock::time_point end =
         std::chrono::steady_clock::now();
-    // std::cout << "Time for conv2d (sec) = " <<
-    // (std::chrono::duration_cast<std::chrono::microseconds>(end -
-    // begin).count()) /1000000.0 << std::endl;
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  float* getTensor() const override {
-    return weights_;
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to the weight matrix for the convolution.
+     */
+    float* getTensor() const override {
+        return weights_;
+    }
 
-  // Getter method for weights
-  float* getWeights() const {
-    return weights_;
-  }
+    /**
+     * @brief Returns the weights of the CNN.
+     *
+     * @return A pointer to the weight matrix.
+     */
+    float* getWeights() const {
+        return weights_;
+    }
 
-  // Getter method for bias
-  float* getBias() const {
-    return bias_;
-  }
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the biases of the CNN.
+     *
+     * @return A pointer to the bias vector.
+     */
+    float* getBias() const {
+        return bias_;
+    }
 
-  static std::string getName() {
-    return "torchcnn";
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
- private:
-  float* weights_;
-  float* bias_;
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("torchcnn").
+     */
+    static std::string getName() {
+        return "torchcnn";
+    }
+
+private:
+    float* weights_; ///< Pointer to the weight matrix for the convolution.
+    float* bias_;    ///< Pointer to the bias vector for the convolution.
+    std::vector<int> dims; ///< Dimensions of the CNN.
 };
-
+/**
+ * @class VectorScalarAddition
+ * @brief A class that implements vector-scalar addition, inheriting from MLFunction.
+ *
+ * This class provides functionality to add a scalar value to each element of a vector.
+ */
 class VectorScalarAddition : public MLFunction {
- public:
-  VectorScalarAddition(float* weights, int size) {
-    weights_ = weights;
-    dims.push_back(size);
-  }
+public:
+    /**
+     * @brief Constructor that initializes the vector-scalar addition with weights and size.
+     *
+     * @param weights A pointer to the scalar values to add.
+     * @param size The size of the vector.
+     */
+    VectorScalarAddition(float* weights, int size) {
+        weights_ = weights;
+        dims.push_back(size);
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies vector-scalar addition to the input array.
+     *
+     * This method processes the input array, adds the scalar values, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     auto input_elements = args[0]->as<ArrayVector>()->elements();
@@ -2717,45 +3691,88 @@ class VectorScalarAddition : public MLFunction {
     }
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(results, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  float* getTensor() const override {
-    return weights_;
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to the scalar values.
+     */
+    float* getTensor() const override {
+        return weights_;
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "vec_scal_add";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("vec_scal_add").
+     */
+    static std::string getName() {
+        return "vec_scal_add";
+    }
 
- private:
-  float* weights_;
+private:
+    float* weights_; ///< Pointer to the scalar values to add.
 };
-
+/**
+ * @class MaxPool
+ * @brief A class that implements max pooling, inheriting from MLFunction.
+ *
+ * This class provides functionality to apply max pooling to an input array.
+ */
 class MaxPool : public MLFunction {
- public:
-  MaxPool(int side, int rows, int cols) {
-    dims.push_back(side);
-    dims.push_back(rows);
-    dims.push_back(cols);
-  }
+public:
+    /**
+     * @brief Constructor that initializes the max pooling operation with dimensions.
+     *
+     * @param side The size of the pooling window.
+     * @param rows The number of rows in the input.
+     * @param cols The number of columns in the input.
+     */
+    MaxPool(int side, int rows, int cols) {
+        dims.push_back(side);
+        dims.push_back(rows);
+        dims.push_back(cols);
+    }
 
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
+    /**
+     * @brief Applies max pooling to the input array.
+     *
+     * This method processes the input array, applies max pooling, and stores the result in the output vector.
+     *
+     * @param rows A SelectivityVector specifying the rows to process.
+     * @param args A vector of input arguments (e.g., the input array).
+     * @param type The type of the output vector.
+     * @param context The execution context.
+     * @param output The output vector where the result will be stored.
+     */
+    void apply(
+        const SelectivityVector& rows,
+        std::vector<VectorPtr>& args,
+        const TypePtr& type,
+        exec::EvalCtx& context,
+        VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
     auto input_elements = args[0]->as<ArrayVector>()->elements();
@@ -2809,25 +3826,47 @@ class MaxPool : public MLFunction {
 
     VectorMaker maker{context.pool()};
     output = maker.arrayVector<float>(results, REAL());
-  }
+    }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {exec::FunctionSignatureBuilder()
-                .returnType("array(REAL)")
-                .argumentType("array(REAL)")
-                .build()};
-  }
+    /**
+     * @brief Returns the function signatures supported by this class.
+     *
+     * @return A vector of shared pointers to FunctionSignature objects.
+     */
+    static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+        return {exec::FunctionSignatureBuilder()
+                    .returnType("array(REAL)")
+                    .argumentType("array(REAL)")
+                    .build()};
+    }
 
-  // getters for metadata to be used by optimiser
-  float* getTensor() const override {
-    return new float[0];
-  }
+    /**
+     * @brief Returns the tensor associated with this function.
+     *
+     * @return A pointer to an empty float array (no weights for MaxPool).
+     */
+    float* getTensor() const override {
+        return new float[0];
+    }
 
-  std::string getFuncName() {
-    return getName();
-  };
+    /**
+     * @brief Returns the name of the function.
+     *
+     * @return The name of the function as a string.
+     */
+    std::string getFuncName() {
+        return getName();
+    }
 
-  static std::string getName() {
-    return "max_pool";
-  };
+    /**
+     * @brief Static method to return the name of the function.
+     *
+     * @return The name of the function as a string ("max_pool").
+     */
+    static std::string getName() {
+        return "max_pool";
+    }
+
+private:
+    std::vector<int> dims; ///< Dimensions of the max pooling operation.
 };

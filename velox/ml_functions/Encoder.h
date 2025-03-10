@@ -1,19 +1,20 @@
-/*
- * Copyright (c) 2025 ASU Cactus Lab.
- *
+/**
+ * @file
+ * @brief Implementation of various encoder classes for machine learning.
+ * @copyright Copyright (c) 2025 ASU Cactus Lab.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * http://www.apache.org/licenses/LICENSE-2.0
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
+
 #include <fmt/format.h>
 #include <iostream>
 #include "BaseFunction.h"
@@ -27,15 +28,28 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
-// Implementation of embedding layer where the embedding is stored as a 2-D
-// array: numEmbedding*embeddingDims, lookup takes a int vector as indices
-
+/**
+ * @class IntEncoder
+ * @brief Implements an encoder that maps integer values to encoded integer values.
+ */
 class IntEncoder : public MLFunction {
  public:
+  /**
+   * @brief Constructor for IntEncoder.
+   * @param mapping A mapping from input integers to encoded integers.
+   */
   IntEncoder(std::unordered_map<int, int> mapping) {
     mapping_ = mapping;
   }
 
+  /**
+   * @brief Applies the encoding function to the input data.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -45,7 +59,6 @@ class IntEncoder : public MLFunction {
     BaseVector::ensureWritable(rows, ARRAY(INTEGER()), context.pool(), output);
 
     // Decode the input argument.
-
     auto arrayVector = args[0]->as<ArrayVector>();
     auto elementsVector = arrayVector->elements()->asFlatVector<int>();
 
@@ -75,6 +88,10 @@ class IntEncoder : public MLFunction {
     output = maker.arrayVector<int>(result, INTEGER());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("array(INTEGER)")
@@ -82,30 +99,59 @@ class IntEncoder : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "encoder";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:
-  std::unordered_map<int, int> mapping_;
+  std::unordered_map<int, int> mapping_; ///< Mapping from input integers to encoded integers.
 };
 
+/**
+ * @class StringEncoder
+ * @brief Implements an encoder that maps string values to encoded integer values.
+ */
 class StringEncoder : public MLFunction {
  public:
+  /**
+   * @brief Constructor for StringEncoder.
+   * @param mapping A mapping from input strings to encoded integers.
+   */
   StringEncoder(std::unordered_map<std::string, int> mapping) {
     mapping_ = mapping;
   }
 
+  /**
+   * @brief Applies the encoding function to the input data.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -138,6 +184,10 @@ class StringEncoder : public MLFunction {
     output = maker.arrayVector<int>(result, INTEGER());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("VARCHAR")
@@ -145,30 +195,59 @@ class StringEncoder : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "encoder_string";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:
-  std::unordered_map<std::string, int> mapping_;
+  std::unordered_map<std::string, int> mapping_; ///< Mapping from input strings to encoded integers.
 };
 
+/**
+ * @class StringVariadicEncoder
+ * @brief Implements an encoder that maps variadic string values to encoded integer values.
+ */
 class StringVariadicEncoder : public MLFunction {
  public:
+  /**
+   * @brief Constructor for StringVariadicEncoder.
+   * @param mapping A mapping from input strings to encoded integers.
+   */
   StringVariadicEncoder(std::unordered_map<std::string, int> mapping) {
     mapping_ = std::unordered_map<std::string, int>(mapping);
   }
 
+  /**
+   * @brief Applies the encoding function to the input data.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -210,6 +289,10 @@ class StringVariadicEncoder : public MLFunction {
     output = maker.arrayVector<int>(result, INTEGER());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("array(VARCHAR)")
@@ -217,30 +300,59 @@ class StringVariadicEncoder : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "encoder_string_variadic";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:
-  std::unordered_map<std::string, int> mapping_;
+  std::unordered_map<std::string, int> mapping_; ///< Mapping from input strings to encoded integers.
 };
 
+/**
+ * @class MultiHotNormalizedEncoder
+ * @brief Implements a multi-hot normalized encoder for integer values.
+ */
 class MultiHotNormalizedEncoder : public MLFunction {
  public:
+  /**
+   * @brief Constructor for MultiHotNormalizedEncoder.
+   * @param size The size of the encoded output vector.
+   */
   MultiHotNormalizedEncoder(int size) {
     size_ = size;
   }
 
+  /**
+   * @brief Applies the encoding function to the input data.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -273,6 +385,10 @@ class MultiHotNormalizedEncoder : public MLFunction {
     output = maker.arrayVector<float>(encoding, REAL());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("array(INTEGER)")
@@ -280,20 +396,33 @@ class MultiHotNormalizedEncoder : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "multi_hot_norm_encoder";
   };
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:
-  int size_;
+  int size_; ///< Size of the encoded output vector.
 };

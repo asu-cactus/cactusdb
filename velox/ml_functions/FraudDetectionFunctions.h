@@ -1,19 +1,20 @@
-/*
- * Copyright (c) 2025 ASU Cactus Lab.
- *
+/**
+ * @file
+ * @brief Implementation of various utility functions for machine learning.
+ * @copyright Copyright (c) 2025 ASU Cactus Lab.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * http://www.apache.org/licenses/LICENSE-2.0
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
+
 #include <time.h>
 #include <Eigen/Dense>
 #include <chrono>
@@ -33,11 +34,20 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
-// Implementation of embedding layer where the embedding is stored as a 2-D
-// array: numEmbedding*embeddingDims, lookup takes a int vector as indices
-
+/**
+ * @class IsWeekday
+ * @brief Implements a function to check if a given timestamp corresponds to a weekday.
+ */
 class IsWeekday : public MLFunction {
  public:
+  /**
+   * @brief Applies the function to check if the timestamp is a weekday.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -55,18 +65,11 @@ class IsWeekday : public MLFunction {
 
     const int secondsInADay = 86400;
     for (int i = 0; i < rows.size(); i++) {
-
       int64_t timestamp = inputTimes->valueAt(i);
 
       std::time_t time = static_cast<std::time_t>(timestamp);
       std::tm* time_info = std::localtime(&time);
       int dayOfWeek = time_info->tm_wday;
-
-      /*int64_t daysSinceEpoch = timestamp / secondsInADay;
-      // Unix epoch (Jan 1, 1970) was a Thursday, so dayOfWeek for epoch is 4
-      (0=Sunday, 6=Saturday) int dayOfWeekEpoch = 4;  // Thursday
-      // Calculate the current day of the week (0=Sunday, ..., 6=Saturday)
-      int dayOfWeek = (daysSinceEpoch + dayOfWeekEpoch) % 7;*/
 
       // Return true if the day is Saturday (6) or Sunday (0)
       if (dayOfWeek == 0 || dayOfWeek == 6) {
@@ -80,10 +83,12 @@ class IsWeekday : public MLFunction {
     auto localResult = maker.flatVector<int>(results);
     context.moveOrCopyResult(localResult, rows, output);
     output = maker.flatVector<int>(results, INTEGER());
-    // auto localResult = maker.flatVector<int>(results);
-    // context.moveOrCopyResult(localResult, rows, output);
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("BIGINT")
@@ -91,23 +96,48 @@ class IsWeekday : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "is_weekday";
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 };
 
+/**
+ * @class GetAge
+ * @brief Implements a function to calculate the age based on the birth year.
+ */
 class GetAge : public MLFunction {
  public:
+  /**
+   * @brief Applies the function to calculate the age.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -137,6 +167,10 @@ class GetAge : public MLFunction {
     output = maker.flatVector<int>(results);
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("INTEGER")
@@ -144,23 +178,48 @@ class GetAge : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "get_age";
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 };
 
+/**
+ * @class GetTransactionFeatures
+ * @brief Implements a function to extract features from transaction data.
+ */
 class GetTransactionFeatures : public MLFunction {
  public:
+  /**
+   * @brief Applies the function to extract transaction features.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -179,19 +238,15 @@ class GetTransactionFeatures : public MLFunction {
 
     exec::LocalDecodedVector firstHolder(context, *base0, rows);
     auto decodedArray0 = firstHolder.get();
-    // auto totalOrders = decodedArray0->base()->as<FlatVector<int64_t>>();
 
     exec::LocalDecodedVector secondHolder(context, *base1, rows);
     auto decodedArray1 = secondHolder.get();
-    // auto tAmounts = decodedArray1->base()->as<FlatVector<float>>();
 
     exec::LocalDecodedVector thirdHolder(context, *base2, rows);
     auto decodedArray2 = thirdHolder.get();
-    // auto timeDiffs = decodedArray2->base()->as<FlatVector<int64_t>>();
 
     exec::LocalDecodedVector fourthHolder(context, *base3, rows);
     auto decodedArray3 = fourthHolder.get();
-    // auto tTimestamps = decodedArray3->base()->as<FlatVector<int64_t>>();
 
     for (int i = 0; i < rows.size(); i++) {
       float totalOrder = (static_cast<float>(decodedArray0->valueAt<int64_t>(i))) / 79.0;
@@ -222,6 +277,10 @@ class GetTransactionFeatures : public MLFunction {
     output = maker.arrayVector<float>(results, REAL());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("BIGINT")
@@ -232,23 +291,48 @@ class GetTransactionFeatures : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "get_transaction_features";
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 };
 
+/**
+ * @class GetCustomerFeatures
+ * @brief Implements a function to extract features from customer data.
+ */
 class GetCustomerFeatures : public MLFunction {
  public:
+  /**
+   * @brief Applies the function to extract customer features.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -267,19 +351,15 @@ class GetCustomerFeatures : public MLFunction {
 
     exec::LocalDecodedVector firstHolder(context, *base0, rows);
     auto decodedArray0 = firstHolder.get();
-    // auto cAddressNums = decodedArray0->base()->as<FlatVector<int>>();
 
     exec::LocalDecodedVector secondHolder(context, *base1, rows);
     auto decodedArray1 = secondHolder.get();
-    // auto cCustFlags = decodedArray1->base()->as<FlatVector<int>>();
 
     exec::LocalDecodedVector thirdHolder(context, *base2, rows);
     auto decodedArray2 = thirdHolder.get();
-    // auto cBirthCountries = decodedArray2->base()->as<FlatVector<int>>();
 
     exec::LocalDecodedVector fourthHolder(context, *base3, rows);
     auto decodedArray3 = fourthHolder.get();
-    // auto cAges = decodedArray3->base()->as<FlatVector<int>>();
 
     for (int i = 0; i < rows.size(); i++) {
       float cAddressNum =
@@ -302,6 +382,10 @@ class GetCustomerFeatures : public MLFunction {
     output = maker.arrayVector<float>(results, REAL());
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("INTEGER")
@@ -312,23 +396,48 @@ class GetCustomerFeatures : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "get_customer_features";
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 };
 
+/**
+ * @class TimeDiffInDays
+ * @brief Implements a function to calculate the difference in days between two timestamps.
+ */
 class TimeDiffInDays : public MLFunction {
  public:
+  /**
+   * @brief Applies the function to calculate the time difference in days.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -340,18 +449,8 @@ class TimeDiffInDays : public MLFunction {
     BaseVector* left = args[0].get();
     BaseVector* right = args[1].get();
 
-    // The following decoded approach won't fetch the values correctly
-    // if there is a filter applied before. Use LocalDecodedVector instead.
-    /* exec::LocalDecodedVector leftHolder(context, *left, rows);
-    auto decodedLeftArray = leftHolder.get();
-    auto inputTimes1 = decodedLeftArray->base()->as<FlatVector<int64_t>>();
-
-    exec::LocalDecodedVector rightHolder(context, *right, rows);
-    auto decodedRightArray = rightHolder.get();
-    auto inputTimes2 = decodedRightArray->base()->as<FlatVector<int64_t>>(); */
-    
     exec::LocalDecodedVector decodedInput1(context, *args[0], rows);
-    exec::LocalDecodedVector decodedInput2(context, *args[1], rows); 
+    exec::LocalDecodedVector decodedInput2(context, *args[1], rows);
 
     std::vector<int64_t> results;
     int secondsInADay = 86400;
@@ -373,6 +472,10 @@ class TimeDiffInDays : public MLFunction {
     context.moveOrCopyResult(localResult, rows, output);
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("BIGINT")
@@ -381,27 +484,56 @@ class TimeDiffInDays : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "time_diff_in_days";
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 };
 
+/**
+ * @class DateToTimestamp
+ * @brief Implements a function to convert a date string to a timestamp.
+ */
 class DateToTimestamp : public MLFunction {
  public:
+  /**
+   * @brief Constructor for DateToTimestamp.
+   * @param dateFormat_ The format of the date string.
+   */
   DateToTimestamp(const char* dateFormat_) {
     dateFormat = dateFormat_;
   }
 
+  /**
+   * @brief Applies the function to convert a date string to a timestamp.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -410,7 +542,6 @@ class DateToTimestamp : public MLFunction {
       VectorPtr& output) const override {
     BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-    // auto inputStrings = args[0]->as<FlatVector<StringView>>();
     exec::LocalDecodedVector decodedStringHolder(context, *args[0], rows);
     auto decodedStringInput = decodedStringHolder.get();
 
@@ -440,10 +571,12 @@ class DateToTimestamp : public MLFunction {
 
     VectorMaker maker{context.pool()};
     output = maker.flatVector<int64_t>(results, BIGINT());
-    // auto localResult = maker.flatVector<int64_t>(results);
-    // context.moveOrCopyResult(localResult, rows, output);
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("VARCHAR")
@@ -451,26 +584,51 @@ class DateToTimestamp : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "date_to_timestamp";
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
  private:
-  const char* dateFormat;
+  const char* dateFormat; ///< The format of the date string.
 };
 
+/**
+ * @class GetBinaryClass
+ * @brief Implements a function to determine the binary class based on probabilities.
+ */
 class GetBinaryClass : public MLFunction {
  public:
+  /**
+   * @brief Applies the function to determine the binary class.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -503,6 +661,10 @@ class GetBinaryClass : public MLFunction {
     output = maker.flatVector<int>(results);
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("ARRAY(REAL)")
@@ -510,21 +672,38 @@ class GetBinaryClass : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "get_binary_class";
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     // TODO: need to implement
     return nullptr;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 };
 
+/**
+ * @brief Reads a file containing country mappings and returns an unordered_map.
+ * @return An unordered_map mapping country names to their corresponding integer values.
+ */
 std::unordered_map<std::string, int> getCountryMap() {
   std::unordered_map<std::string, int> countryMap;
 

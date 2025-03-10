@@ -1,19 +1,20 @@
-/*
- * Copyright (c) 2025 ASU Cactus Lab.
- *
+/**
+ * @file
+ * @brief Implementation of an embedding layer for machine learning.
+ * @copyright Copyright (c) 2025 ASU Cactus Lab.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * http://www.apache.org/licenses/LICENSE-2.0
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
+
 #include <fmt/format.h>
 #include <iostream>
 #include "BaseFunction.h"
@@ -27,11 +28,18 @@ using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
-// Implementation of embedding layer where the embedding is stored as a 2-D
-// array: numEmbedding*embeddingDims, lookup takes a int vector as indices
-
+/**
+ * @class Embedding
+ * @brief Implements an embedding layer for machine learning, where embeddings are stored as a 2-D array.
+ */
 class Embedding : public MLFunction {
  public:
+  /**
+   * @brief Constructor for Embedding.
+   * @param weights Pointer to the embedding weights.
+   * @param numEmbeddings Number of embeddings.
+   * @param embeddingDims Dimensionality of each embedding.
+   */
   Embedding(float* weights, int numEmbeddings, int embeddingDims) {
     // Create a deep copy of the weights
     weights_ = new float[numEmbeddings * embeddingDims];
@@ -42,12 +50,26 @@ class Embedding : public MLFunction {
     dims.push_back(embeddingDims);
   }
 
+  /**
+   * @brief Constructor for Embedding.
+   * @param weightsFile Path to the file containing the embedding weights.
+   * @param numEmbeddings Number of embeddings.
+   * @param embeddingDims Dimensionality of each embedding.
+   */
   Embedding(std::string weightsFile, int numEmbeddings, int embeddingDims) {
     weightsFile_ = weightsFile;
     dims.push_back(numEmbeddings);
     dims.push_back(embeddingDims);
   }
 
+  /**
+   * @brief Applies the embedding function to the input data.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param type Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -116,6 +138,10 @@ class Embedding : public MLFunction {
     arrayOutput->setElements(elementsOutput);
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .argumentType("array(INTEGER)")
@@ -123,23 +149,39 @@ class Embedding : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     return weights_;
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "embedding";
   };
 
+  /**
+   * @brief Returns the path to the weights file.
+   * @return Path to the weights file.
+   */
   std::string getWeightsFile() {
     return weightsFile_;
   }
 
+  /**
+   * @brief Sets the embedding weights.
+   * @param weights Pointer to the embedding weights.
+   */
   void setWeights(float* weights) {
     weights_ = weights;
   }
 
  private:
-  float* weights_;
-  std::string weightsFile_;
+  float* weights_; ///< Pointer to the embedding weights.
+  std::string weightsFile_; ///< Path to the file containing the embedding weights.
 };

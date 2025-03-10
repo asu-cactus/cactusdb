@@ -1,21 +1,45 @@
+/**
+ * @file
+ * @brief Implementation of a Singular Value Decomposition (SVD) function for machine learning.
+ * @copyright Copyright (c) 2025 ASU Cactus Lab.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
+
 #include <Eigen/Dense>
 #include <cmath>
 #include <iostream>
-// #include "velox/exec/tests/utils/AssertQueryBuilder.h"
-// #include "velox/exec/tests/utils/PlanBuilder.h"
-// #include "velox/exec/tests/utils/TempDirectoryPath.h"
-// // #include "velox/functions/lib/LambdaFunctionUtil.h"
-// #include "velox/functions/lib/RowsTranslationUtil.h"
-// #include "velox/vector/tests/utils/VectorTestBase.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::memory;
 
+/**
+ * @class SVD
+ * @brief Implements a Singular Value Decomposition (SVD) function for machine learning.
+ */
 class SVD : public MLFunction {
  public:
+  /**
+   * @brief Constructor for SVD.
+   * @param bu Array of user biases.
+   * @param bi Array of item biases.
+   * @param pu Array of user latent factors.
+   * @param qi Array of item latent factors.
+   * @param numUser Number of users.
+   * @param numItem Number of items.
+   * @param latentDims Number of latent dimensions.
+   */
   SVD(float* bu,
       float* bi,
       float* pu,
@@ -37,6 +61,14 @@ class SVD : public MLFunction {
     dims.push_back(latentDims);
   }
 
+  /**
+   * @brief Applies the SVD function to the input data.
+   * @param rows Selectivity vector indicating which rows to process.
+   * @param args Vector of input arguments.
+   * @param outputType Type of the output vector.
+   * @param context Evaluation context.
+   * @param output Output vector to store the results.
+   */
   void apply(
       const SelectivityVector& rows,
       std::vector<VectorPtr>& args,
@@ -72,6 +104,10 @@ class SVD : public MLFunction {
     });
   }
 
+  /**
+   * @brief Returns the function signatures.
+   * @return Vector of function signatures.
+   */
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
                 .returnType("REAL")
@@ -80,26 +116,51 @@ class SVD : public MLFunction {
                 .build()};
   }
 
+  /**
+   * @brief Returns the tensor associated with the function.
+   * @return Pointer to the tensor.
+   */
   float* getTensor() const override {
     return weights_;
   }
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   std::string getFuncName() {
     return getName();
   };
 
+  /**
+   * @brief Returns the name of the function.
+   * @return Function name.
+   */
   static std::string getName() {
     return "svd";
   };
 
+  /**
+   * @brief Returns the path to the weights file.
+   * @return Path to the weights file.
+   */
   std::string getWeightsFile() {
     return weightsFile_;
   }
 
+  /**
+   * @brief Sets the weights for the function.
+   * @param weights Pointer to the weights array.
+   */
   void setWeights(float* weights) {
     weights_ = weights;
   }
 
+  /**
+   * @brief Estimates the cost of the function.
+   * @param inputDims Dimensions of the input.
+   * @return Cost estimate.
+   */
   CostEstimate getCost(std::vector<int> inputDims) {
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
@@ -108,10 +169,10 @@ class SVD : public MLFunction {
   }
 
  private:
-  float* weights_;
-  float* bu_;
-  float* bi_;
-  float* pu_;
-  float* qi_;
-  std::string weightsFile_;
+  float* weights_; ///< Pointer to the weights array.
+  float* bu_; ///< Array of user biases.
+  float* bi_; ///< Array of item biases.
+  float* pu_; ///< Array of user latent factors.
+  float* qi_; ///< Array of item latent factors.
+  std::string weightsFile_; ///< Path to the weights file.
 };
