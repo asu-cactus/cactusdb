@@ -55,3 +55,9 @@ target_link_libraries(
   reusable_mcts_test
   ml_functions
 )
+
+add_executable(factorization_test FactorizeTest.cpp)
+target_link_libraries(
+  factorization_test
+  ml_functions
+)

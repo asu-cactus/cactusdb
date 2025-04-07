@@ -420,3 +420,12 @@ int countWords(const std::string& input) {
 
   return count;
 }
+
+template <typename T1, typename T2>
+void checkOrAbort(const T1& actual, const T2& expected, const std::string& msgPrefix = "") {
+    if (!(actual == expected)) {
+        std::cerr << fmt::format("[{}-Check failed:] Expected: {} vs  Actual  : {}\n",
+                                 msgPrefix, expected, actual);
+        std::abort();
+    }
+}
