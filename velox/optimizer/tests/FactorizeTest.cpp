@@ -375,807 +375,6 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     return "";
   }
 
-  std::string registerNNModel(
-      std::vector<int> units,
-      CataLog& catalog,
-      bool hasArgmax = false) {
-    // use input size as random seed
-    RandomGenerator randomGenerator = RandomGenerator(-1, 1, units[0]);
-    int modelGroupId = modelGroupId_++;
-    int functionId = 0;
-    int numberOfLayers = units.size() - 1;
-
-    optimization::registerVectorFunction(
-        "relu",
-        Relu::signatures(),
-        std::make_unique<Relu>(),
-        {},
-        true,
-        catalog);
-    optimization::registerVectorFunction(
-        "softmax",
-        Softmax::signatures(),
-        std::make_unique<Softmax>(),
-        {},
-        true,
-        catalog);
-    optimization::registerVectorFunction(
-        "argmax",
-        Argmax::signatures(),
-        std::make_unique<Argmax>(),
-        {},
-        true,
-        catalog);
-
-    std::string modelComputationStr = "{}";
-    int lastSize = units[0];
-
-    for (int i = 1; i < units.size(); i++) {
-      int layerSize = units[i];
-      std::vector<std::vector<float>> weights =
-          randomGenerator.genFloat2dVector(lastSize, layerSize);
-      std::vector<std::vector<float>> bias =
-          randomGenerator.genFloat2dVector(1, layerSize);
-      std::string matMulName =
-          fmt::format("mat_mul{}_{}", modelGroupId, functionId++);
-      optimization::registerVectorFunction(
-          matMulName,
-          MatrixMultiply::signatures(),
-          std::make_unique<MatrixMultiply>(
-              std::move(flattenVectorToPointer(weights)), lastSize, layerSize),
-          {},
-          true,
-          catalog);
-      std::string matVectorAddName =
-          fmt::format("mat_vector_add{}_{}", modelGroupId, functionId++);
-      optimization::registerVectorFunction(
-          matVectorAddName,
-          MatrixVectorAddition::signatures(),
-          std::make_unique<MatrixVectorAddition>(
-              std::move(flattenVectorToPointer(bias)), layerSize),
-          {},
-          true,
-          catalog);
-      modelComputationStr = matVectorAddName + "(" + matMulName + "(" +
-          modelComputationStr + "))";
-      if (i != units.size() - 1) {
-        modelComputationStr = "relu(" + modelComputationStr + ")";
-      } else {
-        modelComputationStr = "softmax(" + modelComputationStr + ")";
-      }
-      lastSize = layerSize;
-    }
-    if (hasArgmax) {
-      modelComputationStr = "argmax(" + modelComputationStr + ")";
-    }
-    return modelComputationStr;
-  }
-
-  PlanBuilder setupProfileQueryPlan(
-      std::string mode,
-      std::string queryTemplate,
-      CataLog& cataLog,
-      std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-      int randomSeed = -1) {
-    // bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
-    bool generateFilter = true;
-
-    unsigned timestampSeed =
-        std::chrono::system_clock::now().time_since_epoch().count();
-    if (randomSeed != -1) {
-      timestampSeed = randomSeed;
-    }
-    RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
-    randomGenerator.setIntRange(0, 1);
-    PlanBuilder myPlan;
-
-    std::vector<std::vector<int>> userModelStructures =
-        readModelStructureFromFile(
-            "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
-    std::vector<std::vector<int>> movieModelStructures =
-        readModelStructureFromFile(
-            "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
-    std::vector<std::vector<int>> tagModelStructures =
-        readModelStructureFromFile(
-            "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
-
-    if (mode == "ml") {
-      RowTypePtr userDataRowType = cataLog.getRegisteredDataSrcSchema("user");
-      RowTypePtr movieDataRowType = cataLog.getRegisteredDataSrcSchema("movie");
-      RowTypePtr movieRelevanceTagRowType =
-          cataLog.getRegisteredDataSrcSchema("movie_relevance_tag");
-
-      dwio::common::FileFormat userFileFormat =
-          cataLog.getRegisteredDataSrcFormat("user");
-      dwio::common::FileFormat movieFileFormat =
-          cataLog.getRegisteredDataSrcFormat("movie");
-      dwio::common::FileFormat movieRelevanceTagFileFormat =
-          cataLog.getRegisteredDataSrcFormat("movie_relevance_tag");
-
-      std::vector<std::string> userFilePaths =
-          cataLog.getRegisteredDataSrcFiles("user");
-      std::vector<std::string> movieFilePaths =
-          cataLog.getRegisteredDataSrcFiles("movie");
-      std::vector<std::string> movieRelevanceTagFilePaths =
-          cataLog.getRegisteredDataSrcFiles("movie_relevance_tag");
-
-      std::pair<int, int> userStats = cataLog.getRegisteredDataSrcStats("user");
-      int userNumRows = userStats.first;
-      int userNumCols = userStats.second;
-      std::pair<int, int> movieStats =
-          cataLog.getRegisteredDataSrcStats("movie");
-      int movieNumRows = movieStats.first;
-      int movieNumCols = movieStats.second;
-      std::pair<int, int> movieRelevanceTagStats =
-          cataLog.getRegisteredDataSrcStats("movie_relevance_tag");
-      int movieRelevanceTagNumRows = movieRelevanceTagStats.first;
-      int movieRelevanceTagNumCols = movieRelevanceTagStats.second;
-
-      if (queryTemplate == "" || queryTemplate == "user") {
-        std::string userModel1ComputExpr = registerNNModel(
-            userModelStructures[0],
-            cataLog,
-            randomGenerator.genRandomIntValue());
-
-        core::PlanNodeId readUserDataPlanNodeId;
-        myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                     .tableScan(userDataRowType, {}, "")
-                     .capturePlanNodeId(readUserDataPlanNodeId)
-                     .project(
-                         {"u_user_id",
-                          "u_age",
-                          "u_gender",
-                          "u_occupation",
-                          "u_zipcode",
-                          "u_features"})
-                     .project(
-                         {"u_user_id",
-                          "u_age",
-                          "u_gender",
-                          "u_occupation",
-                          "u_zipcode",
-                          fmt::format(userModel1ComputExpr, "u_features")});
-        if (generateFilter) {
-          std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("user", randomSeed);
-          for (auto expr : filterExpr) {
-            myPlan = myPlan.filter(expr);
-          }
-          // myPlan = myPlan.filter(filterExpr);
-        }
-
-        cataLog.setIdAddressMap(
-            readUserDataPlanNodeId,
-            userFilePaths,
-            dwio::common::FileFormat::DWRF);
-        cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-        std::shared_ptr<OutputStat> userStats =
-            std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
-        Source userSrc =
-            Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
-        cataLog.addSource(std::make_shared<Source>(userSrc));
-      } else if (queryTemplate == "movie") {
-        std::string movieModel1ComputExpr = registerNNModel(
-            movieModelStructures[0],
-            cataLog,
-            randomGenerator.genRandomIntValue());
-
-        core::PlanNodeId readMovieDataPlanNodeId;
-        myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                     .tableScan(movieDataRowType, {}, "")
-                     .capturePlanNodeId(readMovieDataPlanNodeId)
-                     .project(
-                         {"m_movie_id",
-                          "m_title",
-                          "m_genres",
-                          "m_spoken_languages",
-                          "m_popularity",
-                          "m_vote_average",
-                          "m_vote_count",
-                          "m_features"})
-                     .project(
-                         {"m_movie_id",
-                          "m_title",
-                          "m_genres",
-                          "m_spoken_languages",
-                          "m_popularity",
-                          "m_vote_average",
-                          "m_vote_count",
-                          "m_features",
-                          fmt::format(movieModel1ComputExpr, "m_features")});
-
-        if (generateFilter) {
-          std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("movie", randomSeed);
-          for (auto expr : filterExpr) {
-            myPlan = myPlan.filter(expr);
-          }
-          // myPlan = myPlan.filter(filterExpr);
-        }
-
-        cataLog.setIdAddressMap(
-            readMovieDataPlanNodeId,
-            movieFilePaths,
-            dwio::common::FileFormat::DWRF);
-
-        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-        std::shared_ptr<OutputStat> movieStats = std::make_shared<OutputStat>(
-            OutputStat(movieNumRows, movieNumCols));
-        Source movieSrc =
-            Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
-        cataLog.addSource(std::make_shared<Source>(movieSrc));
-      } else if (queryTemplate == "movie_tag") {
-        std::string tagModel1ComputExpr = registerNNModel(
-            tagModelStructures[0],
-            cataLog,
-            randomGenerator.genRandomIntValue());
-
-        core::PlanNodeId readMovieRelevanceTagDataPlanNodeId;
-        myPlan =
-            PlanBuilder(planNodeIdGenerator, pool_.get())
-                .tableScan(movieRelevanceTagRowType, {}, "")
-                .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId)
-                .project(
-                    {"mt_movie_id",
-                     "mt_relevance_score",
-                     fmt::format(tagModel1ComputExpr, "mt_relevance_score")});
-
-        cataLog.setIdAddressMap(
-            readMovieRelevanceTagDataPlanNodeId,
-            movieRelevanceTagFilePaths,
-            dwio::common::FileFormat::DWRF);
-
-        cataLog.addNodeIdRelationName(
-            readMovieRelevanceTagDataPlanNodeId, "movie_relevance_tag");
-        std::shared_ptr<OutputStat> movieRelevanceTagStats =
-            std::make_shared<OutputStat>(
-                OutputStat(movieRelevanceTagNumRows, movieRelevanceTagNumCols));
-        Source movieRelevanceTagSrc = Source(
-            readMovieRelevanceTagDataPlanNodeId,
-            Source::Type::FILE,
-            movieRelevanceTagStats);
-        cataLog.addSource(std::make_shared<Source>(movieRelevanceTagSrc));
-      } else if (
-          queryTemplate == "movie_user" || queryTemplate == "user_movie") {
-        std::string userModel1ComputExpr = registerNNModel(
-            userModelStructures[0],
-            cataLog,
-            randomGenerator.genRandomIntValue());
-
-        core::PlanNodeId readUserDataPlanNodeId;
-        auto userPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                            .tableScan(userDataRowType, {}, "")
-                            .capturePlanNodeId(readUserDataPlanNodeId)
-                            .project(
-                                {"u_user_id",
-                                 "u_age",
-                                 "u_gender",
-                                 "u_occupation",
-                                 "u_zipcode",
-                                 "u_features"});
-
-        std::string movieModel1ComputExpr = registerNNModel(
-            movieModelStructures[0],
-            cataLog,
-            randomGenerator.genRandomIntValue());
-
-        core::PlanNodeId readMovieDataPlanNodeId;
-        auto moviePlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                             .tableScan(movieDataRowType, {}, "")
-                             .capturePlanNodeId(readMovieDataPlanNodeId)
-                             .project(
-                                 {"m_movie_id",
-                                  "m_title",
-                                  "m_genres",
-                                  "m_spoken_languages",
-                                  "m_popularity",
-                                  "m_vote_average",
-                                  "m_vote_count",
-                                  "m_features"});
-        RandomGenerator numModelGenerator =
-            RandomGenerator(-1, 1, timestampSeed);
-        numModelGenerator.setIntRange(0, 2);
-        int numModel = numModelGenerator.genRandomIntValue();
-        myPlan = userPlan.nestedLoopJoin(
-            moviePlan.planNode(),
-            {"u_user_id",
-             "u_age",
-             "u_gender",
-             "u_occupation",
-             "u_zipcode",
-             "u_features",
-             "m_movie_id",
-             "m_title",
-             "m_genres",
-             "m_spoken_languages",
-             "m_popularity",
-             "m_vote_average",
-             "m_vote_count",
-             "m_features"});
-
-        if (numModel == 1) {
-          myPlan = myPlan.project(
-              {"u_user_id",
-               "u_age",
-               "u_gender",
-               "u_occupation",
-               "u_zipcode",
-               "u_features",
-               "m_movie_id",
-               "m_title",
-               "m_genres",
-               "m_spoken_languages",
-               "m_popularity",
-               "m_vote_average",
-               "m_vote_count",
-               "m_features",
-               fmt::format(userModel1ComputExpr, "u_features")});
-        } else if (numModel == 2) {
-          myPlan = myPlan.project(
-              {"u_user_id",
-               "u_age",
-               "u_gender",
-               "u_occupation",
-               "u_zipcode",
-               "u_features",
-               "m_movie_id",
-               "m_title",
-               "m_genres",
-               "m_spoken_languages",
-               "m_popularity",
-               "m_vote_average",
-               "m_vote_count",
-               "m_features",
-               fmt::format(userModel1ComputExpr, "u_features"),
-               fmt::format(movieModel1ComputExpr, "m_features")});
-        }
-
-        if (generateFilter) {
-          std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("movie_user", randomSeed);
-          for (auto expr : filterExpr) {
-            myPlan = myPlan.filter(expr);
-          }
-          // myPlan = myPlan.filter(filterExpr);
-        }
-
-        cataLog.setIdAddressMap(
-            readUserDataPlanNodeId,
-            userFilePaths,
-            dwio::common::FileFormat::DWRF);
-        cataLog.setIdAddressMap(
-            readMovieDataPlanNodeId,
-            movieFilePaths,
-            dwio::common::FileFormat::DWRF);
-        cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-
-        std::shared_ptr<OutputStat> userStats =
-            std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
-        Source userSrc =
-            Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
-        cataLog.addSource(std::make_shared<Source>(userSrc));
-        std::shared_ptr<OutputStat> movieStats = std::make_shared<OutputStat>(
-            OutputStat(movieNumRows, movieNumCols));
-        Source movieSrc =
-            Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
-        cataLog.addSource(std::make_shared<Source>(movieSrc));
-      } else if (
-          queryTemplate == "movie_user_tag" ||
-          queryTemplate == "user_movie_tag") {
-        std::string userModel1ComputExpr = registerNNModel(
-            userModelStructures[0],
-            cataLog,
-            randomGenerator.genRandomIntValue());
-
-        core::PlanNodeId readUserDataPlanNodeId;
-        auto userPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                            .tableScan(userDataRowType, {}, "")
-                            .capturePlanNodeId(readUserDataPlanNodeId)
-                            .project(
-                                {"u_user_id",
-                                 "u_age",
-                                 "u_gender",
-                                 "u_occupation",
-                                 "u_zipcode",
-                                 "u_features"});
-
-        std::string movieModel1ComputExpr = registerNNModel(
-            movieModelStructures[0],
-            cataLog,
-            randomGenerator.genRandomIntValue());
-
-        core::PlanNodeId readMovieDataPlanNodeId;
-        auto moviePlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                             .tableScan(movieDataRowType, {}, "")
-                             .capturePlanNodeId(readMovieDataPlanNodeId)
-                             .project({
-                                 "m_movie_id",
-                                 "m_title",
-                                 "m_genres",
-                                 "m_spoken_languages",
-                                 "m_popularity",
-                                 "m_vote_average",
-                                 "m_vote_count",
-                                 "m_features",
-                             });
-
-        std::string tagModel1ComputExpr = registerNNModel(
-            tagModelStructures[0],
-            cataLog,
-            randomGenerator.genRandomIntValue());
-
-        core::PlanNodeId readMovieRelevanceTagDataPlanNodeId;
-        auto tagPlan =
-            PlanBuilder(planNodeIdGenerator, pool_.get())
-                .tableScan(movieRelevanceTagRowType, {}, "")
-                .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId)
-                .project({
-                    "mt_movie_id",
-                    "mt_relevance_score",
-                });
-
-        auto movieTagPlan = tagPlan.hashJoin(
-            {"mt_movie_id"},
-            {"m_movie_id"},
-            moviePlan.planNode(),
-            "",
-            {"m_movie_id",
-             "m_title",
-             "m_genres",
-             "m_spoken_languages",
-             "m_popularity",
-             "m_vote_average",
-             "m_vote_count",
-             "m_features",
-             "mt_relevance_score"});
-
-        RandomGenerator numModelGenerator =
-            RandomGenerator(-1, 1, timestampSeed);
-        numModelGenerator.setIntRange(0, 3);
-        int numModel = numModelGenerator.genRandomIntValue();
-        myPlan = userPlan.nestedLoopJoin(
-            movieTagPlan.planNode(),
-            {"u_user_id",
-             "u_age",
-             "u_gender",
-             "u_occupation",
-             "u_zipcode",
-             "u_features",
-             "m_movie_id",
-             "m_title",
-             "m_genres",
-             "m_spoken_languages",
-             "m_popularity",
-             "m_vote_average",
-             "m_vote_count",
-             "m_features",
-             "mt_relevance_score"});
-
-        if (numModel == 1) {
-          myPlan = myPlan.project(
-              {"u_user_id",
-               "u_age",
-               "u_gender",
-               "u_occupation",
-               "u_zipcode",
-               "u_features",
-               "m_movie_id",
-               "m_title",
-               "m_genres",
-               "m_spoken_languages",
-               "m_popularity",
-               "m_vote_average",
-               "m_vote_count",
-               "m_features",
-               "mt_relevance_score",
-               fmt::format(userModel1ComputExpr, "u_features")});
-        } else if (numModel == 2) {
-          myPlan = myPlan.project(
-              {"u_user_id",
-               "u_age",
-               "u_gender",
-               "u_occupation",
-               "u_zipcode",
-               "u_features",
-               "m_movie_id",
-               "m_title",
-               "m_genres",
-               "m_spoken_languages",
-               "m_popularity",
-               "m_vote_average",
-               "m_vote_count",
-               "m_features",
-               "mt_relevance_score",
-               fmt::format(userModel1ComputExpr, "u_features"),
-               fmt::format(movieModel1ComputExpr, "m_features")});
-        } else if (numModel == 3) {
-          myPlan = myPlan.project(
-              {"u_user_id",
-               "u_age",
-               "u_gender",
-               "u_occupation",
-               "u_zipcode",
-               "u_features",
-               "m_movie_id",
-               "m_title",
-               "m_genres",
-               "m_spoken_languages",
-               "m_popularity",
-               "m_vote_average",
-               "m_vote_count",
-               "m_features",
-               "mt_relevance_score",
-               fmt::format(userModel1ComputExpr, "u_features"),
-               fmt::format(movieModel1ComputExpr, "m_features"),
-               fmt::format(tagModel1ComputExpr, "mt_relevance_score")});
-        }
-
-        if (generateFilter) {
-          std::vector<std::string> filterExpr =
-              sampleUserMovieFilterExpr("movie_user", randomSeed);
-          for (auto expr : filterExpr) {
-            myPlan = myPlan.filter(expr);
-          }
-          // myPlan = myPlan.filter(filterExpr);
-        }
-
-        cataLog.setIdAddressMap(
-            readUserDataPlanNodeId,
-            userFilePaths,
-            dwio::common::FileFormat::DWRF);
-        cataLog.setIdAddressMap(
-            readMovieDataPlanNodeId,
-            movieFilePaths,
-            dwio::common::FileFormat::DWRF);
-        cataLog.setIdAddressMap(
-            readMovieRelevanceTagDataPlanNodeId,
-            movieRelevanceTagFilePaths,
-            dwio::common::FileFormat::DWRF);
-
-        cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-        cataLog.addNodeIdRelationName(
-            readMovieRelevanceTagDataPlanNodeId, "movie_relevance_tag");
-        std::shared_ptr<OutputStat> userStats =
-            std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
-        Source userSrc =
-            Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
-        cataLog.addSource(std::make_shared<Source>(userSrc));
-        std::shared_ptr<OutputStat> movieStats = std::make_shared<OutputStat>(
-            OutputStat(movieNumRows, movieNumCols));
-        Source movieSrc =
-            Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
-        cataLog.addSource(std::make_shared<Source>(movieSrc));
-        std::shared_ptr<OutputStat> movieRelevanceTagStats =
-            std::make_shared<OutputStat>(
-                OutputStat(movieRelevanceTagNumRows, movieRelevanceTagNumCols));
-        Source movieRelevanceTagSrc = Source(
-            readMovieRelevanceTagDataPlanNodeId,
-            Source::Type::FILE,
-            movieRelevanceTagStats);
-        cataLog.addSource(std::make_shared<Source>(movieRelevanceTagSrc));
-      } else {
-        throw std::runtime_error(
-            fmt::format("Non-supported queryTemplate: {}", queryTemplate));
-      }
-    } else {
-      throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
-    }
-
-    return myPlan;
-  }
-
-  void generateDummyData(
-      std::string mode,
-      std::vector<int> numberOfTuples,
-      std::vector<int> dummyFeatureSizes,
-      CataLog& cataLog,
-      int dataBatchSize = 256) {
-    if (mode == "ml") {
-      VectorMaker maker{pool_.get()};
-      // it should contains the numbers: # of users, # of movies, # of relevance
-      // tag
-      assert(numberOfTuples.size() == 3 && dummyFeatureSizes.size() == 2);
-      int numUsers = numberOfTuples[0];
-      int numMovies = numberOfTuples[1];
-      int numRelevanceTags = numberOfTuples[2];
-      int userFeatureSize = dummyFeatureSizes[0];
-      int movieFeatureSize = dummyFeatureSizes[1];
-
-      std::string tableStatsPath =
-          "/home/velox/velox/optimizer/tests/tableStats.txt";
-      remove(tableStatsPath.c_str());
-
-      std::vector<std::vector<int>> userModelStructures =
-          readModelStructureFromFile(
-              "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
-      std::vector<std::vector<int>> movieModelStructures =
-          readModelStructureFromFile(
-              "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
-      std::vector<std::vector<int>> tagModelStructures =
-          readModelStructureFromFile(
-              "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
-      // Check: dummy feature size equals the input size of the model
-      assert(userFeatureSize == userModelStructures[0][0]);
-      assert(movieFeatureSize == movieModelStructures[0][0]);
-      assert(numRelevanceTags == tagModelStructures[0][0]);
-
-      RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
-      RandomSampler randomSampler = RandomSampler(0);
-      // sample user data
-      std::vector<int> userIDs = randomGenerator.genIntRange(0, numUsers);
-      std::vector<std::string> userGender =
-          randomSampler.sampleFromSets<std::string>(numUsers, {"M", "F"});
-      std::vector<int> userAge = randomGenerator.gen1DInt(numUsers, 10, 70);
-      std::vector<int> userOccupation =
-          randomGenerator.gen1DInt(numUsers, 0, 20);
-      std::vector<std::string> zipCode = {
-          "94043",
-          "94301",
-          "94305",
-          "94306",
-          "94309",
-          "80212",
-          "80213",
-          "80219",
-          "12301",
-          "40201"};
-      std::vector<std::string> userZipcode =
-          randomSampler.sampleFromSets<std::string>(numUsers, zipCode);
-      std::vector<std::vector<float>> userFeatures =
-          randomGenerator.genFloat2dVector(numUsers, userFeatureSize);
-
-      cataLog.addNumericalColMinMax("u_user_id", 0, numUsers);
-      cataLog.addNumericalColMinMax("u_age", 10, 70);
-      cataLog.addNumericalColMinMax("u_occupation", 0, 20);
-      cataLog.addCategoricalColVals("u_zipcode", zipCode);
-
-      auto userDataRowVector = maker.rowVector(
-          {"u_user_id",
-           "u_gender",
-           "u_age",
-           "u_occupation",
-           "u_zipcode",
-           "u_features"},
-          {maker.flatVector<int>(userIDs, INTEGER()),
-           maker.flatVector<std::string>(userGender, VARCHAR()),
-           maker.flatVector<int>(userAge, INTEGER()),
-           maker.flatVector<int>(userOccupation, INTEGER()),
-           maker.flatVector<std::string>(userZipcode, VARCHAR()),
-           maker.arrayVector<float>(userFeatures, REAL())});
-
-      // output the histogram for the user data
-      cataLog.outputHistogramForData(
-          userDataRowVector, "user", 50, tableStatsPath);
-
-      MovieTitleGenerator movieTitleGenerator = MovieTitleGenerator(0);
-      std::vector<int> movieIDs = randomGenerator.genIntRange(0, numMovies);
-      std::vector<std::string> movieTitle =
-          movieTitleGenerator.generateBatchRandomTitles(numMovies);
-      std::vector<std::string> genres = {
-          "Action",
-          "Adventure",
-          "Animation",
-          "Children",
-          "Comedy",
-          "Crime",
-          "Documentary",
-          "Drama",
-          "Fantasy",
-          "Film-Noir",
-          "Horror",
-          "Musical",
-          "Mystery",
-          "Romance",
-          "Sci-Fi",
-          "Thriller",
-          "War",
-          "Western"};
-      std::vector<std::string> movieGenres =
-          randomSampler.sampleFromSets<std::string>(numMovies, genres);
-      std::vector<std::string> spokenLanguage = {
-          "English",
-          "French",
-          "German",
-          "Italian",
-          "Japanese",
-          "Korean",
-          "Mandarin",
-          "Spanish"};
-      std::vector<std::string> movieSpokenLanguage =
-          randomSampler.sampleFromSets<std::string>(numMovies, spokenLanguage);
-      randomGenerator.setFloatRange(0, 10);
-      std::vector<float> moviePopularity =
-          randomGenerator.genFloat1dVector(numMovies);
-      randomGenerator.setFloatRange(0, 5);
-      std::vector<float> movieVoteAverage =
-          randomGenerator.genFloat1dVector(numMovies);
-      std::vector<int> movieVoteCount =
-          randomGenerator.gen1DInt(numMovies, 0, 5000);
-      std::vector<std::vector<float>> movieFeatures =
-          randomGenerator.genFloat2dVector(numMovies, movieFeatureSize);
-
-      cataLog.addNumericalColMinMax("m_movie_id", 0, numMovies);
-      cataLog.addNumericalColMinMax("m_popularity", 0, 10);
-      cataLog.addNumericalColMinMax("m_vote_average", 0, 5);
-      cataLog.addNumericalColMinMax("m_vote_count", 0, 5000);
-      cataLog.addCategoricalColVals("m_genres", genres);
-      cataLog.addCategoricalColVals("m_spoken_languages", spokenLanguage);
-
-      auto movieDataRowVector = maker.rowVector(
-          {"m_movie_id",
-           "m_title",
-           "m_genres",
-           "m_spoken_languages",
-           "m_popularity",
-           "m_vote_average",
-           "m_vote_count",
-           "m_features"},
-          {maker.flatVector<int>(movieIDs, INTEGER()),
-           maker.flatVector<std::string>(movieTitle, VARCHAR()),
-           maker.flatVector<std::string>(movieGenres, VARCHAR()),
-           maker.flatVector<std::string>(movieSpokenLanguage, VARCHAR()),
-           maker.flatVector<float>(moviePopularity, REAL()),
-           maker.flatVector<float>(movieVoteAverage, REAL()),
-           maker.flatVector<int>(movieVoteCount, INTEGER()),
-           maker.arrayVector<float>(movieFeatures, REAL())});
-
-      // output the histogram for the movie data
-      cataLog.outputHistogramForData(
-          movieDataRowVector, "movie", 50, tableStatsPath);
-
-      randomGenerator.setFloatRange(0, 1);
-      std::vector<std::vector<float>> movieRelevanceTags =
-          randomGenerator.genFloat2dVector(numMovies, numRelevanceTags);
-
-      cataLog.addNumericalColMinMax("mt_movie_id", 0, numMovies);
-
-      auto movieRelevanceTagRowVector = maker.rowVector(
-          {"mt_movie_id", "mt_relevance_score"},
-          {maker.flatVector<int>(movieIDs, INTEGER()),
-           maker.arrayVector<float>(movieRelevanceTags, REAL())});
-
-      // output the histogram for the movie relevance tag data
-      cataLog.outputHistogramForData(
-          movieRelevanceTagRowVector,
-          "movie_relevance_tag",
-          50,
-          tableStatsPath);
-
-      std::vector<std::shared_ptr<TempFilePath>> userFilePaths =
-          splitRowVectorIntoBatchFiles(userDataRowVector, dataBatchSize);
-      std::pair<int, int> userStats =
-          std::make_pair(numUsers, userDataRowVector->childrenSize());
-      cataLog.registerDataSrc(
-          "user",
-          userFilePaths,
-          asRowType(userDataRowVector->type()),
-          userStats);
-
-      std::vector<std::shared_ptr<TempFilePath>> movieFilePaths =
-          splitRowVectorIntoBatchFiles(movieDataRowVector, dataBatchSize);
-      std::pair<int, int> movieStats =
-          std::make_pair(numMovies, movieDataRowVector->childrenSize());
-      cataLog.registerDataSrc(
-          "movie",
-          movieFilePaths,
-          asRowType(movieDataRowVector->type()),
-          movieStats);
-
-      std::vector<std::shared_ptr<TempFilePath>> movieRelevanceTagFilePaths =
-          splitRowVectorIntoBatchFiles(
-              movieRelevanceTagRowVector, dataBatchSize);
-      std::pair<int, int> movieRelevanceTagStats =
-          std::make_pair(numMovies, movieRelevanceTagRowVector->childrenSize());
-      cataLog.registerDataSrc(
-          "movie_relevance_tag",
-          movieRelevanceTagFilePaths,
-          asRowType(movieRelevanceTagRowVector->type()),
-          movieRelevanceTagStats);
-    }
-  }
-
   void factorizationTest(
       std::string mode,
       std::string queryTemplate,
@@ -1192,23 +391,6 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     std::vector<std::string> inputFilePaths;
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
-    std::string computationStr;
-
-    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
-    std::vector<std::vector<float>> input1 =
-        randomGenerator.genFloat2dVector(10, 10);
-    std::vector<std::vector<float>> input2 =
-        randomGenerator.genFloat2dVector(10, 5);
-
-    auto input1Vector = maker.arrayVector<float>(input1, REAL());
-    auto input2Vector = maker.arrayVector<float>(input2, REAL());
-    auto inputRowVector =
-        maker.rowVector({"input1", "input2"}, {input1Vector, input2Vector});
-
-    myPlan =
-        PlanBuilder(planNodeIdGenerator, pool_.get()).values({inputRowVector});
-    float unOptimizedExecutionTime = runPlanWithCataLog(
-        pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
 
     // load serialized model
     std::string serializedModelPath =
@@ -1216,6 +398,21 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     std::string modelDataPath = "/home/velox/temp/test_onnx_ffnn.h5";
     std::vector<std::string> serializedGraphExprs =
         readFileByLines(serializedModelPath);
+    std::string modelDependDataPath =
+        "/home/velox/temp/test_onnx_dependencies.txt";
+    std::unordered_map<int, std::vector<int>> modelDependData =
+        loadONNXGroupDependencyData(modelDependDataPath);
+
+    std::cout << "debug: modelDependData: " << std::endl;
+    printMap(modelDependData);
+
+    // maintain a map of modelGroupId to modelExpr, the modelExpr is a pair of
+    // left expr and right expr. That is used to easily set the model input
+    // the later nodes take intermediate group output will store the whole expr
+    // to the left expr.
+    std::map<int, std::pair<std::string, std::string>> modelGroupIdToExprMap;
+    int groupId = 0;
+
     for (auto expr : serializedGraphExprs) {
       std::vector<std::string> splittedExpr =
           optimization::splitString(expr, '|');
@@ -1223,30 +420,82 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       std::string rightExpr = splittedExpr[1];
       std::string outputName = splittedExpr[2];
       std::cout << "debug: " << splittedExpr << std::endl;
+      std::pair<std::string, std::string> modelExprPair;
+      if (rightExpr.find("output") == std::string::npos) {
+        // the case of model groups take inputs from the query plan
+        modelExprPair = std::make_pair(leftExpr, rightExpr + outputName);
+      } else {
+        modelExprPair = std::make_pair(leftExpr + rightExpr + outputName, "");
+      }
+      modelGroupIdToExprMap[groupId++] = modelExprPair;
+
       std::vector<std::string> parsedSingleExprs;
       std::vector<std::string> matchedExprs;
       // parse the target string into a std::vecotor<DLKernel(string)>
       parseDLExpressions(leftExpr + rightExpr, parsedSingleExprs, matchedExprs);
+      // reverse the ordering
+      std::reverse(parsedSingleExprs.begin(), parsedSingleExprs.end());
 
       std::cout << "debug: parsedSingleExprs" << parsedSingleExprs << std::endl;
-      for (auto mlFunc : parsedSingleExprs) {
-        std::vector<std::string> splittedMLFunc =
-            optimization::splitString(mlFunc, '-');
-        std::cout << "splittedMLFunc: " << splittedMLFunc << std::endl;
-        std::string mlFuncName = splittedMLFunc[0];
-        if (mlFuncName == "relu") {
-        } else if (mlFuncName == "mat_mul") {
-          checkOrAbort(2, splittedMLFunc.size(), "ParseMLFunc");
-          std::string mlFuncParamName = splittedMLFunc[1];
-          std::string weightName = fmt::format("{}_weight", mlFuncParamName);
+      for (auto mlFuncName : parsedSingleExprs) {
+        // std::cout << "debug: mlFuncName: " << mlFuncName << std::endl;
+        // std::vector<std::string> splittedMLFunc =
+        // optimization::splitString(mlFunc, '-');
+        // std::cout << "splittedMLFunc: " << splittedMLFunc << std::endl;
+        // std::string mlFuncName = splittedMLFunc[0];
+        std::cout << "mlFuncName: " << mlFuncName << std::endl;
+        if (mlFuncName.find("relu") != std::string::npos) {
+          optimization::registerVectorFunction(
+              "relu",
+              Relu::signatures(),
+              std::make_unique<Relu>(),
+              {},
+              true,
+              cataLog);
+        } else if (mlFuncName.find("mat_mul") != std::string::npos) {
+          // checkOrAbort(2, splittedMLFunc.size(), "ParseMLFunc");
+          // std::string mlFuncParamName = splittedMLFunc[1];
+          // std::cout << "mlFuncParamName: " << mlFuncParamName << std::endl;
+          std::string weightName = fmt::format("{}_weight", mlFuncName);
+
+          // load weight matrix and dims
           std::vector<std::vector<float>> matMulWeight =
               loadHDF5Array(modelDataPath, weightName);
-        } else if (mlFuncName == "mat_add") {
-          checkOrAbort(2, splittedMLFunc.size(), "ParseMLFunc");
-          std::string mlFuncParamName = splittedMLFunc[1];
-          std::string weightName = fmt::format("{}_bias", mlFuncParamName);
+          std::vector<std::vector<float>> matMulDims =
+              loadHDF5Array(modelDataPath, fmt::format("{}_shape", mlFuncName));
+          checkOrAbort(matMulDims.size(), 2, "ReadMatMulDims");
+
+          // register function
+          optimization::registerVectorFunction(
+              mlFuncName,
+              MatrixMultiply::signatures(),
+              std::make_unique<MatrixMultiply>(
+                  std::move(flattenVectorToPointer(matMulWeight)),
+                  matMulDims[0][0],
+                  matMulDims[1][0]),
+              {},
+              true,
+              cataLog);
+        } else if (mlFuncName.find("mat_add") != std::string::npos) {
+          std::string weightName = fmt::format("{}_weight", mlFuncName);
+
+          // load weight matrix and dims
           std::vector<std::vector<float>> matAddWeight =
               loadHDF5Array(modelDataPath, weightName);
+          std::vector<std::vector<float>> matAddDims =
+              loadHDF5Array(modelDataPath, fmt::format("{}_shape", mlFuncName));
+          checkOrAbort(matAddDims.size(), 1, "ReadMatAddDims");
+
+          // register func
+          optimization::registerVectorFunction(
+              mlFuncName,
+              MatrixVectorAddition::signatures(),
+              std::make_unique<MatrixVectorAddition>(
+                  std::move(flattenVectorToPointer(matAddWeight)),
+                  matAddDims[0][0]),
+              {},
+              true,
+              cataLog);
         }
 
         // 1: bit-vector -> factorization ()
@@ -1256,6 +505,115 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         //
       }
     }
+
+    std::cout << "debug: modelGroupIdToExprMap: " << modelGroupIdToExprMap
+              << std::endl;
+
+    // Init query plan
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    std::vector<int> input1JK = randomGenerator.gen1DInt(5000, 0, 20);
+    std::vector<std::vector<float>> input1 =
+        randomGenerator.genFloat2dVector(5000, 10);
+    std::vector<int> input2JK = randomGenerator.gen1DInt(2000, 0, 20);
+    std::vector<std::vector<float>> input2 =
+        randomGenerator.genFloat2dVector(2000, 5);
+
+    auto input0Vector = maker.arrayVector<float>(input1, REAL());
+    auto input0JKVector = maker.flatVector<int>(input1JK);
+    auto input1Vector = maker.arrayVector<float>(input2, REAL());
+    auto input1JKVector = maker.flatVector<int>(input2JK);
+    auto input0RowVector =
+        maker.rowVector({"input0jk", "input0"}, {input0JKVector, input0Vector});
+    auto input1RowVector =
+        maker.rowVector({"input1jk", "input1"}, {input1JKVector, input1Vector});
+
+    myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                 .values({input0RowVector})
+                 .hashJoin(
+                     {"input0jk"},
+                     {"input1jk"},
+                     PlanBuilder(planNodeIdGenerator, pool_.get())
+                         .values({input1RowVector})
+                         .planNode(),
+                     "",
+                     {"input0jk", "input0", "input1jk", "input1"});
+
+    std::vector<std::string> queryProjectionExprs;
+    for (int i = 0; i < modelGroupIdToExprMap.size(); i++) {
+      std::string computationExpr;
+      auto it = modelDependData.find(i);
+      if (it != modelDependData.end()) {
+        std::cout << "got here1: " << queryProjectionExprs << std::endl;
+        myPlan.project(queryProjectionExprs);
+        std::cout << "got here2" << std::endl;
+        queryProjectionExprs.clear();
+        computationExpr = modelGroupIdToExprMap[i].first;
+
+      } else {
+        computationExpr = fmt::format(
+          "{}input{},input{}{}",
+          modelGroupIdToExprMap[i].first,
+          i,
+          i+1,
+          modelGroupIdToExprMap[i].second);
+      }
+      queryProjectionExprs.push_back(computationExpr);
+    }
+    if (queryProjectionExprs.size() > 0) {
+      myPlan.project(queryProjectionExprs);
+    }
+
+    // Add model into query plan:
+    if (verbose >= 3) {
+      std::cout << "[Query Plan: ]" << myPlan.planNode()->toString(true, true)
+                << std::endl;
+    }
+
+    float unOptimizedExecutionTime = runPlanWithCataLog(
+        pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+
+    std::cout << "[INFO] Total Execution time: " << unOptimizedExecutionTime
+              << std::endl;
+
+    auto sketchPlan1 =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({input0RowVector})
+            .rowNumber({}, std::nullopt, true)
+            .singleAggregation({}, {"approx_set(row_number, 0.01)"})
+            .project({"cardinality(a0)"});
+
+    auto sketchTime1 = runPlanWithCataLog(
+        pool_, numThreads, sketchPlan1, cataLog, repeatRun, verbose);
+    std::cout << "[INFO] Sketch1 Execution time: " << sketchTime1 << std::endl;
+
+    auto sketchPlan2 =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({input1RowVector})
+            .rowNumber({}, std::nullopt, true)
+            .singleAggregation({}, {"approx_set(row_number, 0.01)"})
+            .project({"cardinality(a0)"});
+
+    auto sketchTime2 = runPlanWithCataLog(
+        pool_, numThreads, sketchPlan2, cataLog, repeatRun, verbose);
+    std::cout << "[INFO] Sketch2 Execution time: " << sketchTime2 << std::endl;
+
+    auto sketchPlan3 =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({input0RowVector})
+            .hashJoin(
+                {"input0jk"},
+                {"input1jk"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({input1RowVector})
+                    .planNode(),
+                "",
+                {"input0jk", "input0", "input1jk", "input1"})
+            .rowNumber({}, std::nullopt, true)
+            .singleAggregation({}, {"approx_set(row_number, 0.01)"})
+            .project({"cardinality(a0)"});
+    auto sketchTime3 = runPlanWithCataLog(
+        pool_, numThreads, sketchPlan3, cataLog, repeatRun, verbose);
+    std::cout << "[INFO] Sketch3 Execution time: " << sketchTime3 << std::endl;
 
     return;
   }
@@ -1341,19 +699,4 @@ int main(int argc, char** argv) {
       rewrite,
       dataBatchSize);
 
-  // if (mctsType == "factorize") {
-  //   demo.factorizationTest(
-  //       mode,
-  //       queryTemplate,
-  //       numberOfTuples,
-  //       dummyFeatureSizes,
-  //       numDriver,
-  //       repeatRun,
-  //       verbose,
-  //       rewrite,
-  //       dataBatchSize);
-  // } else {
-  //   throw std::runtime_error(
-  //       fmt::format("Non-supported MCTS type: {}", mctsType));
-  // }
 }

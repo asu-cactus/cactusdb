@@ -422,10 +422,64 @@ int countWords(const std::string& input) {
 }
 
 template <typename T1, typename T2>
-void checkOrAbort(const T1& actual, const T2& expected, const std::string& msgPrefix = "") {
-    if (!(actual == expected)) {
-        std::cerr << fmt::format("[{}-Check failed:] Expected: {} vs  Actual  : {}\n",
-                                 msgPrefix, expected, actual);
-        std::abort();
+void checkOrAbort(
+    const T1& actual,
+    const T2& expected,
+    const std::string& msgPrefix = "") {
+  if (!(actual == expected)) {
+    std::cerr << fmt::format(
+        "[{}-Check failed:] Expected: {} vs  Actual  : {}\n",
+        msgPrefix,
+        expected,
+        actual);
+    std::abort();
+  }
+}
+
+std::unordered_map<int, std::vector<int>> loadONNXGroupDependencyData(
+    const std::string& filename) {
+  std::unordered_map<int, std::vector<int>> groupData;
+  std::ifstream file(filename);
+  std::string line;
+
+  while (std::getline(file, line)) {
+    std::istringstream iss(line);
+    int groupId;
+    iss >> groupId;
+
+    std::vector<int> values;
+    int val;
+    while (iss >> val) {
+      values.push_back(val);
     }
+
+    groupData[groupId] = values;
+  }
+
+  return groupData;
+}
+
+// Forward declaration for printing vector
+template <typename T>
+void printVector(const std::vector<T>& vec);
+
+// Templated map printing function
+template <typename MapType>
+void printMap(const MapType& m) {
+  for (const auto& [key, values] : m) {
+    std::cout << key << ": ";
+    printVector(values);
+  }
+}
+
+// Helper function to print vectors
+template <typename T>
+void printVector(const std::vector<T>& vec) {
+  std::cout << "[";
+  for (size_t i = 0; i < vec.size(); ++i) {
+    std::cout << vec[i];
+    if (i + 1 < vec.size())
+      std::cout << ", ";
+  }
+  std::cout << "]" << std::endl;
 }
