@@ -15,6 +15,7 @@ This file provides detailed instructions for installing the dependencies manuall
 - [Madlib](#madlib)
 - [PostgresML](#postgresml)
 - [tokenizers-cpp](#tokenizers-cpp)
+- [Faiss](#faiss)
 
 ### PostgreSQL
 
@@ -239,4 +240,14 @@ Due to known issues with incorporating the linked libraries into our CMakeLists 
 git clone --recursive https://github.com/mlc-ai/tokenizers-cpp.git 
 cd tokenizers-cpp/example
 bash build_and_run.sh
+```
+
+### Faiss
+
+```bash
+git clone https://github.com/facebookresearch/faiss.git
+cd faiss
+mkdir build && cd build
+cmake -DBUILD_SHARED_LIBS=ON -DFAISS_ENABLE_C_API=ON -DFAISS_ENABLE_GPU=OFF -DFAISS_OPT_LEVEL=avx2 ..
+make -j8
 ```
