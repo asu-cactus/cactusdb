@@ -188,6 +188,14 @@ RUN cd madlib &&
   make
 ENV PATH=$PATH:/usr/lib/postgresql/14/bin
 
+# setup faiss 
+WORKDIR /home
+RUN git clone https://github.com/facebookresearch/faiss.git
+RUN cd faiss &&
+  mkdir build && cd build &&
+  cmake -DBUILD_SHARED_LIBS=ON -DFAISS_ENABLE_C_API=ON -DFAISS_ENABLE_GPU=OFF -DFAISS_OPT_LEVEL=avx2 .. &&
+  make -j8
+
 # set up velox
 WORKDIR /home
 RUN git clone https://github.com/facebookincubator/velox.git
