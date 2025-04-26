@@ -68,7 +68,9 @@ add_library(
   NNBuilder.cpp
   RAG.cpp
   FraudDetectionFunctions.cpp
+  UtilFunction.cpp
 )
+
 
 target_link_libraries(ml_functions
   velox_aggregates

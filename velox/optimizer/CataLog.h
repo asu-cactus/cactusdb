@@ -493,6 +493,59 @@ class CataLog {
     categoricalColVals.clear();
   }
 
+  void addFactorizableOpSrc(
+      std::string opName,
+      std::vector<std::string> srcNames) {
+    factorizableOpSrcMap[opName] = srcNames;
+  }
+
+  std::vector<std::string> getFactorizableOpSrc(std::string opName) {
+    auto it = factorizableOpSrcMap.find(opName);
+    if (it != factorizableOpSrcMap.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] opName: {} not exist in factorizableOpSrcMap", opName);
+      return {};
+    }
+  }
+
+  std::unordered_map<std::string, std::vector<std::string>>
+  getfactorizableOpSrcMap() {
+    return factorizableOpSrcMap;
+  }
+
+  void clearFactorizableOpSrc() {
+    factorizableOpSrcMap.clear();
+  }
+
+  void addFactorizableSrcPushdownNodes(
+      std::string opName,
+      std::vector<std::string> pushdownNodes) {
+    factorizableSrcPushdownNodesMap[opName] = pushdownNodes;
+  }
+
+  std::vector<std::string> getFactorizableSrcPushdownNodes(std::string opName) {
+    auto it = factorizableSrcPushdownNodesMap.find(opName);
+    if (it != factorizableSrcPushdownNodesMap.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] opName: {} not exist in factorizableSrcPushdownNodesMap",
+          opName);
+      return {};
+    }
+  }
+
+  std::unordered_map<std::string, std::vector<std::string>>
+  getFactorizableSrcPushdownNodesMap() {
+    return factorizableSrcPushdownNodesMap;
+  }
+
+  void clearFactorizableSrcPushdownNodes() {
+    factorizableSrcPushdownNodesMap.clear();
+  }
+
   template <typename T>
   void processNumericColumn(
       std::string colName,
@@ -721,6 +774,10 @@ class CataLog {
   // vars to store per-column statistics
   std::unordered_map<std::string, std::pair<int, int>> numericalColMinMaxs;
   std::unordered_map<std::string, std::vector<std::string>> categoricalColVals;
+  std::unordered_map<std::string, std::vector<std::string>>
+      factorizableOpSrcMap;
+  std::unordered_map<std::string, std::vector<std::string>>
+      factorizableSrcPushdownNodesMap;
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(
