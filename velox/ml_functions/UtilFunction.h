@@ -483,3 +483,18 @@ void printVector(const std::vector<T>& vec) {
   }
   std::cout << "]" << std::endl;
 }
+
+class Timer {
+ public:
+  void tic() {
+    start_time_ = std::chrono::high_resolution_clock::now();
+  }
+
+  double toc() {
+    end_time_ = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration<double>(end_time_ - start_time_).count();
+  }
+
+  std::chrono::high_resolution_clock::time_point start_time_;
+  std::chrono::high_resolution_clock::time_point end_time_;
+};

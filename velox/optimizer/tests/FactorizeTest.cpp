@@ -62,12 +62,11 @@
 #include <json/json.h>
 #include "velox/cost_model/CostEstimator.h"
 #include "velox/cost_model/Stat.h"
-#include "velox/optimizer/Mul2JoinAggRewriteAction.h"
+#include "velox/optimizer/MLFactorizationRewriteAction.h"
 #include "velox/optimizer/PlanState.h"
 #include "velox/optimizer/Register.h"
 #include "velox/optimizer/RewriteAction.h"
 #include "velox/optimizer/RuleManager.h"
-#include "velox/optimizer/TwoLayerUDF2TorchNNRewriteAction.h"
 #include "velox/optimizer/tests/BenchmarkUtils.h"
 #include "velox/optimizer/tests/ModelRegister.h"
 
@@ -375,18 +374,102 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     return "";
   }
 
-  void factorizationTest(
-      std::string mode,
-      std::string queryTemplate,
-      std::vector<int> numberOfTuples,
-      std::vector<int> dummyFeatureSizes,
-      int numThreads,
-      int repeatRun,
-      int verbose,
-      bool rewrite,
-      int dataBatchSize = 256) {
+  void TwoTowerQuery(int numThreads, int repeatRun, int verbose) {
     PlanBuilder myPlan;
     CataLog cataLog;
+    Timer timer;
+  }
+
+  void LLMQuery(int numThreads, int repeatRun, int verbose) {
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    Timer timer;
+    // Initialize planNodeIdGenerator
+
+    std::vector<std::string> userDataPaths =
+        getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/user");
+    std::vector<std::string> movieDataPaths =
+        getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/movie");
+    auto userDataRowType =
+        ROW({"user_id", "description"}, {INTEGER(), VARCHAR()});
+
+    auto movieDataRowType = ROW({"id", "description"}, {INTEGER(), VARCHAR()});
+
+    core::PlanNodeId readUserDataPlanNodeId;
+    core::PlanNodeId readMoviewDataPlanNodeId;
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+
+    exec::registerVectorFunction(
+        "chatgpt_server", ChatGPT::signatures(), std::make_unique<ChatGPT>());
+
+    exec::registerVectorFunction(
+        "chatgpt_recommender",
+        ChatGPTRecommender::signatures(),
+        std::make_unique<ChatGPTRecommender>());
+
+    myPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(userDataRowType, {}, "")
+            .capturePlanNodeId(readUserDataPlanNodeId)
+            .project(
+                {"CAST(user_id AS VARCHAR) as user_id",
+                 "description AS user_description"})
+            .nestedLoopJoin(
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(movieDataRowType, {}, "")
+                    .capturePlanNodeId(readMoviewDataPlanNodeId)
+                    .project(
+                        {"CAST(id AS VARCHAR) AS movie_id",
+                         "description AS movie_description"})
+                    .planNode(),
+                {"user_id",
+                 "movie_id",
+                 "user_description",
+                 "movie_description"})
+            .project(
+                {"user_id",
+                 "movie_id",
+                 "chatgpt_server(user_description, 'Please summarize the users description. The following are the average ratings given by users to movies in each genre.') AS user_description",
+                 "chatgpt_server(movie_description, 'Please summarize the movies description. The following are the detailed information of the movie.') AS movie_description"})
+            .project(
+                {"user_id",
+                 "movie_id",
+                 "chatgpt_recommender(user_description, movie_description, 'Given the user description and movie description, please return a recommendation score from 0-5 and explain the reason? Your response should be formatted as recommendation score and reason.')"});
+
+    RuleManager ruleManager;
+    ruleManager.rules.clear();
+    ruleManager.rules.emplace(
+        "MLDecompositionPushdownRewriteAction",
+        std::make_shared<MLDecompositionPushdownRewriteAction>());
+    // Create planState
+    PlanState planState(ruleManager);
+
+    timer.tic();
+    planState.getPossibleActions(myPlan.planNode(), cataLog);
+    std::cout << "[INFO] Data Flow Analysis time: " << timer.toc() << std::endl;
+    planState.showAllActions();
+
+    if (verbose >= 2) {
+      std::cout << "[Query Plan: ]" << myPlan.planNode()->toString(true, true)
+                << std::endl;
+    }
+  }
+
+  void factorizationTest(
+      // std::string mode,
+      // std::string queryTemplate,
+      // std::vector<int> numberOfTuples,
+      // std::vector<int> dummyFeatureSizes,
+      int numThreads,
+      int repeatRun,
+      int verbose
+      // bool rewrite,
+      // int dataBatchSize = 256
+  ) {
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    Timer timer;
+    timer.tic();
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     std::vector<std::string> inputFilePaths;
@@ -403,8 +486,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     std::unordered_map<int, std::vector<int>> modelDependData =
         loadONNXGroupDependencyData(modelDependDataPath);
 
-    std::cout << "debug: modelDependData: " << std::endl;
-    printMap(modelDependData);
+    // std::cout << "debug: modelDependData: " << std::endl;
+    // printMap(modelDependData);
 
     // maintain a map of modelGroupId to modelExpr, the modelExpr is a pair of
     // left expr and right expr. That is used to easily set the model input
@@ -419,7 +502,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       std::string leftExpr = splittedExpr[0];
       std::string rightExpr = splittedExpr[1];
       std::string outputName = splittedExpr[2];
-      std::cout << "debug: " << splittedExpr << std::endl;
+      // std::cout << "debug: " << splittedExpr << std::endl;
       std::pair<std::string, std::string> modelExprPair;
       if (rightExpr.find("output") == std::string::npos) {
         // the case of model groups take inputs from the query plan
@@ -436,14 +519,15 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       // reverse the ordering
       std::reverse(parsedSingleExprs.begin(), parsedSingleExprs.end());
 
-      std::cout << "debug: parsedSingleExprs" << parsedSingleExprs << std::endl;
+      // std::cout << "debug: parsedSingleExprs" << parsedSingleExprs <<
+      // std::endl;
       for (auto mlFuncName : parsedSingleExprs) {
         // std::cout << "debug: mlFuncName: " << mlFuncName << std::endl;
         // std::vector<std::string> splittedMLFunc =
         // optimization::splitString(mlFunc, '-');
         // std::cout << "splittedMLFunc: " << splittedMLFunc << std::endl;
         // std::string mlFuncName = splittedMLFunc[0];
-        std::cout << "mlFuncName: " << mlFuncName << std::endl;
+        // std::cout << "mlFuncName: " << mlFuncName << std::endl;
         if (mlFuncName.find("relu") != std::string::npos) {
           optimization::registerVectorFunction(
               "relu",
@@ -506,8 +590,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       }
     }
 
-    std::cout << "debug: modelGroupIdToExprMap: " << modelGroupIdToExprMap
-              << std::endl;
+    // std::cout << "debug: modelGroupIdToExprMap: " << modelGroupIdToExprMap
+    // << std::endl;
 
     // Init query plan
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
@@ -543,19 +627,19 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       std::string computationExpr;
       auto it = modelDependData.find(i);
       if (it != modelDependData.end()) {
-        std::cout << "got here1: " << queryProjectionExprs << std::endl;
+        // std::cout << "got here1: " << queryProjectionExprs << std::endl;
         myPlan.project(queryProjectionExprs);
-        std::cout << "got here2" << std::endl;
+        // std::cout << "got here2" << std::endl;
         queryProjectionExprs.clear();
         computationExpr = modelGroupIdToExprMap[i].first;
 
       } else {
         computationExpr = fmt::format(
-          "{}input{},input{}{}",
-          modelGroupIdToExprMap[i].first,
-          i,
-          i+1,
-          modelGroupIdToExprMap[i].second);
+            "{}input{},input{}{}",
+            modelGroupIdToExprMap[i].first,
+            i,
+            i + 1,
+            modelGroupIdToExprMap[i].second);
       }
       queryProjectionExprs.push_back(computationExpr);
     }
@@ -563,8 +647,11 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
       myPlan.project(queryProjectionExprs);
     }
 
+    std::cout << "[DEBUG] model loading + query init: " << timer.toc()
+              << std::endl;
+
     // Add model into query plan:
-    if (verbose >= 3) {
+    if (verbose >= 2) {
       std::cout << "[Query Plan: ]" << myPlan.planNode()->toString(true, true)
                 << std::endl;
     }
@@ -574,6 +661,26 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
 
     std::cout << "[INFO] Total Execution time: " << unOptimizedExecutionTime
               << std::endl;
+
+    RuleManager ruleManager;
+    ruleManager.rules.clear();
+    ruleManager.rules.emplace(
+        "MLFactorizationRewriteAction",
+        std::make_shared<MLFactorizationRewriteAction>());
+    // Create planState
+    PlanState planState(ruleManager);
+
+    timer.tic();
+    planState.getPossibleActions(myPlan.planNode(), cataLog);
+    std::cout << "[INFO] Data Flow Analysis time: " << timer.toc() << std::endl;
+    planState.showAllActions();
+
+    std::cout << "[Debug]: factorizableOpSrcMap" << std::endl;
+    printMap(cataLog.getfactorizableOpSrcMap());
+    std::cout << "[Debug]: FactorizableSrcPushdownNodesMap" << std::endl;
+    printMap(cataLog.getFactorizableSrcPushdownNodesMap());
+    // std::cout << printUnorderedMap(cataLog.getfactorizableOpSrcMap()) <<
+    // std::endl;
 
     auto sketchPlan1 =
         PlanBuilder(planNodeIdGenerator, pool_.get())
@@ -633,6 +740,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
   static inline int modelGroupId_ = 0;
 };
 
+DEFINE_string(query, "ffnn", "ffnn, llm");
 DEFINE_string(mcts, "reusable", "MCTS type: reusable, vanilla");
 DEFINE_string(mode, "ml", "Mode: ml");
 DEFINE_string(
@@ -654,6 +762,7 @@ DEFINE_int32(data_batch_size, 256, "Data batch size");
 int main(int argc, char** argv) {
   memory::MemoryManager::initialize({});
   folly::init(&argc, &argv, false);
+  std::string query = FLAGS_query;
   std::string mode = FLAGS_mode;
   std::string queryTemplate = FLAGS_query_template;
   std::string model = FLAGS_model;
@@ -674,29 +783,14 @@ int main(int argc, char** argv) {
   std::vector<int> numberOfTuples;
   std::vector<int> dummyFeatureSizes;
 
-  if (mode == "ml") {
-    numberOfTuples.push_back(numUser);
-    numberOfTuples.push_back(numMovie);
-    numberOfTuples.push_back(numTag);
-    dummyFeatureSizes.push_back(userFeatureSize);
-    dummyFeatureSizes.push_back(movieFeatureSize);
-  } else if (mode == "collect_ml_stats") {
-    // demo.collectMovieLensStats(numDriver, repeatRun, verbose);
-    return 0;
+  if (query == "ffnn") {
+    demo.factorizationTest(numDriver, repeatRun, verbose);
+  } else if (query == "llm") {
+    demo.LLMQuery(numDriver, repeatRun, verbose);
+  } else if (query == "two_tower") {
+    demo.TwoTowerQuery(numDriver, repeatRun, verbose);
+  } else {
+    std::cerr << "Invalid query type: " << query << std::endl;
+    return 1;
   }
-
-  std::cout << "numberOfTuples: " << numberOfTuples << std::endl;
-  std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
-
-  demo.factorizationTest(
-      mode,
-      queryTemplate,
-      numberOfTuples,
-      dummyFeatureSizes,
-      numDriver,
-      repeatRun,
-      verbose,
-      rewrite,
-      dataBatchSize);
-
 }
