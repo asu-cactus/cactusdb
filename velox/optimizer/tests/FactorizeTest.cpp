@@ -126,44 +126,6 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     }
   }
 
-  int cacheQueryPlanAndCateLog(PlanBuilder& planBuilder, CataLog& cataLog) {
-    int queryPlanCacheId = queryPlanCacheId_++;
-    auto serializedPlan = planBuilder.planNode()->serialize();
-    queryPlanCaches_[queryPlanCacheId] = serializedPlan;
-    cataLogIdAddressMapCaches_[queryPlanCacheId] = cataLog.getIdAddressMap();
-
-    return queryPlanCacheId;
-  }
-
-  void resetQueryPlanAndQueryPlanFromCache(
-      PlanBuilder& planBuilder,
-      CataLog& cataLog,
-      int queryPlanCacheId) {
-    auto it1 = queryPlanCaches_.find(queryPlanCacheId);
-    if (it1 != queryPlanCaches_.end()) {
-      auto serializedPlan = it1->second;
-      auto deserlizedUpdatedPlanNode =
-          ISerializable::deserialize<core::PlanNode>(
-              serializedPlan, pool_.get());
-      planBuilder.setRoot(deserlizedUpdatedPlanNode);
-    } else {
-      throw std::runtime_error(
-          fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
-              queryPlanCacheId));
-    }
-
-    auto it2 = cataLogIdAddressMapCaches_.find(queryPlanCacheId);
-    if (it2 != cataLogIdAddressMapCaches_.end()) {
-      cataLog.setIdAddressMap(it2->second);
-    } else {
-      throw std::runtime_error(
-          fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
-              queryPlanCacheId));
-    }
-  }
-
   // Function from ParquetTestBase.h
   std::unique_ptr<dwio::common::FileSink> createSink(
       const std::string& filePath) {
@@ -378,13 +340,353 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     PlanBuilder myPlan;
     CataLog cataLog;
     Timer timer;
+
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    // User-Tower
+
+    // user_id
+    int userIdNumEmbedding = 6040;
+
+    // gender
+    int genderNumEmbedding = 2;
+
+    // age
+    int ageNumEmbedding = 7;
+
+    // occupation
+    int occupationNumEmbedding = 21;
+
+    int numSamples = 500;
+
+    std::vector<std::vector<int>> userIndicesVector =
+        randomGenerator.genLookUpIndices(numSamples, userIdNumEmbedding - 1);
+    auto userIndicesArray =
+        maker.arrayVector<int>(userIndicesVector, INTEGER());
+    auto userIndicesArrayRowVector =
+        maker.rowVector({"user_id"}, {userIndicesArray});
+
+    std::vector<std::vector<int>> genderIndicesVector =
+        randomGenerator.genLookUpIndices(numSamples, genderNumEmbedding - 1);
+    auto genderIndicesArray =
+        maker.arrayVector<int>(genderIndicesVector, INTEGER());
+    auto genderIndicesArrayRowVector =
+        maker.rowVector({"gender"}, {genderIndicesArray});
+
+    std::vector<std::vector<int>> ageIndicesVector =
+        randomGenerator.genLookUpIndices(numSamples, ageNumEmbedding - 1);
+    auto ageIndicesArray = maker.arrayVector<int>(ageIndicesVector, INTEGER());
+    auto ageIndicesArrayRowVector = maker.rowVector({"age"}, {ageIndicesArray});
+
+    std::vector<std::vector<int>> occupationIndicesVector =
+        randomGenerator.genLookUpIndices(
+            numSamples, occupationNumEmbedding - 1);
+    auto occupationIndicesArray =
+        maker.arrayVector<int>(occupationIndicesVector, INTEGER());
+    auto occupationIndicesArrayRowVector =
+        maker.rowVector({"occupation"}, {occupationIndicesArray});
+
+    randomGenerator.setFloatRange(0, 1);
+    std::vector<std::vector<float>> userMeanRatingVector =
+        randomGenerator.genFloat2dVector(numSamples, 1);
+    auto userMeanRatingArray =
+        maker.arrayVector<float>(userMeanRatingVector, REAL());
+
+    int movieIdNumEmbedding = 3706;
+
+    // genres
+    int genresNumEmbedding = 1000;
+
+    std::vector<std::vector<int>> movieIndicesVector =
+        randomGenerator.genLookUpIndices(numSamples, movieIdNumEmbedding - 1);
+    auto movieIndicesArray =
+        maker.arrayVector<int>(movieIndicesVector, INTEGER());
+    auto movieIndicesArrayRowVector =
+        maker.rowVector({"movie_id"}, {movieIndicesArray});
+
+    std::vector<std::vector<int>> genresIndicesVector =
+        randomGenerator.genLookUpIndices(numSamples, genresNumEmbedding - 1, 6);
+    auto genresIndicesArray =
+        maker.arrayVector<int>(genresIndicesVector, INTEGER());
+    auto genresIndicesArrayRowVector =
+        maker.rowVector({"genres"}, {genresIndicesArray});
+
+    randomGenerator.setFloatRange(0, 1);
+    std::vector<std::vector<float>> itemMeanRatingVector =
+        randomGenerator.genFloat2dVector(numSamples, 1);
+    auto itemMeanRatingArray =
+        maker.arrayVector<float>(itemMeanRatingVector, REAL());
+
+    auto userRowVector = maker.rowVector(
+        {"u_user_id", "u_gender", "u_age", "u_occupation", "u_rating"},
+        {userIndicesArray,
+         genderIndicesArray,
+         ageIndicesArray,
+         occupationIndicesArray,
+         userMeanRatingArray});
+
+    auto movieRowVector = maker.rowVector(
+        {"m_movie_id", "m_genres", "m_rating"},
+        {movieIndicesArray, genresIndicesArray, itemMeanRatingArray});
+
+    registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
+
+    PlanNodeId userRowDataPlanNode, movieRowDataPlanNode;
+    std::cout << "got here" << std::endl;
+    myPlan =
+        exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+            .values({userRowVector})
+            .capturePlanNodeId(userRowDataPlanNode)
+            .project({
+                "u_user_id",
+                "user_id_embedding(user_id_encoder(u_user_id)) as u_user_id_embed",
+                "gender_embedding(u_gender) as u_gender",
+                "age_embedding(u_age) as u_age",
+                "occupation_embedding(u_occupation) as u_occupation",
+                "u_rating as u_user_mean_rating",
+            })
+            .project(
+                {"u_user_id",
+                 "concat(u_user_id_embed, u_gender, u_age, u_occupation,u_user_mean_rating) as user_tower_features"})
+            .nestedLoopJoin(
+                exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values({movieRowVector})
+                    .capturePlanNodeId(movieRowDataPlanNode)
+                    .project(
+                        {"m_movie_id",
+                         "movie_id_embedding(m_movie_id) as m_movie_id_embed",
+                         "sequence_pooling(genres_embedding(m_genres)) as m_genres_embed",
+                         "m_rating as m_movie_mean_rating"})
+                    .project(
+                        {"m_movie_id",
+                         "concat(m_movie_id_embed, m_genres_embed, m_movie_mean_rating) as movie_tower_features"})
+                    .planNode(),
+                {"u_user_id",
+                 "m_movie_id",
+                 "user_tower_features",
+                 "movie_tower_features"})
+            .project(
+                {"u_user_id",
+                 "m_movie_id",
+                 "relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(user_tower_features)))))))))))) as user_nn_out",
+                 "relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(movie_tower_features)))))))))))) as movie_nn_out"})
+            .project(
+                {"u_user_id",
+                 "m_movie_id",
+                 "cosine_similarity(user_nn_out, movie_nn_out)"});
+
+    std::cout << "got here2" << std::endl;
+    printMap(cataLog.getIdAddressMap());
+
+    if (verbose >= 2) {
+      std::cout << "[INFO] Plan: \n"
+                << myPlan.planNode()->toString(true, true) << std::endl;
+    }
+
+    float executionTime = runPlanWithCataLog(
+        pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+
+    std::cout << "[INFO] Execution time: " << executionTime << " seconds"
+              << std::endl;
+
+    RuleManager ruleManager;
+    ruleManager.rules.clear();
+    ruleManager.rules.emplace(
+        "MLDecompositionPushdownRewriteAction",
+        std::make_shared<MLDecompositionPushdownRewriteAction>());
+    // Create planState
+    PlanState planState(ruleManager);
+
+    timer.tic();
+    planState.getPossibleActions(myPlan.planNode(), cataLog);
+    std::cout << "[INFO] Data Flow Analysis time: " << timer.toc() << std::endl;
+    planState.showAllActions();
+
+    // // Below is generating the plan
+    // std::chrono::steady_clock::time_point begin =
+    //     std::chrono::steady_clock::now();
+    // auto userPlan = exec::test::PlanBuilder(pool_.get())
+    //                     .values({userIndicesArrayRowVector})
+    //                     .project({"user_id_embedding(user_id)"})
+    //                     .planNode();
+
+    // auto userEmbedding =
+    //     exec::test::AssertQueryBuilder(userPlan).copyResults(pool_.get());
+
+    // auto genderPlan = exec::test::PlanBuilder(pool_.get())
+    //                       .values({genderIndicesArrayRowVector})
+    //                       .project({"gender_embedding(gender)"})
+    //                       .planNode();
+
+    // auto genderEmbedding =
+    //     exec::test::AssertQueryBuilder(genderPlan).copyResults(pool_.get());
+
+    // auto agePlan = exec::test::PlanBuilder(pool_.get())
+    //                    .values({ageIndicesArrayRowVector})
+    //                    .project({"age_embedding(age)"})
+    //                    .planNode();
+
+    // auto ageEmbedding =
+    //     exec::test::AssertQueryBuilder(agePlan).copyResults(pool_.get());
+
+    // auto occupationPlan = exec::test::PlanBuilder(pool_.get())
+    //                           .values({occupationIndicesArrayRowVector})
+    //                           .project({"occupation_embedding(occupation)"})
+    //                           .planNode();
+
+    // auto occupationEmbedding =
+    //     exec::test::AssertQueryBuilder(occupationPlan).copyResults(pool_.get());
+
+    // // std::cout << "[INFO] Results: \n" << results->toString() << std::endl;
+    // //   std::cout << "[INFO] Results: \n"
+    // //             << userEmbedding->toString(0, userEmbedding->size()) <<
+    // //             std::endl;
+
+    // auto in1 = maker.rowVector(
+    //     {"in1", "in2"},
+    //     {userEmbedding->childAt(0), genderEmbedding->childAt(0)});
+
+    // auto concatPlan1 = exec::test::PlanBuilder(pool_.get())
+    //                        .values({in1})
+    //                        .project({"concat(in1, in2)"})
+    //                        .planNode();
+
+    // auto out1 =
+    //     exec::test::AssertQueryBuilder(concatPlan1).copyResults(pool_.get());
+
+    // auto in2 = maker.rowVector(
+    //     {"in1", "in2"}, {out1->childAt(0), ageEmbedding->childAt(0)});
+
+    // auto concatPlan2 = exec::test::PlanBuilder(pool_.get())
+    //                        .values({in2})
+    //                        .project({"concat(in1, in2)"})
+    //                        .planNode();
+    // auto out2 =
+    //     exec::test::AssertQueryBuilder(concatPlan2).copyResults(pool_.get());
+
+    // auto in3 = maker.rowVector(
+    //     {"in1", "in2"}, {out2->childAt(0), occupationEmbedding->childAt(0)});
+
+    // auto concatPlan3 = exec::test::PlanBuilder(pool_.get())
+    //                        .values({in3})
+    //                        .project({"concat(in1, in2)"})
+    //                        .planNode();
+
+    // auto out3 =
+    //     exec::test::AssertQueryBuilder(concatPlan3).copyResults(pool_.get());
+
+    // auto in4 = maker.rowVector(
+    //     {"in1", "in2"}, {out3->childAt(0), userMeanRatingArray});
+
+    // auto concatPlan4 = exec::test::PlanBuilder(pool_.get())
+    //                        .values({in4})
+    //                        .project({"concat(in1, in2) as user_nn_in"})
+    //                        .planNode();
+
+    // auto out4 =
+    //     exec::test::AssertQueryBuilder(concatPlan4).copyResults(pool_.get());
+
+    // //   std::cout << "[INFO] user DNN input: \n"
+    // //             << out4->toString(0, out4->size()) << std::endl;
+
+    // auto userNNPlan =
+    //     exec::test::PlanBuilder(pool_.get())
+    //         .values({out4})
+    //         .project(
+    //             {"relu(batch_norm1_3(mat_vector_add1_3(mat_mul1_3(relu(batch_norm1_2(mat_vector_add1_2(mat_mul1_2(relu(batch_norm1_1(mat_vector_add1_1(mat_mul1_1(user_nn_in))))))))))))
+    //             as user_nn_out"})
+    //         .planNode();
+    // auto userNNOut =
+    //     exec::test::AssertQueryBuilder(userNNPlan).copyResults(pool_.get());
+    // //   std::cout << "[INFO] user DNN output: \n"
+    // //             << userNNOut->toString(0, userNNOut->size()) << std::endl;
+
+    // // Item-Tower
+
+    // auto itemPlan = exec::test::PlanBuilder(pool_.get())
+    //                     .values({movieIndicesArrayRowVector})
+    //                     .project({"movie_id_embedding(movie_id)"})
+    //                     .planNode();
+
+    // auto itemEmbedding =
+    //     exec::test::AssertQueryBuilder(itemPlan).copyResults(pool_.get());
+
+    // //   std::cout << "[INFO] genresIndicesArrayRowVector 1: \n"
+    // //             << genresIndicesArrayRowVector->toString(
+    // //                    0, genresIndicesArrayRowVector->size())
+    // //             << std::endl;
+
+    // auto genresPlan =
+    //     exec::test::PlanBuilder(pool_.get())
+    //         .values({genresIndicesArrayRowVector})
+    //         .project({"sequence_pooling(genres_embedding(genres))"})
+    //         .planNode();
+
+    // auto genresEmbedding =
+    //     exec::test::AssertQueryBuilder(genresPlan).copyResults(pool_.get());
+
+    // auto in2_1 = maker.rowVector(
+    //     {"in1", "in2"},
+    //     {itemEmbedding->childAt(0), genresEmbedding->childAt(0)});
+
+    // auto concatPlan2_1 = exec::test::PlanBuilder(pool_.get())
+    //                          .values({in2_1})
+    //                          .project({"concat(in1, in2)"})
+    //                          .planNode();
+
+    // auto out2_1 =
+    //     exec::test::AssertQueryBuilder(concatPlan2_1).copyResults(pool_.get());
+
+    // auto in2_2 = maker.rowVector(
+    //     {"in1", "in2"}, {out2_1->childAt(0), itemMeanRatingArray});
+
+    // auto concatPlan2_2 = exec::test::PlanBuilder(pool_.get())
+    //                          .values({in2_2})
+    //                          .project({"concat(in1, in2) as item_nn_in"})
+    //                          .planNode();
+    // auto out2_2 =
+    //     exec::test::AssertQueryBuilder(concatPlan2_2).copyResults(pool_.get());
+
+    // //   std::cout << "[INFO] item dnn input: \n"
+    // //             << out2_2->toString(0, out2_2->size()) << std::endl;
+
+    // auto itemNNPlan =
+    //     exec::test::PlanBuilder(pool_.get())
+    //         .values({out2_2})
+    //         .project(
+    //             {"relu(batch_norm2_3(mat_vector_add2_3(mat_mul2_3(relu(batch_norm2_2(mat_vector_add2_2(mat_mul2_2(relu(batch_norm2_1(mat_vector_add2_1(mat_mul2_1(item_nn_in))))))))))))
+    //             as item_nn_out"})
+    //         .planNode();
+    // auto itemNNOut =
+    //     exec::test::AssertQueryBuilder(itemNNPlan).copyResults(pool_.get());
+    // //   std::cout << "[INFO] item NN output: \n"
+    // //             << itemNNOut->toString(0, itemNNOut->size()) << std::endl;
+
+    // auto finalInputRowVector = maker.rowVector(
+    //     {"in1", "in2"}, {userNNOut->childAt(0), itemNNOut->childAt(0)});
+    // auto finalStagePlan = exec::test::PlanBuilder(pool_.get())
+    //                           .values({finalInputRowVector})
+    //                           .project({"cosine_similarity(in1, in2)"})
+    //                           .planNode();
+    // auto scores =
+    //     exec::test::AssertQueryBuilder(finalStagePlan).copyResults(pool_.get());
+    // std::chrono::steady_clock::time_point end =
+    //     std::chrono::steady_clock::now();
+    // std::cout << "Time for Two Tower Model (sec) = "
+    //           << (std::chrono::duration_cast<std::chrono::microseconds>(
+    //                   end - begin)
+    //                   .count()) /
+    //         1000000.0
+    //           << std::endl;
+    // std::cout << "[INFO] final score: \n"
+    //           << scores->toString(0, scores->size()) << std::endl;
   }
 
   void LLMQuery(int numThreads, int repeatRun, int verbose) {
     PlanBuilder myPlan;
     CataLog cataLog;
     Timer timer;
-    // Initialize planNodeIdGenerator
+    // Initialize
 
     std::vector<std::string> userDataPaths =
         getFilePathsFromDir("/home/velox/resources/data/parquet/llm_mr/user");
