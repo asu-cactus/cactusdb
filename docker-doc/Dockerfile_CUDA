@@ -3,57 +3,57 @@ WORKDIR /home
 ENV HOME=/home
 
 RUN apt-get update \
-    && apt-get install -y locales \
-    && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
+  && apt-get install -y locales \
+  && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
-    libopenblas-dev \
-    unzip \
-    ninja-build \
-    libboost-all-dev \
-    libssl-dev \
-    libsodium-dev \
-    libsodium23 \
-    libgoogle-glog-dev \
-    zstd \
-    libzstd-dev \
-    liblz4-dev \
-    liblzo2-dev \
-    libsnappy-dev \
-    libre2-dev \
-    bison \
-    flex \
-    wget \
-    git \
-    cmake \
-    build-essential \
-    libdouble-conversion-dev \
-    libgdl-3-dev \
-    vim \
-    libeigen3-dev \
-    libprotobuf-dev \
-    protobuf-compiler \
-    python3-pip \
-    tmux \
-    sudo \
-    htop \
-    libpq-dev \
-    libjsoncpp-dev \
-    libxsimd-dev \
-    curl \
-    zip \
-    default-jre \
-    kmod \
-    nlohmann-json3-dev \
-    libhdf5-dev \
-    catch2 \
-    openjdk-11-jdk \
-    openssh-server \
-    openssh-client && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  libopenblas-dev \
+  unzip \
+  ninja-build \
+  libboost-all-dev \
+  libssl-dev \
+  libsodium-dev \
+  libsodium23 \
+  libgoogle-glog-dev \
+  zstd \
+  libzstd-dev \
+  liblz4-dev \
+  liblzo2-dev \
+  libsnappy-dev \
+  libre2-dev \
+  bison \
+  flex \
+  wget \
+  git \
+  cmake \
+  build-essential \
+  libdouble-conversion-dev \
+  libgdl-3-dev \
+  vim \
+  libeigen3-dev \
+  libprotobuf-dev \
+  protobuf-compiler \
+  python3-pip \
+  tmux \
+  sudo \
+  htop \
+  libpq-dev \
+  libjsoncpp-dev \
+  libxsimd-dev \
+  curl \
+  zip \
+  default-jre \
+  kmod \
+  nlohmann-json3-dev \
+  libhdf5-dev \
+  catch2 \
+  openjdk-11-jdk \
+  openssh-server \
+  openssh-client && \
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 
 # Set CMake version
@@ -61,10 +61,10 @@ ENV CMAKE_VERSION=3.24.0
 
 # Download and install CMake
 RUN curl -OL https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz && \
-    tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz && \
-    mv cmake-${CMAKE_VERSION}-linux-x86_64 /opt/cmake && \
-    ln -s /opt/cmake/bin/* /usr/local/bin/ && \
-    rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+  tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz && \
+  mv cmake-${CMAKE_VERSION}-linux-x86_64 /opt/cmake && \
+  ln -s /opt/cmake/bin/* /usr/local/bin/ && \
+  rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
 
 # Install Python packages
 RUN pip3 install --no-cache-dir \
@@ -87,10 +87,10 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 # Install github cli (optional)
 RUN type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && sudo apt update \
-    && sudo apt install gh -y
+  && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+  && sudo apt update \
+  && sudo apt install gh -y
 ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 
 # Set-up catch2 (required for h5cpp)
@@ -120,8 +120,8 @@ ENV POSTGRES_USER=postgresdb
 ENV POSTGRES_PASSWORD=postgresdb
 ENV POSTGRES_DB=postgresdb
 RUN service postgresql start \
-    && sudo -u postgres psql -c "CREATE USER $POSTGRES_USER WITH SUPERUSER PASSWORD '$POSTGRES_PASSWORD';" \
-    && sudo -u postgres createdb -O $POSTGRES_USER $POSTGRES_DB
+  && sudo -u postgres psql -c "CREATE USER $POSTGRES_USER WITH SUPERUSER PASSWORD '$POSTGRES_PASSWORD';" \
+  && sudo -u postgres createdb -O $POSTGRES_USER $POSTGRES_DB
 COPY pg_hba.conf /etc/postgresql/$PG_MAJOR/main/pg_hba.conf
 RUN echo "service postgresql start" >> /etc/bash.bashrc
 
@@ -141,28 +141,28 @@ RUN pip install ./[ray]
 # Install cpr
 WORKDIR /home
 RUN git clone https://github.com/libcpr/cpr.git \
-    && cd cpr && mkdir build && cd build \
-    && cmake .. -DCPR_USE_SYSTEM_CURL=ON && cmake --build . --parallel \
-    && make install 
+  && cd cpr && mkdir build && cd build \
+  && cmake .. -DCPR_USE_SYSTEM_CURL=ON && cmake --build . --parallel \
+  && make install 
 
 # Set up duckdb
 WORKDIR /home
 RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
-    && tar -xf v0.8.1.tar.gz \
-    && cd duckdb-0.8.1 \
-    && mkdir build && cd build \
-    && CMAKE_FLAGS="-DBUILD_UNITTESTS=OFF -DENABLE_SANITIZER=OFF -DENABLE_UBSAN=OFF -DBUILD_SHELL=OFF -DEXPORT_DLL_SYMBOLS=OFF" \
-    && cmake ${CMAKE_FLAGS}  .. \
-    && make install -j 16
+  && tar -xf v0.8.1.tar.gz \
+  && cd duckdb-0.8.1 \
+  && mkdir build && cd build \
+  && CMAKE_FLAGS="-DBUILD_UNITTESTS=OFF -DENABLE_SANITIZER=OFF -DENABLE_UBSAN=OFF -DBUILD_SHELL=OFF -DEXPORT_DLL_SYMBOLS=OFF" \
+  && cmake ${CMAKE_FLAGS}  .. \
+  && make install -j 16
 
 # Set up xgboost c api
 WORKDIR /home
 RUN git clone --recursive https://github.com/dmlc/xgboost \
-    && cd xgboost \
-    && mkdir build \
-    && cd build \
-    && cmake .. \
-    && make install .
+  && cd xgboost \
+  && mkdir build \
+  && cd build \
+  && cmake .. \
+  && make install .
 
 # Set up spark
 WORKDIR /home
