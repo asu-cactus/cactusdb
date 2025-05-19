@@ -31,7 +31,8 @@ set_target_properties(tokenizer_c PROPERTIES IMPORTED_LOCATION /home/velox/third
 
 link_directories(${HDF5_LIBRARY_DIRS})
 include_directories(${HDF5_INCLUDE_DIRS})
-include_directories(/home/faiss/build/faiss/CMakeFiles/faiss_avx2.dir)
+include_directories(/home/faiss/build/faiss/CMakeFiles/faiss.dir)
+# include_directories(/home/faiss/build/faiss/CMakeFiles/faiss_avx2.dir)
 
 add_executable(ablation_study_test AblationStudyTest.cpp)
 
@@ -39,7 +40,8 @@ target_link_libraries(
   ablation_study_test
   ml_functions
   OpenMP::OpenMP_CXX
-  /home/faiss/build/faiss/libfaiss_avx2.so
+  /home/faiss/build/faiss/libfaiss.so
+  # /home/faiss/build/faiss/libfaiss_avx2.so
 )
 
 add_dependencies(ablation_study_test ml_functions)
