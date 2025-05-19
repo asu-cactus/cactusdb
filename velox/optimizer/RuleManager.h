@@ -55,6 +55,8 @@ public:
 
         rules.emplace("MLDecompositionPushdownRewriteAction", std::make_shared<MLDecompositionPushdownRewriteAction>());
 
+        // rules.emplace("MLFactorizationRewriteAction", std::make_shared<MLFactorizationRewriteAction>());
+
         // Add more rules if needed
     }
     /**

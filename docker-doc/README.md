@@ -22,9 +22,9 @@ docker run --name cactusdb-container -it cactusdb-docker
 
 ```bash
 # Build the Docker image for ARM architecture
-docker build -t cactusdb-arm -f Dockerfile_ARM .
+docker build -t cactusdb-docker-arm -f Dockerfile_ARM .
 # Run a container from the ARM-based image
-docker run --name cactusdb-container-arm -it cactusdb-arm
+docker run --name cactusdb-container-arm -it cactusdb-docker-arm
 ```
 
 ### Use Docker with GPU
@@ -50,16 +50,18 @@ service docker restart
 If the NVIDIA container toolkit is successfully installed, you should see the NVIDIA-SMI output from the following command:
 ```bash
 sudo docker run --rm --runtime=nvidia --gpus all ubuntu nvidia-smi
+sudo docker run --rm --runtime=nvidia --gpus all -it ubuntu
+sudo docker run --rm --gpus all -it nvidia/cuda:12.6.3-devel-ubuntu22.04 nvcc --version
 ```
 
 ```bash
 # Build image with CUDA
-docker build -t velox-cuda -f Dockerfile_CUDA .
+docker build -t cactusdb-docker-cuda -f Dockerfile_CUDA .
 
 # Use the following commands to grant GPU access
-docker run --name velox-cuda --runtime=nvidia --gpus all -it velox-cuda
+docker run --name cactusdb-container-cuda --runtime=nvidia --gpus all -it cactusdb-docker-cuda
 # or
-docker run --name velox-cuda --gpus all -it velox-cuda
+docker run --name cactusdb-container-cuda --gpus all -it velox-cuda
 ```
 
 ### Link to Our Private Velox Repository

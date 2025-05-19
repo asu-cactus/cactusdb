@@ -2,12 +2,12 @@ FROM arm64v8/ubuntu:22.04
 WORKDIR /home
 ENV HOME=/home
 
-RUN apt-get update &&
-  apt-get install -y locales &&
-  localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US:en
-ENV LC_ALL en_US.UTF-8
+RUN apt-get update \
+  && apt-get install -y locales \
+  && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
   libopenblas-dev \
@@ -52,99 +52,122 @@ RUN apt-get update && apt-get install -y \
   catch2 \
   openjdk-11-jdk \
   openssh-server \
-  libomp-dev \
-  lld \
-  openssh-client &&
-  pip3 install numpy==1.26.2 pandas==2.1.3 pyarrow==14.0.0 gdown protobuf psycopg2 &&
+  openssh-client && \
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-# install aws cli
+
+# Set CMake version
+ENV CMAKE_VERSION=3.24.0
+
+# Download and install CMake
+RUN curl -OL https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-aarch64.tar.gz && \
+  tar -xzf cmake-${CMAKE_VERSION}-linux-aarch64.tar.gz && \
+  mv cmake-${CMAKE_VERSION}-linux-aarch64 /opt/cmake && \
+  ln -s /opt/cmake/bin/* /usr/local/bin/ && \
+  rm cmake-${CMAKE_VERSION}-linux-aarch64.tar.gz
+
+# Install Python packages
+RUN pip3 install --no-cache-dir \
+  numpy==1.26.2 \
+  pandas==2.1.3 \
+  pyarrow==14.0.0 \
+  gdown \
+  protobuf \
+  psycopg2 \
+  pyyaml
+
+
+# Install aws cli
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 RUN unzip awscliv2.zip
 RUN ./aws/install
 
 RUN ln -s /usr/bin/python3 /usr/bin/python
-# install github cli (optional)
+
+# Install github cli (optional)
 RUN type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg &&
-  sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg &&
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null &&
-  sudo apt update &&
-  sudo apt install gh -y
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+  && sudo apt update \
+  && sudo apt install gh -y
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-arm64
 
-# set-up catch2 (required for h5cpp)
+# Set-up catch2 (required for h5cpp)
 WORKDIR /home
-RUN git clone https://github.com/catchorg/Catch2.git &&
-  cd Catch2 &&
-  cmake -Bbuild -H. -DBUILD_TESTING=OFF &&
-  cmake --build build/ --target install
+RUN git clone https://github.com/catchorg/Catch2.git \
+  && cd Catch2 \
+  && cmake -Bbuild -H. -DBUILD_TESTING=OFF \
+  && cmake --build build/ --target install 
 
-# set-up h5cpp
+# Set-up h5cpp
 WORKDIR /home
-RUN git clone https://github.com/ess-dmsc/h5cpp.git &&
-  cd h5cpp &&
-  mkdir build &&
-  cd build &&
-  cmake .. -DH5CPP_CONAN=DISABLE && make install
+RUN git clone https://github.com/ess-dmsc/h5cpp.git \
+  && cd h5cpp \
+  && mkdir build \
+  && cd build \
+  && cmake .. -DH5CPP_CONAN=DISABLE\
+  && make install
 
-# set-up eigen
+# Set-up eigen
 WORKDIR /usr/include
 RUN ln -sf eigen3/Eigen Eigen
 RUN ln -sf eigen3/unsupported unsupported
 
-# configure postgres
+# Configure postgres
 RUN apt-get install -qq postgresql-14
-ENV POSTGRES_USER postgresdb
-ENV POSTGRES_PASSWORD postgresdb
-ENV POSTGRES_DB postgresdb
-RUN service postgresql start &&
-  sudo -u postgres psql -c "CREATE USER $POSTGRES_USER WITH SUPERUSER PASSWORD '$POSTGRES_PASSWORD';" &&
-  sudo -u postgres createdb -O $POSTGRES_USER $POSTGRES_DB
+ENV POSTGRES_USER=postgresdb
+ENV POSTGRES_PASSWORD=postgresdb
+ENV POSTGRES_DB=postgresdb
+RUN service postgresql start \
+  && sudo -u postgres psql -c "CREATE USER $POSTGRES_USER WITH SUPERUSER PASSWORD '$POSTGRES_PASSWORD';" \
+  && sudo -u postgres createdb -O $POSTGRES_USER $POSTGRES_DB
 COPY pg_hba.conf /etc/postgresql/$PG_MAJOR/main/pg_hba.conf
-RUN echo "service postgresql start" >>/etc/bash.bashrc
+RUN echo "service postgresql start" >> /etc/bash.bashrc
 
-# download torch
+
+# Download torch (Compile from source)
 WORKDIR /home
 RUN git clone https://github.com/pytorch/pytorch.git
 WORKDIR /home/pytorch
 RUN python3 setup.py install
 ENV Caffe2_DIR=/usr/local/lib/python3.10/dist-packages/torch/share/cmake/Caffe2
 ENV Torch_DIR=/usr/local/lib/python3.10/dist-packages/torch/share/cmake/Torch
+
+# Set up evadb
 WORKDIR /home
-# set up evadb
 RUN git clone https://github.com/lixi-zhou/evadb.git
 WORKDIR /home/evadb
 RUN git checkout array
 RUN pip install ./[ray]
 
-# install cpr
+# Install cpr
 WORKDIR /home
-RUN git clone https://github.com/libcpr/cpr.git &&
-  cd cpr && mkdir build && cd build &&
-  cmake .. -DCPR_USE_SYSTEM_CURL=ON && cmake --build . --parallel &&
-  make install
+RUN git clone https://github.com/libcpr/cpr.git \
+  && cd cpr && mkdir build && cd build \
+  && cmake .. -DCPR_USE_SYSTEM_CURL=ON && cmake --build . --parallel \
+  && make install 
 
-# set up duckdb
+# Set up duckdb
 WORKDIR /home
-RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz &&
-  tar -xf v0.8.1.tar.gz &&
-  cd duckdb-0.8.1 &&
-  mkdir build && cd build &&
-  CMAKE_FLAGS="-DBUILD_UNITTESTS=OFF -DENABLE_SANITIZER=OFF -DENABLE_UBSAN=OFF -DBUILD_SHELL=OFF -DEXPORT_DLL_SYMBOLS=OFF" &&
-  cmake ${CMAKE_FLAGS} .. &&
-  make install -j 16
+RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
+  && tar -xf v0.8.1.tar.gz \
+  && cd duckdb-0.8.1 \
+  && mkdir build && cd build \
+  && CMAKE_FLAGS="-DBUILD_UNITTESTS=OFF -DENABLE_SANITIZER=OFF -DENABLE_UBSAN=OFF -DBUILD_SHELL=OFF -DEXPORT_DLL_SYMBOLS=OFF" \
+  && cmake ${CMAKE_FLAGS}  .. \
+  && make install -j 16
 
-# set up xgboost c api
+# Set up xgboost c api
 WORKDIR /home
-RUN git clone --recursive https://github.com/dmlc/xgboost &&
-  cd xgboost &&
-  mkdir build &&
-  cd build &&
-  cmake .. &&
-  make install .
+RUN git clone --recursive https://github.com/dmlc/xgboost \
+  && cd xgboost \
+  && mkdir build \
+  && cd build \
+  && cmake .. \
+  && make install .
 
-# set up spark
+# Set up spark
 WORKDIR /home
 RUN wget https://archive.apache.org/dist/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz
 RUN tar -xvzf spark-3.5.0-bin-hadoop3.tgz
@@ -152,26 +175,26 @@ ENV SPARK_HOME=/home/spark-3.5.0-bin-hadoop3
 ENV PATH=$PATH:$SPARK_HOME/bin
 RUN pip install pyspark
 
-# set up hadoop
+# Set up hadoop
 # refered setup: https://medium.com/@festusmorumbasi/installing-hadoop-on-ubuntu-20-04-4610b6e0391e
 WORKDIR /home
 # generate ssh key for hadoop
 RUN ssh-keygen -t rsa -b 4096 -f /root/.ssh/id_rsa -N ""
-RUN cat /root/.ssh/id_rsa.pub >>/root/.ssh/authorized_keys
-RUN echo "PasswordAuthentication no" >>/etc/ssh/sshd_config
-RUN echo "PermitRootLogin without-password" >>/etc/ssh/sshd_config
-RUN echo "service ssh start" >>/etc/bash.bashrc
+RUN cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
+RUN echo "PasswordAuthentication no" >> /etc/ssh/sshd_config
+RUN echo "PermitRootLogin without-password" >> /etc/ssh/sshd_config
+RUN echo "service ssh start" >> /etc/bash.bashrc
 RUN wget https://dlcdn.apache.org/hadoop/common/hadoop-3.4.0/hadoop-3.4.0.tar.gz
 RUN tar -xvzf hadoop-3.4.0.tar.gz
-RUN echo "export HADOOP_HOME=/home/hadoop-3.4.0" >>/etc/bash.bashrc
-RUN echo "export PATH=\$PATH:\$HADOOP_HOME/bin" >>/etc/bash.bashrc
-RUN echo "export PATH=\$PATH:\$HADOOP_HOME/sbin" >>/etc/bash.bashrc
-RUN echo "export HDFS_NAMENODE_USER=root" >>/home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
-RUN echo "export HDFS_DATANODE_USER=root" >>/home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
-RUN echo "export HDFS_SECONDARYNAMENODE_USER=root" >>/home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
-RUN echo "export YARN_RESOURCEMANAGER_USER=root" >>/home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
-RUN echo "export YARN_NODEMANAGER_USER=root" >>/home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
-RUN echo "export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >>/home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export HADOOP_HOME=/home/hadoop-3.4.0" >> /etc/bash.bashrc
+RUN echo "export PATH=\$PATH:\$HADOOP_HOME/bin" >> /etc/bash.bashrc
+RUN echo "export PATH=\$PATH:\$HADOOP_HOME/sbin" >> /etc/bash.bashrc
+RUN echo "export HDFS_NAMENODE_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export HDFS_DATANODE_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export HDFS_SECONDARYNAMENODE_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export YARN_RESOURCEMANAGER_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export YARN_NODEMANAGER_USER=root" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
+RUN echo "export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-arm64" >> /home/hadoop-3.4.0/etc/hadoop/hadoop-env.sh
 RUN mkdir /home/hadoopdata
 COPY hadoop_conf/core-site.xml /home/hadoop-3.4.0/etc/hadoop/core-site.xml
 COPY hadoop_conf/hdfs-site.xml /home/hadoop-3.4.0/etc/hadoop/hdfs-site.xml
@@ -179,19 +202,29 @@ COPY hadoop_conf/mapred-site.xml /home/hadoop-3.4.0/etc/hadoop/mapred-site.xml
 COPY hadoop_conf/yarn-site.xml /home/hadoop-3.4.0/etc/hadoop/yarn-site.xml
 RUN /home/hadoop-3.4.0/bin/hdfs namenode -format
 
-# setup madlib
+# Setup madlib
 WORKDIR /home
-RUN apt-get install postgresql-plpython3-14 -y
+RUN apt-get install postgresql-plpython3-14 -y 
 RUN apt-get install postgresql-server-dev-14 -y
 RUN git clone -b madlib2-master --single-branch https://github.com/lixi-zhou/madlib.git
-RUN cd madlib &&
-  mkdir build &&
-  cd build &&
-  cmake .. &&
-  make
+RUN cd madlib \
+  && mkdir build \
+  && cd build \
+  && cmake .. \
+  make 
 ENV PATH=$PATH:/usr/lib/postgresql/14/bin
 
-# set up velox
+# Setup faiss 
+RUN apt-get update && apt-get install -y swig python3 python3-dev
+RUN pip install swig
+WORKDIR /home
+RUN git clone https://github.com/facebookresearch/faiss.git
+RUN cd faiss \
+  && mkdir build && cd build \
+  && cmake -DBUILD_SHARED_LIBS=ON -DFAISS_ENABLE_C_API=ON -DFAISS_ENABLE_GPU=OFF -DFAISS_OPT_LEVEL=generic .. \
+  && make -j8
+
+# Set up velox
 WORKDIR /home
 RUN git clone https://github.com/facebookincubator/velox.git
 WORKDIR /home/velox
@@ -200,19 +233,19 @@ RUN git remote remove origin
 RUN git remote add upstream https://github.com/facebookincubator/velox.git
 RUN git remote set-url --push upstream no_push
 
-# set num threads for compilation
+# Set up tokenizers-cpp
+WORKDIR /home/velox/third_party
+RUN git clone --recursive https://github.com/mlc-ai/tokenizers-cpp.git \
+  && cd tokenizers-cpp/example \
+  && bash build_and_run.sh
+
+
+# Set num threads for compilation
 ENV NUM_THREADS=8
 
-# download data
-# RUN mkdir data
-# WORKDIR /home/velox/data
-# RUN gdown 1iCmXYbCMaSyT5dH5pYQ275-pPjuEPf3D
-# RUN unzip two_tower_data.zip
-# WORKDIR /home/velox
-
-# set-up vscode
+# Set-up vscode
 WORKDIR /home
 RUN gdown 16fk_0viXZmCKQc5PSdRYfDNMqe3mUkrJ
 RUN chmod +x vscode_cli
-RUN echo "./vscode_cli tunnel --accept-server-license-terms --cli-data-dir $(mktemp -d)" >"start_vscode_tunnel.sh"
+RUN echo "./vscode_cli tunnel --accept-server-license-terms --cli-data-dir $(mktemp -d)" > "start_vscode_tunnel.sh"
 RUN chmod +x start_vscode_tunnel.sh
