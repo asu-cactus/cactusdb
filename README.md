@@ -42,6 +42,7 @@ The following dependencies are required to run CactusDB and other baselines:
 - hadoop
 - Madlib
 - PostgresML
+- Faiss
 
 To manually install the dependencies, please refer to [this file](/INSTALL_DEPENDENCIES.md) for more details.
 
