@@ -4,6 +4,12 @@
   - [Link to Our Private Velox Repository](#link-to-our-private-velox-repository)
   - [Set-Up Dependencies and Compile](#set-up-dependencies-and-compile)
   - [Develop with Visual Studio Code](#develop-with-visual-studio-code)
+- [Pull our Pre-built Docker Development Images](#pull-our-pre-built-docker-development-images)
+  - [Available Images](#available-images)
+  - [Getting Started](#getting-started)
+
+
+You can directly use our pre-built docker images by following the instructions [here](#pull-our-pre-built-docker-development-images).
 
 ## Use Docker to Build Your Development Environment
 
@@ -110,4 +116,31 @@ It is recommended to code with Visual Studio Code. You can use the following scr
 
 ```bash
 bash ~/start_vscode_tunnel.sh
+```
+
+## Pull our Pre-built Docker Development Images
+
+We provide pre-built Docker images for **x86_64**, **ARM64**, and **CUDA-enabled** architectures, all based on **Ubuntu 22.04**. These images are available on [Docker Hub](https://hub.docker.com/repository/docker/cactusdb/cactusdb/).
+
+### Available Images
+
+| Architecture | Tag              | Description                 |
+| ------------ | ---------------- | --------------------------- |
+| x86_64       | `cactusdb-amd64` | Standard image for x64 CPUs |
+| ARM64        | `cactusdb-arm64` | For ARM-based platforms     |
+| CUDA         | `cactusdb-cuda`  | With NVIDIA CUDA support    |
+
+### Getting Started
+
+Run a container using the appropriate image for your platform:
+
+```bash
+# Run the x64-based image
+docker run --name cactusdb-container-amd64 -it cactusdb/cactusdb:cactusdb-amd64
+
+# Run the ARM-based image
+docker run --name cactusdb-container-arm64 -it cactusdb/cactusdb:cactusdb-arm64
+
+# Run the x64-based image with CUDA enabled
+docker run --name cactusdb-container-cuda -it cactusdb/cactusdb:cactusdb-cuda
 ```
