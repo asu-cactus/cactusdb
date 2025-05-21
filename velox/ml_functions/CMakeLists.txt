@@ -192,6 +192,12 @@ target_link_libraries(
   ml_functions
 )
 
+add_executable(intermediate_tuple_count_test tests/IntermediateTupleCountTest.cpp)
+target_link_libraries(
+  intermediate_tuple_count_test
+  ml_functions
+)
+
 # TODO: add or remove this unit test
 # add_executable(parquest_loader tests/TestParquetLoader.cpp)
 # target_link_libraries(
