@@ -26,6 +26,7 @@
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/optimizer/CataLog.h"
 #include "velox/optimizer/PlanState.h"
+#include "velox/ml_functions/TupleCounter.h"
 #include "velox/optimizer/tests/BenchmarkUtils.h"
 #include "velox/parse/Expressions.h"
 #include "velox/parse/ExpressionsParser.h"
@@ -64,7 +65,7 @@ class IntermediateTupleCountTest : public VectorTestBase {
   }
 
   /// Run the demo.
-  void run();
+  void run(int verbose);
 
   std::shared_ptr<folly::Executor> executor_{
       std::make_shared<folly::CPUThreadPoolExecutor>(
@@ -75,38 +76,69 @@ class IntermediateTupleCountTest : public VectorTestBase {
       std::make_unique<core::ExecCtx>(pool_.get(), queryCtx_.get())};
 };
 
-void IntermediateTupleCountTest::run() {
-  RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+void IntermediateTupleCountTest::run(int verbose) {
+  std::random_device rd;
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, rd());
   CataLog cataLog;
-  // Let’s create two vectors of 64-bit integers and one vector of strings.
-  auto a = makeFlatVector<float>({0, 1, 2});
-  //   auto b = makeFlatVector<int64_t>({0, 1, 2});
-  // auto baseVector = makeArrayVector<float>(
-  //     {{1, 1, 1}, {2, 2, 2}, {3, 3, 3}, {4, 4, 4}, {5, 5, 5}, {6, 6, 6}});
-  auto baseVector = makeArrayVector<float>(
-      {{1, 1, 1}, {2, 2, 2}, {3, 3, 3}, {4, 4, 4}, {5, 5, 5}, {6, 6, 6}});
 
-  // Create an array of array vector using above base vector
-  auto arrayOfArrays = makeArrayVector({0}, baseVector);
+  int numRows = 20000;
+  std::vector<int> inputIds = randomGenerator.genIntRange(0, numRows);
+  std::vector<float> attr1Values = randomGenerator.genFloat1dVector(numRows);
+  std::vector<std::vector<float>> featureValues =
+      randomGenerator.genFloat2dVector(numRows, 10);
 
-  // auto data = makeRowVector({"a", "b"}, {a, arrayOfArrays});
-  auto data = makeRowVector({"b"}, {arrayOfArrays});
+  auto inputIdVector = makeFlatVector<int>(inputIds, INTEGER());
+  auto attr1Vector = makeFlatVector<float>(attr1Values, REAL());
+  auto featureVector = makeArrayVector<float>(featureValues, REAL());
 
-  auto plan = PlanBuilder().values({data});
+  auto inputRowVector = makeRowVector(
+      {"id", "attr1", "features"}, {inputIdVector, attr1Vector, featureVector});
+
+  auto inputRowVectorBatches = splitRowVectorIntoBatches(inputRowVector, 5);
+
+  exec::registerVectorFunction(
+      "tuple_counter",
+      TupleCounter::signatures(),
+      std::make_unique<TupleCounter>(&cataLog));
+
+  auto plan =
+      PlanBuilder()
+          .values(inputRowVectorBatches)
+          .filter("attr1 > 0.3")
+          .project(
+              {"id", "attr1", "tuple_counter(features, 'test1') AS features"});
 
   std::vector<RowVectorPtr> finalResult;
-  float executionTime =
-      runPlanWithCataLog(pool_, 8, plan, cataLog, finalResult, 1, 4, true);
+  float executionTime = runPlanWithCataLog(
+      pool_, 8, plan, cataLog, finalResult, 1, verbose, true);
+  std::cout << "Execution time: " << executionTime << " seconds" << std::endl;
   
-  for (auto& result : finalResult) {
-    std::cout << "Result: " << result->toString(0, result->size()) << std::endl;
+  std::cout << "IntermediateStateTupleCounterMap" << std::endl;
+  for (const auto& [key, value] :
+       cataLog.getIntermediateStateTupleCounterMap()) {
+    std::cout << key << ": " << value << std::endl;
   }
+  
+  auto sketchPlan = PlanBuilder()
+                        .values(inputRowVectorBatches)
+                        .filter("attr1 > 0.3")
+                        .singleAggregation({}, {"approx_set(id, 0.01)"})
+                        .project({"cardinality(a0)"});
+
+  auto sketchTime = runPlanWithCataLog(
+      pool_, 8, sketchPlan, cataLog, finalResult, 1, verbose, true);
+      
+  std::cout << "Sketch Execution time: " << sketchTime << " seconds"
+            << std::endl;
 }
+
+DEFINE_int32(verbose, 2, "Verbose");
 
 int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   memory::MemoryManager::initialize({});
+  int verbose = FLAGS_verbose;
 
   IntermediateTupleCountTest demo;
-  demo.run();
+  demo.run(verbose);
 }
