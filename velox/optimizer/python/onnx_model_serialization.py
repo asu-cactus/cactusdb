@@ -29,10 +29,12 @@ from collections import deque, defaultdict
 from onnx import numpy_helper
 import h5py
 import numpy as np
+import os
 
-# model_path = "two_input_model1.onnx" 
-model_path = "two_input_model.onnx" 
-# model_path = "ffnn.onnx"
+model_dir = "/home/velox/resources/model/load_onnx_models/"
+# model_path = os.path.join(model_dir, "two_input_model1.onnx")
+model_path = os.path.join(model_dir, "two_input_model.onnx")
+# model_path = os.path.join(model_dir, "ffnn.onnx")
 model = onnx.load(model_path)
 graph = model.graph
 nodes = graph.node
