@@ -18,13 +18,11 @@ set(SOURCES
 
 set(Torch_DIR "$HOME/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
-
 find_package(jsoncpp REQUIRED)
+find_package(Faiss REQUIRED)
 
 include_directories(/home/velox/third_party/tokenizers-cpp/include)
 include_directories(/home/velox/third_party/tokenizers-cpp/src)
-
-
 
 add_executable(velox_op ${SOURCES})
 target_link_libraries(

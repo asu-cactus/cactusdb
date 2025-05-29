@@ -78,6 +78,13 @@ endif()
 if(${VELOX_ENABLE_SUBSTRAIT})
   add_subdirectory(substrait)
 endif()
+
+# Set global include path and prefix path
+include_directories("/home/faiss-install/include")
+list(APPEND CMAKE_PREFIX_PATH "/home/faiss-install")
+# Find Faiss once
+find_package(Faiss REQUIRED)
+
 add_subdirectory(ml_functions)
 add_subdirectory(optimizer)
 add_subdirectory(cost_model)

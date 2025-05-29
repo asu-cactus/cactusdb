@@ -248,6 +248,6 @@ bash build_and_run.sh
 git clone https://github.com/facebookresearch/faiss.git
 cd faiss
 mkdir build && cd build
-cmake -DBUILD_SHARED_LIBS=ON -DFAISS_ENABLE_C_API=ON -DFAISS_ENABLE_GPU=OFF -DFAISS_OPT_LEVEL=generic ..
+cmake -DBUILD_SHARED_LIBS=ON -DFAISS_ENABLE_C_API=ON -DFAISS_ENABLE_GPU=OFF -DFAISS_OPT_LEVEL=generic -DCMAKE_INSTALL_PREFIX=$HOME/faiss-install ..
 make -j8
 ```

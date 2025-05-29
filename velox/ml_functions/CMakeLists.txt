@@ -39,6 +39,7 @@ include_directories("/home/h5cpp/build/src/h5cpp")
 
 find_package(h5cpp REQUIRED)
 find_package(HDF5 COMPONENTS C CXX HL REQUIRED)
+find_package(Faiss REQUIRED)
 
 link_directories(${HDF5_LIBRARY_DIRS})
 include_directories(${HDF5_INCLUDE_DIRS})
@@ -94,6 +95,7 @@ target_link_libraries(ml_functions
   hdf5_serial
   ${HDF5_CXX_LIBRARIES}
   xgboost::xgboost
+  /home/faiss-install/lib/libfaiss.so
 )
 
 add_executable(ml_functions_test tests/MLFunctionsTest.cpp)
