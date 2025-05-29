@@ -17,6 +17,7 @@ set(Torch_DIR "$HOME/libtorch")
 
 
 find_package(Torch REQUIRED)
+find_package(Faiss REQUIRED)
 
 include_directories(/home/velox/third_party/tokenizers-cpp/include)
 include_directories(/home/velox/third_party/tokenizers-cpp/src)
@@ -25,8 +26,6 @@ add_library(tokenizer_cpp STATIC IMPORTED)
 add_library(tokenizer_c STATIC IMPORTED)
 set_target_properties(tokenizer_cpp PROPERTIES IMPORTED_LOCATION /home/velox/third_party/tokenizers-cpp/example/build/tokenizers/libtokenizers_cpp.a)
 set_target_properties(tokenizer_c PROPERTIES IMPORTED_LOCATION /home/velox/third_party/tokenizers-cpp/example/build/tokenizers/libtokenizers_c.a)
-
-
 
 add_executable(nn_test tests/NNTests.cpp)
 target_link_libraries(
