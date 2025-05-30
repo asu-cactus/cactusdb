@@ -17,6 +17,25 @@ This file provides detailed instructions for installing the dependencies manuall
 - [tokenizers-cpp](#tokenizers-cpp)
 - [Faiss](#faiss)
 
+## Summary
+
+| Libraries      | Version                               |
+|----------------|---------------------------------------|
+| Catch2         | @74fcff6                              |
+| H5Cpp          | @10a5719                              |
+| Postgres       | 14                                    |
+| EvaDB          | 0.3.9 with patch for array support    |
+| CPR            | @e421287                              |
+| DuckDB         | 0.8.1                                 |
+| XGBoost        | @614cd54                               |
+| Spark          | 3.5.0                                 |
+| Hadoop         | 3.4.0                                 |
+| Madlib         | 2.1.0 with patch for ML model support |
+| Faiss          | @4c13a88                              |
+| Tokenizers-cpp | @4fbe996                              |
+
+## Libraries
+
 ### PostgreSQL
 
 ```bash
@@ -45,6 +64,7 @@ echo "service postgresql start" >> /etc/bash.bashrc
 ```bash
 git clone --recursive https://github.com/dmlc/xgboost \
     && cd xgboost \
+    && git checkout 614cd54 \
     && mkdir build \
     && cd build \
     && cmake .. \
@@ -123,11 +143,13 @@ Catch2 is a dependency for H5CPP, a library to load H5 files into C++ programs.
 # Install Catch2
 git clone https://github.com/catchorg/Catch2.git \
   && cd Catch2 \
+  && git checkout 74fcff6 \
   && cmake -Bbuild -H. -DBUILD_TESTING=OFF \
   && cmake --build build/ --target install
 cd ~
 git clone https://github.com/ess-dmsc/h5cpp.git \
   && cd h5cpp \
+  && git checkout 10a5719 \
   && mkdir build \
   && cd build \
   && cmake .. -DH5CPP_CONAN=DISABLE \
@@ -140,7 +162,7 @@ CPR library is used for RESTful API requests.
 
 ```bash
 git clone https://github.com/libcpr/cpr.git \
-    && cd cpr && mkdir build && cd build \
+    && cd cpr && git checkout e421287 && mkdir build && cd build \
     && cmake .. -DCPR_USE_SYSTEM_CURL=ON && cmake --build . --parallel \
     && make install
 ```
@@ -237,17 +259,20 @@ https://postgresml.org/docs/open-source/pgml/developers/installation#dependencie
 Due to known issues with incorporating the linked libraries into our CMakeLists file, we are still investigating the problem. Currently, we are using the built shared objects for our program.
 
 ```bash
-git clone --recursive https://github.com/mlc-ai/tokenizers-cpp.git 
-cd tokenizers-cpp/example
-bash build_and_run.sh
+git clone --recursive https://github.com/mlc-ai/tokenizers-cpp.git \
+  && cd tokenizers-cpp \
+  && git checkout 4fbe996 \
+  && cd example \
+  && bash build_and_run.sh
 ```
 
 ### Faiss
 
 ```bash
 git clone https://github.com/facebookresearch/faiss.git
-cd faiss
-mkdir build && cd build
-cmake -DBUILD_SHARED_LIBS=ON -DFAISS_ENABLE_C_API=ON -DFAISS_ENABLE_GPU=OFF -DFAISS_OPT_LEVEL=generic -DCMAKE_INSTALL_PREFIX=$HOME/faiss-install ..
-make -j8
+cd faiss \
+  && git checkout 4c13a88 \
+  && mkdir build && cd build \
+  && cmake -DBUILD_SHARED_LIBS=ON -DFAISS_ENABLE_C_API=ON -DFAISS_ENABLE_GPU=OFF -DFAISS_OPT_LEVEL=generic -DCMAKE_INSTALL_PREFIX=$HOME/faiss-install .. \
+  && make -j8 install
 ```
