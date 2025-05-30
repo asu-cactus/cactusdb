@@ -23,10 +23,9 @@ add_library(tokenizer_c STATIC IMPORTED)
 set_target_properties(tokenizer_cpp PROPERTIES IMPORTED_LOCATION /home/velox/third_party/tokenizers-cpp/example/build/tokenizers/libtokenizers_cpp.a)
 set_target_properties(tokenizer_c PROPERTIES IMPORTED_LOCATION /home/velox/third_party/tokenizers-cpp/example/build/tokenizers/libtokenizers_c.a)
 
-
-
 find_package(Torch REQUIRED)
 find_package(jsoncpp REQUIRED)
+find_package(Faiss REQUIRED)
 add_executable(job_test tests/JobBenchmark.cpp)
 target_link_libraries(
   job_test

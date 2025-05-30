@@ -740,6 +740,33 @@ class CataLog {
     outFile.close();
   }
 
+  std::unordered_map<std::string, int> getIntermediateStateTupleCounterMap() {
+    return intermediateStateTupleCounterMap;
+  }
+
+  int getIntermediateStateTupleCounter(std::string intermediateStateName) {
+    auto it = intermediateStateTupleCounterMap.find(intermediateStateName);
+    if (it != intermediateStateTupleCounterMap.end()) {
+      return it->second;
+    } else {
+      return 0;
+    }
+  }
+
+  void setIntermediateStateTupleCounter(
+      std::string intermediateStateName, int counter) {
+    intermediateStateTupleCounterMap[intermediateStateName] = counter;
+  }
+
+  void clearIntermediateStateTupleCounter(
+      std::string intermediateStateName) {
+    intermediateStateTupleCounterMap.erase(intermediateStateName);
+  }
+
+  void clearIntermediateStateTupleCounterMap() {
+    intermediateStateTupleCounterMap.clear();
+  }
+
  private:
   std::string name;
   // Default values
@@ -778,6 +805,7 @@ class CataLog {
       factorizableOpSrcMap;
   std::unordered_map<std::string, std::vector<std::string>>
       factorizableSrcPushdownNodesMap;
+  std::unordered_map<std::string, int> intermediateStateTupleCounterMap;
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(

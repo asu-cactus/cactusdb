@@ -2,12 +2,22 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <H5Cpp.h>
+#include <json/json.h>
+#include "velox/common/base/Fs.h"
+#include "velox/common/file/FileSystems.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
+#include "velox/optimizer/Helper.h"
+#include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
+#include "velox/optimizer/CataLog.h"
+#include "velox/optimizer/PlanState.h"
+#include "velox/optimizer/RuleManager.h"
 
 #define BUFFER_SIZE 1024
-
+using namespace optimization;
 using namespace facebook::velox;
+using namespace facebook::velox::core;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
