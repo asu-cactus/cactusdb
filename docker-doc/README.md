@@ -20,8 +20,8 @@ You can directly use our pre-built docker images by following the instructions [
 Use the following commands to build your Docker image and start a container:
 
 ```bash
-docker build --tag cactusdb-docker .
-docker run --name cactusdb-container -it cactusdb-docker
+docker build --tag cactusdb-docker-amd64 .
+docker run --name cactusdb-container -it cactusdb-docker-amd64
 ```
 
 **Note:** If you are using an ARM-based chip, you need to use an ARM-compatible Docker image. Use the following commands:
