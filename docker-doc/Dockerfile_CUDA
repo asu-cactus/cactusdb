@@ -97,6 +97,7 @@ ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 WORKDIR /home
 RUN git clone https://github.com/catchorg/Catch2.git \
   && cd Catch2 \
+  && git checkout 74fcff6 \
   && cmake -Bbuild -H. -DBUILD_TESTING=OFF \
   && cmake --build build/ --target install 
 
@@ -104,6 +105,7 @@ RUN git clone https://github.com/catchorg/Catch2.git \
 WORKDIR /home
 RUN git clone https://github.com/ess-dmsc/h5cpp.git \
   && cd h5cpp \
+  && git checkout 10a5719 \
   && mkdir build \
   && cd build \
   && cmake .. -DH5CPP_CONAN=DISABLE\
@@ -115,6 +117,7 @@ RUN ln -sf eigen3/Eigen Eigen
 RUN ln -sf eigen3/unsupported unsupported
 
 # Configure postgres
+RUN apt-get update
 RUN apt-get install -qq postgresql-14
 ENV POSTGRES_USER=postgresdb
 ENV POSTGRES_PASSWORD=postgresdb
@@ -133,15 +136,17 @@ ENV Torch_DIR=/home/libtorch
 
 # Set up evadb
 WORKDIR /home
-RUN git clone https://github.com/lixi-zhou/evadb.git
-WORKDIR /home/evadb
-RUN git checkout array
-RUN pip install ./[ray]
+RUN git clone https://github.com/lixi-zhou/evadb.git \
+  && cd evadb \
+  && git checkout array \
+  && pip install ./[ray]
 
 # Install cpr
 WORKDIR /home
 RUN git clone https://github.com/libcpr/cpr.git \
-  && cd cpr && mkdir build && cd build \
+  && cd cpr \ 
+  && git checkout e421287 \
+  && mkdir build && cd build \
   && cmake .. -DCPR_USE_SYSTEM_CURL=ON && cmake --build . --parallel \
   && make install 
 
@@ -159,6 +164,7 @@ RUN wget https://github.com/duckdb/duckdb/archive/refs/tags/v0.8.1.tar.gz \
 WORKDIR /home
 RUN git clone --recursive https://github.com/dmlc/xgboost \
   && cd xgboost \
+  && git checkout 614cd54 \
   && mkdir build \
   && cd build \
   && cmake .. \
@@ -217,9 +223,10 @@ RUN pip install swig
 WORKDIR /home
 RUN git clone https://github.com/facebookresearch/faiss.git
 RUN cd faiss \
+  && git checkout 4c13a88 \
   && mkdir build && cd build \
-  && cmake -DBUILD_SHARED_LIBS=ON -DFAISS_ENABLE_C_API=ON -DFAISS_ENABLE_GPU=OFF -DFAISS_OPT_LEVEL=generic .. \
-  && make -j8
+  && cmake -DBUILD_SHARED_LIBS=ON -DFAISS_ENABLE_C_API=ON -DFAISS_ENABLE_GPU=OFF -DFAISS_OPT_LEVEL=generic -DCMAKE_INSTALL_PREFIX=$HOME/faiss-install .. \
+  && make -j8 install
 
 # Set up velox
 WORKDIR /home
@@ -233,7 +240,9 @@ RUN git remote set-url --push upstream no_push
 # Set up tokenizers-cpp
 WORKDIR /home/velox/third_party
 RUN git clone --recursive https://github.com/mlc-ai/tokenizers-cpp.git \
-  && cd tokenizers-cpp/example \
+  && cd tokenizers-cpp \
+  && git checkout 4fbe996 \
+  && cd example \
   && bash build_and_run.sh
 
 
@@ -242,7 +251,7 @@ ENV NUM_THREADS=8
 
 # Set-up vscode
 WORKDIR /home
-RUN gdown 16fk_0viXZmCKQc5PSdRYfDNMqe3mUkrJ
+RUN gdown 1z5wMjJ23TipQ8bbiDnf4n7OHMxQXmqpw
 RUN chmod +x vscode_cli
 RUN echo "./vscode_cli tunnel --accept-server-license-terms --cli-data-dir $(mktemp -d)" > "start_vscode_tunnel.sh"
 RUN chmod +x start_vscode_tunnel.sh
