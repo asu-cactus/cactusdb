@@ -1,17 +1,18 @@
 #pragma once
+#include <H5Cpp.h>
+#include <json/json.h>
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <H5Cpp.h>
-#include <json/json.h>
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
-#include "velox/optimizer/Helper.h"
 #include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/optimizer/CataLog.h"
+#include "velox/optimizer/Helper.h"
 #include "velox/optimizer/PlanState.h"
+#include "velox/optimizer/Register.h"
 #include "velox/optimizer/RuleManager.h"
 
 #define BUFFER_SIZE 1024
@@ -274,22 +275,21 @@ std::vector<std::vector<float>> loadHDF5Array(
   return result;
 };
 
-
 std::vector<std::string> readTextFile(const std::string& filename) {
-    std::vector<std::string> lines;
-    std::ifstream file(filename);
+  std::vector<std::string> lines;
+  std::ifstream file(filename);
 
-    if (!file.is_open()) {
-        throw std::runtime_error("Could not open file: " + filename);
-    }
+  if (!file.is_open()) {
+    throw std::runtime_error("Could not open file: " + filename);
+  }
 
-    std::string line;
-    while (std::getline(file, line)) {
-        lines.push_back(line);
-    }
+  std::string line;
+  while (std::getline(file, line)) {
+    lines.push_back(line);
+  }
 
-    file.close();
-    return lines;
+  file.close();
+  return lines;
 }
 
 std::vector<std::string> loadHDF5StringArray(
@@ -326,10 +326,11 @@ std::vector<std::string> loadHDF5StringArray(
 
   // Read data into a 1D vector of strings
   std::vector<std::string> flatData(rows * cols);
-  
-  // Assuming the data is stored as fixed-size strings or strings encoded in a way that can be read as a single block
-  dataset.read(flatData.data(), H5::PredType::C_S1);  // C_S1 for string types
-  
+
+  // Assuming the data is stored as fixed-size strings or strings encoded in a
+  // way that can be read as a single block
+  dataset.read(flatData.data(), H5::PredType::C_S1); // C_S1 for string types
+
   // Convert to 2D vector if the dataset is 2-dimensional
   std::vector<std::string> result;
   if (rank == 1) {
@@ -348,7 +349,6 @@ std::vector<std::string> loadHDF5StringArray(
 
   return result;
 }
-
 
 PlanBuilder setupTPCxAIQuery(
     std::string queryType,
@@ -2726,4 +2726,902 @@ PlanBuilder heuristicQueryRewrite(
   }
 
   return plan;
+}
+
+std::vector<std::vector<int>> readModelStructureFromFile(
+    const std::string& filename) {
+  std::ifstream file(filename);
+  if (!file) {
+    std::cerr << "Error opening model structure file: " << filename
+              << std::endl;
+    return {};
+  }
+
+  std::vector<std::vector<int>> all_lines;
+  std::string line;
+
+  while (std::getline(file, line)) {
+    std::istringstream iss(line);
+    std::vector<int> values;
+    int num;
+
+    // Read each integer in the line
+    while (iss >> num) {
+      values.push_back(num);
+    }
+
+    // Store the line of integers in the main vector
+    all_lines.push_back(values);
+  }
+
+  file.close();
+  return all_lines;
+}
+
+void generateDummyData(
+    std::string mode,
+    std::vector<int> numberOfTuples,
+    std::vector<int> dummyFeatureSizes,
+    CataLog& cataLog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    std::shared_ptr<memory::MemoryPool> rootPool,
+    int dataBatchSize = 256,
+    std::string dataPath = "") {
+  if (mode == "ml") {
+    VectorMaker maker{pool_.get()};
+    // it should contains the numbers: # of users, # of movies, # of relevance
+    // tag
+    assert(numberOfTuples.size() == 3 && dummyFeatureSizes.size() == 2);
+    int numUsers = numberOfTuples[0];
+    int numMovies = numberOfTuples[1];
+    int numRelevanceTags = numberOfTuples[2];
+    int userFeatureSize = dummyFeatureSizes[0];
+    int movieFeatureSize = dummyFeatureSizes[1];
+
+    std::string tableStatsPath =
+        "/home/velox/velox/optimizer/tests/tableStats.txt";
+    remove(tableStatsPath.c_str());
+
+    std::vector<std::vector<int>> userModelStructures =
+        readModelStructureFromFile(
+            "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+    std::vector<std::vector<int>> movieModelStructures =
+        readModelStructureFromFile(
+            "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
+    std::vector<std::vector<int>> tagModelStructures =
+        readModelStructureFromFile(
+            "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
+
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    RandomSampler randomSampler = RandomSampler(0);
+    // sample user data
+    std::vector<int> userIDs = randomGenerator.genIntRange(0, numUsers);
+    std::vector<std::string> userGender =
+        randomSampler.sampleFromSets<std::string>(numUsers, {"M", "F"});
+    std::vector<int> userAge = randomGenerator.gen1DInt(numUsers, 10, 70);
+    std::vector<int> userOccupation = randomGenerator.gen1DInt(numUsers, 0, 20);
+    std::vector<std::string> zipCode = {
+        "94043",
+        "94301",
+        "94305",
+        "94306",
+        "94309",
+        "80212",
+        "80213",
+        "80219",
+        "12301",
+        "40201"};
+    std::vector<std::string> userZipcode =
+        randomSampler.sampleFromSets<std::string>(numUsers, zipCode);
+    std::vector<std::vector<float>> userFeatures =
+        randomGenerator.genFloat2dVector(numUsers, userFeatureSize);
+
+    cataLog.addNumericalColMinMax("u_user_id", 0, numUsers);
+    cataLog.addNumericalColMinMax("u_age", 10, 70);
+    cataLog.addNumericalColMinMax("u_occupation", 0, 20);
+    cataLog.addCategoricalColVals("u_zipcode", zipCode);
+
+    auto userDataRowVector = maker.rowVector(
+        {"u_user_id",
+         "u_gender",
+         "u_age",
+         "u_occupation",
+         "u_zipcode",
+         "u_features"},
+        {maker.flatVector<int>(userIDs, INTEGER()),
+         maker.flatVector<std::string>(userGender, VARCHAR()),
+         maker.flatVector<int>(userAge, INTEGER()),
+         maker.flatVector<int>(userOccupation, INTEGER()),
+         maker.flatVector<std::string>(userZipcode, VARCHAR()),
+         maker.arrayVector<float>(userFeatures, REAL())});
+
+    // output the histogram for the user data
+    cataLog.outputHistogramForData(
+        userDataRowVector, "user", 50, tableStatsPath);
+
+    MovieTitleGenerator movieTitleGenerator = MovieTitleGenerator(0);
+    std::vector<int> movieIDs = randomGenerator.genIntRange(0, numMovies);
+    std::vector<std::string> movieTitle =
+        movieTitleGenerator.generateBatchRandomTitles(numMovies);
+    std::vector<std::string> genres = {
+        "Action",
+        "Adventure",
+        "Animation",
+        "Children",
+        "Comedy",
+        "Crime",
+        "Documentary",
+        "Drama",
+        "Fantasy",
+        "Film-Noir",
+        "Horror",
+        "Musical",
+        "Mystery",
+        "Romance",
+        "Sci-Fi",
+        "Thriller",
+        "War",
+        "Western"};
+    std::vector<std::string> movieGenres =
+        randomSampler.sampleFromSets<std::string>(numMovies, genres);
+    std::vector<std::string> spokenLanguage = {
+        "English",
+        "French",
+        "German",
+        "Italian",
+        "Japanese",
+        "Korean",
+        "Mandarin",
+        "Spanish"};
+    std::vector<std::string> movieSpokenLanguage =
+        randomSampler.sampleFromSets<std::string>(numMovies, spokenLanguage);
+    randomGenerator.setFloatRange(0, 10);
+    std::vector<float> moviePopularity =
+        randomGenerator.genFloat1dVector(numMovies);
+    randomGenerator.setFloatRange(0, 5);
+    std::vector<float> movieVoteAverage =
+        randomGenerator.genFloat1dVector(numMovies);
+    std::vector<int> movieVoteCount =
+        randomGenerator.gen1DInt(numMovies, 0, 5000);
+    std::vector<std::vector<float>> movieFeatures =
+        randomGenerator.genFloat2dVector(numMovies, movieFeatureSize);
+
+    cataLog.addNumericalColMinMax("m_movie_id", 0, numMovies);
+    cataLog.addNumericalColMinMax("m_popularity", 0, 10);
+    cataLog.addNumericalColMinMax("m_vote_average", 0, 5);
+    cataLog.addNumericalColMinMax("m_vote_count", 0, 5000);
+    cataLog.addCategoricalColVals("m_genres", genres);
+    cataLog.addCategoricalColVals("m_spoken_languages", spokenLanguage);
+
+    auto movieDataRowVector = maker.rowVector(
+        {"m_movie_id",
+         "m_title",
+         "m_genres",
+         "m_spoken_languages",
+         "m_popularity",
+         "m_vote_average",
+         "m_vote_count",
+         "m_features"},
+        {maker.flatVector<int>(movieIDs, INTEGER()),
+         maker.flatVector<std::string>(movieTitle, VARCHAR()),
+         maker.flatVector<std::string>(movieGenres, VARCHAR()),
+         maker.flatVector<std::string>(movieSpokenLanguage, VARCHAR()),
+         maker.flatVector<float>(moviePopularity, REAL()),
+         maker.flatVector<float>(movieVoteAverage, REAL()),
+         maker.flatVector<int>(movieVoteCount, INTEGER()),
+         maker.arrayVector<float>(movieFeatures, REAL())});
+
+    // output the histogram for the movie data
+    cataLog.outputHistogramForData(
+        movieDataRowVector, "movie", 50, tableStatsPath);
+
+    randomGenerator.setFloatRange(0, 1);
+    std::vector<std::vector<float>> movieRelevanceTags =
+        randomGenerator.genFloat2dVector(numMovies, numRelevanceTags);
+
+    cataLog.addNumericalColMinMax("mt_movie_id", 0, numMovies);
+
+    auto movieRelevanceTagRowVector = maker.rowVector(
+        {"mt_movie_id", "mt_relevance_score"},
+        {maker.flatVector<int>(movieIDs, INTEGER()),
+         maker.arrayVector<float>(movieRelevanceTags, REAL())});
+
+    // output the histogram for the movie relevance tag data
+    cataLog.outputHistogramForData(
+        movieRelevanceTagRowVector, "movie_relevance_tag", 50, tableStatsPath);
+
+    std::pair<int, int> userStats =
+        std::make_pair(numUsers, userDataRowVector->childrenSize());
+    std::pair<int, int> movieStats =
+        std::make_pair(numMovies, movieDataRowVector->childrenSize());
+    std::pair<int, int> movieRelevanceTagStats =
+        std::make_pair(numMovies, movieRelevanceTagRowVector->childrenSize());
+
+    if (dataPath.empty()) {
+      // Save the data to temprary files
+      // user
+      std::vector<std::shared_ptr<TempFilePath>> userFilePaths =
+          splitRowVectorIntoBatchFiles(userDataRowVector, dataBatchSize);
+      cataLog.registerDataSrc(
+          "user",
+          userFilePaths,
+          asRowType(userDataRowVector->type()),
+          userStats);
+      // movie
+      std::vector<std::shared_ptr<TempFilePath>> movieFilePaths =
+          splitRowVectorIntoBatchFiles(movieDataRowVector, dataBatchSize);
+      cataLog.registerDataSrc(
+          "movie",
+          movieFilePaths,
+          asRowType(movieDataRowVector->type()),
+          movieStats);
+      // movie_relevance_tag
+      std::vector<std::shared_ptr<TempFilePath>> movieRelevanceTagFilePaths =
+          splitRowVectorIntoBatchFiles(
+              movieRelevanceTagRowVector, dataBatchSize);
+      cataLog.registerDataSrc(
+          "movie_relevance_tag",
+          movieRelevanceTagFilePaths,
+          asRowType(movieRelevanceTagRowVector->type()),
+          movieRelevanceTagStats);
+    } else {
+      // Save the data to the specified path
+      // user
+      std::vector<std::string> userFilePaths =
+          splitRowVectorsIntoBatchParquetFiles(
+              userDataRowVector,
+              dataBatchSize,
+              fmt::format("{}/user", dataPath),
+              rootPool);
+      cataLog.registerDataSrc(
+          "user",
+          userFilePaths,
+          dwio::common::FileFormat::PARQUET,
+          asRowType(userDataRowVector->type()),
+          userStats);
+      // movie
+      std::vector<std::string> movieFilePaths =
+          splitRowVectorsIntoBatchParquetFiles(
+              movieDataRowVector,
+              dataBatchSize,
+              fmt::format("{}/movie", dataPath),
+              rootPool);
+      cataLog.registerDataSrc(
+          "movie",
+          movieFilePaths,
+          dwio::common::FileFormat::PARQUET,
+          asRowType(movieDataRowVector->type()),
+          movieStats);
+      // movie_relevance_tag
+      std::vector<std::string> movieRelevanceTagFilePaths =
+          splitRowVectorsIntoBatchParquetFiles(
+              movieRelevanceTagRowVector,
+              dataBatchSize,
+              fmt::format("{}/movie_relevance_tag", dataPath),
+              rootPool);
+      cataLog.registerDataSrc(
+          "movie_relevance_tag",
+          movieRelevanceTagFilePaths,
+          dwio::common::FileFormat::PARQUET,
+          asRowType(movieRelevanceTagRowVector->type()),
+          movieRelevanceTagStats);
+    }
+  }
+}
+
+std::string registerNNModel(
+    std::vector<int> units,
+    CataLog& catalog,
+    int& modelGroupId_,
+    bool hasArgmax = false) {
+  // use input size as random seed
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, units[0]);
+  int modelGroupId = modelGroupId_++;
+  int functionId = 0;
+  int numberOfLayers = units.size() - 1;
+
+  optimization::registerVectorFunction(
+      "relu", Relu::signatures(), std::make_unique<Relu>(), {}, true, catalog);
+  optimization::registerVectorFunction(
+      "softmax",
+      Softmax::signatures(),
+      std::make_unique<Softmax>(),
+      {},
+      true,
+      catalog);
+  optimization::registerVectorFunction(
+      "argmax",
+      Argmax::signatures(),
+      std::make_unique<Argmax>(),
+      {},
+      true,
+      catalog);
+
+  std::string modelComputationStr = "{}";
+  int lastSize = units[0];
+
+  for (int i = 1; i < units.size(); i++) {
+    int layerSize = units[i];
+    std::vector<std::vector<float>> weights =
+        randomGenerator.genFloat2dVector(lastSize, layerSize);
+    std::vector<std::vector<float>> bias =
+        randomGenerator.genFloat2dVector(1, layerSize);
+    std::string matMulName =
+        fmt::format("mat_mul{}_{}", modelGroupId_, functionId++);
+    optimization::registerVectorFunction(
+        matMulName,
+        MatrixMultiply::signatures(),
+        std::make_unique<MatrixMultiply>(
+            std::move(flattenVectorToPointer(weights)), lastSize, layerSize),
+        {},
+        true,
+        catalog);
+    std::string matVectorAddName =
+        fmt::format("mat_vector_add{}_{}", modelGroupId_, functionId++);
+    optimization::registerVectorFunction(
+        matVectorAddName,
+        MatrixVectorAddition::signatures(),
+        std::make_unique<MatrixVectorAddition>(
+            std::move(flattenVectorToPointer(bias)), layerSize),
+        {},
+        true,
+        catalog);
+    modelComputationStr =
+        matVectorAddName + "(" + matMulName + "(" + modelComputationStr + "))";
+    if (i != units.size() - 1) {
+      modelComputationStr = "relu(" + modelComputationStr + ")";
+    } else {
+      modelComputationStr = "softmax(" + modelComputationStr + ")";
+    }
+    lastSize = layerSize;
+  }
+  if (hasArgmax) {
+    modelComputationStr = "argmax(" + modelComputationStr + ")";
+  }
+  return modelComputationStr;
+}
+
+PlanBuilder setupProfileQueryPlan(
+    std::string mode,
+    std::string queryTemplate,
+    int& modelGroupId_,
+    CataLog& cataLog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
+    int randomSeed = -1) {
+  bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
+
+  unsigned timestampSeed =
+      std::chrono::system_clock::now().time_since_epoch().count();
+  if (randomSeed != -1) {
+    timestampSeed = randomSeed;
+  }
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
+  randomGenerator.setIntRange(0, 1);
+  PlanBuilder myPlan;
+
+  std::vector<std::vector<int>> userModelStructures =
+      readModelStructureFromFile(
+          "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+  std::vector<std::vector<int>> movieModelStructures =
+      readModelStructureFromFile(
+          "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
+  std::vector<std::vector<int>> tagModelStructures = readModelStructureFromFile(
+      "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
+
+  if (mode == "ml") {
+    RowTypePtr userDataRowType = cataLog.getRegisteredDataSrcSchema("user");
+    RowTypePtr movieDataRowType = cataLog.getRegisteredDataSrcSchema("movie");
+    RowTypePtr movieRelevanceTagRowType =
+        cataLog.getRegisteredDataSrcSchema("movie_relevance_tag");
+
+    dwio::common::FileFormat userFileFormat =
+        cataLog.getRegisteredDataSrcFormat("user");
+    dwio::common::FileFormat movieFileFormat =
+        cataLog.getRegisteredDataSrcFormat("movie");
+    dwio::common::FileFormat movieRelevanceTagFileFormat =
+        cataLog.getRegisteredDataSrcFormat("movie_relevance_tag");
+
+    std::vector<std::string> userFilePaths =
+        cataLog.getRegisteredDataSrcFiles("user");
+    std::vector<std::string> movieFilePaths =
+        cataLog.getRegisteredDataSrcFiles("movie");
+    std::vector<std::string> movieRelevanceTagFilePaths =
+        cataLog.getRegisteredDataSrcFiles("movie_relevance_tag");
+
+    std::pair<int, int> userStats = cataLog.getRegisteredDataSrcStats("user");
+    int userNumRows = userStats.first;
+    int userNumCols = userStats.second;
+    std::pair<int, int> movieStats = cataLog.getRegisteredDataSrcStats("movie");
+    int movieNumRows = movieStats.first;
+    int movieNumCols = movieStats.second;
+    std::pair<int, int> movieRelevanceTagStats =
+        cataLog.getRegisteredDataSrcStats("movie_relevance_tag");
+    int movieRelevanceTagNumRows = movieRelevanceTagStats.first;
+    int movieRelevanceTagNumCols = movieRelevanceTagStats.second;
+
+    if (queryTemplate == "" || queryTemplate == "user") {
+      std::string userModel1ComputExpr = registerNNModel(
+          userModelStructures[0],
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+
+      core::PlanNodeId readUserDataPlanNodeId;
+      myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                   .tableScan(userDataRowType, {}, "")
+                   .capturePlanNodeId(readUserDataPlanNodeId)
+                   .project(
+                       {"u_user_id",
+                        "u_age",
+                        "u_gender",
+                        "u_occupation",
+                        "u_zipcode",
+                        "u_features"})
+                   .project(
+                       {"u_user_id",
+                        "u_age",
+                        "u_gender",
+                        "u_occupation",
+                        "u_zipcode",
+                        fmt::format(userModel1ComputExpr, "u_features")});
+      if (generateFilter) {
+        std::vector<std::string> filterExpr =
+            sampleUserMovieFilterExpr("user", timestampSeed);
+        for (auto expr : filterExpr) {
+          myPlan = myPlan.filter(expr);
+        }
+        // myPlan = myPlan.filter(filterExpr);
+      }
+
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId, userFilePaths, userFileFormat);
+      cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+      std::shared_ptr<OutputStat> userStats =
+          std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+      Source userSrc =
+          Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+      cataLog.addSource(std::make_shared<Source>(userSrc));
+    } else if (queryTemplate == "movie") {
+      std::string movieModel1ComputExpr = registerNNModel(
+          movieModelStructures[0],
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+
+      core::PlanNodeId readMovieDataPlanNodeId;
+      myPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                   .tableScan(movieDataRowType, {}, "")
+                   .capturePlanNodeId(readMovieDataPlanNodeId)
+                   .project(
+                       {"m_movie_id",
+                        "m_title",
+                        "m_genres",
+                        "m_spoken_languages",
+                        "m_popularity",
+                        "m_vote_average",
+                        "m_vote_count",
+                        "m_features"})
+                   .project(
+                       {"m_movie_id",
+                        "m_title",
+                        "m_genres",
+                        "m_spoken_languages",
+                        "m_popularity",
+                        "m_vote_average",
+                        "m_vote_count",
+                        "m_features",
+                        fmt::format(movieModel1ComputExpr, "m_features")});
+
+      if (generateFilter) {
+        std::vector<std::string> filterExpr =
+            sampleUserMovieFilterExpr("movie", timestampSeed);
+        for (auto expr : filterExpr) {
+          myPlan = myPlan.filter(expr);
+        }
+        // myPlan = myPlan.filter(filterExpr);
+      }
+
+      cataLog.setIdAddressMap(
+          readMovieDataPlanNodeId, movieFilePaths, movieFileFormat);
+
+      cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+      std::shared_ptr<OutputStat> movieStats =
+          std::make_shared<OutputStat>(OutputStat(movieNumRows, movieNumCols));
+      Source movieSrc =
+          Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
+      cataLog.addSource(std::make_shared<Source>(movieSrc));
+    } else if (queryTemplate == "movie_tag") {
+      std::string tagModel1ComputExpr = registerNNModel(
+          tagModelStructures[0],
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+
+      core::PlanNodeId readMovieRelevanceTagDataPlanNodeId;
+      myPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(movieRelevanceTagRowType, {}, "")
+              .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId)
+              .project(
+                  {"mt_movie_id",
+                   "mt_relevance_score",
+                   fmt::format(tagModel1ComputExpr, "mt_relevance_score")});
+
+      cataLog.setIdAddressMap(
+          readMovieRelevanceTagDataPlanNodeId,
+          movieRelevanceTagFilePaths,
+          movieRelevanceTagFileFormat);
+
+      cataLog.addNodeIdRelationName(
+          readMovieRelevanceTagDataPlanNodeId, "movie_relevance_tag");
+      std::shared_ptr<OutputStat> movieRelevanceTagStats =
+          std::make_shared<OutputStat>(
+              OutputStat(movieRelevanceTagNumRows, movieRelevanceTagNumCols));
+      Source movieRelevanceTagSrc = Source(
+          readMovieRelevanceTagDataPlanNodeId,
+          Source::Type::FILE,
+          movieRelevanceTagStats);
+      cataLog.addSource(std::make_shared<Source>(movieRelevanceTagSrc));
+    } else if (queryTemplate == "movie_user" || queryTemplate == "user_movie") {
+      std::string userModel1ComputExpr = registerNNModel(
+          userModelStructures[0],
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+
+      core::PlanNodeId readUserDataPlanNodeId;
+      auto userPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                          .tableScan(userDataRowType, {}, "")
+                          .capturePlanNodeId(readUserDataPlanNodeId)
+                          .project(
+                              {"u_user_id",
+                               "u_age",
+                               "u_gender",
+                               "u_occupation",
+                               "u_zipcode",
+                               "u_features"});
+
+      std::string movieModel1ComputExpr = registerNNModel(
+          movieModelStructures[0],
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+
+      core::PlanNodeId readMovieDataPlanNodeId;
+      auto moviePlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                           .tableScan(movieDataRowType, {}, "")
+                           .capturePlanNodeId(readMovieDataPlanNodeId)
+                           .project(
+                               {"m_movie_id",
+                                "m_title",
+                                "m_genres",
+                                "m_spoken_languages",
+                                "m_popularity",
+                                "m_vote_average",
+                                "m_vote_count",
+                                "m_features"});
+      RandomGenerator numModelGenerator = RandomGenerator(-1, 1, timestampSeed);
+      numModelGenerator.setIntRange(0, 2);
+      int numModel = numModelGenerator.genRandomIntValue();
+      myPlan = userPlan.nestedLoopJoin(
+          moviePlan.planNode(),
+          {"u_user_id",
+           "u_age",
+           "u_gender",
+           "u_occupation",
+           "u_zipcode",
+           "u_features",
+           "m_movie_id",
+           "m_title",
+           "m_genres",
+           "m_spoken_languages",
+           "m_popularity",
+           "m_vote_average",
+           "m_vote_count",
+           "m_features"});
+
+      if (numModel == 1) {
+        myPlan = myPlan.project(
+            {"u_user_id",
+             "u_age",
+             "u_gender",
+             "u_occupation",
+             "u_zipcode",
+             "u_features",
+             "m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features",
+             fmt::format(userModel1ComputExpr, "u_features")});
+      } else if (numModel == 2) {
+        myPlan = myPlan.project(
+            {"u_user_id",
+             "u_age",
+             "u_gender",
+             "u_occupation",
+             "u_zipcode",
+             "u_features",
+             "m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features",
+             fmt::format(userModel1ComputExpr, "u_features"),
+             fmt::format(movieModel1ComputExpr, "m_features")});
+      }
+
+      if (generateFilter) {
+        std::vector<std::string> filterExpr =
+            sampleUserMovieFilterExpr("movie_user", timestampSeed);
+        for (auto expr : filterExpr) {
+          myPlan = myPlan.filter(expr);
+        }
+        // myPlan = myPlan.filter(filterExpr);
+      }
+
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId, userFilePaths, userFileFormat);
+      cataLog.setIdAddressMap(
+          readMovieDataPlanNodeId, movieFilePaths, movieFileFormat);
+      cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+      cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+
+      std::shared_ptr<OutputStat> userStats =
+          std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+      Source userSrc =
+          Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+      cataLog.addSource(std::make_shared<Source>(userSrc));
+      std::shared_ptr<OutputStat> movieStats =
+          std::make_shared<OutputStat>(OutputStat(movieNumRows, movieNumCols));
+      Source movieSrc =
+          Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
+      cataLog.addSource(std::make_shared<Source>(movieSrc));
+    } else if (
+        queryTemplate == "movie_user_tag" ||
+        queryTemplate == "user_movie_tag") {
+      std::string userModel1ComputExpr = registerNNModel(
+          userModelStructures[0],
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+
+      core::PlanNodeId readUserDataPlanNodeId;
+      auto userPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                          .tableScan(userDataRowType, {}, "")
+                          .capturePlanNodeId(readUserDataPlanNodeId)
+                          .project(
+                              {"u_user_id",
+                               "u_age",
+                               "u_gender",
+                               "u_occupation",
+                               "u_zipcode",
+                               "u_features"});
+
+      std::string movieModel1ComputExpr = registerNNModel(
+          movieModelStructures[0],
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+
+      core::PlanNodeId readMovieDataPlanNodeId;
+      auto moviePlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                           .tableScan(movieDataRowType, {}, "")
+                           .capturePlanNodeId(readMovieDataPlanNodeId)
+                           .project({
+                               "m_movie_id",
+                               "m_title",
+                               "m_genres",
+                               "m_spoken_languages",
+                               "m_popularity",
+                               "m_vote_average",
+                               "m_vote_count",
+                               "m_features",
+                           });
+
+      std::string tagModel1ComputExpr = registerNNModel(
+          tagModelStructures[0],
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+
+      core::PlanNodeId readMovieRelevanceTagDataPlanNodeId;
+      auto tagPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                         .tableScan(movieRelevanceTagRowType, {}, "")
+                         .capturePlanNodeId(readMovieRelevanceTagDataPlanNodeId)
+                         .project({
+                             "mt_movie_id",
+                             "mt_relevance_score",
+                         });
+
+      auto movieTagPlan = tagPlan.hashJoin(
+          {"mt_movie_id"},
+          {"m_movie_id"},
+          moviePlan.planNode(),
+          "",
+          {"m_movie_id",
+           "m_title",
+           "m_genres",
+           "m_spoken_languages",
+           "m_popularity",
+           "m_vote_average",
+           "m_vote_count",
+           "m_features",
+           "mt_relevance_score"});
+
+      RandomGenerator numModelGenerator = RandomGenerator(-1, 1, timestampSeed);
+      numModelGenerator.setIntRange(0, 3);
+      int numModel = numModelGenerator.genRandomIntValue();
+      myPlan = userPlan.nestedLoopJoin(
+          movieTagPlan.planNode(),
+          {"u_user_id",
+           "u_age",
+           "u_gender",
+           "u_occupation",
+           "u_zipcode",
+           "u_features",
+           "m_movie_id",
+           "m_title",
+           "m_genres",
+           "m_spoken_languages",
+           "m_popularity",
+           "m_vote_average",
+           "m_vote_count",
+           "m_features",
+           "mt_relevance_score"});
+
+      if (numModel == 1) {
+        myPlan = myPlan.project(
+            {"u_user_id",
+             "u_age",
+             "u_gender",
+             "u_occupation",
+             "u_zipcode",
+             "u_features",
+             "m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features",
+             "mt_relevance_score",
+             fmt::format(userModel1ComputExpr, "u_features")});
+      } else if (numModel == 2) {
+        myPlan = myPlan.project(
+            {"u_user_id",
+             "u_age",
+             "u_gender",
+             "u_occupation",
+             "u_zipcode",
+             "u_features",
+             "m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features",
+             "mt_relevance_score",
+             fmt::format(userModel1ComputExpr, "u_features"),
+             fmt::format(movieModel1ComputExpr, "m_features")});
+      } else if (numModel == 3) {
+        myPlan = myPlan.project(
+            {"u_user_id",
+             "u_age",
+             "u_gender",
+             "u_occupation",
+             "u_zipcode",
+             "u_features",
+             "m_movie_id",
+             "m_title",
+             "m_genres",
+             "m_spoken_languages",
+             "m_popularity",
+             "m_vote_average",
+             "m_vote_count",
+             "m_features",
+             "mt_relevance_score",
+             fmt::format(userModel1ComputExpr, "u_features"),
+             fmt::format(movieModel1ComputExpr, "m_features"),
+             fmt::format(tagModel1ComputExpr, "mt_relevance_score")});
+      }
+
+      if (generateFilter) {
+        std::vector<std::string> filterExpr =
+            sampleUserMovieFilterExpr("movie_user", timestampSeed);
+        for (auto expr : filterExpr) {
+          myPlan = myPlan.filter(expr);
+        }
+        // myPlan = myPlan.filter(filterExpr);
+      }
+
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId, userFilePaths, userFileFormat);
+      cataLog.setIdAddressMap(
+          readMovieDataPlanNodeId, movieFilePaths, movieFileFormat);
+      cataLog.setIdAddressMap(
+          readMovieRelevanceTagDataPlanNodeId,
+          movieRelevanceTagFilePaths,
+          movieRelevanceTagFileFormat);
+
+      cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+      cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+      cataLog.addNodeIdRelationName(
+          readMovieRelevanceTagDataPlanNodeId, "movie_relevance_tag");
+      std::shared_ptr<OutputStat> userStats =
+          std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+      Source userSrc =
+          Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+      cataLog.addSource(std::make_shared<Source>(userSrc));
+      std::shared_ptr<OutputStat> movieStats =
+          std::make_shared<OutputStat>(OutputStat(movieNumRows, movieNumCols));
+      Source movieSrc =
+          Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
+      cataLog.addSource(std::make_shared<Source>(movieSrc));
+      std::shared_ptr<OutputStat> movieRelevanceTagStats =
+          std::make_shared<OutputStat>(
+              OutputStat(movieRelevanceTagNumRows, movieRelevanceTagNumCols));
+      Source movieRelevanceTagSrc = Source(
+          readMovieRelevanceTagDataPlanNodeId,
+          Source::Type::FILE,
+          movieRelevanceTagStats);
+      cataLog.addSource(std::make_shared<Source>(movieRelevanceTagSrc));
+    } else {
+      throw std::runtime_error(
+          fmt::format("Non-supported queryTemplate: {}", queryTemplate));
+    }
+  } else {
+    throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
+  }
+
+  return myPlan;
+}
+
+
+void checkValidProfileQueryGenerationSetting(
+    std::vector<int> numberOfTuples,
+    std::vector<int> dummyFeatureSizes,
+    std::string queryTemplate) {
+    int numRelevanceTags = numberOfTuples[2];
+  int userFeatureSize = dummyFeatureSizes[0];
+  int movieFeatureSize = dummyFeatureSizes[1];
+
+  std::vector<std::vector<int>> userModelStructures =
+      readModelStructureFromFile(
+          "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+  std::vector<std::vector<int>> movieModelStructures =
+      readModelStructureFromFile(
+          "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
+  std::vector<std::vector<int>> tagModelStructures = readModelStructureFromFile(
+      "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
+
+  if (queryTemplate.find("user") != std::string::npos &&
+      userFeatureSize != userModelStructures[0][0])
+    checkOrAbort(
+        userModelStructures[0][0],
+        userFeatureSize,
+        "[registerProfileModel-userModel]");
+  if (queryTemplate.find("movie") != std::string::npos &&
+      movieFeatureSize != movieModelStructures[0][0])
+    checkOrAbort(
+        movieModelStructures[0][0],
+        movieFeatureSize,
+        "[registerProfileModel-movieModel]");
+  if (queryTemplate.find("movie") != std::string::npos &&
+      queryTemplate.find("user") != std::string::npos &&
+      numRelevanceTags != tagModelStructures[0][0])
+    checkOrAbort(
+        tagModelStructures[0][0],
+        numRelevanceTags,
+        "[registerProfileModel-movieTagModel]");
 }
