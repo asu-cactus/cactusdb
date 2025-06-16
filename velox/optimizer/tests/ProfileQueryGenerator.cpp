@@ -130,18 +130,22 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     }
   }
 
-  int cacheQueryPlan(PlanBuilder& planBuilder) {
+  int cacheQueryPlanAndCateLog(PlanBuilder& planBuilder, CataLog& cataLog) {
     int queryPlanCacheId = queryPlanCacheId_++;
     auto serializedPlan = planBuilder.planNode()->serialize();
-    // queryPlanCaches_[queryPlanCacheId] = serializedPlan;
+    queryPlanCaches_[queryPlanCacheId] = serializedPlan;
+    cataLogIdAddressMapCaches_[queryPlanCacheId] = cataLog.getIdAddressMap();
 
     return queryPlanCacheId;
   }
 
-  void resetQueryPlanFromCache(PlanBuilder& planBuilder, int queryPlanCacheId) {
-    auto it = queryPlanCaches_.find(queryPlanCacheId);
-    if (it != queryPlanCaches_.end()) {
-      auto serializedPlan = it->second;
+  void resetQueryPlanAndQueryPlanFromCache(
+      PlanBuilder& planBuilder,
+      CataLog& cataLog,
+      int queryPlanCacheId) {
+    auto it1 = queryPlanCaches_.find(queryPlanCacheId);
+    if (it1 != queryPlanCaches_.end()) {
+      auto serializedPlan = it1->second;
       auto deserlizedUpdatedPlanNode =
           ISerializable::deserialize<core::PlanNode>(
               serializedPlan, pool_.get());
@@ -149,7 +153,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     } else {
       throw std::runtime_error(
           fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+              "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
+              queryPlanCacheId));
+    }
+
+    auto it2 = cataLogIdAddressMapCaches_.find(queryPlanCacheId);
+    if (it2 != cataLogIdAddressMapCaches_.end()) {
+      cataLog.setIdAddressMap(it2->second);
+    } else {
+      throw std::runtime_error(
+          fmt::format(
+              "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
+              queryPlanCacheId));
     }
   }
 
@@ -406,16 +421,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << myPlan.planNode()->toString(true, true) << std::endl;
 
     if (rewrite) {
+      // Randomly rewrite the query plan to generate various query plans.
       myPlan = rewriteQuery(
           cataLog, pool_, myPlan, planNodeIdGenerator, verbose, "random");
     }
-
-    // auto idAddressMap = cataLog.getIdAddressMap();
-    // std::cout << "[INFO] Id Address Map: \n";
-    // for (auto entry : idAddressMap) {
-    //   std::cout << entry.first << ": " << entry.second.size() << " Files" <<
-    //   std::endl;
-    // }
 
     std::cout << "[INFO] Executed Query Plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
@@ -434,11 +443,70 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     float executeTime = runPlanWithCataLog(
         pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
 
-    std::string latencyOutPutPath =
+    std::string latencyOutputPath =
         "/home/velox/velox/optimizer/tests/executionLatency.txt";
-    writeStringToFile(std::to_string(executeTime), latencyOutPutPath);
+    writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+
+    // Collect optimal rule
+    int initQueryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
+
+    auto planNode = myPlan.planNode();
+    planState.getPossibleActions(planNode, cataLog);
+    std::map<std::string, std::vector<std::string>> actionsPair =
+        planState.actionsPair;
+    // Use a min-heap to store the rule latency
+    std::priority_queue<
+        std::pair<float, std::string>,
+        std::vector<std::pair<float, std::string>>,
+        std::greater<std::pair<float, std::string>>>
+        minHeapOfRuleLatency;
+    // Enumerate plan
+    for (auto& action : actionsPair) {
+      std::string targetExpr = action.first;
+      std::vector<std::string> applicableRules = action.second;
+      for (auto& ruleName : applicableRules) {
+        std::pair<std::string, std::string> selectedAction =
+            std::make_pair(targetExpr, ruleName);
+
+        // Apply the rule and get the new plan
+        planState.takeAction(
+            planNode,
+            nullptr,
+            maker,
+            myPlan,
+            pool_,
+            planNodeIdGenerator,
+            {selectedAction},
+            cataLog);
+        float latency = runPlanWithCataLog(
+            pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
+        // Store the current rule latency, the rule with the minimum latency
+        // will be stored as the top in the min-heap
+        minHeapOfRuleLatency.push(std::make_pair(latency, ruleName));
+        
+        // Rest the query plan and catalog to the original state
+        resetQueryPlanAndQueryPlanFromCache(
+            myPlan, cataLog, initQueryPlanCacheId);
+        planNode = myPlan.planNode();
+        planState.clearTransformedExpr();
+        planState.getPossibleActions(planNode, cataLog);
+      }
+    }
+
+    // Obtain the optimal rule name
+    auto [minLatency, optimalRuleName] = minHeapOfRuleLatency.top();
+
+    std::string optimalRuleOutputPath =
+        "/home/velox/velox/optimizer/tests/optimalRule.txt";
+    writeStringToFile(optimalRuleName, optimalRuleOutputPath);
+
+    std::cout << "[INFO] Optimal Rule: " << optimalRuleName << std::endl;
 
     return;
   }
@@ -449,6 +517,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   std::shared_ptr<memory::MemoryPool> pool_{
       memory::MemoryManager::getInstance()->addLeafPool()};
   std::shared_ptr<TempDirectoryPath> tempDirPath_;
+  std::map<int, std::map<core::PlanNodeId, std::vector<std::string>>>
+      cataLogIdAddressMapCaches_;
 
   VectorMaker maker{pool_.get()};
   static inline int queryPlanCacheId_ = 0;
