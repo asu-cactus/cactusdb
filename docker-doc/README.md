@@ -96,8 +96,6 @@ After successfully launching the container, you need to install Velox's dependen
 ```bash
 # Run Velox setup-ubuntu to install other dependencies
 ./scripts/setup-ubuntu.sh
-# Compile Velox in release mode
-make release
 # Install Python libraries for baselines
 pip install -r db-ml/baseline/requirements.txt
 # Compile CactusDB at the root folder
@@ -107,6 +105,10 @@ make release
 **Note:** If you are using an ARM chip, you need to set `CPU_TARGET="aarch64"` before running setup-ubuntu.sh.
 
 Before running `make release` in the Velox folder, you are required to set the following two environment variables:
+
+```bash
+export CPU_TARGET=aarch64
+```
 
 **Note:** If there is any missing library, please refer to [this file](../INSTALL_DEPENDENCIES.md) to install it manually within the Docker container.
 
