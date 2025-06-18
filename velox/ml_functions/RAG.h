@@ -136,7 +136,7 @@ class RAG : public MLFunction {
   };
 
   static std::string getName() {
-    return "svd";
+    return "rag";
   };
 
   std::string getWeightsFile() {
