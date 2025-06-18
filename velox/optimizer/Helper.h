@@ -20,6 +20,9 @@
 #include "CataLog.h"
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
+#include "velox/dwio/parquet/RegisterParquetReader.h"
+#include "velox/dwio/parquet/RegisterParquetWriter.h"
+#include "velox/dwio/parquet/writer/Writer.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/ml_functions/functions.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
@@ -825,6 +828,82 @@ std::vector<std::shared_ptr<TempFilePath>> splitRowVectorIntoBatchFiles(
     auto file = TempFilePath::create();
     myFile.writeToFile(file->path, {batches[i]});
     batchFiles.push_back(file);
+  }
+  return batchFiles;
+}
+
+// Function from ParquetTestBase.h
+std::unique_ptr<dwio::common::FileSink> createSink(
+    const std::string& filePath,
+    std::shared_ptr<memory::MemoryPool> rootPool) {
+  auto sink = dwio::common::FileSink::create(
+      fmt::format("file:{}", filePath), {.pool = rootPool.get()});
+  return sink;
+}
+
+// Function from ParquetTestBase.h
+std::unique_ptr<facebook::velox::parquet::Writer> createWriter(
+    std::unique_ptr<dwio::common::FileSink> sink,
+    std::shared_ptr<memory::MemoryPool> rootPool,
+    std::function<
+        std::unique_ptr<facebook::velox::parquet::DefaultFlushPolicy>()>
+        flushPolicy,
+    const RowTypePtr& rowType,
+    facebook::velox::common::CompressionKind compressionKind =
+        facebook::velox::common::CompressionKind_NONE) {
+  facebook::velox::parquet::WriterOptions options;
+  options.memoryPool = rootPool.get();
+  options.flushPolicyFactory = flushPolicy;
+  options.compression = compressionKind;
+  return std::make_unique<facebook::velox::parquet::Writer>(
+      std::move(sink), options, rowType);
+}
+
+void writeRowVectorToParquetFile(
+    RowVectorPtr rowVector,
+    const std::string& filePath,
+    std::shared_ptr<memory::MemoryPool> rootPool) {
+  auto sink = createSink(filePath, rootPool);
+  auto sinkPtr = sink.get();
+  uint64_t kRowsInRowGroup = 1000;
+  uint64_t kBytesInRowGroup = 128 * 1024 * 1024;
+  auto writer = createWriter(
+      std::move(sink),
+      rootPool,
+      [&]() {
+        return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
+            kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
+      },
+      asRowType(rowVector->type()));
+  writer->write(rowVector);
+  writer->flush();
+  writer->close();
+}
+
+std::vector<std::string> splitRowVectorsIntoBatchParquetFiles(
+    RowVectorPtr inputVector,
+    size_t batchSize,
+    const std::string& outputDir,
+    std::shared_ptr<memory::MemoryPool> rootPool) {
+  // Check if the output directory exists
+  if (fs::exists(outputDir)) {
+    // If it exists, remove it to start fresh
+    LOG(WARNING) << "Output directory already exists: " << outputDir
+                 << ". Removing it to start fresh." << std::endl;
+    fs::remove_all(outputDir);
+  }
+  // Split the input RowVector into batches
+  auto batches = splitRowVectorIntoBatches(inputVector, batchSize);
+  // Result vector to hold all the batch file paths
+  std::vector<std::string> batchFiles;
+  // Write each batch to a Parquet file
+  for (size_t i = 0; i < batches.size(); ++i) {
+    // Create a unique file path for each batch
+    std::string filePath = fmt::format("{}/part_{}.parquet", outputDir, i);
+    // Write the RowVector to the Parquet file
+    writeRowVectorToParquetFile(batches[i], filePath, rootPool);
+    // Add the file path to the result vector
+    batchFiles.push_back(filePath);
   }
   return batchFiles;
 }

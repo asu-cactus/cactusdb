@@ -425,8 +425,8 @@ def main():
     utils.setup_postgres_for_evadb()
 
     if dataset == "all":
-        load_movielens_to_postgres()
-        load_ffnn_data_to_postgres()
+        # load_movielens_to_postgres()
+        # load_ffnn_data_to_postgres()
         load_movielens_recommendation_to_datastore()
         load_tpcxai_final_to_datastore()
     elif dataset == "movielens":
