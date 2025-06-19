@@ -70,6 +70,7 @@
 #include "velox/optimizer/TwoLayerUDF2TorchNNRewriteAction.h"
 #include "velox/optimizer/tests/BenchmarkUtils.h"
 #include "velox/optimizer/tests/ModelRegister.h"
+#include "velox/optimizer/tests/BenchmarkQueryTemplates.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
@@ -350,7 +351,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   }
 
   void runProfile(
-      std::string mode,
+      std::string workload,
       std::string queryTemplate,
       std::vector<int> numberOfTuples,
       std::vector<int> dummyFeatureSizes,
@@ -368,7 +369,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
     std::string computationStr;
 
-    if (mode == "ml") {
+    if (workload == "ml") {
       if (queryTemplate == "ml-q1" || queryTemplate == "ml-q2" ||
           queryTemplate == "ml-q3") {
         if (queryTemplate == "ml-q1") {
@@ -396,7 +397,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         checkValidProfileQueryGenerationSetting(
             numberOfTuples, dummyFeatureSizes, queryTemplate);
         generateDummyData(
-            mode,
+            workload,
             numberOfTuples,
             dummyFeatureSizes,
             cataLog,
@@ -405,7 +406,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             dataBatchSize,
             dataPath);
         myPlan = setupProfileQueryPlan(
-            mode,
+            workload,
             queryTemplate,
             modelGroupId_,
             cataLog,
@@ -414,7 +415,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       }
 
     } else {
-      throw std::runtime_error(fmt::format("Non-supported model: {}", mode));
+      throw std::runtime_error(fmt::format("Non-supported workload: {}", workload));
     }
 
     std::cout << "[INFO] Original Query Plan: \n"
@@ -449,6 +450,9 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
 
+    /*
+    Comment it out for now, since it is not used in the current version of
+    training data collections.
     // Collect optimal rule
     int initQueryPlanCacheId = cacheQueryPlanAndCateLog(myPlan, cataLog);
     // Create ruleManager
@@ -489,7 +493,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         // Store the current rule latency, the rule with the minimum latency
         // will be stored as the top in the min-heap
         minHeapOfRuleLatency.push(std::make_pair(latency, ruleName));
-        
+
         // Rest the query plan and catalog to the original state
         resetQueryPlanAndQueryPlanFromCache(
             myPlan, cataLog, initQueryPlanCacheId);
@@ -507,8 +511,58 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     writeStringToFile(optimalRuleName, optimalRuleOutputPath);
 
     std::cout << "[INFO] Optimal Rule: " << optimalRuleName << std::endl;
+    */
 
     return;
+  }
+
+  void benchmarkQueryFromTemplate(
+      std::string workload,
+      std::string queryTemplate,
+      std::vector<int> numberOfTuples,
+      std::vector<int> dummyFeatureSizes,
+      int numThreads,
+      int repeatRun,
+      int verbose,
+      bool rewrite,
+      int dataBatchSize = 256,
+      std::string dataPath = "") {
+    PlanBuilder queryPlan;
+    CataLog cataLog;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+    std::vector<std::string> inputFilePaths;
+    std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
+
+    // During the benchmark, we are going to use the real movielens & TPCx-AI datasets
+
+    queryPlan = setupProfileQueryPlanFromTemplate(workload,
+            queryTemplate,
+            modelGroupId_,
+            cataLog,
+            pool_,
+            planNodeIdGenerator);
+
+
+    float executeTime = runPlanWithCataLog(
+        pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
+
+    std::string latencyOutputPath =
+        "/home/velox/velox/optimizer/tests/executionLatency.txt";
+    writeStringToFile(std::to_string(executeTime), latencyOutputPath);
+
+    auto serializedPlan = queryPlan.planNode()->serialize();
+    std::string queryOutPutPath =
+        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+    augmentSerializedPlan(serializedPlan, cataLog);
+    writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
+
+    auto queryPlanStr = queryPlan.planNode()->toString(true, true);
+    std::string queryPlanStrOutputPath =
+        "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
+    writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
+
+    std::cout << "[INFO] Execution time: " << executeTime << std::endl;
   }
 
  private:
@@ -526,7 +580,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   static inline int modelGroupId_ = 0;
 };
 
-DEFINE_string(mode, "ml", "Mode: ml");
+DEFINE_string(workload, "ml", "workload: ml, movielens");
 DEFINE_string(
     query_template,
     "user",
@@ -547,7 +601,7 @@ DEFINE_string(data_path, "", "Data path to store the generated data");
 int main(int argc, char** argv) {
   memory::MemoryManager::initialize({});
   folly::init(&argc, &argv, false);
-  std::string mode = FLAGS_mode;
+  std::string workload = FLAGS_workload;
   std::string queryTemplate = FLAGS_query_template;
   std::string model = FLAGS_model;
 
@@ -567,26 +621,48 @@ int main(int argc, char** argv) {
   std::vector<int> numberOfTuples;
   std::vector<int> dummyFeatureSizes;
 
-  if (mode == "ml") {
+  if (workload == "ml") {
+    // TODO: refactor: change to another name
     numberOfTuples.push_back(numUser);
     numberOfTuples.push_back(numMovie);
     numberOfTuples.push_back(numTag);
     dummyFeatureSizes.push_back(userFeatureSize);
     dummyFeatureSizes.push_back(movieFeatureSize);
+    std::cout << "numberOfTuples: " << numberOfTuples << std::endl;
+    std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
+
+    demo.runProfile(
+        workload,
+        queryTemplate,
+        numberOfTuples,
+        dummyFeatureSizes,
+        numDriver,
+        repeatRun,
+        verbose,
+        rewrite,
+        dataBatchSize,
+        dataPath);
+  } else if (workload == "movielens") {
+    numberOfTuples.push_back(numUser);
+    numberOfTuples.push_back(numMovie);
+    numberOfTuples.push_back(numTag);
+    dummyFeatureSizes.push_back(userFeatureSize);
+    dummyFeatureSizes.push_back(movieFeatureSize);
+    std::cout << "numberOfTuples: " << numberOfTuples << std::endl;
+    std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
+
+    demo.benchmarkQueryFromTemplate(
+        workload,
+        queryTemplate,
+        numberOfTuples,
+        dummyFeatureSizes,
+        numDriver,
+        repeatRun,
+        verbose,
+        rewrite,
+        dataBatchSize,
+        dataPath);
+  } else {
+    throw std::runtime_error(fmt::format("Non-supported workload: {}", workload));
   }
-
-  std::cout << "numberOfTuples: " << numberOfTuples << std::endl;
-  std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
-
-  demo.runProfile(
-      mode,
-      queryTemplate,
-      numberOfTuples,
-      dummyFeatureSizes,
-      numDriver,
-      repeatRun,
-      verbose,
-      rewrite,
-      dataBatchSize,
-      dataPath);
 }
