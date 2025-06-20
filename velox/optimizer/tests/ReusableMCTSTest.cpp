@@ -266,36 +266,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     return inputArrayVector;
   }
 
-  std::vector<std::vector<int>> readModelStructureFromFile(
-      const std::string& filename) {
-    std::ifstream file(filename);
-    if (!file) {
-      std::cerr << "Error opening file!" << std::endl;
-      return {};
-    }
-
-    std::vector<std::vector<int>> all_lines;
-    std::string line;
-
-    while (std::getline(file, line)) {
-      std::istringstream iss(line);
-      std::vector<int> values;
-      int num;
-
-      // Read each integer in the line
-      while (iss >> num) {
-        values.push_back(num);
-      }
-
-      // Store the line of integers in the main vector
-      all_lines.push_back(values);
-    }
-
-    file.close();
-    return all_lines;
-  }
-
-  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(
+    std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(
       std::vector<std::vector<float>> data,
       int numSplit = 4,
       bool createIndex = false) {
