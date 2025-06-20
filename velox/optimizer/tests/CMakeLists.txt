@@ -66,3 +66,9 @@ target_link_libraries(
   factorization_test
   ml_functions
 )
+
+add_executable(sparse_dense_conversion_test sparseDenseMatMulConversionTemplateTest.cpp)
+target_link_libraries(
+  sparse_dense_conversion_test
+  ml_functions
+)
