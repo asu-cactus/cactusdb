@@ -30,6 +30,7 @@
 #include "velox/optimizer/PlanState.h"
 #include "velox/optimizer/Register.h"
 #include "velox/optimizer/RuleManager.h"
+#include "velox/optimizer/tests/BenchmarkUtils.h"
 
 using namespace optimization;
 using namespace facebook::velox;
@@ -152,8 +153,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                   "u_user_id",
                   "transform(concat(array_constructor(u_age), u_gender_encoded, array_constructor(u_occupation)), x-> CAST(x AS REAL)) as u_features" // ARRAY(REAL)
               })
-              .project({"u_user_id", fmt::format(modelStr, "u_features")})
-              .filter({"u_age >= 18"});
+              .project({"u_user_id", fmt::format(modelStr, "u_features")});
 
       // select u_user_id, dnn(features) as pred from users;
       // select dnn(features) as pred from users;
@@ -213,8 +213,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       //     movieTagStats);
       // cataLog.addSource(std::make_shared<Source>(movieTagSrc));
     } else if (queryTemplate == "template4") {
-      
-    }
+        }
 
     // TODO
   } else if (workload == "tpcxai") {

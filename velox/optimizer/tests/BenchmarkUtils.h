@@ -2773,6 +2773,33 @@ std::vector<std::vector<int>> readModelStructureFromFile(
   return all_lines;
 }
 
+std::vector<std::vector<std::string>> readModelKernelStrFromFile(
+    const std::string& filename) {
+  std::ifstream file(filename);
+  if (!file) {
+    std::cerr << "Error opening model kernel file: " << filename << std::endl;
+    return {};
+  }
+
+  std::vector<std::vector<std::string>> all_lines;
+  std::string line;
+
+  while (std::getline(file, line)) {
+    std::istringstream iss(line);
+    std::vector<std::string> values;
+    std::string word;
+
+    while (iss >> word) {
+      values.push_back(word);
+    }
+
+    all_lines.push_back(values);
+  }
+
+  file.close();
+  return all_lines;
+}
+
 void generateDummyData(
     std::string workload,
     std::vector<int> numberOfTuples,
@@ -3602,12 +3629,11 @@ PlanBuilder setupProfileQueryPlan(
   return myPlan;
 }
 
-
 void checkValidProfileQueryGenerationSetting(
     std::vector<int> numberOfTuples,
     std::vector<int> dummyFeatureSizes,
     std::string queryTemplate) {
-    int numRelevanceTags = numberOfTuples[2];
+  int numRelevanceTags = numberOfTuples[2];
   int userFeatureSize = dummyFeatureSizes[0];
   int movieFeatureSize = dummyFeatureSizes[1];
 
