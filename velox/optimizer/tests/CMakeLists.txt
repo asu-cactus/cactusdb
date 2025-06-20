@@ -49,6 +49,12 @@ target_link_libraries(
   ml_functions
 )
 
+add_executable(model_query_profiler ModelQueryProfiler.cpp)
+target_link_libraries(
+  model_query_profiler
+  ml_functions
+)
+
 add_executable(reusable_mcts_test ReusableMCTSTest.cpp)
 target_link_libraries(
   reusable_mcts_test
