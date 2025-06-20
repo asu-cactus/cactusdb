@@ -76,9 +76,9 @@ using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::test;
 
-class IntegratedMCTSTest : public HiveConnectorTestBase {
+class SparseDenseMatMulConversionTest : public HiveConnectorTestBase {
  public:
-  IntegratedMCTSTest() {
+  SparseDenseMatMulConversionTest() {
     // Register Presto scalar functions.
     functions::prestosql::registerAllScalarFunctions();
 
@@ -113,7 +113,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     pool_ = rootPool_->addLeafChild("ProfileQueryGenerator");
   }
 
-  ~IntegratedMCTSTest() {
+  ~SparseDenseMatMulConversionTest() {
     TearDown();
   }
 
@@ -194,6 +194,118 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         std::move(sink), options, rowType);
   }
 
+  struct DataFrame {
+    std::vector<std::vector<float>> features;
+    std::vector<float*> weights;
+    std::vector<float*> bias;
+    float* featuresFloat;
+    std::vector<std::shared_ptr<TempFilePath>> feature_paths;
+  };
+
+  /**
+   * @brief Registers a series of vector functions in the optimization
+   * namespace.
+   *
+   * @param units1 Number of units in the first layer.
+   * @param units2 Number of units in the second layer.
+   * @param input_size Size of the input for the first layer.
+   * @param weights1 Pointer to the weights for the first layer.
+   * @param weights2 Pointer to the weights for the second layer.
+   * @param bias1 Pointer to the bias for the first layer.
+   * @param bias2 Pointer to the bias for the second layer.
+   * @param catalog Reference to a CataLog object to store metadata and
+   * information.
+   *
+   * @return A string representing the composed vector function expression.
+   */
+
+  std::vector<std::vector<float>>
+  loadFeaturesFromCSV(std::string filePath, int numSamples, int numFeature) {
+    int size = numSamples * numFeature;
+
+    std::cout << "Loading tensor of size " << size << " from " << filePath
+              << std::endl;
+
+    std::ifstream file(filePath.c_str());
+
+    std::vector<std::vector<float>> inputArrayVector;
+
+    int index = 0;
+
+    std::string line;
+
+    while (numSamples--) { // Read a line from the file
+
+      std::vector<float> curRow(numFeature);
+
+      std::getline(file, line);
+
+      std::istringstream iss(
+          line); // Create an input string stream from the line
+
+      std::string numberStr;
+
+      int colIndex = 0;
+
+      while (std::getline(
+          iss, numberStr, ',')) { // Read each number separated by comma
+        //
+        float number = std::stof(numberStr); // Convert the string to float
+
+        if (colIndex < numFeature)
+
+          curRow[colIndex] = number;
+
+        colIndex++;
+      }
+
+      inputArrayVector.push_back(std::move(curRow));
+    }
+
+    file.close();
+
+    return inputArrayVector;
+  }
+
+  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(
+      std::vector<std::vector<float>> data,
+      int numSplit = 4,
+      bool createIndex = false) {
+    std::vector<std::shared_ptr<TempFilePath>> paths;
+
+    RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+    size_t numSamples = data.size();
+    size_t partitionSize = ceil(numSamples / numSplit);
+    for (size_t i = 0; i < numSplit; i++) {
+      auto startIdx = data.begin() + i * partitionSize;
+      auto endIdx = data.begin() + (i + 1) * partitionSize;
+      endIdx = (endIdx < data.end()) ? endIdx : data.end();
+      size_t numSampleInPartition = (i + 1) * partitionSize <= numSamples
+          ? partitionSize
+          : numSamples - i * partitionSize;
+
+      std::vector<std::vector<float>> partialData(startIdx, endIdx);
+      auto featureArrayVector = maker.arrayVector<float>(partialData, REAL());
+      RowVectorPtr inputRowVector;
+      if (createIndex) {
+        std::vector<int> indexes = randomGenerator.genIntRange(
+            i * partitionSize, i * partitionSize + numSampleInPartition);
+        auto indexFlatVector = maker.flatVector<int>(indexes);
+        inputRowVector = maker.rowVector(
+            {"idx", "v"},
+            {std::move(indexFlatVector), std::move(featureArrayVector)});
+      } else {
+        inputRowVector = maker.rowVector({"v"}, {featureArrayVector});
+      }
+      auto file = TempFilePath::create();
+      auto config = std::make_shared<facebook::velox::dwrf::Config>();
+      writeToFile(file->path, {inputRowVector}, config);
+      paths.push_back(file);
+    }
+
+    return paths;
+  }
+
   std::string process_mem_usage() {
     using std::ifstream;
     using std::ios_base;
@@ -238,199 +350,58 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     return "";
   }
 
-  std::string registerNNModelFromParams(
-      std::vector<int> kernelSizes,
-      std::vector<std::string> kernelNames,
-      int featureSize,
-      CataLog& cataLog,
-      int& modelGroupId_) {
-    checkOrAbort(
-        kernelSizes.size(),
-        kernelNames.size(),
-        "[ERROR] kernelSizes and kernelNames should have the same size.");
-    // use input size as random seed
-    RandomGenerator randomGenerator = RandomGenerator(-1, 1);
-    int modelGroupId = modelGroupId_++;
-    int functionId = 0;
-    int numberOfLayers = kernelNames.size();
-
-    optimization::registerVectorFunction(
-        "relu",
-        Relu::signatures(),
-        std::make_unique<Relu>(),
-        {},
-        true,
-        cataLog);
-    optimization::registerVectorFunction(
-        "softmax",
-        Softmax::signatures(),
-        std::make_unique<Softmax>(),
-        {},
-        true,
-        cataLog);
-    optimization::registerVectorFunction(
-        "argmax",
-        Argmax::signatures(),
-        std::make_unique<Argmax>(),
-        {},
-        true,
-        cataLog);
-
-    std::string modelComputationStr = "{}";
-    int lastSize = featureSize;
-
-    for (int i = 0; i < kernelSizes.size(); i++) {
-      int layerSize = kernelSizes[i];
-      std::string kernelName = kernelNames[i];
-
-      if (kernelName == "MatMul") {
-        std::vector<std::vector<float>> weights =
-            randomGenerator.genFloat2dVector(lastSize, layerSize);
-        std::string matMulName =
-            fmt::format("mat_mul{}_{}", modelGroupId_, functionId++);
-        optimization::registerVectorFunction(
-            matMulName,
-            MatrixMultiply::signatures(),
-            std::make_unique<MatrixMultiply>(
-                std::move(flattenVectorToPointer(weights)),
-                lastSize,
-                layerSize),
-            {},
-            true,
-            cataLog);
-        modelComputationStr = matMulName + "(" + modelComputationStr + ")";
-      } else if (kernelName == "MatAdd") {
-        std::vector<std::vector<float>> bias =
-            randomGenerator.genFloat2dVector(1, layerSize);
-
-        std::string matVectorAddName =
-            fmt::format("mat_vector_add{}_{}", modelGroupId_, functionId++);
-        optimization::registerVectorFunction(
-            matVectorAddName,
-            MatrixVectorAddition::signatures(),
-            std::make_unique<MatrixVectorAddition>(
-                std::move(flattenVectorToPointer(bias)), layerSize),
-            {},
-            true,
-            cataLog);
-        modelComputationStr =
-            matVectorAddName + "(" + modelComputationStr + ")";
-      } else if (kernelName == "ReLu") {
-        modelComputationStr = "relu(" + modelComputationStr + ")";
-      } else if (kernelName == "Softmax") {
-        modelComputationStr = "softmax(" + modelComputationStr + ")";
-      } else if (kernelName == "Argmax") {
-        modelComputationStr = "argmax(" + modelComputationStr + ")";
-      } else if (kernelName == "BatchNorm") {
-        std::vector<std::vector<float>> batchNormWeights =
-            randomGenerator.genFloat2dVector(1, layerSize);
-        std::vector<std::vector<float>> batchNormBias =
-            randomGenerator.genFloat2dVector(1, layerSize);
-        std::string batchNormName =
-            fmt::format("batch_norm_1d{}_{}", modelGroupId_, functionId++);
-        optimization::registerVectorFunction(
-            batchNormName,
-            BatchNorm1D::signatures(),
-            std::make_unique<BatchNorm1D>(
-                std::move(flattenVectorToPointer(batchNormWeights)),
-                std::move(flattenVectorToPointer(batchNormBias)),
-                layerSize),
-            {},
-            true,
-            cataLog);
-        modelComputationStr = batchNormName + "(" + modelComputationStr + ")";
-      } else {
-        throw std::runtime_error(
-            fmt::format("[ERROR] Unsupported kernel name: {}", kernelName));
-      }
-      lastSize = layerSize;
-    }
-    return modelComputationStr;
-  }
-
-  void benchmarkModel(
-      std::string modelType,
-      int numThreads,
-      int repeatRun,
-      int verbose,
-      bool rewrite,
-      int numData,
-      int featureSize,
-      int featureSize2,
-      int dataBatchSize = 256) {
-    VectorMaker maker{pool_.get()};
+  void runTest(int numThreads, int repeatRun, int verbose) {
     PlanBuilder queryPlan;
     CataLog cataLog;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
 
-    std::vector<std::vector<int>> sampledModelKernelSizes =
-        readModelStructureFromFile(
-            "/home/velox/velox/optimizer/tests/_sampledModel/model_layer_size.txt");
+    // Define data schema
+    auto movieTagDataRowType =
+        ROW({"mt_movie_id", "mt_relevance_score"}, {INTEGER(), ARRAY(REAL())});
 
-    std::vector<std::vector<std::string>> sampledModelKernelNames =
-        readModelKernelStrFromFile(
-            "/home/velox/velox/optimizer/tests/_sampledModel/model_kernel_name.txt");
-
-    std::cout << "[INFO] sampledModelKernelSizes: " << sampledModelKernelSizes
-              << std::endl;
-    std::cout << "[INFO] sampledModelKernelNames: " << sampledModelKernelNames
-              << std::endl;
-
-    // sample data
-    RandomGenerator randomGenerator = RandomGenerator(-1, 1);
-    std::vector<std::vector<float>> inputData =
-        randomGenerator.genFloat2dVector(numData, featureSize);
-
-    auto inputDataVector = maker.arrayVector<float>(inputData, REAL());
-    RowVectorPtr inputRowVector;
-
-    std::vector<std::vector<float>> inputData2;
-    ArrayVectorPtr inputData2Vector;
-
-    if (featureSize2 > 0) {
-      inputData2 = randomGenerator.genFloat2dVector(numData, featureSize2);
-      inputData2Vector = maker.arrayVector<float>(inputData2, REAL());
-      inputRowVector =
-          maker.rowVector({"input", "input2"}, {inputDataVector, inputData2Vector});
-    } else {
-      inputRowVector = maker.rowVector({"input"}, {inputDataVector});
+    // Get data paths
+    std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+    if (dataDirPrefix == "") {
+      // use default value:
+      dataDirPrefix = "/home/velox/resources/data/parquet/movielens/final/";
     }
 
-    // register model functions
-    std::string modelComputationStr = registerNNModelFromParams(
-        sampledModelKernelSizes[0],
-        sampledModelKernelNames[0],
-        featureSize,
-        cataLog,
-        modelGroupId_);
+    std::vector<std::string> movieTagDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "movie_tag_relevance");
 
+    int movieTagNumRows, movieTagNumCols;
+    readDataStats(
+        dataDirPrefix + "movie_tag_relevance_stats.txt",
+        movieTagNumRows,
+        movieTagNumCols);
+
+    PlanNodeId readMovieTagDataPlanNodeId;
     queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
-                    .values({inputRowVector})
-                    .project({fmt::format(modelComputationStr, "input")});
+                    .tableScan(movieTagDataRowType, {}, "")
+                    .capturePlanNodeId(readMovieTagDataPlanNodeId)
+                    .project({"mt_movie_id", "mt_relevance_score"});
+
+    cataLog.setIdAddressMap(
+        readMovieTagDataPlanNodeId,
+        movieTagDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(
+        readMovieTagDataPlanNodeId, "movie_relevance_tag");
+    std::shared_ptr<OutputStat> movieTagStats = std::make_shared<OutputStat>(
+        OutputStat(movieTagNumRows, movieTagNumCols));
+    Source movieTagSrc =
+        Source(readMovieTagDataPlanNodeId, Source::Type::FILE, movieTagStats);
+    cataLog.addSource(std::make_shared<Source>(movieTagSrc));
 
     float executeTime = runPlanWithCataLog(
         pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
-    std::cout << "[INFO] Query Plan: "
-              << queryPlan.planNode()->toString(true, true) << std::endl;
+
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+    std::cout << "[INFO] MovieTagTable Dimensions: "
+              << movieTagNumRows << " x " << movieTagNumCols << std::endl;
 
-    // std::string latencyOutputPath =
-    //     "/home/velox/velox/optimizer/tests/executionLatency.txt";
-    // writeStringToFile(std::to_string(executeTime), latencyOutputPath);
-
-    // auto serializedPlan = queryPlan.planNode()->serialize();
-    // std::string queryOutPutPath =
-    //     "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
-    // augmentSerializedPlan(serializedPlan, cataLog);
-    // writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
-
-    // auto queryPlanStr = queryPlan.planNode()->toString(true, true);
-    // std::string queryPlanStrOutputPath =
-    //     "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
-    // writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
-
-    // std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+    return;
   }
 
  private:
@@ -448,39 +419,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
   static inline int modelGroupId_ = 0;
 };
 
-DEFINE_string(modelType, "ffnn", "Model: ffnn, df, two-tower, llm");
-DEFINE_int32(num_repeat, 1, "Number of repeat run");
-DEFINE_int32(num_data, 1000, "Number of data to generate for the benchmark");
-DEFINE_int32(feature_size, 256, "Feature size for the model");
-DEFINE_int32(feature_size2, 0, "2nd input feature size for the model");
 DEFINE_int32(num_driver, 8, "Number of drivers");
 DEFINE_int32(verbose, 2, "Verbose");
-DEFINE_int32(data_batch_size, 256, "Data batch size");
-DEFINE_string(data_path, "", "Data path to store the generated data");
+DEFINE_int32(repeat_run, 4, "Number of repeat run");
 
 int main(int argc, char** argv) {
   memory::MemoryManager::initialize({});
   folly::init(&argc, &argv, false);
-  std::string modelType = FLAGS_modelType;
 
-  // bool rewrite = FLAGS_rewrite;
-  int repeatRun = FLAGS_num_repeat;
-  int numData = FLAGS_num_data;
-  int featureSize = FLAGS_feature_size;
-  int featureSize2 = FLAGS_feature_size2;
   int numDriver = FLAGS_num_driver;
   int verbose = FLAGS_verbose;
-  int dataBatchSize = FLAGS_data_batch_size;
-  std::string dataPath = FLAGS_data_path;
-  IntegratedMCTSTest demo;
+  int repeatRun = FLAGS_repeat_run;
+  SparseDenseMatMulConversionTest demo;
 
-  demo.benchmarkModel(
-      modelType,
-      numDriver,
-      repeatRun,
-      verbose,
-      numData,
-      featureSize,
-      featureSize2,
-      dataBatchSize);
+  demo.runTest(numDriver, repeatRun, verbose);
 }
