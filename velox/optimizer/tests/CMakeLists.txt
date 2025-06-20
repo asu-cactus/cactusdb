@@ -49,6 +49,12 @@ target_link_libraries(
   ml_functions
 )
 
+add_executable(model_query_profiler ModelQueryProfiler.cpp)
+target_link_libraries(
+  model_query_profiler
+  ml_functions
+)
+
 add_executable(reusable_mcts_test ReusableMCTSTest.cpp)
 target_link_libraries(
   reusable_mcts_test
@@ -58,5 +64,11 @@ target_link_libraries(
 add_executable(factorization_test FactorizeTest.cpp)
 target_link_libraries(
   factorization_test
+  ml_functions
+)
+
+add_executable(sparse_dense_conversion_test sparseDenseMatMulConversionTemplateTest.cpp)
+target_link_libraries(
+  sparse_dense_conversion_test
   ml_functions
 )
