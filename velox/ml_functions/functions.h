@@ -38,6 +38,10 @@
 #include "XGBoost.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
 
+#include <Eigen/Sparse>
+#include <map>
+#include <vector>
+
 using namespace facebook::velox;
 using namespace facebook::velox::test;
 
@@ -93,7 +97,6 @@ using namespace facebook::velox::test;
 //     return UdfCostCoefficient::getInstance().getCoefficient(name);
 //   }
 // };
-
 class MatrixMultiply : public MLFunction {
  public:
   MatrixMultiply(float* weights, int num_rows, int num_cols) {
@@ -264,6 +267,373 @@ class MatrixMultiply : public MLFunction {
   std::string weightsFile_;
 };
 
+class SparseMatrixMultiply : public MLFunction {
+ public:
+  SparseMatrixMultiply(float* weights, int num_rows, int num_cols) {
+    // Create a deep copy of the weights
+    weights_ = new float[num_rows * num_cols];
+    std::memcpy(weights_, weights, num_rows * num_cols * sizeof(float));
+    dims.push_back(num_rows);
+    dims.push_back(num_cols);
+  }
+
+  SparseMatrixMultiply(std::string weightsFile, int num_rows, int num_cols) {
+    weightsFile_ = weightsFile;
+    dims.push_back(num_rows);
+    dims.push_back(num_cols);
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& outputType,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+    bool use_gpu = false;
+    if (args.size() == 2) {
+      // an optional parameter can be passed to enable the GPU for mat_mul
+      use_gpu = args[1]->as<ConstantVector<bool>>()->valueAt(0);
+    }
+    if (use_gpu) {
+      // TODO: implementation of matrix multiplication in GPU
+      throw std::runtime_error(
+          "GPU implementation of Matrix Multiple is not implemented.");
+    } else {
+      std::cout<<"Applied sparse matrix multiply" <<std::endl;
+      // Ensure output vector is writable.
+      context.ensureWritable(rows, outputType, output);
+      output->clearNulls(rows);
+      auto arrayOutput = output->as<ArrayVector>();
+      auto sizes = arrayOutput->mutableSizes(rows.end());
+      auto rawSizes = sizes->asMutable<int32_t>();
+      auto offsets = arrayOutput->mutableOffsets(rows.end());
+      auto rawOffsets = offsets->asMutable<int32_t>();
+
+      // Initialize sizes and offsets to zero.
+      std::fill(rawSizes, rawSizes + rows.end(), 0);
+      std::fill(rawOffsets, rawOffsets + rows.end(), 0);
+
+      auto elementsOutput = arrayOutput->elements();
+      auto elementsPool = context.pool();
+
+      // Perform matrix multiplication logic.
+      exec::DecodedArgs decodedArgs(rows, args, context);
+      auto decodedInput = decodedArgs.at(0);
+      auto inputArray = decodedInput->base()->as<ArrayVector>();
+      auto inputElements = inputArray->elements();
+      float* inputValues = inputElements->values()->asMutable<float>();
+      auto inputOffsets = inputArray->rawOffsets();
+      auto inputSizes = inputArray->rawSizes();
+
+      // The map between the row index in the input data and the row index in
+      // the output data.
+      std::map<vector_size_t, vector_size_t> rowMap;
+      // for efficient check
+      std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+      // for iterating over the insert ordering
+      std::vector<vector_size_t> uniqueRawIndexeVector;
+      vector_size_t numUniqueRows = 0;
+      rows.applyToSelected([&](vector_size_t row) {
+        auto mappedIndexInRowData = decodedInput->index(row);
+        if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
+            uniqueRawIndexeSet.end()) {
+          // add it
+          rowMap[row] = numUniqueRows;
+          uniqueRawIndexeSet.insert(mappedIndexInRowData);
+          uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+          ++numUniqueRows;
+        } else {
+          // already added
+          rowMap[row] = rowMap[mappedIndexInRowData];
+        }
+      });
+
+      int numInputMatrixRows = numUniqueRows;
+      // Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+      // int rowIndex = 0;
+      // for (auto rawIndex : uniqueRawIndexeVector) {
+      //   Eigen::Map<const Eigen::VectorXf> rowVector(
+      //       inputValues + inputOffsets[rawIndex], dims[0]);
+      //   inputMatrix.row(rowIndex++) = rowVector;
+      // }
+
+      Eigen::SparseMatrix<float, Eigen::RowMajor> sparseInput(
+          numInputMatrixRows, dims[0]);
+      std::vector<Eigen::Triplet<float>> inputTriplets;
+
+      int rowIndex = 0;
+      for (auto rawIndex : uniqueRawIndexeVector) {
+        const float* rowPtr = inputValues + inputOffsets[rawIndex];
+        for (int col = 0; col < dims[0]; ++col) {
+          float val = rowPtr[col];
+          if (val != 0.0f) {
+            inputTriplets.emplace_back(rowIndex, col, val);
+          }
+        }
+        ++rowIndex;
+      }
+      sparseInput.setFromTriplets(inputTriplets.begin(), inputTriplets.end());
+
+      // Step 2: Construct the dense weight matrix
+      Eigen::Map<
+          Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
+          weightMatrix(weights_, dims[0], dims[1]);
+
+      // Step 3: Perform sparse × dense = dense
+      Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+          resultMatrix = sparseInput * weightMatrix;
+
+      // Eigen::Map<
+      //     Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic,
+      //     Eigen::RowMajor>> weightMatrix(weights_, dims[0], dims[1]);
+      // Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+      //     resultMatrix = inputMatrix * weightMatrix;
+
+      // Append results to the output vector.
+      auto baseOffset = elementsOutput->size();
+      elementsOutput->resize(baseOffset + rows.end() * dims[1]);
+
+      float* outputValues = elementsOutput->values()->asMutable<float>();
+      vector_size_t outputOffset = 0;
+      rows.applyToSelected([&](vector_size_t row) {
+        if (rowMap.find(row) == rowMap.end()) {
+          throw std::runtime_error(
+              "Mapped index not found for the result matrix.");
+        }
+        auto mappedIndexInResultMatrix = rowMap[row];
+        // auto mappedIndexInRawData = decodedInput->index(row);
+        rawOffsets[row] = outputOffset;
+        rawSizes[row] = dims[1];
+        std::memcpy(
+            outputValues + outputOffset,
+            resultMatrix.row(mappedIndexInResultMatrix).data(),
+            dims[1] * sizeof(float));
+
+        outputOffset += dims[1];
+      });
+      arrayOutput->setElements(elementsOutput);
+    }
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {
+        exec::FunctionSignatureBuilder()
+            .returnType("array(REAL)")
+            .argumentType("array(REAL)")
+            .build(),
+        // supports with additional flag: use_gpu
+        exec::FunctionSignatureBuilder()
+            .returnType("array(REAL)")
+            .argumentType("array(REAL)")
+            .argumentType("BOOLEAN")
+            .build()};
+  }
+
+  float* getTensor() const override {
+    return weights_;
+  }
+
+  std::string getFuncName() {
+    return getName();
+  };
+
+  static std::string getName() {
+    return "mat_mul";
+  };
+
+  std::string getWeightsFile() {
+    return weightsFile_;
+  }
+
+  void setWeights(float* weights) {
+    weights_ = weights;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    std::vector<double> coefficientVector = getCoefficientVector(getName());
+    int factor1 = inputDims[0];
+    int factor2 = dims[0];
+    int factor3 = dims[1];
+    float cost = coefficientVector[0] * factor1 * factor2 * factor3 +
+        coefficientVector[1] * factor1 + coefficientVector[2] * factor2 +
+        coefficientVector[3] * factor3;
+    return CostEstimate(cost, inputDims[0], dims[1]);
+  }
+
+ private:
+  float* weights_;
+  std::string weightsFile_;
+};
+
+class SparseMatrixMultiply1 : public MLFunction {
+ public:
+  SparseMatrixMultiply1(float* weights, int num_rows, int num_cols) {
+    weights_ = new float[num_rows * num_cols];
+    std::memcpy(weights_, weights, num_rows * num_cols * sizeof(float));
+    dims.push_back(num_rows);
+    dims.push_back(num_cols);
+    buildSparseMatrix(weights);
+  }
+
+  SparseMatrixMultiply1(std::string weightsFile, int num_rows, int num_cols) {
+    weightsFile_ = weightsFile;
+    dims.push_back(num_rows);
+    dims.push_back(num_cols);
+    throw std::runtime_error("Loading weights from file not implemented.");
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& outputType,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+    bool use_gpu = false;
+    if (args.size() == 2) {
+      use_gpu = args[1]->as<ConstantVector<bool>>()->valueAt(0);
+    }
+    if (use_gpu) {
+      throw std::runtime_error("GPU implementation not supported.");
+    } else {
+      context.ensureWritable(rows, outputType, output);
+      output->clearNulls(rows);
+      auto arrayOutput = output->as<ArrayVector>();
+      auto sizes = arrayOutput->mutableSizes(rows.end());
+      auto rawSizes = sizes->asMutable<int32_t>();
+      auto offsets = arrayOutput->mutableOffsets(rows.end());
+      auto rawOffsets = offsets->asMutable<int32_t>();
+
+      std::fill(rawSizes, rawSizes + rows.end(), 0);
+      std::fill(rawOffsets, rawOffsets + rows.end(), 0);
+
+      auto elementsOutput = arrayOutput->elements();
+      auto elementsPool = context.pool();
+
+      exec::DecodedArgs decodedArgs(rows, args, context);
+      auto decodedInput = decodedArgs.at(0);
+      auto inputArray = decodedInput->base()->as<ArrayVector>();
+      auto inputElements = inputArray->elements();
+      float* inputValues = inputElements->values()->asMutable<float>();
+      auto inputOffsets = inputArray->rawOffsets();
+      auto inputSizes = inputArray->rawSizes();
+
+      std::map<vector_size_t, vector_size_t> rowMap;
+      std::unordered_set<vector_size_t> uniqueRawIndexeSet;
+      std::vector<vector_size_t> uniqueRawIndexeVector;
+      vector_size_t numUniqueRows = 0;
+      rows.applyToSelected([&](vector_size_t row) {
+        auto mappedIndexInRowData = decodedInput->index(row);
+        if (uniqueRawIndexeSet.find(mappedIndexInRowData) ==
+            uniqueRawIndexeSet.end()) {
+          // add it
+          rowMap[row] = numUniqueRows;
+          uniqueRawIndexeSet.insert(mappedIndexInRowData);
+          uniqueRawIndexeVector.push_back(mappedIndexInRowData);
+          ++numUniqueRows;
+        } else {
+          // already added
+          rowMap[row] = rowMap[mappedIndexInRowData];
+        }
+      });
+
+      int numInputMatrixRows = numUniqueRows;
+      Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+          resultMatrix(numInputMatrixRows, dims[1]);
+
+      int rowIndex = 0;
+      for (auto rawIndex : uniqueRawIndexeVector) {
+        Eigen::Map<const Eigen::VectorXf> inputRow(
+            inputValues + inputOffsets[rawIndex], dims[0]);
+        Eigen::VectorXf resultDense = sparseWeightMatrix_ * inputRow;
+        resultMatrix.row(rowIndex++) =
+            resultDense.transpose(); // shape (1 x dims[1])
+      }
+
+      auto baseOffset = elementsOutput->size();
+      elementsOutput->resize(baseOffset + rows.end() * dims[1]);
+
+      float* outputValues = elementsOutput->values()->asMutable<float>();
+      vector_size_t outputOffset = 0;
+      rows.applyToSelected([&](vector_size_t row) {
+        auto mappedIndex = rowMap[row];
+        rawOffsets[row] = outputOffset;
+        rawSizes[row] = dims[1];
+        std::memcpy(
+            outputValues + outputOffset,
+            resultMatrix.row(mappedIndex).data(),
+            dims[1] * sizeof(float));
+        outputOffset += dims[1];
+      });
+
+      arrayOutput->setElements(elementsOutput);
+    }
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {
+        exec::FunctionSignatureBuilder()
+            .returnType("array(REAL)")
+            .argumentType("array(REAL)")
+            .build(),
+        exec::FunctionSignatureBuilder()
+            .returnType("array(REAL)")
+            .argumentType("array(REAL)")
+            .argumentType("BOOLEAN")
+            .build()};
+  }
+
+  float* getTensor() const override {
+    return weights_;
+  }
+
+  std::string getFuncName() {
+    return getName();
+  }
+
+  static std::string getName() {
+    return "mat_mul";
+  }
+
+  std::string getWeightsFile() {
+    return weightsFile_;
+  }
+
+  void setWeights(float* weights) {
+    buildSparseMatrix(weights);
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    std::vector<double> coefficientVector = getCoefficientVector(getName());
+    int factor1 = inputDims[0];
+    int factor2 = dims[0];
+    int factor3 = dims[1];
+    float cost = coefficientVector[0] * factor1 * factor2 * factor3 +
+        coefficientVector[1] * factor1 + coefficientVector[2] * factor2 +
+        coefficientVector[3] * factor3;
+    return CostEstimate(cost, inputDims[0], dims[1]);
+  }
+
+ private:
+  void buildSparseMatrix(float* weights) {
+    sparseWeightMatrix_.resize(dims[0], dims[1]);
+    std::vector<Eigen::Triplet<float>> triplets;
+    for (int i = 0; i < dims[0]; ++i) {
+      for (int j = 0; j < dims[1]; ++j) {
+        float val = weights[i * dims[1] + j];
+        if (val != 0.0f) {
+          triplets.emplace_back(i, j, val);
+        }
+      }
+    }
+    sparseWeightMatrix_.setFromTriplets(triplets.begin(), triplets.end());
+  }
+
+  float* weights_ = nullptr;
+  std::string weightsFile_;
+  std::vector<int> dims;
+  Eigen::SparseMatrix<float, Eigen::ColMajor> sparseWeightMatrix_;
+};
+
 class MatrixMultiply_b : public MLFunction {
  public:
   MatrixMultiply_b(int num_rows, int num_cols, int num_samples, int blocks) {
@@ -345,7 +715,6 @@ class MatrixMultiply_b : public MLFunction {
   std::string getFuncName() {
     return getName();
   };
-
   static std::string getName() {
     return "mat_mul_block";
   };
