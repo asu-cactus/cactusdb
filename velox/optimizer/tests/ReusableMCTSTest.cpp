@@ -266,7 +266,7 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
     return inputArrayVector;
   }
 
-    std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(
+  std::vector<std::shared_ptr<TempFilePath>> splitDataToFiles(
       std::vector<std::vector<float>> data,
       int numSplit = 4,
       bool createIndex = false) {
@@ -424,6 +424,9 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         registerTPCxAIUC8ModelFunctions(cataLog, pool_);
       } else if (queryTemplate == "uc10") {
         registerTPCxAIUC10ModelFunctions(cataLog, pool_);
+      } else if (
+          queryTemplate == "readCustomer" || queryTemplate == "readReview" ||
+          queryTemplate == "readOrderReturn") {
       } else {
         throw std::runtime_error(
             fmt::format("Non-supported query template: {}", queryTemplate));
@@ -689,6 +692,9 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         registerTPCxAIUC8ModelFunctions(cataLog, pool_);
       } else if (queryTemplate == "uc10") {
         registerTPCxAIUC10ModelFunctions(cataLog, pool_);
+      } else if (
+          queryTemplate == "readCustomer" || queryTemplate == "readReview" ||
+          queryTemplate == "readOrderReturn") {
       } else {
         throw std::runtime_error(
             fmt::format("Non-supported query template: {}", queryTemplate));
@@ -1029,6 +1035,9 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
         registerTPCxAIUC10ModelFunctions(cataLog, pool_);
       } else if (queryTemplate == "uc10-ml") {
         registerTPCxAIUC10MLModelFunctions(cataLog, pool_);
+      } else if (
+          queryTemplate == "readCustomer" || queryTemplate == "readReview" ||
+          queryTemplate == "readOrderReturn") {
       } else {
         throw std::runtime_error(
             fmt::format("Non-supported query template: {}", queryTemplate));
