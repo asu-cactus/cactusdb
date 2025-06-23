@@ -150,6 +150,9 @@ def load_tpcxai_final_to_datastore():
         "financial_transactions",
         "store_dept",
         "product_rating",
+        "customer",
+        "order_returns",
+        "review",
     ]
 
     conn_params = utils.get_connectorx_configuration()
