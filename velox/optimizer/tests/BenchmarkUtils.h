@@ -391,6 +391,36 @@ PlanBuilder setupTPCxAIQuery(
       {"store", "department", "num_of_week"}, {BIGINT(), VARCHAR(), BIGINT()});
   auto productRatingRowType =
       ROW({"user_id", "product_id"}, {BIGINT(), BIGINT()});
+  auto customerDataRowType =
+      ROW({"c_customer_sk",
+           "c_customer_id",
+           "c_current_addr_sk",
+           "c_first_name",
+           "c_last_name",
+           "c_preferred_cust_flag",
+           "c_birth_day",
+           "c_birth_month",
+           "c_birth_year",
+           "c_birth_country",
+           "c_login",
+           "c_email_address"},
+          {INTEGER(),
+           VARCHAR(),
+           INTEGER(),
+           VARCHAR(),
+           VARCHAR(),
+           VARCHAR(),
+           INTEGER(),
+           INTEGER(),
+           INTEGER(),
+           VARCHAR(),
+           VARCHAR(),
+           VARCHAR()});
+  auto orderReturnDataRowType =
+      ROW({"or_order_id", "or_product_id", "or_return_quantity"},
+          {INTEGER(), INTEGER(), INTEGER()});
+  auto reviewDataRowType = ROW({"id", "text"}, {INTEGER(), VARCHAR()});
+
   std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
 
   if (dataDirPrefix == "") {
@@ -413,12 +443,19 @@ PlanBuilder setupTPCxAIQuery(
       getFilePathsFromDir(dataDirPrefix + "store_dept");
   std::vector<std::string> productRatingDataPaths =
       getFilePathsFromDir(dataDirPrefix + "product_rating");
+  std::vector<std::string> customerDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "customer");
+  std::vector<std::string> orderReturnDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "order_returns");
+  std::vector<std::string> reviewDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "review");
 
   int finicialAccountNumRows, finicialAccountNumCols,
       finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
       orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
       productNumCols, storeDeptNumRows, storeDeptNumCols, productRatingNumRows,
-      productRatingNumCols;
+      productRatingNumCols, customerNumRows, customerNumCols,
+      orderReturnNumRows, orderReturnNumCols, reviewNumRows, reviewNumCols;
 
   readDataStats(
       dataDirPrefix + "financial_account_stats.txt",
@@ -441,6 +478,14 @@ PlanBuilder setupTPCxAIQuery(
       dataDirPrefix + "product_rating_stats.txt",
       productRatingNumRows,
       productRatingNumCols);
+  readDataStats(
+      dataDirPrefix + "customer_stats.txt", customerNumRows, customerNumCols);
+  readDataStats(
+      dataDirPrefix + "order_returns_stats.txt",
+      orderReturnNumRows,
+      orderReturnNumCols);
+  readDataStats(
+      dataDirPrefix + "review_stats.txt", reviewNumRows, reviewNumCols);
   if (queryType.find("uc3") != std::string::npos) {
     PlanNodeId readStoreDeptDataPlanNodeId;
     queryPlan =
@@ -683,6 +728,71 @@ PlanBuilder setupTPCxAIQuery(
             finicialTransactionsNumRows, finicialTransactionsNumCols)));
     cataLog.addSource(std::make_shared<Source>(financialAccountSrc));
     cataLog.addSource(std::make_shared<Source>(financialTransactionsSrc));
+  } else if (queryType == "readCustomer") {
+    PlanNodeId readCustomerDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(customerDataRowType, {}, "")
+                    .capturePlanNodeId(readCustomerDataPlanNodeId)
+                    .project(
+                        {"c_customer_sk",
+                         "c_customer_id",
+                         "c_current_addr_sk",
+                         "c_first_name",
+                         "c_last_name",
+                         "c_preferred_cust_flag",
+                         "c_birth_day",
+                         "c_birth_month",
+                         "c_birth_year",
+                         "c_birth_country",
+                         "c_login",
+                         "c_email_address"});
+    cataLog.setIdAddressMap(
+        readCustomerDataPlanNodeId,
+        customerDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(readCustomerDataPlanNodeId, "customer");
+    Source customerSrc = Source(
+        readCustomerDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(customerNumRows, customerNumCols)));
+    cataLog.addSource(std::make_shared<Source>(customerSrc));
+  } else if (queryType == "readReview") {
+    PlanNodeId readReviewDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(reviewDataRowType, {}, "")
+                    .capturePlanNodeId(readReviewDataPlanNodeId)
+                    .project({"id", "text"});
+    cataLog.setIdAddressMap(
+        readReviewDataPlanNodeId,
+        reviewDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(readReviewDataPlanNodeId, "review");
+    Source reviewSrc = Source(
+        readReviewDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(OutputStat(reviewNumRows, reviewNumCols)));
+    cataLog.addSource(std::make_shared<Source>(reviewSrc));
+  } else if (queryType == "readOrderReturn") {
+    PlanNodeId readOrderReturnDataPlanNodeId;
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(orderReturnDataRowType, {}, "")
+            .capturePlanNodeId(readOrderReturnDataPlanNodeId)
+            .project({"or_order_id", "or_product_id", "or_return_quantity"});
+    cataLog.setIdAddressMap(
+        readOrderReturnDataPlanNodeId,
+        orderReturnDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(
+        readOrderReturnDataPlanNodeId, "order_returns");
+    Source orderReturnSrc = Source(
+        readOrderReturnDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(orderReturnNumRows, orderReturnNumCols)));
+    cataLog.addSource(std::make_shared<Source>(orderReturnSrc));
+
   } else {
     throw std::runtime_error(
         "[setupTPCxAIQuery] Unsupported query type: " + queryType);
