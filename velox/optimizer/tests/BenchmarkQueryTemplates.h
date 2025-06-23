@@ -55,7 +55,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     timestampSeed = randomSeed;
   }
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
-  randomGenerator.setIntRange(0, 1);
+  randomGenerator.setIntRange(10, 3000);
   PlanBuilder queryPlan;
 
   if (workload == "movielens") {
@@ -212,8 +212,86 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       //     Source(readMovieTagDataPlanNodeId, Source::Type::FILE,
       //     movieTagStats);
       // cataLog.addSource(std::make_shared<Source>(movieTagSrc));
-    } else if (queryTemplate == "template4") {
+    } else if (queryTemplate == "template5") {
+        std::unordered_map<std::string, int> genderMapping;
+      genderMapping["F"] = 0;
+      genderMapping["M"] = 1;
+
+      optimization::registerVectorFunction(
+          "gender_encoder",
+          StringEncoder::signatures(),
+          std::make_unique<StringEncoder>(std::move(genderMapping)),
+          {},
+          true,
+          cataLog);
+
+      int modelGroupId_ = 0;
+
+
+      std::vector<std::vector<int>> userModelStructures = readModelStructureFromFile(
+          "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+       auto modelStr =
+          registerNNModel(userModelStructures[0], cataLog, modelGroupId_, false);
+
+    //   int hidden1 = randomGenerator.genRandomIntValue();
+    //   int hidden2 = randomGenerator.genRandomIntValue();
+    //   std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << std::endl;
+    //   auto modelStr =
+    //       registerNNModel({3, hidden1, hidden2, 3706}, cataLog, modelGroupId_, false);
+
+    //   auto modelStr =
+    //       registerNNModel({3, 1024, 2048, 3706}, cataLog, modelGroupId_, false);
+
+      std::cout << "[INFO] modelStr: " << modelStr << std::endl;
+
+      queryPlan =
+          PlanBuilder(planNodeIdGenerator)
+              .tableScan(userDataRowType, {}, "")
+              .capturePlanNodeId(readUserDataPlanNodeId)
+              .project(
+                  {"u_user_id",
+                   "u_age",
+                   "u_gender",                   
+                   "u_occupation",
+                   "u_zipcode",
+                   "gender_encoder(u_gender) as u_gender_encoded"})
+              .project({
+                  "u_user_id",
+                  "u_age",
+                   "u_gender",                   
+                   "u_occupation",
+                   "u_zipcode",
+                  "transform(concat(array_constructor(u_age), u_gender_encoded, array_constructor(u_occupation)), x-> CAST(x AS REAL)) as u_features" // ARRAY(REAL)
+              })
+              .project({
+                    "u_user_id", 
+                    "u_age",
+                    "u_gender",                   
+                    "u_occupation",
+                    "u_zipcode", 
+                    fmt::format(modelStr, "u_features")});
+        std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("user", timestampSeed);
+        for (auto expr : filterExpr) {
+          queryPlan = queryPlan.filter(expr);
         }
+
+      // select u_user_id, dnn(features) as pred from users;
+      // select dnn(features) as pred from users;
+      // Set data files for the data source nodes, it is okay if the node
+      // is actually not used
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId,
+          userDataPaths,
+          dwio::common::FileFormat::PARQUET);
+
+      cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+
+      std::shared_ptr<OutputStat> userStats =
+          std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
+      Source userSrc =
+          Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
+      cataLog.addSource(std::make_shared<Source>(userSrc));
+    }
 
     // TODO
   } else if (workload == "tpcxai") {
