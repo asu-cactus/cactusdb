@@ -426,7 +426,7 @@ PlanBuilder setupTPCxAIQuery(
   if (dataDirPrefix == "") {
     // use default value:
     dataDirPrefix =
-        "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
+        "/home/cactusdb/resources/data/parquet/tpcxai_sf1/final/serving/";
   }
 
   std::vector<std::string> finicialAccountDataPaths =
@@ -840,7 +840,7 @@ PlanBuilder setupMovielensDBQuery(
 
   if (dataDirPrefix == "") {
     // use default value:
-    dataDirPrefix = "/home/velox/resources/data/parquet/movielens/final/";
+    dataDirPrefix = "/home/cactusdb/resources/data/parquet/movielens/final/";
   }
 
   std::vector<std::string> movieTagDataPaths =
@@ -2730,7 +2730,7 @@ void outputAugmentedQueryPlan(
     std::string outputPath = "") {
   auto serializedPlan = plan.planNode()->serialize();
   if (outputPath == "") {
-    outputPath = "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+    outputPath = "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
   }
   augmentSerializedPlan(serializedPlan, cataLog);
   writeStringToFile(folly::toJson(serializedPlan), outputPath);
@@ -2740,7 +2740,7 @@ void outputStructuredQueryPlan(PlanBuilder& plan) {
   auto structuredPlan = plan.planNode()->toString(true, true);
   writeStringToFile(
       structuredPlan,
-      "/home/velox/velox/optimizer/tests/structuredQueryPlan.txt");
+      "/home/cactusdb/velox/optimizer/tests/structuredQueryPlan.txt");
 }
 
 void deleteFilesInFolder(const std::string& folderPath) {
@@ -3130,18 +3130,18 @@ void generateDummyData(
     int movieFeatureSize = dummyFeatureSizes[1];
 
     std::string tableStatsPath =
-        "/home/velox/velox/optimizer/tests/tableStats.txt";
+        "/home/cactusdb/velox/optimizer/tests/tableStats.txt";
     remove(tableStatsPath.c_str());
 
     std::vector<std::vector<int>> userModelStructures =
         readModelStructureFromFile(
-            "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+            "/home/cactusdb/velox/optimizer/tests/user_dummy_model_structure.txt");
     std::vector<std::vector<int>> movieModelStructures =
         readModelStructureFromFile(
-            "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
+            "/home/cactusdb/velox/optimizer/tests/movie_dummy_model_structure.txt");
     std::vector<std::vector<int>> tagModelStructures =
         readModelStructureFromFile(
-            "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
+            "/home/cactusdb/velox/optimizer/tests/tag_dummy_model_structure.txt");
 
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
     RandomSampler randomSampler = RandomSampler(0);
@@ -3463,12 +3463,12 @@ PlanBuilder setupProfileQueryPlan(
 
   std::vector<std::vector<int>> userModelStructures =
       readModelStructureFromFile(
-          "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+          "/home/cactusdb/velox/optimizer/tests/user_dummy_model_structure.txt");
   std::vector<std::vector<int>> movieModelStructures =
       readModelStructureFromFile(
-          "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
+          "/home/cactusdb/velox/optimizer/tests/movie_dummy_model_structure.txt");
   std::vector<std::vector<int>> tagModelStructures = readModelStructureFromFile(
-      "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
+      "/home/cactusdb/velox/optimizer/tests/tag_dummy_model_structure.txt");
 
   if (mode == "ml") {
     RowTypePtr userDataRowType = cataLog.getRegisteredDataSrcSchema("user");
@@ -3958,12 +3958,12 @@ void checkValidProfileQueryGenerationSetting(
 
   std::vector<std::vector<int>> userModelStructures =
       readModelStructureFromFile(
-          "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+          "/home/cactusdb/velox/optimizer/tests/user_dummy_model_structure.txt");
   std::vector<std::vector<int>> movieModelStructures =
       readModelStructureFromFile(
-          "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
+          "/home/cactusdb/velox/optimizer/tests/movie_dummy_model_structure.txt");
   std::vector<std::vector<int>> tagModelStructures = readModelStructureFromFile(
-      "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
+      "/home/cactusdb/velox/optimizer/tests/tag_dummy_model_structure.txt");
 
   if (queryTemplate.find("user") != std::string::npos &&
       userFeatureSize != userModelStructures[0][0])

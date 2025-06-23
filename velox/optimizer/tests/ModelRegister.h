@@ -763,7 +763,7 @@ void registerMLTrendingModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnModelPath =
-      "/home/velox/resources/model/movielens/final/velox/q1_ffnn_weights.h5";
+      "/home/cactusdb/resources/model/movielens/final/velox/q1_ffnn_weights.h5";
   std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
   std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
   std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
@@ -840,7 +840,7 @@ void registerMLTrendingModelFunctions(
       "llm_ffnn_minmax_scaler",
       MinMaxScaler::signatures(),
       std::make_unique<MinMaxScaler>(
-          "/home/velox/resources/model/movielens/final/velox/q1_ffnn_minmax_scaler.txt"),
+          "/home/cactusdb/resources/model/movielens/final/velox/q1_ffnn_minmax_scaler.txt"),
       {},
       true,
       catalog);
@@ -965,7 +965,7 @@ void registerMLInterestMovieModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnModelPath =
-      "/home/velox/resources/model/movielens/final/velox/interest_ffnn_model_weights.h5";
+      "/home/cactusdb/resources/model/movielens/final/velox/interest_ffnn_model_weights.h5";
   std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
   std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
   std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
@@ -1060,7 +1060,7 @@ void registerMLInterestMovieModelFunctions(
       "llm_ffnn_interest_scaler",
       MinMaxScaler::signatures(),
       std::make_unique<MinMaxScaler>(
-          "/home/velox/resources/model/movielens/final/velox/q2_ffnn_interest_scaler.txt"),
+          "/home/cactusdb/resources/model/movielens/final/velox/q2_ffnn_interest_scaler.txt"),
       {},
       true,
       catalog);
@@ -1080,7 +1080,7 @@ void registerMLQ3UserMovieInterestModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnModelPath =
-      "/home/velox/resources/model/movielens/final/velox/q3_user_movie_interest_ffnn_weight.h5";
+      "/home/cactusdb/resources/model/movielens/final/velox/q3_user_movie_interest_ffnn_weight.h5";
   std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
   std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
   std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
@@ -1145,7 +1145,7 @@ void registerMLQ3UserMovieRatingModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnModelPath =
-      "/home/velox/resources/model/movielens/final/velox/q3_user_movie_rating_ffnn_weight.h5";
+      "/home/cactusdb/resources/model/movielens/final/velox/q3_user_movie_rating_ffnn_weight.h5";
   std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
   std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
   std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
@@ -1229,7 +1229,7 @@ void registerMLMovieTagEncoderModelFunctions1(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnEncoderModelPath =
-      "/home/velox/resources/model/movielens/final/velox/movie_tag_standalone_encoder_weight.h5";
+      "/home/cactusdb/resources/model/movielens/final/velox/movie_tag_standalone_encoder_weight.h5";
   std::vector<std::vector<float>> w1 =
       loadHDF5Array(ffnnEncoderModelPath, "w1");
   std::vector<std::vector<float>> b1 =
@@ -1279,7 +1279,7 @@ void registerMLMovieTagEncoderModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnEncoderModelPath =
-      "/home/velox/resources/model/movielens/final/velox/movie_tag_standalone_encoder_weight.h5";
+      "/home/cactusdb/resources/model/movielens/final/velox/movie_tag_standalone_encoder_weight.h5";
   std::vector<std::vector<float>> w1 =
       loadHDF5Array(ffnnEncoderModelPath, "w1");
   std::vector<std::vector<float>> b1 =
@@ -1456,7 +1456,7 @@ void registerTPCxAIUC10ModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnModelPath =
-      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase10_ffnn_weight.h5";
+      "/home/cactusdb/resources/model/tpcxai_sf1/final/velox/usecase10_ffnn_weight.h5";
   std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
   std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
   std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
@@ -1512,7 +1512,7 @@ void registerTPCxAIUC10MLModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnModelPath =
-      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase10_lr_model_weight.h5";
+      "/home/cactusdb/resources/model/tpcxai_sf1/final/velox/usecase10_lr_model_weight.h5";
   std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
   std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
 
@@ -1548,7 +1548,7 @@ void registerTPCxAIUC3ModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnModelPath =
-      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase3_ffnn_weight.h5";
+      "/home/cactusdb/resources/model/tpcxai_sf1/final/velox/usecase3_ffnn_weight.h5";
   std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
   std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
   std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
@@ -1685,7 +1685,7 @@ void registerTPCxAIUC8ModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string ffnnModelPath =
-      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_ffnn_weight.h5";
+      "/home/cactusdb/resources/model/tpcxai_sf1/final/velox/usecase8_ffnn_weight.h5";
   std::vector<std::vector<float>> w1 = loadHDF5Array(ffnnModelPath, "w1");
   std::vector<std::vector<float>> b1 = loadHDF5Array(ffnnModelPath, "b1");
   std::vector<std::vector<float>> w2 = loadHDF5Array(ffnnModelPath, "w2");
@@ -1835,7 +1835,7 @@ void registerTPCxAIUC7MLModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string svdModelPath =
-      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_svd.h5";
+      "/home/cactusdb/resources/model/tpcxai_sf1/final/velox/usecase8_svd.h5";
   std::vector<std::vector<float>> bu = loadHDF5Array(svdModelPath, "bu");
   std::vector<std::vector<float>> bi = loadHDF5Array(svdModelPath, "bi");
   std::vector<std::vector<float>> pu = loadHDF5Array(svdModelPath, "pu");
@@ -1862,7 +1862,7 @@ void registerTPCxAIUC8MLModelFunctions(
   VectorMaker maker{pool_.get()};
 
   std::string xgboostModelPath =
-      "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_ml_xgboost_model/0.txt";
+      "/home/cactusdb/resources/model/tpcxai_sf1/final/velox/usecase8_ml_xgboost_model/0.txt";
 
   optimization::registerVectorFunction(
       "decision_tree_predict",
@@ -1894,7 +1894,7 @@ void registerTPCxAIUC8MLModelFunctions(
       "decision_forest_predict",
       TreePrediction::signatures(),
       std::make_unique<ForestPrediction>(
-          "/home/velox/resources/model/tpcxai_sf1/final/velox/usecase8_ml_xgboost_model",
+          "/home/cactusdb/resources/model/tpcxai_sf1/final/velox/usecase8_ml_xgboost_model",
           4,
           false),
       {},
@@ -2053,10 +2053,11 @@ void normalizeAge(
       "user_age_minmax_scaler",
       MinMaxScaler::signatures(),
       std::make_unique<MinMaxScaler>(
-          fmt::format("/home/velox/resources/model/movielens/final/velox/{}", fileName)),
+          "/home/cactusdb/resources/model/movielens/final/velox/q4_user_age_minmax_scaler.txt"),
       {},
       true,
       catalog);   
+
     }
 
 void normalizeOccupation(
@@ -2069,7 +2070,7 @@ void normalizeOccupation(
       "user_occupation_minmax_scaler",
       MinMaxScaler::signatures(),
       std::make_unique<MinMaxScaler>(
-          fmt::format("/home/velox/resources/model/movielens/final/velox/{}", fileName)),
+          "/home/cactusdb/resources/model/movielens/final/velox/q4_user_occupation_minmax_scaler.txt"),
       {},
       true,
       catalog);   
@@ -2119,7 +2120,7 @@ void normalizePopularity(
       "movie_popularity_minmax_scaler",
       MinMaxScaler::signatures(),
       std::make_unique<MinMaxScaler>(
-          "/home/velox/resources/model/movielens/final/velox/q9_movie_popularity_minmax_scaler.txt"),
+          "/home/cactusdb/resources/model/movielens/final/velox/q9_movie_popularity_minmax_scaler.txt"),
       /*extraParameters=*/{},
       /*isDeterministic=*/true,
       catalog);
@@ -2133,7 +2134,7 @@ void normalizeVoteAverage(
       "movie_vote_average_minmax_scaler",
       MinMaxScaler::signatures(),
       std::make_unique<MinMaxScaler>(
-          "/home/velox/resources/model/movielens/final/velox/q9_movie_vote_avg_minmax_scaler.txt"),
+          "/home/cactusdb/resources/model/movielens/final/velox/q9_movie_vote_avg_minmax_scaler.txt"),
       {},
       true,
       catalog);
@@ -2147,7 +2148,7 @@ void normalizeVoteCount(
       "movie_vote_count_minmax_scaler",
       MinMaxScaler::signatures(),
       std::make_unique<MinMaxScaler>(
-          "/home/velox/resources/model/movielens/final/velox/q9_movie_vote_count_minmax_scaler.txt"),
+          "/home/cactusdb/resources/model/movielens/final/velox/q9_movie_vote_count_minmax_scaler.txt"),
       {},
       true,
       catalog);
@@ -2161,7 +2162,7 @@ void normalizeRating(
       "rating_minmax_scaler",
       MinMaxScaler::signatures(),
       std::make_unique<MinMaxScaler>(
-          "/home/velox/resources/model/movielens/final/velox/q9_rating_rating_minmax_scaler.txt"),
+          "/home/cactusdb/resources/model/movielens/final/velox/q9_rating_rating_minmax_scaler.txt"),
       {},
       true,
       catalog);
