@@ -2483,6 +2483,16 @@ std::vector<std::string> sampleUserMovieFilterExpr(
         predefinedMovieFilterExprs.begin(),
         predefinedMovieFilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
+  } else if (filterTable == "user_movie_genres"){
+    randomGenerator.setIntRange(1, 3);
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        predefinedUserFilterExprs.begin(),
+        predefinedUserFilterExprs.end());
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        movieGenresFilterExprs);
+    sampleFilterPool = combinedFilterExprSets;
   } else {
     throw std::invalid_argument(
         "Invalid table for sampling filter expression: " + filterTable);
