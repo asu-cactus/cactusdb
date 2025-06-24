@@ -267,9 +267,11 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                     "u_occupation",
                     "u_zipcode", 
                     fmt::format(modelStr, "features")});
-        std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("user", timestampSeed);
-        for (auto expr : filterExpr) {
-          queryPlan = queryPlan.filter(expr);
+        if (generateFilter) {
+            std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("user", timestampSeed);
+            for (auto expr : filterExpr) {
+            queryPlan = queryPlan.filter(expr);
+            }
         }
 
       // select u_user_id, dnn(features) as pred from users;
@@ -289,11 +291,12 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
       cataLog.addSource(std::make_shared<Source>(userSrc));
     } else if (queryTemplate == "template6") {
-        std::string svdModelPath = "/home/velox/resources/model/tpcxai_sf1/final/velox/movielens_template6_svd.h5";
+        std::string svdModelPath = "/home/velox/resources/model/movielens/final/velox/movielens_template6_svd.h5";
         std::vector<std::vector<float>> bu = loadHDF5Array(svdModelPath, "bu");
         std::vector<std::vector<float>> bi = loadHDF5Array(svdModelPath, "bi");
         std::vector<std::vector<float>> pu = loadHDF5Array(svdModelPath, "pu");
         std::vector<std::vector<float>> qi = loadHDF5Array(svdModelPath, "qi");
+
         optimization::registerVectorFunction(
             "svd",
             SVD::signatures(),
@@ -302,15 +305,79 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                 std::move(flattenVectorToPointer(bi)),
                 std::move(flattenVectorToPointer(pu)),
                 std::move(flattenVectorToPointer(qi)),
-                7071,
-                6818,
-                100),
+                pu.size(),
+                qi.size(),
+                pu[0].size()),
             {},
             true,
             cataLog);
+
+        queryPlan = PlanBuilder(planNodeIdGenerator)
+            .tableScan(userDataRowType, {}, "")
+            .capturePlanNodeId(readUserDataPlanNodeId)
+            .nestedLoopJoin(
+                PlanBuilder(planNodeIdGenerator)
+                    .tableScan(movieDataRowType, {}, "")
+                    .capturePlanNodeId(readMovieDataPlanNodeId)
+                    .planNode(),
+                { // what columns to project from the join
+                    "u_user_id",
+                    "m_movie_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "u_zipcode",
+                   "m_genres"
+                }
+            ).project({
+                "CAST (u_user_id AS INTEGER) AS u_user_id",
+                "CAST (m_movie_id as INTEGER) AS m_movie_id",
+                "u_age",
+                "u_gender",
+                "u_occupation",
+                "u_zipcode",
+                "m_genres"})
+            .project({
+                "u_user_id", "m_movie_id", "svd(u_user_id, m_movie_id) as pred", 
+                "u_age",
+                "u_gender",
+                "u_occupation",
+                "u_zipcode",
+                "m_genres"});
+
+        if (generateFilter) {
+            std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("user_movie_genres", timestampSeed);
+            for (auto expr : filterExpr) {
+                queryPlan = queryPlan.filter(expr);
+            }
+        }
+        // — user side
+        cataLog.setIdAddressMap(
+            readUserDataPlanNodeId,
+            userDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readUserDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(userNumRows, userNumCols))));
+
+        // — movie side
+        cataLog.setIdAddressMap(
+            readMovieDataPlanNodeId,
+            movieDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readMovieDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+  
+    }  else if (queryTemplate == "template7") {
+
     }
 
-    // TODO
+
   } else if (workload == "tpcxai") {
     // TODO
   } else {
