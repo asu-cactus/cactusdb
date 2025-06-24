@@ -31,6 +31,7 @@
 #include "velox/optimizer/Register.h"
 #include "velox/optimizer/RuleManager.h"
 #include "velox/optimizer/tests/BenchmarkUtils.h"
+#include "velox/optimizer/tests/ModelRegister.h"
 
 using namespace optimization;
 using namespace facebook::velox;
@@ -213,19 +214,12 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       //     movieTagStats);
       // cataLog.addSource(std::make_shared<Source>(movieTagSrc));
     } else if (queryTemplate == "template5") {
-        std::unordered_map<std::string, int> genderMapping;
-      genderMapping["F"] = 0;
-      genderMapping["M"] = 1;
-
-      optimization::registerVectorFunction(
-          "gender_encoder",
-          StringEncoder::signatures(),
-          std::make_unique<StringEncoder>(std::move(genderMapping)),
-          {},
-          true,
-          cataLog);
-
-      int modelGroupId_ = 0;
+        // gender_encoder
+        registerGenderEncoder(cataLog, pool_);
+        // user_age_minmax_scaler
+        normalizeAge(cataLog,pool_, "q5_user_age_minmax_scaler.txt");
+        // user_occupation_minmax_scaler
+        normalizeOccupation(cataLog,pool_, "q5_user_occupation_minmax_scaler.txt");
 
 
       std::vector<std::vector<int>> userModelStructures = readModelStructureFromFile(
@@ -254,14 +248,17 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                    "u_gender",                   
                    "u_occupation",
                    "u_zipcode",
-                   "gender_encoder(u_gender) as u_gender_encoded"})
+                   "gender_encoder(u_gender) as u_gender_encoded",
+                    "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as u_age_encoded",
+                    "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as u_occupation_encoded"})
               .project({
                   "u_user_id",
                   "u_age",
                    "u_gender",                   
                    "u_occupation",
                    "u_zipcode",
-                  "transform(concat(array_constructor(u_age), u_gender_encoded, array_constructor(u_occupation)), x-> CAST(x AS REAL)) as u_features" // ARRAY(REAL)
+                   "transform(concat(u_gender_encoded,u_age_encoded,u_occupation_encoded), x-> CAST(x AS REAL)) as features",
+
               })
               .project({
                     "u_user_id", 
@@ -269,7 +266,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                     "u_gender",                   
                     "u_occupation",
                     "u_zipcode", 
-                    fmt::format(modelStr, "u_features")});
+                    fmt::format(modelStr, "features")});
         std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("user", timestampSeed);
         for (auto expr : filterExpr) {
           queryPlan = queryPlan.filter(expr);
@@ -291,6 +288,26 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       Source userSrc =
           Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
       cataLog.addSource(std::make_shared<Source>(userSrc));
+    } else if (queryTemplate == "template6") {
+        std::string svdModelPath = "/home/velox/resources/model/tpcxai_sf1/final/velox/movielens_template6_svd.h5";
+        std::vector<std::vector<float>> bu = loadHDF5Array(svdModelPath, "bu");
+        std::vector<std::vector<float>> bi = loadHDF5Array(svdModelPath, "bi");
+        std::vector<std::vector<float>> pu = loadHDF5Array(svdModelPath, "pu");
+        std::vector<std::vector<float>> qi = loadHDF5Array(svdModelPath, "qi");
+        optimization::registerVectorFunction(
+            "svd",
+            SVD::signatures(),
+            std::make_unique<SVD>(
+                std::move(flattenVectorToPointer(bu)),
+                std::move(flattenVectorToPointer(bi)),
+                std::move(flattenVectorToPointer(pu)),
+                std::move(flattenVectorToPointer(qi)),
+                7071,
+                6818,
+                100),
+            {},
+            true,
+            cataLog);
     }
 
     // TODO
