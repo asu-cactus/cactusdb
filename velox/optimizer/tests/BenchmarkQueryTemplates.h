@@ -329,14 +329,15 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                    "u_zipcode",
                    "m_genres"
                 }
-            ).project({
-                "CAST (u_user_id AS INTEGER) AS u_user_id",
-                "CAST (m_movie_id as INTEGER) AS m_movie_id",
-                "u_age",
-                "u_gender",
-                "u_occupation",
-                "u_zipcode",
-                "m_genres"})
+            )
+            // .project({
+            //     "CAST (u_user_id AS INTEGER) AS u_user_id",
+            //     "CAST (m_movie_id as INTEGER) AS m_movie_id",
+            //     "u_age",
+            //     "u_gender",
+            //     "u_occupation",
+            //     "u_zipcode",
+            //     "m_genres"})
             .project({
                 "u_user_id", "m_movie_id", "svd(u_user_id, m_movie_id) as pred", 
                 "u_age",
@@ -373,15 +374,97 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                 Source::Type::FILE,
                 std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
   
-    }  else if (queryTemplate == "template7") {
-       
-    } else if (queryTemplate == "template10") {
-         // Embedding
+    } else if (queryTemplate == "template7") {
+        // Embedding
         VectorMaker maker{pool_.get()};
-        std::cout << "[INFO] Test of Embedding." << std::endl;
+        constexpr int numUserEmbeddings = 6041;
+        constexpr int numMovieEmbedding = 3707;
+        constexpr int embeddingDims = 32;
+
+        std::vector<std::vector<float>> userEmbedWeights =
+            randomGenerator.genFloat2dVector(numUserEmbeddings, embeddingDims);
+        auto userWeightsVector = maker.arrayVector<float>(userEmbedWeights, REAL());
+        exec::registerVectorFunction(
+            "user_embedding",
+            Embedding::signatures(),
+            std::make_unique<Embedding>(
+                userWeightsVector->elements()->values()->asMutable<float>(),
+                numUserEmbeddings,
+                embeddingDims));
+
+        std::vector<std::vector<float>> movieEmbedWeights =
+            randomGenerator.genFloat2dVector(numMovieEmbedding, embeddingDims);
+        auto movieWeightsVector = maker.arrayVector<float>(movieEmbedWeights, REAL());
+        exec::registerVectorFunction(
+            "movie_embedding",
+            Embedding::signatures(),
+            std::make_unique<Embedding>(
+                movieWeightsVector->elements()->values()->asMutable<float>(),
+                numUserEmbeddings,
+                embeddingDims));
+
+        // Cosine Similarity
+        exec::registerVectorFunction(
+            "cosine_similarity",
+            CosineSimilarity::signatures(),
+            std::make_unique<CosineSimilarity>(embeddingDims));
+
+        // Query Plan
+       queryPlan = PlanBuilder(planNodeIdGenerator)
+            .tableScan(userDataRowType, {}, "")
+            .capturePlanNodeId(readUserDataPlanNodeId)
+            .nestedLoopJoin(
+                PlanBuilder(planNodeIdGenerator)
+                    .tableScan(movieDataRowType, {}, "")
+                    .capturePlanNodeId(readMovieDataPlanNodeId)
+                    .planNode(),
+                { // what columns to project from the join
+                    "u_user_id", "m_movie_id",
+                    "u_age", "u_gender", "u_occupation", "u_zipcode", "m_genres"
+                })
+            .project({
+                "u_user_id", "m_movie_id",
+                "u_age", "u_gender", "u_occupation", "u_zipcode", "m_genres",
+                "user_embedding(array_constructor(u_user_id)) as user_embed",
+                "movie_embedding(array_constructor(m_movie_id)) as movie_embed"})
+            .project({ 
+                "u_user_id", "m_movie_id",
+                "u_age", "u_gender", "u_occupation", "u_zipcode", "m_genres",
+                "cosine_similarity(user_embed, movie_embed) as pred"
+            });
+
+        if (generateFilter) {
+            std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("user_movie_genres", timestampSeed);
+            for (auto expr : filterExpr) {
+                queryPlan = queryPlan.filter(expr);
+            }
+        }
+        // — user side
+        cataLog.setIdAddressMap(
+            readUserDataPlanNodeId,
+            userDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readUserDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(userNumRows, userNumCols))));
+
+        // — movie side
+        cataLog.setIdAddressMap(
+            readMovieDataPlanNodeId,
+            movieDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readMovieDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+    } else if (queryTemplate == "template10") {
+        // Embedding
+        VectorMaker maker{pool_.get()};
         constexpr int numEmbeddings = 3707; // 3707
         constexpr int embeddingDims = 256; // 256
-        // constexpr int numSamples = 8;
 
         RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
         randomGenerator.setIntRange(0, numEmbeddings - 1);
@@ -420,26 +503,9 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                     .capturePlanNodeId(readMovieDataPlanNodeId)
                     .planNode(),
                 { // what columns to project from the join
-                    "u_user_id",
-                    "m_movie_id",
-                   "u_age",
-                   "u_gender",
-                   "u_occupation",
-                   "u_zipcode",
-                   "m_genres"
-                }
-            )
-            // .project({
-            //     "u_user_id",
-            //     "CAST (m_movie_id as INTEGER) AS m_movie_id",
-            //     "u_age",
-            //     "u_gender",
-            //     "u_occupation",
-            //     "u_zipcode",
-            //     "m_genres", 
-            //     "gender_encoder(u_gender) as gender_encoded",
-            //     "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as age_encoded",
-            //     "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as occupation_encoded"})
+                    "u_user_id", "m_movie_id",
+                    "u_age", "u_gender", "u_occupation", "u_zipcode", "m_genres"
+                })
             .project({
                 "u_user_id", "m_movie_id", "embedding(array_constructor(m_movie_id)) as embed", 
                 "u_age", "u_gender", "u_occupation", "u_zipcode", "m_genres",
