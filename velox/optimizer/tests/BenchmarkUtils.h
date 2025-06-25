@@ -2076,9 +2076,16 @@ PlanBuilder setupMovielensDBQuery(
                    "cosine_similarity_q3(mt_relevance_ir, mt_relevance_ir1) as cosine_sim",
                    "user_movie_interest_pred",
                    "user_movie_rating_pred"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "m_genres",
+                   "user_movie_interest_pred",
+                   "user_movie_rating_pred",
+                   "cosine_sim"})
               .filter("user_movie_interest_pred = 1")
-              .filter("m_genres LIKE '\%Adventure\%'")
-              .filter("user_movie_rating_pred = 5");
+              .filter("user_movie_rating_pred = 5")
+              .filter("m_genres LIKE '\%Adventure\%'");
 
     } else if (queryOptType.find("mlq3-pushdown") != std::string::npos) {
       auto movieTagQueryPlan =
@@ -2205,12 +2212,14 @@ PlanBuilder setupMovielensDBQuery(
                    "mt_movie_id",
                    "mt_relevance_score",
                    "m_popularity",
+                   "m_genres",
                    "m_vote_average"})
               .project({
                   "m_movie_id",
                   "mt_movie_id",
                   "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_ir",
                   "m_popularity",
+                  "m_genres",
                   "m_vote_average",
               })
               .project({
@@ -2218,6 +2227,7 @@ PlanBuilder setupMovielensDBQuery(
                   "mt_movie_id",
                   "mt_relevance_ir",
                   "m_popularity",
+                  "m_genres",
                   "m_vote_average",
               });
       queryPlan =
@@ -2243,23 +2253,28 @@ PlanBuilder setupMovielensDBQuery(
                    "mt_movie_id",
                    "mt_relevance_ir",
                    "m_popularity",
+                   "m_genres",
                    "m_vote_average"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
                    "mt_movie_id",
+                   "m_genres",
                    "mt_relevance_ir",
                    "transform(array_constructor(u_age, u_gender, u_occupation, m_popularity, m_vote_average), x->Cast(x AS real))   AS model_features"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
                    "model_features",
+                   "m_genres",
                    "mt_relevance_ir",
                    "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(model_features))))))))) AS user_movie_interest_pred"})
               .filter("user_movie_interest_pred = 1")
               .project(
                   {"u_user_id",
                    "m_movie_id",
+                   "m_genres",
+                   //  "user_movie_interest_pred",
                    "mt_relevance_ir",
                    "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(model_features))))))))) AS user_movie_rating_pred",
                    "model_features"})
@@ -2274,7 +2289,7 @@ PlanBuilder setupMovielensDBQuery(
               .project(
                   {"u_user_id",
                    "m_movie_id",
-                   "cosine_similarity_q3(mt_relevance_ir, mt_relevance_ir1) as cosine_sim"});
+                   "cosine_similarity_q3(mt_relevance_ir, mt_relevance_ir1) as cosine_sim "});
     }
     cataLog.setIdAddressMap(
         readMovieTagDataPlanNodeId,

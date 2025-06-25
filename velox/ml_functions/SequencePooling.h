@@ -104,7 +104,7 @@ class SequencePooling : public MLFunction {
     });
 
     int numResultMatrixRows = numUniqueRows;
-    Eigen::MatrixXf resultMatix(numResultMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> resultMatix(numResultMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       int numEmbeddingValues = inputSizes[rawIndex];
@@ -140,7 +140,7 @@ class SequencePooling : public MLFunction {
     elementsOutput->resize(baseOffset + rows.end() * dims[0]);
     float* outputValues = elementsOutput->values()->asMutable<float>();
 
-    vector_size_t outputOffset = 0;
+    vector_size_t outputOffset = baseOffset;
 
     rows.applyToSelected([&](vector_size_t row) {
       if (rowMap.find(row) == rowMap.end()) {
