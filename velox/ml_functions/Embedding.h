@@ -91,7 +91,7 @@ class Embedding : public MLFunction {
     elementsOutput->resize(baseOffset + numEmbeddingToRetireve * dims[1]);
     float* outputValues = elementsOutput->values()->asMutable<float>();
 
-    vector_size_t outputOffset = 0;
+    vector_size_t outputOffset = baseOffset;
     rows.applyToSelected([&](vector_size_t row) {
       int numSubIndices = arrayVector->sizeAt(row);
       int indicesOffset = arrayVector->offsetAt(row);

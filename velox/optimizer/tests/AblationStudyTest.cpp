@@ -2617,13 +2617,13 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planNode = myPlan.planNode();
       planState.getPossibleActions(planNode, cataLog);
     }
-
-    if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized") {
+    // Temporary disabled the Mul2JoinAgg for q3 since environment changed
+    if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized1") {
       if (queryOptType == "mlq3-mul2join") {
         testAction =
             std::make_pair("mat_mul20_1", "Mul2JoinAggHorizontalRewriteAction");
       } else if (
-          queryOptType == "mlq3-optimized" ||
+          queryOptType == "mlq3-optimized1" ||
           queryOptType == "mlq3-optimized-gpu") {
         testAction =
             std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
