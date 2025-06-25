@@ -91,7 +91,7 @@ class BatchNorm1D : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, numCols);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, numCols);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -115,7 +115,7 @@ class BatchNorm1D : public MLFunction {
     auto baseOffset = elementsOutput->size();
     elementsOutput->resize(baseOffset + rows.end() * numCols);
     float* outputValues = elementsOutput->values()->asMutable<float>();
-    vector_size_t outputOffset = 0;
+    vector_size_t outputOffset = baseOffset;
     rows.applyToSelected([&](vector_size_t row) {
       if (rowMap.find(row) == rowMap.end()) {
         throw std::runtime_error(

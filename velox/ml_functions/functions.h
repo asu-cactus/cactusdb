@@ -175,7 +175,7 @@ class MatrixMultiply : public MLFunction {
       });
 
       int numInputMatrixRows = numUniqueRows;
-      Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+      Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
       int rowIndex = 0;
       for (auto rawIndex : uniqueRawIndexeVector) {
         Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -194,7 +194,7 @@ class MatrixMultiply : public MLFunction {
       elementsOutput->resize(baseOffset + rows.end() * dims[1]);
 
       float* outputValues = elementsOutput->values()->asMutable<float>();
-      vector_size_t outputOffset = 0;
+      vector_size_t outputOffset = baseOffset;
       rows.applyToSelected([&](vector_size_t row) {
         if (rowMap.find(row) == rowMap.end()) {
           throw std::runtime_error(
@@ -211,7 +211,6 @@ class MatrixMultiply : public MLFunction {
 
         outputOffset += dims[1];
       });
-      arrayOutput->setElements(elementsOutput);
     }
   }
 
@@ -428,7 +427,7 @@ class MatrixMultiply_h : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -447,7 +446,7 @@ class MatrixMultiply_h : public MLFunction {
 
     float* outputValues = elementsOutput->values()->asMutable<float>();
 
-    vector_size_t outputOffset = 0;
+    vector_size_t outputOffset = baseOffset;
     rows.applyToSelected([&](vector_size_t row) {
       if (rowMap.find(row) == rowMap.end()) {
         throw std::runtime_error(
@@ -462,7 +461,6 @@ class MatrixMultiply_h : public MLFunction {
           currentBlockSize * sizeof(float));
       outputOffset += currentBlockSize;
     });
-    arrayOutput->setElements(elementsOutput);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -759,7 +757,7 @@ class MatrixVectorAddition : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -777,7 +775,7 @@ class MatrixVectorAddition : public MLFunction {
     elementsOutput->resize(baseOffset + rows.end() * dims[0]);
     float* outputValues = elementsOutput->values()->asMutable<float>();
 
-    vector_size_t outputOffset = 0;
+    vector_size_t outputOffset = baseOffset;
 
     rows.applyToSelected([&](vector_size_t row) {
       if (rowMap.find(row) == rowMap.end()) {
@@ -795,7 +793,6 @@ class MatrixVectorAddition : public MLFunction {
 
       outputOffset += dims[0];
     });
-    arrayOutput->setElements(elementsOutput);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -1026,7 +1023,7 @@ class Softmax : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, numCols);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, numCols);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -1043,7 +1040,7 @@ class Softmax : public MLFunction {
     auto baseOffset = elementsOutput->size();
     elementsOutput->resize(baseOffset + rows.end() * numCols);
     float* outputValues = elementsOutput->values()->asMutable<float>();
-    vector_size_t outputOffset = 0;
+    vector_size_t outputOffset = baseOffset;
     rows.applyToSelected([&](vector_size_t row) {
       if (rowMap.find(row) == rowMap.end()) {
         throw std::runtime_error(
@@ -1061,7 +1058,6 @@ class Softmax : public MLFunction {
       outputOffset += numCols;
     });
 
-    arrayOutput->setElements(elementsOutput);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -1136,7 +1132,7 @@ class Argmax : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, numCols);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, numCols);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -1152,7 +1148,6 @@ class Argmax : public MLFunction {
     }
 
     int* outputValues = arrayOutput->mutableRawValues<int>();
-    vector_size_t outputOffset = 0;
     std::unordered_map<int, int> valueCounts;
     rows.applyToSelected([&](vector_size_t row) {
       if (rowMap.find(row) == rowMap.end()) {
@@ -1160,14 +1155,16 @@ class Argmax : public MLFunction {
             "Mapped index not found for the result matrix.");
       }
       auto mappedIndexInResultMatrix = rowMap[row];
-      outputValues[row] = argmaxMap[mappedIndexInResultMatrix];
+      arrayOutput->set(row, argmaxMap[mappedIndexInResultMatrix]);
       valueCounts[outputValues[row]]++;
     });
-
+    
+    /*
     for (const auto& pair : valueCounts) {
       LOG(INFO) << "[INFO] Label Distributions: Key: " << pair.first
                 << ", Value: " << pair.second << std::endl;
     }
+    */
 
     // There could be a more efficient way to do this
     // Ref: https://stackoverflow.com/a/41384560
@@ -1305,7 +1302,7 @@ class MinMaxScaler : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, numCols);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, numCols);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -1319,14 +1316,14 @@ class MinMaxScaler : public MLFunction {
     Eigen::Map<
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
         maxVals(scalerMaxValues_, 1, numCols);
-    Eigen::MatrixXf resultMatrix =
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> resultMatrix =
         (inputMatrix.rowwise() - minVals.row(0)).array().rowwise() /
         (maxVals.row(0) - minVals.row(0)).array();
 
     auto baseOffset = elementsOutput->size();
     elementsOutput->resize(baseOffset + rows.end() * numCols);
     float* outputValues = elementsOutput->values()->asMutable<float>();
-    vector_size_t outputOffset = 0;
+    vector_size_t outputOffset = baseOffset;
     rows.applyToSelected([&](vector_size_t row) {
       if (rowMap.find(row) == rowMap.end()) {
         throw std::runtime_error(
@@ -1343,7 +1340,6 @@ class MinMaxScaler : public MLFunction {
 
       outputOffset += numCols;
     });
-    arrayOutput->setElements(elementsOutput);
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -1683,10 +1679,11 @@ class TorchDNNV2 : public MLFunction {
     hasArgmax_ = false;
     model_ = torch::nn::Sequential();
     if (2 * numOps != dims.size()) {
-      throw std::runtime_error(fmt::format(
-          "Mismatched number of  2*kernel types and dimensions: {} vs {}",
-          2 * numOps,
-          dims.size()));
+      throw std::runtime_error(
+          fmt::format(
+              "Mismatched number of  2*kernel types and dimensions: {} vs {}",
+              2 * numOps,
+              dims.size()));
     }
     assert(2 * numOps == dims.size());
     for (int i = 0; i < numOps; ++i) {
@@ -1720,8 +1717,9 @@ class TorchDNNV2 : public MLFunction {
         model_->push_back(LibTorchArgmaxKernel(1));
         hasArgmax_ = true;
       } else {
-        throw std::runtime_error(fmt::format(
-            "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
+        throw std::runtime_error(
+            fmt::format(
+                "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
       }
     }
     // enable evaluation mode, this is required for inference, otherwise some
@@ -1772,7 +1770,7 @@ class TorchDNNV2 : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -1820,7 +1818,7 @@ class TorchDNNV2 : public MLFunction {
       elementsOutput->resize(baseOffset + rows.end() * dims.back());
 
       float* outputValues = elementsOutput->values()->asMutable<float>();
-      vector_size_t outputOffset = 0;
+      vector_size_t outputOffset = baseOffset;
       float* dataFloat = output_tensor.data_ptr<float>();
 
       rows.applyToSelected([&](vector_size_t row) {
@@ -1837,7 +1835,6 @@ class TorchDNNV2 : public MLFunction {
             dims.back() * sizeof(float));
         outputOffset += dims.back();
       });
-      arrayOutput->setElements(elementsOutput);
     }
   }
 
@@ -1951,8 +1948,9 @@ class TorchDNNV2CUDA : public MLFunction {
         model_->push_back(LibTorchArgmaxKernel(1));
         hasArgmax_ = true;
       } else {
-        throw std::runtime_error(fmt::format(
-            "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
+        throw std::runtime_error(
+            fmt::format(
+                "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
       }
     }
     // enable evaluation mode, this is required for inference, otherwise some
@@ -2004,7 +2002,7 @@ class TorchDNNV2CUDA : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::MatrixXf inputMatrix(numInputMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -2054,7 +2052,7 @@ class TorchDNNV2CUDA : public MLFunction {
       auto baseOffset = elementsOutput->size();
       elementsOutput->resize(baseOffset + rows.end() * dims.back());
       float* outputValues = elementsOutput->values()->asMutable<float>();
-      vector_size_t outputOffset = 0;
+      vector_size_t outputOffset = baseOffset;
 
       float* dataFloat = output_tensor.data_ptr<float>();
 
@@ -2072,7 +2070,6 @@ class TorchDNNV2CUDA : public MLFunction {
             dims.back() * sizeof(float));
         outputOffset += dims.back();
       });
-      arrayOutput->setElements(elementsOutput);
     }
   }
 
