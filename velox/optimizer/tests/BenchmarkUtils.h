@@ -1970,7 +1970,8 @@ PlanBuilder setupMovielensDBQuery(
     PlanNodeId readUserDataPlanNodeId;
     PlanNodeId readMovieDataPlanNodeId;
     if (queryOptType.empty() || queryOptType == "" ||
-        queryOptType == "mlq3-fusion" || queryOptType == "mlq3-mul2join") {
+        queryOptType == "mlq3-fusion" || queryOptType == "mlq3-mul2join" ||
+        queryOptType == "mlq3-dense2sparse") {
       auto movieTagQueryPlan =
           PlanBuilder(planNodeIdGenerator, pool_.get())
               .tableScan(movieTagDataRowType, {}, "")
@@ -2337,6 +2338,29 @@ PlanBuilder setupMovielensDBQuery(
     Source movieTagSrc2 =
         Source(readMovieTagDataPlanNodeId2, Source::Type::FILE, movieTagStats2);
     cataLog.addSource(std::make_shared<Source>(movieTagSrc2));
+
+  } else if (queryType.find("q4") != std::string::npos) {
+    std::cout << "q4" << std::endl;
+    PlanNodeId readMovieTagDataPlanNodeId;
+    queryPlan =
+        PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(movieTagDataRowType, {}, "")
+            .capturePlanNodeId(readMovieTagDataPlanNodeId)
+            .project(
+                {"mt_movie_id AS mt_movie_id1",
+                 "relu(mat_vector_add20_4(mat_mul20_3(relu(mat_vector_add20_2(mat_mul20_1(mt_relevance_score)))))) AS mt_relevance_ir1"});
+    cataLog.setIdAddressMap(
+        readMovieTagDataPlanNodeId,
+        movieTagDataPaths,
+        dwio::common::FileFormat::PARQUET);
+
+    cataLog.addNodeIdRelationName(
+        readMovieTagDataPlanNodeId, "movie_relevance_tag");
+    std::shared_ptr<OutputStat> movieTagStats = std::make_shared<OutputStat>(
+        OutputStat(movieTagNumRows, movieTagNumCols));
+    Source movieTagSrc =
+        Source(readMovieTagDataPlanNodeId, Source::Type::FILE, movieTagStats);
+    cataLog.addSource(std::make_shared<Source>(movieTagSrc));
   }
 
   return queryPlan;
