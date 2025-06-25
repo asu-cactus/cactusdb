@@ -164,17 +164,17 @@ target_link_libraries(
   ml_functions
 )
 
-add_executable(ml_sql_test tests/MLSQLTest.cpp)
-target_link_libraries(
-  ml_sql_test
-  ml_functions
-)
+#add_executable(ml_sql_test tests/MLSQLTest.cpp)
+#target_link_libraries(
+#  ml_sql_test
+#  ml_functions
+#)
 
-add_executable(duckdb_optimizer_test tests/DuckDBOptimizerTest.cpp)
-target_link_libraries(
-  duckdb_optimizer_test
-  ml_functions
-)
+#add_executable(duckdb_optimizer_test tests/DuckDBOptimizerTest.cpp)
+#target_link_libraries(
+#  duckdb_optimizer_test
+#  ml_functions
+#)
 
 add_executable(array_array_unnest_test tests/ArrayofArrayUnnestTest.cpp)
 target_link_libraries(

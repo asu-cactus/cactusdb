@@ -136,8 +136,9 @@ class AblationStudyTest : public HiveConnectorTestBase {
               serializedPlan, pool_.get());
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
-      throw std::runtime_error(fmt::format(
-          "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+      throw std::runtime_error(
+          fmt::format(
+              "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
     }
   }
 
@@ -2216,6 +2217,22 @@ class AblationStudyTest : public HiveConnectorTestBase {
 
     return myPlan;
   }
+  void print_action(
+      std::pair<std::string, std::string>& testAction,
+      PlanState& planState,
+      PlanBuilder& myPlan) {
+    std::cout << "################## print info #################" << std::endl;
+    std::cout << "[INFO] Action taken:" << testAction.first << " "
+              << testAction.second << std::endl;
+    std::cout << "[INFO] All possible actions:" << std::endl;
+    for (auto entry : planState.actionsPair) {
+      std::cout << entry.first << ": " << entry.second << std::endl;
+      std::cout << "[DEBUG] execution plan(After action taken): \n"
+                << myPlan.planNode()->toString(true, true) << std::endl;
+    }
+    std::cout << "################## print info end #################"
+              << std::endl;
+  }
 
   void testAblationStudy(
       std::string model,
@@ -2333,6 +2350,7 @@ class AblationStudyTest : public HiveConnectorTestBase {
     }
 
     std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
+    std::cout << "QueryOptType:" << std::endl;
     std::pair<std::string, std::string> testAction;
 
     if (queryOptType == "mlq1-fusion" || queryOptType == "mlq1-optimized") {
@@ -2617,8 +2635,12 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planNode = myPlan.planNode();
       planState.getPossibleActions(planNode, cataLog);
     }
-    // Temporary disabled the Mul2JoinAgg for q3 since environment changed
-    if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized1") {
+
+    std::cout << "[DEBUG] Initial execution plan: \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
+
+    if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized" ||
+        queryOptType == "mlq3-dense2sparse") {
       if (queryOptType == "mlq3-mul2join") {
         testAction =
             std::make_pair("mat_mul20_1", "Mul2JoinAggHorizontalRewriteAction");
@@ -2627,6 +2649,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
           queryOptType == "mlq3-optimized-gpu") {
         testAction =
             std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
+      } else if (queryOptType == "mlq3-dense2sparse") {
+        testAction = std::make_pair("mat_mul20_1", "Dense2SparseRewriteAction");
       }
 
       planState.takeAction(
@@ -2642,6 +2666,7 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planState.update(myPlan, cataLog);
       planNode = myPlan.planNode();
       planState.getPossibleActions(planNode, cataLog);
+      print_action(testAction, planState, myPlan);
     }
 
     if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized") {
@@ -2662,6 +2687,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planNode = myPlan.planNode();
       planState.getPossibleActions(planNode, cataLog);
 
+      print_action(testAction, planState, myPlan);
+
       testAction = std::make_pair(
           "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(ROW[\"model_features\"])))))))))",
           "MultiLayerUDF2TorchNNRewriteAction");
@@ -2678,6 +2705,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planState.update(myPlan, cataLog);
       planNode = myPlan.planNode();
       planState.getPossibleActions(planNode, cataLog);
+
+      print_action(testAction, planState, myPlan);
     }
 
     if (queryOptType == "mlq3-fusion-gpu" ||
@@ -2699,6 +2728,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planNode = myPlan.planNode();
       planState.getPossibleActions(planNode, cataLog);
 
+      print_action(testAction, planState, myPlan);
+
       testAction = std::make_pair(
           "argmax(mat_vector_add16_6(mat_mul16_5(relu(mat_vector_add16_4(mat_mul16_3(relu(mat_vector_add16_2(mat_mul16_1(ROW[\"model_features\"])))))))))",
           "MultiLayerUDF2TorchNNCUDARewriteAction");
@@ -2715,6 +2746,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planState.update(myPlan, cataLog);
       planNode = myPlan.planNode();
       planState.getPossibleActions(planNode, cataLog);
+
+      print_action(testAction, planState, myPlan);
     }
 
     std::cout << "[INFO] All possible actions:" << std::endl;
