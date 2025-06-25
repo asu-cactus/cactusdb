@@ -104,6 +104,12 @@ target_link_libraries(
   ml_functions
 )
 
+add_executable(ml_kernel_eval_test tests/MLKernelEvaluationTest.cpp)
+target_link_libraries(
+  ml_kernel_eval_test
+  ml_functions
+)
+
 add_executable(nn_tests tests/NNTest.cpp)
 target_link_libraries(
   nn_tests
