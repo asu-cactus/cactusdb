@@ -2015,9 +2015,8 @@ void normalizeOccupation(
 
 void oneHotEncodeGenres(
     CataLog& catalog,
-    std::shared_ptr<memory::MemoryPool> pool_,
-    bool isVerticalPartition){
-        VectorMaker maker{pool_.get()};
+    std::shared_ptr<memory::MemoryPool> pool_){
+    VectorMaker maker{pool_.get()};
 
     std::unordered_map<std::string, int> genresMapping = {
       {"Animation", 1},
@@ -2045,15 +2044,13 @@ void oneHotEncodeGenres(
       std::make_unique<OneHotEncoder>(std::move(genresMapping)),
       {},
       true,
-      catalog,
-      isVerticalPartition);
+      catalog);
 
 }
 
 void normalizePopularity(
     CataLog& catalog,
-    std::shared_ptr<memory::MemoryPool> pool_,
-    bool isVerticalPartition) {
+    std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
   optimization::registerVectorFunction(
       "movie_popularity_minmax_scaler",
