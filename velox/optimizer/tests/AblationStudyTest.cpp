@@ -2227,9 +2227,9 @@ class AblationStudyTest : public HiveConnectorTestBase {
     std::cout << "[INFO] All possible actions:" << std::endl;
     for (auto entry : planState.actionsPair) {
       std::cout << entry.first << ": " << entry.second << std::endl;
-      std::cout << "[DEBUG] execution plan(After action taken): \n"
-                << myPlan.planNode()->toString(true, true) << std::endl;
     }
+    std::cout << "[DEBUG] execution plan(After action taken): \n"
+              << myPlan.planNode()->toString(true, true) << std::endl;
     std::cout << "################## print info end #################"
               << std::endl;
   }
@@ -2350,7 +2350,7 @@ class AblationStudyTest : public HiveConnectorTestBase {
     }
 
     std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
-    std::cout << "QueryOptType:" << std::endl;
+    std::cout << "QueryOptType:" << queryOptType << std::endl;
     std::pair<std::string, std::string> testAction;
 
     if (queryOptType == "mlq1-fusion" || queryOptType == "mlq1-optimized") {
@@ -2639,7 +2639,7 @@ class AblationStudyTest : public HiveConnectorTestBase {
     std::cout << "[DEBUG] Initial execution plan: \n"
               << myPlan.planNode()->toString(true, true) << std::endl;
 
-    if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized" ||
+    if (queryOptType == "mlq3-mul2join" || queryOptType == "mlq3-optimized1" ||
         queryOptType == "mlq3-dense2sparse") {
       if (queryOptType == "mlq3-mul2join") {
         testAction =
@@ -2650,7 +2650,9 @@ class AblationStudyTest : public HiveConnectorTestBase {
         testAction =
             std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
       } else if (queryOptType == "mlq3-dense2sparse") {
-        testAction = std::make_pair("mat_mul20_1", "Dense2SparseRewriteAction");
+        testAction = std::make_pair(
+            "mat_mul20_1(ROW[\"mt_relevance_score\"])",
+            "Dense2SparseRewriteAction");
       }
 
       planState.takeAction(
@@ -2668,8 +2670,30 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planState.getPossibleActions(planNode, cataLog);
       print_action(testAction, planState, myPlan);
     }
+    if (queryOptType == "mlq3-dense2sparse1" ||
+        queryOptType == "mlq3-dense2sparse") {
+      testAction = std::make_pair(
+          "mat_mul10_1(ROW[\"mt_relevance_score\"])",
+          "Dense2SparseRewriteAction");
 
-    if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized") {
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+      print_action(testAction, planState, myPlan);
+    }
+
+    if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized" ||
+        queryOptType == "mlq3-optimized-d2s") {
       testAction = std::make_pair(
           "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(ROW[\"model_features\"])))))))))",
           "MultiLayerUDF2TorchNNRewriteAction");
@@ -2707,6 +2731,27 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planState.getPossibleActions(planNode, cataLog);
 
       print_action(testAction, planState, myPlan);
+
+      if (queryOptType == "mlq3-optimized-d2s") {
+        testAction = std::make_pair(
+            "mat_mul10_1(ROW[\"mt_relevance_score\"])",
+            "Dense2SparseRewriteAction");
+
+        planState.takeAction(
+            planNode,
+            nullptr,
+            maker,
+            myPlan,
+            pool_,
+            planNodeIdGenerator,
+            {testAction},
+            cataLog);
+
+        planState.update(myPlan, cataLog);
+        planNode = myPlan.planNode();
+        planState.getPossibleActions(planNode, cataLog);
+        print_action(testAction, planState, myPlan);
+      }
     }
 
     if (queryOptType == "mlq3-fusion-gpu" ||

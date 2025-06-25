@@ -2186,7 +2186,9 @@ PlanBuilder setupMovielensDBQuery(
                    "m_movie_id",
                    "cosine_similarity_q3(mt_relevance_ir, mt_relevance_ir1) as cosine_sim"});
 
-    } else if (queryOptType.find("mlq3-optimized") != std::string::npos) {
+    } else if (
+        queryOptType.find("mlq3-optimized") != std::string::npos /* ) { */
+        || queryOptType.find("mlq3-dense2sparse1") != std::string::npos) {
       auto movieTagQueryPlan =
           PlanBuilder(planNodeIdGenerator, pool_.get())
               .tableScan(movieTagDataRowType, {}, "")
