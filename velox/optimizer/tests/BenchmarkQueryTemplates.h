@@ -374,7 +374,114 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                 std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
   
     }  else if (queryTemplate == "template7") {
+       
+    } else if (queryTemplate == "template10") {
+         // Embedding
+        VectorMaker maker{pool_.get()};
+        std::cout << "[INFO] Test of Embedding." << std::endl;
+        constexpr int numEmbeddings = 3707; // 3707
+        constexpr int embeddingDims = 256; // 256
+        // constexpr int numSamples = 8;
 
+        RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
+        randomGenerator.setIntRange(0, numEmbeddings - 1);
+
+        std::vector<std::vector<float>> weights =
+            randomGenerator.genFloat2dVector(numEmbeddings, embeddingDims);
+        auto weightsVector = maker.arrayVector<float>(weights, REAL());
+
+        exec::registerVectorFunction(
+            "embedding",
+            Embedding::signatures(),
+            std::make_unique<Embedding>(
+                weightsVector->elements()->values()->asMutable<float>(),
+                numEmbeddings,
+                embeddingDims));
+
+        // Feature processor
+        // gender_encoder
+        registerGenderEncoder(cataLog, pool_);
+        // user_age_minmax_scaler
+        normalizeAge(cataLog,pool_, "q10_user_age_minmax_scaler.txt");
+        // user_occupation_minmax_scaler
+        normalizeOccupation(cataLog,pool_, "q10_user_occupation_minmax_scaler.txt");
+        // Feed forward Neural Network
+        int hidden1 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << std::endl;
+        auto modelStr = registerNNModel({embeddingDims+3, hidden1, 1}, cataLog, modelGroupId_, false);
+    
+        // Query Plan
+        queryPlan = PlanBuilder(planNodeIdGenerator)
+            .tableScan(userDataRowType, {}, "")
+            .capturePlanNodeId(readUserDataPlanNodeId)
+            .nestedLoopJoin(
+                PlanBuilder(planNodeIdGenerator)
+                    .tableScan(movieDataRowType, {}, "")
+                    .capturePlanNodeId(readMovieDataPlanNodeId)
+                    .planNode(),
+                { // what columns to project from the join
+                    "u_user_id",
+                    "m_movie_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "u_zipcode",
+                   "m_genres"
+                }
+            )
+            // .project({
+            //     "u_user_id",
+            //     "CAST (m_movie_id as INTEGER) AS m_movie_id",
+            //     "u_age",
+            //     "u_gender",
+            //     "u_occupation",
+            //     "u_zipcode",
+            //     "m_genres", 
+            //     "gender_encoder(u_gender) as gender_encoded",
+            //     "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as age_encoded",
+            //     "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as occupation_encoded"})
+            .project({
+                "u_user_id", "m_movie_id", "embedding(array_constructor(m_movie_id)) as embed", 
+                "u_age", "u_gender", "u_occupation", "u_zipcode", "m_genres",
+                "gender_encoder(u_gender) as gender_encoded",
+                "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as age_encoded",
+                "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as occupation_encoded"})
+            .project({
+                "u_user_id", "m_movie_id", 
+                "u_age", "u_gender", "u_occupation", "u_zipcode", "m_genres",
+                "transform(concat(gender_encoded,age_encoded,occupation_encoded,embed), x-> CAST(x AS REAL)) as features"})
+            .project({
+                "u_user_id", "m_movie_id", 
+                "u_age", "u_gender", "u_occupation", "u_zipcode", "m_genres",
+                fmt::format(modelStr, "features")});
+
+        if (generateFilter) {
+            std::vector<std::string> filterExpr = sampleUserMovieFilterExpr("user_movie_genres", timestampSeed);
+            for (auto expr : filterExpr) {
+                queryPlan = queryPlan.filter(expr);
+            }
+        }
+        // — user side
+        cataLog.setIdAddressMap(
+            readUserDataPlanNodeId,
+            userDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readUserDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(userNumRows, userNumCols))));
+
+        // — movie side
+        cataLog.setIdAddressMap(
+            readMovieDataPlanNodeId,
+            movieDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readMovieDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
     }
 
 
