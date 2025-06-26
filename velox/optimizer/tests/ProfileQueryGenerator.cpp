@@ -696,7 +696,7 @@ int main(int argc, char** argv) {
         rewrite,
         dataBatchSize,
         dataPath);
-  } else if (workload == "movielens") {
+  } else if (workload == "movielens" || workload == "tpcxai") {
     numberOfTuples.push_back(numUser);
     numberOfTuples.push_back(numMovie);
     numberOfTuples.push_back(numTag);
@@ -716,7 +716,8 @@ int main(int argc, char** argv) {
         rewrite,
         dataBatchSize,
         dataPath);
-  } else if (workload == "movielens1") {
+      std::cout << "[INFO] Executed Query Plan" << std::endl;
+  } else if (workload == "movielens1" || workload == "tpcxai1") {
     numberOfTuples.push_back(numUser);
     numberOfTuples.push_back(numMovie);
     numberOfTuples.push_back(numTag);
