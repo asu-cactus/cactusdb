@@ -548,16 +548,352 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
             Source(readMovieDataPlanNodeId,
                 Source::Type::FILE,
                 std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+    } else {
+        throw std::runtime_error("Unsupported query template for movielens workload: " + queryTemplate);
     }
 
-
   } else if (workload == "tpcxai") {
-    // TODO
-  } else {
+    std::string queryOptType =
+        getEnvVar("CD_VELOX_QUERY_OPT_TYPE"); // env used for ablation study of
+
+    auto finicialAccountDataRowType =
+        ROW({"fa_customer_sk", "transaction_limit"}, {BIGINT(), DOUBLE()});
+    auto finicialTransactionsDataRowType = ROW(
+        {"amount", "iban", "sender_id", "receiver_id", "transaction_id", "time"},
+        {DOUBLE(), VARCHAR(), BIGINT(), VARCHAR(), BIGINT(), VARCHAR()});
+    auto orderDataRowType =
+        ROW({"o_order_id", "o_customer_sk", "weekday", "date", "store"},
+            {BIGINT(), BIGINT(), VARCHAR(), VARCHAR(), BIGINT()});
+    auto lineitemDataRowType =
+        ROW({"li_order_id", "li_product_id", "quantity", "price"},
+            {BIGINT(), BIGINT(), BIGINT(), DOUBLE()});
+    auto productDataRowType = ROW(
+        {"p_product_id", "name", "department"}, {BIGINT(), VARCHAR(), VARCHAR()});
+    auto storeDeptDataRowType = ROW(
+        {"store", "department", "num_of_week"}, {BIGINT(), VARCHAR(), BIGINT()});
+    auto productRatingRowType =
+        ROW({"user_id", "product_id"}, {BIGINT(), BIGINT()});
+    auto customerDataRowType =
+        ROW({"c_customer_sk",
+            "c_customer_id",
+            "c_current_addr_sk",
+            "c_first_name",
+            "c_last_name",
+            "c_preferred_cust_flag",
+            "c_birth_day",
+            "c_birth_month",
+            "c_birth_year",
+            "c_birth_country",
+            "c_login",
+            "c_email_address"},
+            {INTEGER(),
+            VARCHAR(),
+            INTEGER(),
+            VARCHAR(),
+            VARCHAR(),
+            VARCHAR(),
+            INTEGER(),
+            INTEGER(),
+            INTEGER(),
+            VARCHAR(),
+            VARCHAR(),
+            VARCHAR()});
+    auto orderReturnDataRowType =
+        ROW({"or_order_id", "or_product_id", "or_return_quantity"},
+            {INTEGER(), INTEGER(), INTEGER()});
+    auto reviewDataRowType = ROW({"id", "text"}, {INTEGER(), VARCHAR()});
+
+    std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+    if (dataDirPrefix == "") {
+        // use default value:
+        dataDirPrefix =
+            "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
+    }
+
+    std::vector<std::string> finicialAccountDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "financial_account");
+    std::vector<std::string> finicialTransactionsDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "financial_transactions");
+    std::vector<std::string> orderDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "order");
+    std::vector<std::string> lineitemDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "lineitem");
+    std::vector<std::string> productDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "product");
+    std::vector<std::string> storeDeptDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "store_dept");
+    std::vector<std::string> productRatingDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "product_rating");
+    std::vector<std::string> customerDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "customer");
+    std::vector<std::string> orderReturnDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "order_returns");
+    std::vector<std::string> reviewDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "review");
+
+    int finicialAccountNumRows, finicialAccountNumCols,
+        finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
+        orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
+        productNumCols, storeDeptNumRows, storeDeptNumCols, productRatingNumRows,
+        productRatingNumCols, customerNumRows, customerNumCols,
+        orderReturnNumRows, orderReturnNumCols, reviewNumRows, reviewNumCols;
+
+    readDataStats(
+        dataDirPrefix + "financial_account_stats.txt",
+        finicialAccountNumRows,
+        finicialAccountNumCols);
+    readDataStats(
+        dataDirPrefix + "financial_transactions_stats.txt",
+        finicialTransactionsNumRows,
+        finicialTransactionsNumCols);
+    readDataStats(dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
+    readDataStats(
+        dataDirPrefix + "lineitem_stats.txt", lineitemNumRows, lineitemNumCols);
+    readDataStats(
+        dataDirPrefix + "product_stats.txt", productNumRows, productNumCols);
+    readDataStats(
+        dataDirPrefix + "store_dept_stats.txt",
+        storeDeptNumRows,
+        storeDeptNumCols);
+    readDataStats(
+        dataDirPrefix + "product_rating_stats.txt",
+        productRatingNumRows,
+        productRatingNumCols);
+    readDataStats(
+        dataDirPrefix + "customer_stats.txt", customerNumRows, customerNumCols);
+    readDataStats(
+        dataDirPrefix + "order_returns_stats.txt",
+        orderReturnNumRows,
+        orderReturnNumCols);
+    readDataStats(
+        dataDirPrefix + "review_stats.txt", reviewNumRows, reviewNumCols);
+    
+    PlanNodeId readProductRatingDataPlanNodeId;
+    PlanNodeId readOrderDataPlanNodeId;
+    PlanNodeId readLineitemDataPlanNodeId;
+    PlanNodeId readProductDataPlanNodeId;
+    PlanNodeId readCustomerDataPlanNodeId;
+
+    if (queryTemplate == "template4" ) { // uc7
+        std::string svdModelPath = "/home/velox/resources/model/tpcxai_sf1/final/velox/tpcxai_template4_svd.h5";
+        std::vector<std::vector<float>> bu = loadHDF5Array(svdModelPath, "bu");
+        std::vector<std::vector<float>> bi = loadHDF5Array(svdModelPath, "bi");
+        std::vector<std::vector<float>> pu = loadHDF5Array(svdModelPath, "pu");
+        std::vector<std::vector<float>> qi = loadHDF5Array(svdModelPath, "qi");
+
+        optimization::registerVectorFunction(
+            "svd",
+            SVD::signatures(),
+            std::make_unique<SVD>(
+                std::move(flattenVectorToPointer(bu)),
+                std::move(flattenVectorToPointer(bi)),
+                std::move(flattenVectorToPointer(pu)),
+                std::move(flattenVectorToPointer(qi)),
+                pu.size(),
+                qi.size(),
+                pu[0].size()),
+            {},
+            true,
+            cataLog);
+
+        queryPlan = PlanBuilder(planNodeIdGenerator)
+            .tableScan(productRatingRowType, {}, "")
+            .capturePlanNodeId(readProductRatingDataPlanNodeId)
+            .hashJoin(
+                {"product_id"},
+                {"p_product_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(productDataRowType, {}, "")
+                    .capturePlanNodeId(readProductDataPlanNodeId)
+                    .planNode(),
+                "",
+                {"product_id",
+                "user_id",
+                "department",
+                })
+            .project(
+                {"CAST (user_id AS INTEGER) AS user_id",
+                 "CAST (product_id as INTEGER) AS product_id",
+                 "department"})
+            .hashJoin(
+                {"user_id"},
+                {"c_customer_sk"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(customerDataRowType, {}, "")
+                    .capturePlanNodeId(readCustomerDataPlanNodeId)
+                    .planNode(),
+                "",
+                {"product_id",
+                "user_id",
+                "department", "c_birth_day", "c_birth_country"
+                })
+            .project(
+                {"user_id", "product_id", "svd(user_id, product_id) as pred"});
+        // if (generateFilter) {
+        //     std::vector<std::string> filterExpr = sampleOrderFilterExpr("order", timestampSeed);
+        //     for (auto expr : filterExpr) {
+        //         queryPlan = queryPlan.filter(expr);
+        //     }
+        // }
+
+        cataLog.setIdAddressMap(
+            readProductRatingDataPlanNodeId,
+            productRatingDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.setIdAddressMap(
+            readProductDataPlanNodeId,
+            productDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.setIdAddressMap(
+            readCustomerDataPlanNodeId,
+            customerDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        
+        cataLog.addNodeIdRelationName(readProductRatingDataPlanNodeId, "product_rating");
+        cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+        cataLog.addNodeIdRelationName(readCustomerDataPlanNodeId, "customer");
+
+        Source productRatingSrc = Source(
+            readProductRatingDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(
+                OutputStat(productRatingNumRows, productRatingNumCols)));
+        Source productSrc = Source(
+            readProductDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(
+                OutputStat(productNumRows, productNumCols)));
+        Source customerSrc = Source(
+            readCustomerDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(
+                OutputStat(customerNumRows, customerNumCols)));
+                    
+        cataLog.addSource(std::make_shared<Source>(productRatingSrc));
+        cataLog.addSource(std::make_shared<Source>(productSrc));
+        cataLog.addSource(std::make_shared<Source>(customerSrc));
+    } else if (queryTemplate == "template6") { // uc8
+        // Register model
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << std::endl;
+        auto modelStr = registerNNModel({4, hidden1, hidden2, 384}, cataLog, modelGroupId_, false);
+        // Register functions: department_encoder
+        registerDepartmentEncoder(cataLog, pool_);
+
+        // Query Plan
+        queryPlan = PlanBuilder(planNodeIdGenerator)
+            .tableScan(orderDataRowType, {}, "")
+            .capturePlanNodeId(readOrderDataPlanNodeId)
+            .project({
+                "o_order_id",
+                "store",
+                "CAST (date AS TIMESTAMP) AS date",
+            })
+            .project({
+                "o_order_id",
+                "store",
+                "date",
+                "day_of_week(date) as weekday",
+            })
+            .hashJoin(
+                {"o_order_id"},
+                {"li_order_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(lineitemDataRowType, {}, "")
+                    .capturePlanNodeId(readLineitemDataPlanNodeId)
+                    .planNode(),
+                "",
+                {"li_product_id",
+                // "li_order_id",
+                "o_order_id",
+                "quantity",
+                "date",
+                "weekday"})
+            .hashJoin(
+                {"li_product_id"},
+                {"p_product_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(productDataRowType, {}, "")
+                    .capturePlanNodeId(readProductDataPlanNodeId)
+                    .planNode(),
+                "",
+                {"o_order_id",
+                // "li_order_id",
+                "quantity",
+                "date",
+                "department",
+                "weekday"})
+            .partialAggregation(
+                {"o_order_id", "date", "department", "quantity"},
+                {"sum(quantity) as scan_count", "min(weekday) as weekday"})
+            .finalAggregation()
+            .project(
+                {"o_order_id",
+                "date",
+                "array_constructor(quantity, scan_count, weekday) as features",
+                "department_encoder(department) as department_encoded"})
+            .project(
+                {"o_order_id",
+                "date",
+                "transform(concat(features, department_encoded), x-> CAST(x as REAL)) as features"})
+            .project(
+                {"o_order_id",
+                "date",
+                fmt::format(modelStr, "features")});
+        // if (generateFilter) {
+        //     std::vector<std::string> filterExpr = sampleOrderFilterExpr("order", timestampSeed);
+        //     for (auto expr : filterExpr) {
+        //         queryPlan = queryPlan.filter(expr);
+        //     }
+        // }
+
+        cataLog.setIdAddressMap(
+            readOrderDataPlanNodeId,
+            orderDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.setIdAddressMap(
+            readLineitemDataPlanNodeId,
+            lineitemDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.setIdAddressMap(
+            readProductDataPlanNodeId,
+            productDataPaths,
+            dwio::common::FileFormat::PARQUET);
+
+        cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
+        cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
+        cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+
+        Source orderSrc = Source(
+            readOrderDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(OutputStat(orderNumRows, orderNumCols)));
+        Source lineitemSrc = Source(
+            readLineitemDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(
+                OutputStat(lineitemNumRows, lineitemNumCols)));
+        Source productSrc = Source(
+            readProductDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(
+                OutputStat(productNumRows, productNumCols)));
+
+        cataLog.addSource(std::make_shared<Source>(orderSrc));
+        cataLog.addSource(std::make_shared<Source>(lineitemSrc));
+        cataLog.addSource(std::make_shared<Source>(productSrc));
+
+    } else {
+        throw std::runtime_error("Unsupported query template for tpcxai workload : " + queryTemplate);
+    }
+
+} else {
     throw std::runtime_error(
         "Unsupported workload: " + workload +
-        ". Currently only movielens is supported.");
-  }
+        ". Currently, movielens and tpcxai are supported.");
+}
 
   return queryPlan;
 }

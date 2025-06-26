@@ -1961,6 +1961,69 @@ void registerTPCxAIUC8MLModelFunctions(
       catalog);
 };
 
+void registerDepartmentEncoder(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+    std::vector<std::string> departmentList = {
+      "AUTOMOTIVE",
+      "BATH AND SHOWER",
+      "BEAUTY",
+      "BEDDING",
+      "BOYS WEAR",
+      "CANDY, TOBACCO, COOKIES",
+      "CELEBRATION",
+      "COMM BREAD",
+      "COOK AND DINE",
+      "DAIRY",
+      "DSD GROCERY",
+      "ELECTRONICS",
+      "FABRICS AND CRAFTS",
+      "FINANCIAL SERVICES",
+      "FROZEN FOODS",
+      "GIRLS WEAR, 4-6X  AND 7-14",
+      "GROCERY DRY GOODS",
+      "HARDWARE",
+      "HOME DECOR",
+      "HOME MANAGEMENT",
+      "HORTICULTURE AND ACCESS",
+      "HOUSEHOLD CHEMICALS/SUPP",
+      "HOUSEHOLD PAPER GOODS",
+      "IMPULSE MERCHANDISE",
+      "INFANT APPAREL",
+      "INFANT CONSUMABLE HARDLINES",
+      "JEWELRY AND SUNGLASSES",
+      "LADIESWEAR",
+      "LAWN AND GARDEN",
+      "LIQUOR,WINE,BEER",
+      "MEAT - FRESH & FROZEN",
+      "MEDIA AND GAMING",
+      "MENS WEAR",
+      "OFFICE SUPPLIES",
+      "PAINT AND ACCESSORIES",
+      "PERSONAL CARE",
+      "PETS AND SUPPLIES",
+      "PHARMACY OTC",
+      "PHARMACY RX",
+      "PLAYERS AND ELECTRONICS",
+      "PRODUCE",
+      "SERVICE DELI",
+      "SHOES",
+      "SPORTING GOODS",
+      "TOYS",
+      "WIRELESS"};
+  std::unordered_map<std::string, int> departmentMapping;
+  for (int i = 0; i < departmentList.size(); i++) {
+    departmentMapping[departmentList[i]] = i;
+  }
+  optimization::registerVectorFunction(
+      "department_encoder",
+      StringEncoder::signatures(),
+      std::make_unique<StringEncoder>(std::move(departmentMapping)),
+      {},
+      true,
+      catalog);
+}
+
 void registerGenderEncoder(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_){
