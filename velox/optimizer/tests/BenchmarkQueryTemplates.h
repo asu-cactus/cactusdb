@@ -674,6 +674,9 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     PlanNodeId readLineitemDataPlanNodeId;
     PlanNodeId readProductDataPlanNodeId;
     PlanNodeId readCustomerDataPlanNodeId;
+    PlanNodeId readFinancialAccountDataPlanNodeId;
+    PlanNodeId readFinancialTransactionsDataPlanNodeId;
+    PlanNodeId readStoreDeptDataPlanNodeId;
 
     if (queryTemplate == "template4" ) { // uc7
         std::string svdModelPath = "/home/velox/resources/model/tpcxai_sf1/final/velox/tpcxai_template4_svd.h5";
@@ -885,6 +888,129 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
         cataLog.addSource(std::make_shared<Source>(lineitemSrc));
         cataLog.addSource(std::make_shared<Source>(productSrc));
 
+    } else if (queryTemplate == "template7") { // uc10
+        // Register model
+        int hidden1 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << std::endl;
+        auto modelStr = registerNNModel({2, hidden1, 1}, cataLog, modelGroupId_, false);
+
+        queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(finicialAccountDataRowType, {}, "")
+            .capturePlanNodeId(readFinancialAccountDataPlanNodeId)
+            .hashJoin(
+                {"fa_customer_sk"},
+                {"sender_id"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(finicialTransactionsDataRowType, {}, "")
+                    .capturePlanNodeId(readFinancialTransactionsDataPlanNodeId)
+                    .project(
+                        {"transaction_id",
+                         "sender_id",
+                         "CAST(hour(CAST(time AS TIMESTAMP)) as DOUBLE) as business_hour_norm",
+                         "amount"})
+                    .planNode(),
+                "",
+                {"transaction_id",
+                 "sender_id",
+                 "business_hour_norm",
+                 "amount",
+                 "transaction_limit"})
+            .project(
+                {"transaction_id",
+                 "amount / transaction_limit as amount_norm",
+                 "business_hour_norm"})
+            .project(
+                {"transaction_id",
+                 "transform(array_constructor(amount_norm, business_hour_norm), x-> CAST(X as REAL)) as features"})
+            .project(
+                {"transaction_id",
+                fmt::format(modelStr, "features")});
+
+    // if (generateFilter) {
+    //     std::vector<std::string> filterExpr = sampleUC10FilterExpr("order", timestampSeed);
+    //     for (auto expr : filterExpr) {
+    //         queryPlan = queryPlan.filter(expr);
+    //     }
+    // }
+    cataLog.setIdAddressMap(
+        readFinancialAccountDataPlanNodeId,
+        finicialAccountDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readFinancialTransactionsDataPlanNodeId,
+        finicialTransactionsDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(
+        readFinancialAccountDataPlanNodeId, "financial_account");
+    cataLog.addNodeIdRelationName(
+        readFinancialTransactionsDataPlanNodeId, "financial_transactions");
+    Source financialAccountSrc = Source(
+        readFinancialAccountDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(finicialAccountNumRows, finicialAccountNumCols)));
+    Source financialTransactionsSrc = Source(
+        readFinancialTransactionsDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(OutputStat(
+            finicialTransactionsNumRows, finicialTransactionsNumCols)));
+    cataLog.addSource(std::make_shared<Source>(financialAccountSrc));
+    cataLog.addSource(std::make_shared<Source>(financialTransactionsSrc));
+    } else if (queryTemplate == "template8") { // uc3
+        // Register functions: department_encoder
+        registerDepartmentEncoder(cataLog, pool_);
+
+        // Register model
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << std::endl;
+        auto modelStr = registerNNModel({3, hidden1, hidden2, 1}, cataLog, modelGroupId_, false);
+
+        // Query Plan
+        queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(storeDeptDataRowType, {}, "")
+            .capturePlanNodeId(readStoreDeptDataPlanNodeId)
+            .project({
+                "CAST(store as INTEGER) store",
+                "department",
+                "num_of_week",
+                "department_encoder(department) as department_encoded",
+                "CAST(num_of_week / 156 AS REAL) as num_of_week_norm",
+            })
+            .project(
+                {"store",
+                "department",
+                "num_of_week",
+                "transform(concat(store, department_encoded), x-> CAST(x as REAL))  as features1",
+                "array_constructor(num_of_week_norm) as features2"})
+            .project(
+                {"store",
+                "department",
+                "num_of_week",
+                "concat(features1, features2) as features"})
+            .project(
+                {"store",
+                "department",
+                "num_of_week",
+                fmt::format(modelStr, "features")});
+        // if (generateFilter) {
+        //     std::vector<std::string> filterExpr = sampleStoreDeptFilterExpr("store_dept", timestampSeed);
+        //     for (auto expr : filterExpr) {
+        //         queryPlan = queryPlan.filter(expr);
+        //     }
+        // }    
+        cataLog.setIdAddressMap(
+            readStoreDeptDataPlanNodeId,
+            storeDeptDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readStoreDeptDataPlanNodeId, "store_dept");
+        Source storeDeptSrc = Source(
+            readStoreDeptDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(
+                OutputStat(storeDeptNumRows, storeDeptNumCols)));
+        cataLog.addSource(std::make_shared<Source>(storeDeptSrc));
     } else {
         throw std::runtime_error("Unsupported query template for tpcxai workload : " + queryTemplate);
     }
