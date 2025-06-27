@@ -2632,6 +2632,15 @@ std::vector<std::string> sampleTPCxAIFilterExpr(
         "num_of_week >= 140",
         "num_of_week <= 150",
     };
+    std::vector<std::string> productIDFilterExprs = { // range from 1 to 706
+        "product_id < 100",
+        // "product_id < 200",
+        // "product_id <= 300",
+        // "product_id >= 400",
+        // "product_id >= 500",
+        "product_id >= 600",
+    };
+
   
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
     std::vector<std::vector<std::string>> sampleFilterPool;
@@ -2671,6 +2680,10 @@ std::vector<std::string> sampleTPCxAIFilterExpr(
     if (filterTable.find("numWeek") != std::string::npos) {
         sampleFilterPool.insert(
             sampleFilterPool.end(), numWeekFilterExprs);
+    }
+    if (filterTable.find("product") != std::string::npos) {
+        sampleFilterPool.insert(
+            sampleFilterPool.end(), productIDFilterExprs);
     }
 
     RandomSampler randomSampler = RandomSampler(timestampSeed);
