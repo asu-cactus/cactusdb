@@ -736,7 +736,8 @@ int main(int argc, char** argv) {
         rewrite,
         dataBatchSize,
         dataPath);
-  } else {
+  }
+  else {
     throw std::runtime_error(fmt::format("Non-supported workload: {}", workload));
   }
 }

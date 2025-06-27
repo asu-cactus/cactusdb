@@ -1410,14 +1410,25 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
                    "u_age",
                    "u_gender",
                    "u_occupation",
+                   "u_zipcode",
                    "m_movie_id",
+<<<<<<< HEAD
                    "m_genres"  }
+=======
+                   "m_genres",
+                    "m_title",
+                    "m_spoken_languages","m_popularity","m_vote_average","m_vote_count"   }
+>>>>>>> bbfa0f88c (movielens t4,8,9 tpcxai t5,10,9(partial))
         );
       
         //Filter here
       if (generateFilter) {
         std::vector<std::string> filterExpr =
+<<<<<<< HEAD
             sampleUserMovieFilterExpr("age_gender_occupation_genre", timestampSeed);
+=======
+            sampleUserMovieFilterExpr("movie_user", timestampSeed);
+>>>>>>> bbfa0f88c (movielens t4,8,9 tpcxai t5,10,9(partial))
         for (auto expr : filterExpr) {
           queryPlan = queryPlan.filter(expr);
         }
@@ -1490,7 +1501,12 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
                     {
                     "m_movie_id",
                    "m_genres",
+<<<<<<< HEAD
                     "m_popularity","m_vote_average","m_vote_count",
+=======
+                    "m_title",
+                    "m_spoken_languages","m_popularity","m_vote_average","m_vote_count",
+>>>>>>> bbfa0f88c (movielens t4,8,9 tpcxai t5,10,9(partial))
                     "r_rating" 
                     },
                     /*joinType=*/core::JoinType::kInner  
@@ -1499,7 +1515,11 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
                 //filter expressions
                 if (generateFilter) {
             std::vector<std::string> filterExpr =
+<<<<<<< HEAD
                 sampleUserMovieFilterExpr("genre_rating", timestampSeed);
+=======
+                sampleUserMovieFilterExpr("movie", timestampSeed);
+>>>>>>> bbfa0f88c (movielens t4,8,9 tpcxai t5,10,9(partial))
             for (auto expr : filterExpr) {
             queryPlan = queryPlan.filter(expr);
             }
