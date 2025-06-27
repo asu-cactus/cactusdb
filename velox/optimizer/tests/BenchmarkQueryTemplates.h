@@ -732,13 +732,13 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                 "department", "c_birth_day", "c_birth_country"
                 })
             .project(
-                {"user_id", "product_id", "svd(user_id, product_id) as pred"});
-        // if (generateFilter) {
-        //     std::vector<std::string> filterExpr = sampleOrderFilterExpr("order", timestampSeed);
-        //     for (auto expr : filterExpr) {
-        //         queryPlan = queryPlan.filter(expr);
-        //     }
-        // }
+                {"user_id", "product_id", "department", "c_birth_day", "c_birth_country", "svd(user_id, product_id) as pred"});
+        if (generateFilter) {
+            std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr("department_birthDay_birthCountry", timestampSeed);
+            for (auto expr : filterExpr) {
+                queryPlan = queryPlan.filter(expr);
+            }
+        }
 
         cataLog.setIdAddressMap(
             readProductRatingDataPlanNodeId,
@@ -811,9 +811,8 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                 {"li_product_id",
                 // "li_order_id",
                 "o_order_id",
-                "quantity",
-                "date",
-                "weekday"})
+                "quantity", "price",
+                "date", "weekday"})
             .hashJoin(
                 {"li_product_id"},
                 {"p_product_id"},
@@ -824,33 +823,30 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                 "",
                 {"o_order_id",
                 // "li_order_id",
-                "quantity",
-                "date",
+                "quantity", "price",
+                "date","weekday",
                 "department",
-                "weekday"})
+                })
             .partialAggregation(
                 {"o_order_id", "date", "department", "quantity"},
-                {"sum(quantity) as scan_count", "min(weekday) as weekday"})
+                {"sum(quantity) as scan_count", "min(weekday) as weekday", "avg(price) as price"})
             .finalAggregation()
             .project(
-                {"o_order_id",
-                "date",
+                {"o_order_id", "date", "department", "weekday", "quantity", "price",
                 "array_constructor(quantity, scan_count, weekday) as features",
                 "department_encoder(department) as department_encoded"})
             .project(
-                {"o_order_id",
-                "date",
+                {"o_order_id", "date", "department", "weekday", "quantity", "price",
                 "transform(concat(features, department_encoded), x-> CAST(x as REAL)) as features"})
             .project(
-                {"o_order_id",
-                "date",
+                {"o_order_id", "date", "department", "weekday", "quantity", "price",
                 fmt::format(modelStr, "features")});
-        // if (generateFilter) {
-        //     std::vector<std::string> filterExpr = sampleOrderFilterExpr("order", timestampSeed);
-        //     for (auto expr : filterExpr) {
-        //         queryPlan = queryPlan.filter(expr);
-        //     }
-        // }
+        if (generateFilter) {
+            std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr("orderTime_department_weekday_price_quantity", timestampSeed);
+            for (auto expr : filterExpr) {
+                queryPlan = queryPlan.filter(expr);
+            }
+        }
 
         cataLog.setIdAddressMap(
             readOrderDataPlanNodeId,
@@ -906,32 +902,56 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                     .project(
                         {"transaction_id",
                          "sender_id",
-                         "CAST(hour(CAST(time AS TIMESTAMP)) as DOUBLE) as business_hour_norm",
+                         "CAST(time AS TIMESTAMP) as time",
+                         "CAST(hour(CAST(time AS TIMESTAMP)) as DOUBLE) as business_hour",
                          "amount"})
                     .planNode(),
                 "",
                 {"transaction_id",
-                 "sender_id",
-                 "business_hour_norm",
+                 "fa_customer_sk",
+                 "business_hour",
                  "amount",
-                 "transaction_limit"})
+                 "transaction_limit",
+                 "time"})
             .project(
                 {"transaction_id",
+                 "CAST(fa_customer_sk AS INTEGER) as fa_customer_sk",
+                 "business_hour",
+                 "amount",
+                 "transaction_limit",
+                "time"})
+            .hashJoin(
+                {"fa_customer_sk"},
+                {"c_customer_sk"},
+                PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(customerDataRowType, {}, "")
+                    .capturePlanNodeId(readCustomerDataPlanNodeId)
+                    .project(
+                        {"c_customer_sk",
+                         "c_birth_day"})
+                    .planNode(),
+                "",
+                {"transaction_id", "amount", "time", "c_birth_day",
+                 "business_hour",
+                 "transaction_limit"}
+            )
+            .project(
+                {"transaction_id", "amount", "time", "c_birth_day",
                  "amount / transaction_limit as amount_norm",
-                 "business_hour_norm"})
+                 "business_hour / 23.0 as business_hour_norm"})
             .project(
-                {"transaction_id",
+                {"transaction_id", "amount", "time", "c_birth_day",
                  "transform(array_constructor(amount_norm, business_hour_norm), x-> CAST(X as REAL)) as features"})
             .project(
-                {"transaction_id",
+                {"transaction_id", "amount", "time", "c_birth_day",
                 fmt::format(modelStr, "features")});
 
-    // if (generateFilter) {
-    //     std::vector<std::string> filterExpr = sampleUC10FilterExpr("order", timestampSeed);
-    //     for (auto expr : filterExpr) {
-    //         queryPlan = queryPlan.filter(expr);
-    //     }
-    // }
+    if (generateFilter) {
+        std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr("transactionTime_amount_birthDay", timestampSeed);
+        for (auto expr : filterExpr) {
+            queryPlan = queryPlan.filter(expr);
+        }
+    }
     cataLog.setIdAddressMap(
         readFinancialAccountDataPlanNodeId,
         finicialAccountDataPaths,
@@ -994,12 +1014,12 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                 "department",
                 "num_of_week",
                 fmt::format(modelStr, "features")});
-        // if (generateFilter) {
-        //     std::vector<std::string> filterExpr = sampleStoreDeptFilterExpr("store_dept", timestampSeed);
-        //     for (auto expr : filterExpr) {
-        //         queryPlan = queryPlan.filter(expr);
-        //     }
-        // }    
+        if (generateFilter) {
+            std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr("department_numWeek_store", timestampSeed);
+            for (auto expr : filterExpr) {
+                queryPlan = queryPlan.filter(expr);
+            }
+        }    
         cataLog.setIdAddressMap(
             readStoreDeptDataPlanNodeId,
             storeDeptDataPaths,
