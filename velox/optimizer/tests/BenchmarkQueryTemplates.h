@@ -677,6 +677,8 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     PlanNodeId readFinancialAccountDataPlanNodeId;
     PlanNodeId readFinancialTransactionsDataPlanNodeId;
     PlanNodeId readStoreDeptDataPlanNodeId;
+    PlanNodeId readOrderReturnDataPlanNodeId;
+
 
     if (queryTemplate == "template4" ) { // uc7
         std::string svdModelPath = "/home/velox/resources/model/tpcxai_sf1/final/velox/tpcxai_template4_svd.h5";
@@ -1031,6 +1033,188 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
             std::make_shared<OutputStat>(
                 OutputStat(storeDeptNumRows, storeDeptNumCols)));
         cataLog.addSource(std::make_shared<Source>(storeDeptSrc));
+    } else if (queryTemplate == "template9") { 
+        // Register model
+        int hidden1 = randomGenerator.genRandomIntValue();
+
+        std::cout << "[INFO] hidden units: " << hidden1 << std::endl;
+        auto modelStr = registerNNModel({2, hidden1, 30}, cataLog, modelGroupId_, false);
+        auto makeGroupsBuilder = [&]() {
+            auto plan = PlanBuilder(planNodeIdGenerator)
+                .tableScan(orderDataRowType, {}, "")
+                .capturePlanNodeId(readOrderDataPlanNodeId)
+                .hashJoin(
+                    { "o_order_id" },
+                    { "li_order_id" },
+                    PlanBuilder(planNodeIdGenerator)
+                        .tableScan(lineitemDataRowType, {}, "")
+                        .capturePlanNodeId(readLineitemDataPlanNodeId).planNode(),
+                    /*extraFilter=*/{},
+                    /*outputCols=*/{
+                    "o_customer_sk", "o_order_id", "date","weekday","store",
+                    "li_product_id", "quantity", "price"},
+                    JoinType::kInner)
+                .hashJoin(
+                    { "li_product_id" },
+                    { "p_product_id" },
+                    PlanBuilder(planNodeIdGenerator)
+                        .tableScan(productDataRowType, {}, "")
+                        .capturePlanNodeId(readProductDataPlanNodeId).planNode(),
+                    /*extraFilter=*/{},
+                    /*outputCols=*/{
+                    "o_customer_sk", "o_order_id", "date","weekday","store", //from order table
+                    "li_product_id", "quantity", "price", //from lineitem table
+                    "name","department" //from product table
+                    },
+                    JoinType::kInner)
+                .project({
+                    "o_customer_sk", "date", "weekday", //from order table
+                    "store AS store_id", //from order table
+                    "CAST(o_order_id AS INTEGER) AS o_order_id",
+                    "quantity", "price", //from lineitem table
+                    "li_product_id AS product_id", //from lineitem table
+                    "name","department"}) //from product table
+                .hashJoin(
+                    { "o_order_id" },
+                    { "or_order_id" },
+                    PlanBuilder(planNodeIdGenerator)
+                        .tableScan(orderReturnDataRowType, {}, "")
+                        .capturePlanNodeId(readOrderReturnDataPlanNodeId).planNode(),
+                    /*extraFilter=*/{},
+                    /*outputCols=*/{
+                    "o_customer_sk", "o_order_id", "date", "store_id", "product_id", "department",
+                    "quantity", "price", "or_return_quantity"
+                    },
+                    JoinType::kInner)
+                .project({"o_customer_sk", "o_order_id", "date", "store_id", "product_id","department",
+                    "year(parse_datetime(date, 'yyyy-MM-dd HH:mm:ss')) AS year_",
+                    "quantity", "price", "or_return_quantity",
+                    "(cast(or_return_quantity as DOUBLE) * price) as rq_p",
+                    "(cast(quantity as DOUBLE) * price) as q_p"
+                })
+                .partialAggregation(
+                    /*groupKeys=*/{"o_customer_sk", "o_order_id", "date", "store_id", "product_id","department"},
+                    /*aggregates=*/{
+                    "min(year_) as invoice_year",
+                    "sum(rq_p) as num",
+                    "sum(q_p) as den"
+                    })
+                .finalAggregation()
+                .project({
+                    "o_customer_sk", "o_order_id", "invoice_year", "(num / den) AS ratio",
+                    "date", "store_id", "product_id","department"
+                });
+            if (generateFilter) {
+                std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr("orderTime_store_product_department", timestampSeed);
+                for (auto expr : filterExpr) {
+                    plan = plan.filter(expr);
+                }
+            }
+            return plan;
+        };  
+
+        auto ratioBuilder = makeGroupsBuilder()
+            .partialAggregation(
+                /*groupKeys=*/{"o_customer_sk"},
+                /*aggregates=*/{"avg(ratio) as avg_return_ratio"})
+            .finalAggregation()
+            .project({
+                "o_customer_sk",
+                "avg_return_ratio"
+            });
+
+        
+        auto frequencyBuilder = makeGroupsBuilder()
+            .partialAggregation(
+                {"o_customer_sk","invoice_year"},
+                {"count(1) as num_return"})
+            .finalAggregation()
+            .project({
+                "o_customer_sk",
+                "invoice_year",
+                "num_return"
+            })
+            .partialAggregation(
+                {"o_customer_sk"},
+                {"avg(num_return) as avg_num_return"})
+            .finalAggregation()
+            .project({
+                "o_customer_sk AS freq_customer_sk",
+                "avg_num_return"
+            });
+
+        
+        auto frequencyPlanNode = frequencyBuilder.planNode();
+        
+        queryPlan = ratioBuilder.hashJoin(
+                { "o_customer_sk" },
+                { "freq_customer_sk" },
+                frequencyPlanNode,
+                /*extraFilter=*/{},
+                /*outputCols=*/{
+                "o_customer_sk",
+                "avg_return_ratio",
+                "avg_num_return"
+                },
+                JoinType::kInner)
+            .project({
+                "o_customer_sk",
+                "CAST(avg_return_ratio AS REAL) as avg_return_ratio", 
+                "CAST(avg_num_return AS REAL) as avg_num_return"
+            })
+            .project({
+                "o_customer_sk", 
+                "array_constructor(avg_return_ratio, avg_num_return) as features"
+            })
+            .project({
+                "o_customer_sk", 
+                fmt::format(modelStr, "features")});
+
+    //read all the tables
+    //order
+    cataLog.setIdAddressMap(
+            readOrderDataPlanNodeId,
+            orderDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readOrderDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
+
+    //lineitem
+    cataLog.setIdAddressMap(
+            readLineitemDataPlanNodeId,
+            lineitemDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readLineitemDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(lineitemNumRows, lineitemNumCols))));
+
+    //Product
+    cataLog.setIdAddressMap(
+            readProductDataPlanNodeId,
+            productDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readProductDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(productNumRows, productNumCols))));
+
+    //order_return
+    cataLog.setIdAddressMap(
+            readOrderReturnDataPlanNodeId,
+            orderReturnDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readOrderReturnDataPlanNodeId, "order_returns");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readOrderReturnDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(orderReturnNumRows, orderReturnNumCols))));  
+
     } else {
         throw std::runtime_error("Unsupported query template for tpcxai workload : " + queryTemplate);
     }
