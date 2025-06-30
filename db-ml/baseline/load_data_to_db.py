@@ -21,7 +21,7 @@ def load_movielens_recommendation_to_datastore():
     db = create_engine(conn_string)
     conn = db.connect()
 
-    data_dir = "../../resources/data/movielens/final"
+    data_dir = "/home/velox/resources/data/movielens/final"
     df_movie = pq.read_table(os.path.join(data_dir, "movie.parquet")).to_pandas()
     a = LabelEncoder().fit(df_movie["m_movie_id"])
     b = a.transform(df_movie["m_movie_id"])
@@ -65,6 +65,7 @@ def load_movielens_recommendation_to_datastore():
     )
     db_connection.commit()
 
+    os.makedirs("./cache", exist_ok=True)
     df_movie_tag.to_csv("./cache/ml-movie-tag.csv", index=False, header=True)
     data_file_abs_path = os.path.abspath("./cache/ml-movie-tag.csv")
 
@@ -107,26 +108,26 @@ def load_movielens_recommendation_to_datastore():
 
     movie_path_in_hdfs = os.path.join(data_path, "movie")
     utils.load_csv_to_hdfs(
-        "../../resources/data/movielens/final/movie.parquet",
+        "/home/velox/resources/data/movielens/final/movie.parquet",
         movie_path_in_hdfs,
         overwrite=True,
     )
     user_path_in_hdfs = os.path.join(data_path, "user")
     utils.load_csv_to_hdfs(
-        "../../resources/data/movielens/final/user.parquet",
+        "/home/velox/resources/data/movielens/final/user.parquet",
         user_path_in_hdfs,
         overwrite=True,
     )
     rating_path_in_hdfs = os.path.join(data_path, "rating")
     utils.load_csv_to_hdfs(
-        "../../resources/data/movielens/final/rating.parquet",
+        "/home/velox/resources/data/movielens/final/rating.parquet",
         rating_path_in_hdfs,
         overwrite=True,
     )
 
     movie_tag_path_in_hdfs = os.path.join(data_path, "movie_tag")
     utils.load_csv_to_hdfs(
-        "../../resources/data/movielens/final/movie_tag_relevance.parquet",
+        "/home/velox/resources/data/movielens/final/movie_tag_relevance.parquet",
         movie_tag_path_in_hdfs,
         overwrite=True,
     )
@@ -141,7 +142,7 @@ def load_tpcxai_final_to_datastore():
     db = create_engine(conn_string)
     conn = db.connect()
 
-    data_dir = "../../resources/data/tpcxai_sf1/final"
+    data_dir = "/home/velox/resources/data/tpcxai_sf1/final"
     parquet_files_to_load = [
         "order",
         "lineitem",
@@ -176,7 +177,7 @@ def load_tpcxai_final_to_datastore():
         for dataset in ["training", "serving"]:
             path_in_hdfs = os.path.join(data_path, "{}_{}".format(file, dataset))
             utils.load_csv_to_hdfs(
-                "../../resources/data/tpcxai_sf1/final/{}/{}.parquet".format(
+                "/home/velox/resources/data/tpcxai_sf1/final/{}/{}.parquet".format(
                     dataset, file
                 ),
                 path_in_hdfs,
