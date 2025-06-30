@@ -962,10 +962,16 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
         readFinancialTransactionsDataPlanNodeId,
         finicialTransactionsDataPaths,
         dwio::common::FileFormat::PARQUET);
+    cataLog.setIdAddressMap(
+        readCustomerDataPlanNodeId,
+        customerDataPaths,
+        dwio::common::FileFormat::PARQUET);
     cataLog.addNodeIdRelationName(
         readFinancialAccountDataPlanNodeId, "financial_account");
     cataLog.addNodeIdRelationName(
         readFinancialTransactionsDataPlanNodeId, "financial_transactions");
+    cataLog.addNodeIdRelationName(
+        readCustomerDataPlanNodeId, "customer");
     Source financialAccountSrc = Source(
         readFinancialAccountDataPlanNodeId,
         Source::Type::FILE,
@@ -976,8 +982,14 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
         Source::Type::FILE,
         std::make_shared<OutputStat>(OutputStat(
             finicialTransactionsNumRows, finicialTransactionsNumCols)));
+    Source customerSrc = Source(
+        readCustomerDataPlanNodeId,
+        Source::Type::FILE,
+        std::make_shared<OutputStat>(
+            OutputStat(customerNumRows, customerNumCols)));
     cataLog.addSource(std::make_shared<Source>(financialAccountSrc));
     cataLog.addSource(std::make_shared<Source>(financialTransactionsSrc));
+    cataLog.addSource(std::make_shared<Source>(customerSrc));
     } else if (queryTemplate == "template8") { // uc3
         // Register functions: department_encoder
         registerDepartmentEncoder(cataLog, pool_);
@@ -1109,8 +1121,51 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                 for (auto expr : filterExpr) {
                     plan = plan.filter(expr);
                 }
-            }
-            return plan;
+              }
+            //order
+            cataLog.setIdAddressMap(
+                    readOrderDataPlanNodeId,
+                    orderDataPaths,
+                    dwio::common::FileFormat::PARQUET);
+                cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
+                cataLog.addSource(std::make_shared<Source>(
+                    Source(readOrderDataPlanNodeId,
+                        Source::Type::FILE,
+                        std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
+
+            //lineitem
+            cataLog.setIdAddressMap(
+                    readLineitemDataPlanNodeId,
+                    lineitemDataPaths,
+                    dwio::common::FileFormat::PARQUET);
+                cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
+                cataLog.addSource(std::make_shared<Source>(
+                    Source(readLineitemDataPlanNodeId,
+                        Source::Type::FILE,
+                        std::make_shared<OutputStat>(lineitemNumRows, lineitemNumCols))));
+
+            //Product
+            cataLog.setIdAddressMap(
+                    readProductDataPlanNodeId,
+                    productDataPaths,
+                    dwio::common::FileFormat::PARQUET);
+                cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+                cataLog.addSource(std::make_shared<Source>(
+                    Source(readProductDataPlanNodeId,
+                        Source::Type::FILE,
+                        std::make_shared<OutputStat>(productNumRows, productNumCols))));
+
+            //order_return
+            cataLog.setIdAddressMap(
+                    readOrderReturnDataPlanNodeId,
+                    orderReturnDataPaths,
+                    dwio::common::FileFormat::PARQUET);
+                cataLog.addNodeIdRelationName(readOrderReturnDataPlanNodeId, "order_returns");
+                cataLog.addSource(std::make_shared<Source>(
+                    Source(readOrderReturnDataPlanNodeId,
+                        Source::Type::FILE,
+                        std::make_shared<OutputStat>(orderReturnNumRows, orderReturnNumCols))));  
+              return plan;
         };  
 
         auto ratioBuilder = makeGroupsBuilder()
@@ -1170,50 +1225,6 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                 "o_customer_sk", 
                 fmt::format(modelStr, "features")});
 
-    //read all the tables
-    //order
-    cataLog.setIdAddressMap(
-            readOrderDataPlanNodeId,
-            orderDataPaths,
-            dwio::common::FileFormat::PARQUET);
-        cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
-        cataLog.addSource(std::make_shared<Source>(
-            Source(readOrderDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
-
-    //lineitem
-    cataLog.setIdAddressMap(
-            readLineitemDataPlanNodeId,
-            lineitemDataPaths,
-            dwio::common::FileFormat::PARQUET);
-        cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
-        cataLog.addSource(std::make_shared<Source>(
-            Source(readLineitemDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(lineitemNumRows, lineitemNumCols))));
-
-    //Product
-    cataLog.setIdAddressMap(
-            readProductDataPlanNodeId,
-            productDataPaths,
-            dwio::common::FileFormat::PARQUET);
-        cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
-        cataLog.addSource(std::make_shared<Source>(
-            Source(readProductDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(productNumRows, productNumCols))));
-
-    //order_return
-    cataLog.setIdAddressMap(
-            readOrderReturnDataPlanNodeId,
-            orderReturnDataPaths,
-            dwio::common::FileFormat::PARQUET);
-        cataLog.addNodeIdRelationName(readOrderReturnDataPlanNodeId, "order_returns");
-        cataLog.addSource(std::make_shared<Source>(
-            Source(readOrderReturnDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(orderReturnNumRows, orderReturnNumCols))));  
 
     } else {
         throw std::runtime_error("Unsupported query template for tpcxai workload : " + queryTemplate);
