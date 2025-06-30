@@ -426,7 +426,7 @@ PlanBuilder setupTPCxAIQuery(
   if (dataDirPrefix == "") {
     // use default value:
     dataDirPrefix =
-        "/home/cactusdb/resources/data/parquet/tpcxai_sf1/final/serving/";
+        "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
   }
 
   std::vector<std::string> finicialAccountDataPaths =
@@ -840,7 +840,7 @@ PlanBuilder setupMovielensDBQuery(
 
   if (dataDirPrefix == "") {
     // use default value:
-    dataDirPrefix = "/home/cactusdb/resources/data/parquet/movielens/final/";
+    dataDirPrefix = "/home/velox/resources/data/parquet/movielens/final/";
   }
 
   std::vector<std::string> movieTagDataPaths =
@@ -2461,6 +2461,14 @@ std::vector<std::string> sampleUserMovieFilterExpr(
       "m_vote_count = 150",
   };
 
+  std::vector<std::string> ratingTimestampFilterExprs = { // range  max : 1046454590 | min : 956703932
+      "r_rating <= 964152800",
+      "r_rating >= 964152816",
+      "r_rating < 974687965",
+      "r_rating >= 975768738",
+      "r_rating < 967588077",
+  };
+
   std::vector<std::vector<std::string>> predefinedUserFilterExprs = {
       userGenderFilterExprs,
       userAgeFilterExprs,
@@ -2508,7 +2516,28 @@ std::vector<std::string> sampleUserMovieFilterExpr(
         combinedFilterExprSets.end(),
         movieGenresFilterExprs);
     sampleFilterPool = combinedFilterExprSets;
-  } else {
+  } else if(filterTable == "age_gender_occupation_genre"){
+    randomGenerator.setIntRange(1, 3);
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        predefinedUserFilterExprs.begin(),
+        predefinedUserFilterExprs.end()-1);
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        movieGenresFilterExprs);
+    sampleFilterPool = combinedFilterExprSets;
+  } else if(filterTable == "genre_rating"){
+    randomGenerator.setIntRange(1, 3);
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        movieGenresFilterExprs);
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        ratingTimestampFilterExprs);
+    sampleFilterPool = combinedFilterExprSets;
+  }  
+  
+  else {
     throw std::invalid_argument(
         "Invalid table for sampling filter expression: " + filterTable);
   }
@@ -2641,6 +2670,14 @@ std::vector<std::string> sampleTPCxAIFilterExpr(
         "product_id >= 600",
     };
 
+
+    std::vector<std::string> idReviewFilterExprs = { //range from 0 to 13432
+        "id < 1243",
+        "id >= 5834",
+        "id <= 10341",
+        "id > 2587",
+        "id >= 9476",
+    };
   
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
     std::vector<std::vector<std::string>> sampleFilterPool;
@@ -2684,6 +2721,9 @@ std::vector<std::string> sampleTPCxAIFilterExpr(
     if (filterTable.find("product") != std::string::npos) {
         sampleFilterPool.insert(
             sampleFilterPool.end(), productIDFilterExprs);
+    if (filterTable.find("idReview") != std::string::npos) {
+        sampleFilterPool.insert(
+            sampleFilterPool.end(), idReviewFilterExprs);
     }
 
     RandomSampler randomSampler = RandomSampler(timestampSeed);
@@ -2730,7 +2770,7 @@ void outputAugmentedQueryPlan(
     std::string outputPath = "") {
   auto serializedPlan = plan.planNode()->serialize();
   if (outputPath == "") {
-    outputPath = "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
+    outputPath = "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
   }
   augmentSerializedPlan(serializedPlan, cataLog);
   writeStringToFile(folly::toJson(serializedPlan), outputPath);
@@ -2740,7 +2780,7 @@ void outputStructuredQueryPlan(PlanBuilder& plan) {
   auto structuredPlan = plan.planNode()->toString(true, true);
   writeStringToFile(
       structuredPlan,
-      "/home/cactusdb/velox/optimizer/tests/structuredQueryPlan.txt");
+      "/home/velox/velox/optimizer/tests/structuredQueryPlan.txt");
 }
 
 void deleteFilesInFolder(const std::string& folderPath) {
@@ -3130,18 +3170,18 @@ void generateDummyData(
     int movieFeatureSize = dummyFeatureSizes[1];
 
     std::string tableStatsPath =
-        "/home/cactusdb/velox/optimizer/tests/tableStats.txt";
+        "/home/velox/velox/optimizer/tests/tableStats.txt";
     remove(tableStatsPath.c_str());
 
     std::vector<std::vector<int>> userModelStructures =
         readModelStructureFromFile(
-            "/home/cactusdb/velox/optimizer/tests/user_dummy_model_structure.txt");
+            "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
     std::vector<std::vector<int>> movieModelStructures =
         readModelStructureFromFile(
-            "/home/cactusdb/velox/optimizer/tests/movie_dummy_model_structure.txt");
+            "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
     std::vector<std::vector<int>> tagModelStructures =
         readModelStructureFromFile(
-            "/home/cactusdb/velox/optimizer/tests/tag_dummy_model_structure.txt");
+            "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
 
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
     RandomSampler randomSampler = RandomSampler(0);
@@ -3463,12 +3503,12 @@ PlanBuilder setupProfileQueryPlan(
 
   std::vector<std::vector<int>> userModelStructures =
       readModelStructureFromFile(
-          "/home/cactusdb/velox/optimizer/tests/user_dummy_model_structure.txt");
+          "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
   std::vector<std::vector<int>> movieModelStructures =
       readModelStructureFromFile(
-          "/home/cactusdb/velox/optimizer/tests/movie_dummy_model_structure.txt");
+          "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
   std::vector<std::vector<int>> tagModelStructures = readModelStructureFromFile(
-      "/home/cactusdb/velox/optimizer/tests/tag_dummy_model_structure.txt");
+      "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
 
   if (mode == "ml") {
     RowTypePtr userDataRowType = cataLog.getRegisteredDataSrcSchema("user");
@@ -3958,12 +3998,12 @@ void checkValidProfileQueryGenerationSetting(
 
   std::vector<std::vector<int>> userModelStructures =
       readModelStructureFromFile(
-          "/home/cactusdb/velox/optimizer/tests/user_dummy_model_structure.txt");
+          "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
   std::vector<std::vector<int>> movieModelStructures =
       readModelStructureFromFile(
-          "/home/cactusdb/velox/optimizer/tests/movie_dummy_model_structure.txt");
+          "/home/velox/velox/optimizer/tests/movie_dummy_model_structure.txt");
   std::vector<std::vector<int>> tagModelStructures = readModelStructureFromFile(
-      "/home/cactusdb/velox/optimizer/tests/tag_dummy_model_structure.txt");
+      "/home/velox/velox/optimizer/tests/tag_dummy_model_structure.txt");
 
   if (queryTemplate.find("user") != std::string::npos &&
       userFeatureSize != userModelStructures[0][0])
