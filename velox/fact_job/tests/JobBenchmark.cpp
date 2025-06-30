@@ -140,6 +140,7 @@ class JobBenchmark : HiveConnectorTestBase {
   VectorMaker maker{pool_.get()};
 
   std::unordered_map<std::string, RowVectorPtr> tableName2RowVector;
+  std::unordered_map<std::string, std::vector<std::string>> tabel2Columns;
 
   // Function to check if a string represents a valid integer
   bool isInteger(const std::string& s) {
