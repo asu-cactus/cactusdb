@@ -235,6 +235,78 @@ class StringVariadicEncoder : public MLFunction {
   std::unordered_map<std::string, int> mapping_;
 };
 
+class OneHotEncoder : public MLFunction {
+ public:
+  OneHotEncoder(std::unordered_map<std::string, int> mapping) {
+    mapping_ = std::unordered_map<std::string, int>(mapping);
+  }
+
+  void apply(
+    const SelectivityVector& rows,
+    std::vector<VectorPtr>& args,
+    const TypePtr& type,
+    exec::EvalCtx& context,
+    VectorPtr& output) const override {
+  
+  BaseVector::ensureWritable(rows, type, context.pool(), output);
+  auto inputVector = args[0]->asFlatVector<StringView>();
+  auto numRows = rows.size();
+
+  // Determine fixed one-hot length
+  int numCategories = mapping_.size();
+
+  std::vector<std::vector<int>> result(numRows, std::vector<int>(numCategories, 0));
+
+  rows.applyToSelected([&](vector_size_t row) {
+    StringView val = inputVector->valueAt(row);
+    std::string raw = val.getString();
+
+    std::stringstream ss(raw);
+    std::string token;
+    while (std::getline(ss, token, '|')) {
+      // Optionally trim and capitalize/lowercase here
+      auto it = mapping_.find(token);
+      if (it != mapping_.end()) {
+        int index = it->second - 1; // Assuming mapping values are 1-based
+        if (index >= 0 && index < numCategories) {
+          result[row][index] = 1;
+        }
+      } else {
+        std::cout << "[ERROR] Unknown genre: " << token << std::endl;
+      }
+    }
+  });
+
+  VectorMaker maker{context.pool()};
+  output = maker.arrayVector<int>(result, INTEGER());
+}
+
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {exec::FunctionSignatureBuilder()
+                .argumentType("VARCHAR")
+                .returnType("array(INTEGER)")
+                .build()};
+  }
+
+  static std::string getName() {
+    return "one_hot_encoder";
+  };
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
+
+ private:
+  std::unordered_map<std::string, int> mapping_;
+};
+
 class MultiHotNormalizedEncoder : public MLFunction {
  public:
   MultiHotNormalizedEncoder(int size) {
