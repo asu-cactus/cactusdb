@@ -1960,3 +1960,209 @@ void registerTPCxAIUC8MLModelFunctions(
       true,
       catalog);
 };
+
+void registerDepartmentEncoder(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+    std::vector<std::string> departmentList = {
+      "AUTOMOTIVE",
+      "BATH AND SHOWER",
+      "BEAUTY",
+      "BEDDING",
+      "BOYS WEAR",
+      "CANDY, TOBACCO, COOKIES",
+      "CELEBRATION",
+      "COMM BREAD",
+      "COOK AND DINE",
+      "DAIRY",
+      "DSD GROCERY",
+      "ELECTRONICS",
+      "FABRICS AND CRAFTS",
+      "FINANCIAL SERVICES",
+      "FROZEN FOODS",
+      "GIRLS WEAR, 4-6X  AND 7-14",
+      "GROCERY DRY GOODS",
+      "HARDWARE",
+      "HOME DECOR",
+      "HOME MANAGEMENT",
+      "HORTICULTURE AND ACCESS",
+      "HOUSEHOLD CHEMICALS/SUPP",
+      "HOUSEHOLD PAPER GOODS",
+      "IMPULSE MERCHANDISE",
+      "INFANT APPAREL",
+      "INFANT CONSUMABLE HARDLINES",
+      "JEWELRY AND SUNGLASSES",
+      "LADIESWEAR",
+      "LAWN AND GARDEN",
+      "LIQUOR,WINE,BEER",
+      "MEAT - FRESH & FROZEN",
+      "MEDIA AND GAMING",
+      "MENS WEAR",
+      "OFFICE SUPPLIES",
+      "PAINT AND ACCESSORIES",
+      "PERSONAL CARE",
+      "PETS AND SUPPLIES",
+      "PHARMACY OTC",
+      "PHARMACY RX",
+      "PLAYERS AND ELECTRONICS",
+      "PRODUCE",
+      "SERVICE DELI",
+      "SHOES",
+      "SPORTING GOODS",
+      "TOYS",
+      "WIRELESS"};
+  std::unordered_map<std::string, int> departmentMapping;
+  for (int i = 0; i < departmentList.size(); i++) {
+    departmentMapping[departmentList[i]] = i;
+  }
+  optimization::registerVectorFunction(
+      "department_encoder",
+      StringEncoder::signatures(),
+      std::make_unique<StringEncoder>(std::move(departmentMapping)),
+      {},
+      true,
+      catalog);
+}
+
+void registerGenderEncoder(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_){
+        VectorMaker maker{pool_.get()};
+        std::unordered_map<std::string, int> genderMapping;
+        genderMapping["F"] = 0;
+        genderMapping["M"] = 1;
+
+        optimization::registerVectorFunction(
+            "gender_encoder",
+            StringEncoder::signatures(),
+            std::make_unique<StringEncoder>(std::move(genderMapping)),
+            {},
+            true,
+            catalog
+            );
+
+    }
+
+void normalizeAge(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    const std::string& fileName){
+        VectorMaker maker{pool_.get()};
+        
+    optimization::registerVectorFunction(
+      "user_age_minmax_scaler",
+      MinMaxScaler::signatures(),
+      std::make_unique<MinMaxScaler>(
+          fmt::format("/home/velox/resources/model/movielens/final/velox/{}", fileName)),
+      {},
+      true,
+      catalog);   
+    }
+
+void normalizeOccupation(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    const std::string& fileName){
+        VectorMaker maker{pool_.get()};
+        
+    optimization::registerVectorFunction(
+      "user_occupation_minmax_scaler",
+      MinMaxScaler::signatures(),
+      std::make_unique<MinMaxScaler>(
+          fmt::format("/home/velox/resources/model/movielens/final/velox/{}", fileName)),
+      {},
+      true,
+      catalog);   
+
+    }
+
+void oneHotEncodeGenres(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_){
+    VectorMaker maker{pool_.get()};
+
+    std::unordered_map<std::string, int> genresMapping = {
+      {"Animation", 1},
+      {"Children's", 2},
+      {"Comedy", 3},
+      {"Adventure", 4},
+      {"Fantasy", 5},
+      {"Romance", 6},
+      {"Drama", 7},
+      {"Action", 8},
+      {"Crime", 9},
+      {"Thriller", 10},
+      {"Horror", 11},
+      {"Sci-Fi", 12},
+      {"Documentary", 13},
+      {"War", 14},
+      {"Musical", 15},
+      {"Mystery", 16},
+      {"Film-Noir", 17},
+      {"Western", 18}};
+
+  optimization::registerVectorFunction(
+      "genres_encoder",
+      OneHotEncoder::signatures(),
+      std::make_unique<OneHotEncoder>(std::move(genresMapping)),
+      {},
+      true,
+      catalog);
+
+}
+
+void normalizePopularity(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+  optimization::registerVectorFunction(
+      "movie_popularity_minmax_scaler",
+      MinMaxScaler::signatures(),
+      std::make_unique<MinMaxScaler>(
+          "/home/velox/resources/model/movielens/final/velox/q9_movie_popularity_minmax_scaler.txt"),
+      /*extraParameters=*/{},
+      /*isDeterministic=*/true,
+      catalog);
+}
+
+void normalizeVoteAverage(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+  optimization::registerVectorFunction(
+      "movie_vote_average_minmax_scaler",
+      MinMaxScaler::signatures(),
+      std::make_unique<MinMaxScaler>(
+          "/home/velox/resources/model/movielens/final/velox/q9_movie_vote_avg_minmax_scaler.txt"),
+      {},
+      true,
+      catalog);
+}
+
+void normalizeVoteCount(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+  optimization::registerVectorFunction(
+      "movie_vote_count_minmax_scaler",
+      MinMaxScaler::signatures(),
+      std::make_unique<MinMaxScaler>(
+          "/home/velox/resources/model/movielens/final/velox/q9_movie_vote_count_minmax_scaler.txt"),
+      {},
+      true,
+      catalog);
+}
+
+void normalizeRating(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+  optimization::registerVectorFunction(
+      "rating_minmax_scaler",
+      MinMaxScaler::signatures(),
+      std::make_unique<MinMaxScaler>(
+          "/home/velox/resources/model/movielens/final/velox/q9_rating_rating_minmax_scaler.txt"),
+      {},
+      true,
+      catalog);
+}

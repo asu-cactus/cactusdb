@@ -262,6 +262,13 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         true,
         cataLog);
     optimization::registerVectorFunction(
+        "sigmoid",
+        Sigmoid::signatures(),
+        std::make_unique<Sigmoid>(),
+        {},
+        true,
+        cataLog);
+    optimization::registerVectorFunction(
         "softmax",
         Softmax::signatures(),
         std::make_unique<Softmax>(),
@@ -315,8 +322,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
             cataLog);
         modelComputationStr =
             matVectorAddName + "(" + modelComputationStr + ")";
-      } else if (kernelName == "ReLu") {
+      } else if (kernelName == "ReLU") {
         modelComputationStr = "relu(" + modelComputationStr + ")";
+      } else if (kernelName == "Sigmoid") {
+        modelComputationStr = "sigmoid(" + modelComputationStr + ")";
       } else if (kernelName == "Softmax") {
         modelComputationStr = "softmax(" + modelComputationStr + ")";
       } else if (kernelName == "Argmax") {
@@ -366,7 +375,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     std::vector<std::vector<int>> sampledModelKernelSizes =
         readModelStructureFromFile(
-            "/home/velox/velox/optimizer/tests/_sampledModel/model_layer_size.txt");
+            "/home/velox/velox/optimizer/tests/_sampledModel/model_kernel_size.txt");
 
     std::vector<std::vector<std::string>> sampledModelKernelNames =
         readModelKernelStrFromFile(
@@ -391,8 +400,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     if (featureSize2 > 0) {
       inputData2 = randomGenerator.genFloat2dVector(numData, featureSize2);
       inputData2Vector = maker.arrayVector<float>(inputData2, REAL());
-      inputRowVector =
-          maker.rowVector({"input", "input2"}, {inputDataVector, inputData2Vector});
+      inputRowVector = maker.rowVector(
+          {"input", "input2"}, {inputDataVector, inputData2Vector});
     } else {
       inputRowVector = maker.rowVector({"input"}, {inputDataVector});
     }
@@ -415,22 +424,20 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << queryPlan.planNode()->toString(true, true) << std::endl;
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
 
-    // std::string latencyOutputPath =
-    //     "/home/velox/velox/optimizer/tests/executionLatency.txt";
-    // writeStringToFile(std::to_string(executeTime), latencyOutputPath);
+    std::string latencyOutputPath =
+        "/home/velox/velox/optimizer/tests/executionLatency.txt";
+    writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
-    // auto serializedPlan = queryPlan.planNode()->serialize();
-    // std::string queryOutPutPath =
-    //     "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
-    // augmentSerializedPlan(serializedPlan, cataLog);
-    // writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
+    auto serializedPlan = queryPlan.planNode()->serialize();
+    std::string queryOutPutPath =
+        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+    augmentSerializedPlan(serializedPlan, cataLog, true /*removeSourceData*/);
+    writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
-    // auto queryPlanStr = queryPlan.planNode()->toString(true, true);
-    // std::string queryPlanStrOutputPath =
-    //     "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
-    // writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
-
-    // std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+    auto queryPlanStr = queryPlan.planNode()->toString(true, true);
+    std::string queryPlanStrOutputPath =
+        "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
+    writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
   }
 
  private:
@@ -456,6 +463,7 @@ DEFINE_int32(feature_size2, 0, "2nd input feature size for the model");
 DEFINE_int32(num_driver, 8, "Number of drivers");
 DEFINE_int32(verbose, 2, "Verbose");
 DEFINE_int32(data_batch_size, 256, "Data batch size");
+DEFINE_bool(rewrite, false, "Rewrite the query plan");
 DEFINE_string(data_path, "", "Data path to store the generated data");
 
 int main(int argc, char** argv) {
@@ -463,7 +471,6 @@ int main(int argc, char** argv) {
   folly::init(&argc, &argv, false);
   std::string modelType = FLAGS_modelType;
 
-  // bool rewrite = FLAGS_rewrite;
   int repeatRun = FLAGS_num_repeat;
   int numData = FLAGS_num_data;
   int featureSize = FLAGS_feature_size;
@@ -472,6 +479,7 @@ int main(int argc, char** argv) {
   int verbose = FLAGS_verbose;
   int dataBatchSize = FLAGS_data_batch_size;
   std::string dataPath = FLAGS_data_path;
+  bool rewrite = FLAGS_rewrite;
   IntegratedMCTSTest demo;
 
   demo.benchmarkModel(
@@ -479,6 +487,7 @@ int main(int argc, char** argv) {
       numDriver,
       repeatRun,
       verbose,
+      rewrite,
       numData,
       featureSize,
       featureSize2,

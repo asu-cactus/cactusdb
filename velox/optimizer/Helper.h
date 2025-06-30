@@ -371,9 +371,12 @@ void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
   }
 }
 
-// if the query plan takes in-memory data, the data will be stored in sources'data attribute, we 
-// we may not need it
-void augmentSerializedPlan(folly::dynamic& serializedPlan, CataLog& cataLog, bool removeSourceData = false) {
+// if the query plan takes in-memory data, the data will be stored in
+// sources'data attribute, we we may not need it
+void augmentSerializedPlan(
+    folly::dynamic& serializedPlan,
+    CataLog& cataLog,
+    bool removeSourceData = false) {
   if (serializedPlan.count("projections")) {
     for (auto& project : serializedPlan["projections"]) {
       if (project.count("functionName")) {
