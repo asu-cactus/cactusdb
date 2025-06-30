@@ -2608,10 +2608,10 @@ std::vector<std::string> sampleTPCxAIFilterExpr(
         "amount <= 2000.0",
   };
   std::vector<std::string> financialTransactionsTimeFilterExprs = { // range from "2012-01-01 00:14:00" to "2013-12-30 23:16:00
-        "time < '2012-06-01 00:00:00'",
-        "time > '2012-07-01 00:00:00'",
-        "time >= '2013-08-01 00:00:00'",
-        "time <= '2013-09-01 00:00:00'"        
+        "time < cast('2012-06-01 00:00:00' as timestamp)",
+        "time > cast('2012-07-01 00:00:00' as timestamp)",
+        "time >= cast('2013-08-01 00:00:00' as timestamp)",
+        "time <= cast('2013-09-01 00:00:00' as timestamp)"        
   };
   std::vector<std::string> storeFilterExprs = { // range from 1 to 11
         "store_id = 1",
