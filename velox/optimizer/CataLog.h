@@ -367,6 +367,11 @@ class CataLog {
       registeredDataSrcSchema[name] = schema;
       registeredDataSrcStats[name] = stats;
     }
+    if (name == "movie_relevance_tag") {
+      sparsityMap[name] = 0.05;
+    } else {
+      sparsityMap[name] = 0.1;
+    }
   }
 
   void registerDataSrc(
@@ -385,6 +390,23 @@ class CataLog {
       registeredDataSrcSchema[name] = schema;
       registeredDataSrcStats[name] = stats;
     }
+    if (name == "movie_relevance_tag") {
+      sparsityMap[name] = 0.05;
+    } else {
+      sparsityMap[name] = 0.1;
+    }
+  }
+
+  float getSparsity(std::string name) const {
+    auto it = sparsityMap.find(name);
+    if (it != sparsityMap.end()) {
+      return it->second;
+    } else
+      return 1;
+  }
+
+  void setSparsity(std::string name, float sparsity) {
+    sparsityMap[name] = sparsity;
   }
 
   std::vector<std::string> getRegisteredDataSrcFiles(std::string name) {
@@ -754,12 +776,12 @@ class CataLog {
   }
 
   void setIntermediateStateTupleCounter(
-      std::string intermediateStateName, int counter) {
+      std::string intermediateStateName,
+      int counter) {
     intermediateStateTupleCounterMap[intermediateStateName] = counter;
   }
 
-  void clearIntermediateStateTupleCounter(
-      std::string intermediateStateName) {
+  void clearIntermediateStateTupleCounter(std::string intermediateStateName) {
     intermediateStateTupleCounterMap.erase(intermediateStateName);
   }
 
@@ -806,6 +828,7 @@ class CataLog {
   std::unordered_map<std::string, std::vector<std::string>>
       factorizableSrcPushdownNodesMap;
   std::unordered_map<std::string, int> intermediateStateTupleCounterMap;
+  std::unordered_map<std::string, float> sparsityMap;
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(

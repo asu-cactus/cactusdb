@@ -126,112 +126,109 @@ class Dense2SparseRewriteAction : public RewriteAction {
 
                 targetExprStr = exprStr;
                 core::QueryConfig config({});
-                std::vector<std::string> parsedSingleExprs;
-                std::vector<std::string> matchedExprs;
+                std::string parsedSingleExpr;
+                std::string matchedExpr;
                 // parse the target string into a std::vecotor<DLKernel(string)>
-                parseDLExpressions(target, parsedSingleExprs, matchedExprs);
-                std::reverse(
-                    parsedSingleExprs.begin(), parsedSingleExprs.end());
+                parseInnerExpressions(target, parsedSingleExpr, matchedExpr);
 
                 std::vector<velox::dl::KernelType> kernelTypes;
                 std::vector<float*> weights;
                 std::vector<int> dims;
                 bool hasArgmax = false;
                 // process each expression from the innermost DL kernel
-                for (int i = 0; i < parsedSingleExprs.size(); i++) {
-                  // double check it is supported DL kernel
-                  assert(isSupportedDLKernel(parsedSingleExprs[i]));
-                  auto dlKernelName = parsedSingleExprs[i];
-                  std::vector<int> udfDims;
-                  if (dlKernelName.find("mat_mul") != std::string::npos) {
-                    auto myDL = getVectorFunction(
-                        dlKernelName, {ARRAY(REAL())}, {}, config);
-                    assert(myDL);
-                    auto myDLFunc =
-                        std::dynamic_pointer_cast<MatrixMultiply>(myDL);
-                    assert(myDLFunc);
-                    weights.push_back(myDLFunc->getTensor());
-                    udfDims = myDLFunc->getDims();
-                    kernelTypes.push_back(velox::dl::KernelType::MatMul);
-                    //} else if (
-                    //    dlKernelName.find("mat_add") != std::string::npos ||
-                    //    dlKernelName.find("mat_vector_add") !=
-                    //        std::string::npos) {
-                    //  auto myDL = getVectorFunction(
-                    //      dlKernelName, {ARRAY(REAL())}, {}, config);
-                    //  assert(myDL);
-                    //  auto myDLFunc =
-                    //      std::dynamic_pointer_cast<MatrixVectorAddition>(myDL);
-                    //  assert(myDLFunc);
-                    //  weights.push_back(myDLFunc->getTensor());
-                    //  udfDims = myDLFunc->getDims();
-                    //  kernelTypes.push_back(velox::dl::KernelType::MatAdd);
-                    //} else if (dlKernelName.find("relu") != std::string::npos)
-                    //{
-                    //  // Relu itself does not have dims stored in the UDF will
-                    //  use
-                    //  // the last element in dims. current limitation: relu
-                    //  cannot
-                    //  // be the innermost UDF.
-                    //  assert(!dims.empty());
-                    //  udfDims = {dims.back()};
-                    //  kernelTypes.push_back(velox::dl::KernelType::ReLU);
-                    //} else if (
-                    //    dlKernelName.find("batch_norm") != std::string::npos)
-                    //    {
-                    //  // BachNorm
-                    //  auto myDL = getVectorFunction(
-                    //      dlKernelName, {ARRAY(REAL())}, {}, config);
-                    //  assert(myDL);
-                    //  auto myDLFunc =
-                    //      std::dynamic_pointer_cast<BatchNorm1D>(myDL);
-                    //  assert(myDLFunc);
-                    //  weights.push_back(myDLFunc->getWeight());
-                    //  weights.push_back(myDLFunc->getBias());
-                    //  udfDims = myDLFunc->getDims();
-                    //  kernelTypes.push_back(velox::dl::KernelType::BatchNorm);
-                    //} else if (
-                    //    dlKernelName.find("softmax") != std::string::npos) {
-                    //  // Softmax itself does not have dims stored in the UDF
-                    //  will
-                    //  // use the last element in dims. current limitation:
-                    //  softmax
-                    //  // cannot be the innermost UDF.
-                    //  udfDims = {dims.back()};
-                    //  kernelTypes.push_back(velox::dl::KernelType::Softmax);
-                    //} else if (dlKernelName.find("argmax") !=
-                    // std::string::npos) {
-                    //  // Argmax itself does not have dims stored in the UDF
-                    //  will
-                    //  // use the last element in dims. current limitation:
-                    //  argmax
-                    //  // cannot be the innermost UDF.
-                    //  udfDims = {dims.back(), 1};
-                    //  kernelTypes.push_back(velox::dl::KernelType::Argmax);
-                    //  hasArgmax = true;
-                    //} else if (
-                    //    dlKernelName.find("sigmoid") != std::string::npos) {
-                    //  udfDims = {dims.back(), 1};
-                    //  kernelTypes.push_back(velox::dl::KernelType::Sigmoid);
-                  } else {
-                    std::cout
-                        << "ERROR, Unsupported DL kernel: " << dlKernelName
-                        << std::endl;
-                  }
-
-                  // Size of dimension should equal to 2*(Number of DL Ops)
-                  // dims with index 2*i and 2*i+1 are the input and output
-
-                  if (udfDims.size() == 2) {
-                    // For DLs have two dimensions, like MatMul
-                    dims.push_back(udfDims[0]);
-                    dims.push_back(udfDims[1]);
-                  } else {
-                    // For DLs have one dimension, like Relu
-                    dims.push_back(udfDims[0]);
-                    dims.push_back(udfDims[0]);
-                  }
+                // for (int i = 0; i < parsedSingleExprs.size(); i++) {
+                // double check it is supported DL kernel
+                assert(isSupportedDLKernel(parsedSingleExpr));
+                auto dlKernelName = parsedSingleExpr;
+                std::vector<int> udfDims;
+                if (dlKernelName.find("mat_mul") != std::string::npos) {
+                  auto myDL = getVectorFunction(
+                      dlKernelName, {ARRAY(REAL())}, {}, config);
+                  assert(myDL);
+                  auto myDLFunc =
+                      std::dynamic_pointer_cast<MatrixMultiply>(myDL);
+                  assert(myDLFunc);
+                  weights.push_back(myDLFunc->getTensor());
+                  udfDims = myDLFunc->getDims();
+                  kernelTypes.push_back(velox::dl::KernelType::MatMul);
+                  //} else if (
+                  //    dlKernelName.find("mat_add") != std::string::npos ||
+                  //    dlKernelName.find("mat_vector_add") !=
+                  //        std::string::npos) {
+                  //  auto myDL = getVectorFunction(
+                  //      dlKernelName, {ARRAY(REAL())}, {}, config);
+                  //  assert(myDL);
+                  //  auto myDLFunc =
+                  //      std::dynamic_pointer_cast<MatrixVectorAddition>(myDL);
+                  //  assert(myDLFunc);
+                  //  weights.push_back(myDLFunc->getTensor());
+                  //  udfDims = myDLFunc->getDims();
+                  //  kernelTypes.push_back(velox::dl::KernelType::MatAdd);
+                  //} else if (dlKernelName.find("relu") != std::string::npos)
+                  //{
+                  //  // Relu itself does not have dims stored in the UDF will
+                  //  use
+                  //  // the last element in dims. current limitation: relu
+                  //  cannot
+                  //  // be the innermost UDF.
+                  //  assert(!dims.empty());
+                  //  udfDims = {dims.back()};
+                  //  kernelTypes.push_back(velox::dl::KernelType::ReLU);
+                  //} else if (
+                  //    dlKernelName.find("batch_norm") != std::string::npos)
+                  //    {
+                  //  // BachNorm
+                  //  auto myDL = getVectorFunction(
+                  //      dlKernelName, {ARRAY(REAL())}, {}, config);
+                  //  assert(myDL);
+                  //  auto myDLFunc =
+                  //      std::dynamic_pointer_cast<BatchNorm1D>(myDL);
+                  //  assert(myDLFunc);
+                  //  weights.push_back(myDLFunc->getWeight());
+                  //  weights.push_back(myDLFunc->getBias());
+                  //  udfDims = myDLFunc->getDims();
+                  //  kernelTypes.push_back(velox::dl::KernelType::BatchNorm);
+                  //} else if (
+                  //    dlKernelName.find("softmax") != std::string::npos) {
+                  //  // Softmax itself does not have dims stored in the UDF
+                  //  will
+                  //  // use the last element in dims. current limitation:
+                  //  softmax
+                  //  // cannot be the innermost UDF.
+                  //  udfDims = {dims.back()};
+                  //  kernelTypes.push_back(velox::dl::KernelType::Softmax);
+                  //} else if (dlKernelName.find("argmax") !=
+                  // std::string::npos) {
+                  //  // Argmax itself does not have dims stored in the UDF
+                  //  will
+                  //  // use the last element in dims. current limitation:
+                  //  argmax
+                  //  // cannot be the innermost UDF.
+                  //  udfDims = {dims.back(), 1};
+                  //  kernelTypes.push_back(velox::dl::KernelType::Argmax);
+                  //  hasArgmax = true;
+                  //} else if (
+                  //    dlKernelName.find("sigmoid") != std::string::npos) {
+                  //  udfDims = {dims.back(), 1};
+                  //  kernelTypes.push_back(velox::dl::KernelType::Sigmoid);
+                } else {
+                  std::cout << "ERROR, Unsupported DL kernel: " << dlKernelName
+                            << std::endl;
                 }
+
+                // Size of dimension should equal to 2*(Number of DL Ops)
+                // dims with index 2*i and 2*i+1 are the input and output
+
+                if (udfDims.size() == 2) {
+                  // For DLs have two dimensions, like MatMul
+                  dims.push_back(udfDims[0]);
+                  dims.push_back(udfDims[1]);
+                } else {
+                  // For DLs have one dimension, like Relu
+                  dims.push_back(udfDims[0]);
+                  dims.push_back(udfDims[0]);
+                }
+                //}
 
                 std::string sparseMatrixName =
                     fmt::format("sparseMatrix_{}", rewriteTorchDNNCounter++);
@@ -508,6 +505,14 @@ class Dense2SparseRewriteAction : public RewriteAction {
     return false;
   }
 
+  bool isSparseMatrix(const std::string& matchedExpr, const CataLog& cataLog) {
+    auto inputName = getInputExprName(matchedExpr);
+    if (cataLog.getSparsity(inputName) <= 1) {
+      return true;
+    }
+    return false;
+  }
+
   /**
    * @brief A function to check if this rule can be applied in a logical plan
    * and to store the possible UDF name.
@@ -557,18 +562,14 @@ class Dense2SparseRewriteAction : public RewriteAction {
       for (const auto& expression : expressions) {
         std::string expr = expression->toString();
         // std::cout << "expr: " << expr << std::endl;
-        std::vector<std::string> parsedSingleExprs;
-        std::vector<std::string> matchedExprs;
-        parseDLExpressions(expr, parsedSingleExprs, matchedExprs);
+        std::string parsedSingleExpr; // function name
+        std::string matchedExpr; // matched expression
+        parseInnerExpressions(expr, parsedSingleExpr, matchedExpr);
         // reverse to get the innermost function first
-        std::reverse(parsedSingleExprs.begin(), parsedSingleExprs.end());
-        std::reverse(matchedExprs.begin(), matchedExprs.end());
         std::string targetExprStr;
-        for (int i = 0; i < parsedSingleExprs.size(); i++) {
-          if (isSupportedDLKernel(parsedSingleExprs[i])) {
-            targetExprStr = matchedExprs[i];
-            break;
-          }
+        if (isSupportedDLKernel(parsedSingleExpr) &&
+            isSparseMatrix(matchedExpr, cataLog)) {
+          targetExprStr = matchedExpr;
         }
 
         if (!targetExprStr.empty()) {

@@ -2233,6 +2233,34 @@ class AblationStudyTest : public HiveConnectorTestBase {
     std::cout << "################## print info end #################"
               << std::endl;
   }
+  std::pair<std::string, std::string> getMostSparsityAction(
+      PlanState& planState,
+      CataLog& cataLog) {
+    // Find the action with the most sparsity
+    std::pair<std::string, std::string> mostSparsityAction;
+    double maxSparsity = 1.1;
+    for (const auto& action : planState.actionsPair) {
+      if (action.second.size() < 1) {
+        continue; // Skip actions with no parameters
+      }
+      if (action.second[0] != "Dense2SparseRewriteAction") {
+        continue; // Skip other action
+      }
+      auto inputName = getInputExprName(action.first);
+      double sparsity = cataLog.getSparsity(inputName);
+      std::cout << "inputName: " << inputName << ", sparsity: " << sparsity
+                << std::endl;
+      if (sparsity < maxSparsity) {
+        maxSparsity = sparsity;
+        mostSparsityAction.first = action.first;
+        mostSparsityAction.second = action.second[0];
+      }
+    }
+    std::cout << "The most Sparsity Action:\n"
+              << mostSparsityAction.first << ": " << mostSparsityAction.second
+              << "Sparsity ratio:" << maxSparsity << std::endl;
+    return mostSparsityAction;
+  }
 
   void testAblationStudy(
       std::string model,
@@ -2348,6 +2376,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
     for (auto entry : planState.actionsPair) {
       std::cout << entry.first << ": " << entry.second << std::endl;
     }
+    std::pair<std::string, std::string> mostSparsityAction =
+        getMostSparsityAction(planState, cataLog);
 
     std::string queryOptType = getEnvVar("CD_VELOX_QUERY_OPT_TYPE");
     std::cout << "QueryOptType:" << queryOptType << std::endl;

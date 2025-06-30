@@ -371,9 +371,12 @@ void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
   }
 }
 
-// if the query plan takes in-memory data, the data will be stored in sources'data attribute, we 
-// we may not need it
-void augmentSerializedPlan(folly::dynamic& serializedPlan, CataLog& cataLog, bool removeSourceData = false) {
+// if the query plan takes in-memory data, the data will be stored in
+// sources'data attribute, we we may not need it
+void augmentSerializedPlan(
+    folly::dynamic& serializedPlan,
+    CataLog& cataLog,
+    bool removeSourceData = false) {
   if (serializedPlan.count("projections")) {
     for (auto& project : serializedPlan["projections"]) {
       if (project.count("functionName")) {
@@ -505,6 +508,64 @@ void parseDLExpressions(
 
   // Recursively parse the inner expression
   parseDLExpressions(inner, parsedSingleExpr, matchedExpr);
+}
+
+std::string getInputExprName(const std::string& targetExprStr) {
+  std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+  std::smatch matches;
+  // Object to capture the matched data source
+  std::string matchedDataSrc;
+  // Search out the matched data source and store in matches
+  if (std::regex_search(targetExprStr, matches, patternToMatchRawSource)) {
+    matchedDataSrc = matches[1].str();
+  } else {
+    std::cout << "Uncaptured data source" << std::endl;
+  }
+  return matchedDataSrc;
+}
+
+bool parseInnerExpressions(
+    const std::string& input,
+    std::string& funcName,
+    std::string& innermostExpression) {
+  std::vector<int> parenStack;
+  int maxDepthCloseIdx = -1;
+
+  // Track current depth
+  int depth = 0;
+  parenStack.push_back(-1);
+
+  for (int i = 0; i < input.length(); ++i) {
+    if (input[i] == '(') {
+      parenStack.push_back(i);
+      ++depth;
+    } else if (input[i] == ')') {
+      if (maxDepthCloseIdx < 0) {
+        maxDepthCloseIdx = i;
+      }
+      --depth;
+    }
+  }
+
+  if (depth == 0) {
+    int len = parenStack.size();
+    if (len > 1 && maxDepthCloseIdx > 0) {
+      innermostExpression = input.substr(
+          parenStack[len - 2] + 1, maxDepthCloseIdx - parenStack[len - 2]);
+      funcName = input.substr(
+          parenStack[len - 2] + 1,
+          parenStack[len - 1] - parenStack[len - 2] - 1);
+      funcName = trim(funcName);
+      innermostExpression = trim(innermostExpression);
+
+    } else {
+      return false;
+    }
+  } else {
+    std::cout << "Invalid input: " << input << std::endl;
+    return false;
+  }
+  return true;
 }
 
 // Function to split a string based on a delimiter
