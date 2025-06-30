@@ -178,7 +178,8 @@ class MatrixMultiply : public MLFunction {
       });
 
       int numInputMatrixRows = numUniqueRows;
-      Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
+      Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+          inputMatrix(numInputMatrixRows, dims[0]);
       int rowIndex = 0;
       for (auto rawIndex : uniqueRawIndexeVector) {
         Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -299,7 +300,7 @@ class SparseMatrixMultiply : public MLFunction {
       throw std::runtime_error(
           "GPU implementation of Matrix Multiple is not implemented.");
     } else {
-      std::cout<<"Applied sparse matrix multiply" <<std::endl;
+      std::cout << "Applied sparse matrix multiply" << std::endl;
       // Ensure output vector is writable.
       context.ensureWritable(rows, outputType, output);
       output->clearNulls(rows);
@@ -438,7 +439,7 @@ class SparseMatrixMultiply : public MLFunction {
   };
 
   static std::string getName() {
-    return "mat_mul";
+    return "mat_mul_s";
   };
 
   std::string getWeightsFile() {
@@ -796,7 +797,8 @@ class MatrixMultiply_h : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        inputMatrix(numInputMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -1126,7 +1128,8 @@ class MatrixVectorAddition : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        inputMatrix(numInputMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -1392,7 +1395,8 @@ class Softmax : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, numCols);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        inputMatrix(numInputMatrixRows, numCols);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -1426,7 +1430,6 @@ class Softmax : public MLFunction {
 
       outputOffset += numCols;
     });
-
   }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
@@ -1501,7 +1504,8 @@ class Argmax : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, numCols);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        inputMatrix(numInputMatrixRows, numCols);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -1527,7 +1531,7 @@ class Argmax : public MLFunction {
       arrayOutput->set(row, argmaxMap[mappedIndexInResultMatrix]);
       valueCounts[outputValues[row]]++;
     });
-    
+
     /*
     for (const auto& pair : valueCounts) {
       LOG(INFO) << "[INFO] Label Distributions: Key: " << pair.first
@@ -1671,7 +1675,8 @@ class MinMaxScaler : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, numCols);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        inputMatrix(numInputMatrixRows, numCols);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -1685,8 +1690,9 @@ class MinMaxScaler : public MLFunction {
     Eigen::Map<
         Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
         maxVals(scalerMaxValues_, 1, numCols);
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> resultMatrix =
-        (inputMatrix.rowwise() - minVals.row(0)).array().rowwise() /
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        resultMatrix =
+            (inputMatrix.rowwise() - minVals.row(0)).array().rowwise() /
         (maxVals.row(0) - minVals.row(0)).array();
 
     auto baseOffset = elementsOutput->size();
@@ -2139,7 +2145,8 @@ class TorchDNNV2 : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        inputMatrix(numInputMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -2371,7 +2378,8 @@ class TorchDNNV2CUDA : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        inputMatrix(numInputMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(

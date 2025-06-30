@@ -2340,6 +2340,8 @@ PlanBuilder setupMovielensDBQuery(
     Source movieTagSrc2 =
         Source(readMovieTagDataPlanNodeId2, Source::Type::FILE, movieTagStats2);
     cataLog.addSource(std::make_shared<Source>(movieTagSrc2));
+    cataLog.setSparsity("mt_relevance_score", 0.1);
+    cataLog.setSparsity("model_features", 0.5);
 
   } else if (queryType.find("q4") != std::string::npos) {
     std::cout << "q4" << std::endl;

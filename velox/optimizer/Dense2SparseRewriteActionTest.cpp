@@ -381,16 +381,32 @@ class Dense2SparseRewriteActionTest : public HiveConnectorTestBase {
                                   NNBuilder::SOFTMAX)
                               .build();
 
+    std::string compute1 = NNBuilder()
+                               .denseLayer(
+                                   first_layer_output_size,
+                                   input_features_size,
+                                   data.weights[0],
+                                   data.bias[0],
+                                   NNBuilder::RELU)
+                               .denseLayer(
+                                   second_layer_output_size,
+                                   first_layer_output_size,
+                                   data.weights[1],
+                                   data.bias[1],
+                                   NNBuilder::RELU)
+                               .build();
+
     // Initialize planNodeID
     core::PlanNodeId p0;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     // Create a plan for FFNN using two dense layers UDFs
-    auto myPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(asRowType(inputRowVector->type()))
-                      .capturePlanNodeId(p0)
-                      .project({fmt::format(compute, "v")})
-                      .planBuild();
+    auto myPlan =
+        exec::test::PlanBuilder(planNodeIdGenerator, pool_.get())
+            .tableScan(asRowType(inputRowVector->type()))
+            .capturePlanNodeId(p0)
+            .project({fmt::format(compute, "v"), fmt::format(compute1, "v")})
+            .planBuild();
     // Get the logical plan
     auto planNode = myPlan.planNode();
     // catalog
