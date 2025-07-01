@@ -400,7 +400,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
             Embedding::signatures(),
             std::make_unique<Embedding>(
                 movieWeightsVector->elements()->values()->asMutable<float>(),
-                numUserEmbeddings,
+                numMovieEmbedding,
                 embeddingDims));
 
         // Cosine Similarity
