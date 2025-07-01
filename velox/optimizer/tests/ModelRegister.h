@@ -15,7 +15,7 @@
 void registerTwoTowerFunc(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_,
-    bool isVerticalPartition) {
+    bool isVerticalPartition = false) {
   VectorMaker maker{pool_.get()};
   std::cout << "[INFO]: Register two tower model functions" << std::endl;
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
