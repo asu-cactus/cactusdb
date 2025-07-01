@@ -90,7 +90,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
 
     if (dataDirPrefix == "") {
       // use default value:
-      dataDirPrefix = "/home/cactusdb/resources/data/parquet/movielens/final/";
+      dataDirPrefix = "/home/velox/resources/data/parquet/movielens/final/";
     }
 
     std::vector<std::string> movieTagDataPaths =
@@ -1291,7 +1291,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
 
     if (dataDirPrefix == "") {
       // use default value:
-      dataDirPrefix = "/home/cactusdb/resources/data/parquet/movielens/final/";
+      dataDirPrefix = "/home/velox/resources/data/parquet/movielens/final/";
     }
 
     std::vector<std::string> movieTagDataPaths =
@@ -1731,7 +1731,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
     if (dataDirPrefix == "") {
         // use default value:
         dataDirPrefix =
-            "/home/cactusdb/resources/data/parquet/tpcxai_sf1/final/serving/";
+            "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
     }
 
     std::vector<std::string> finicialAccountDataPaths =
