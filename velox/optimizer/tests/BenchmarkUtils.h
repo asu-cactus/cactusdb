@@ -2398,27 +2398,27 @@ std::vector<std::string> sampleUserMovieFilterExpr(
   };
 
   std::vector<std::string> movieGenresFilterExprs = {
-      "m_genres = 'Action'",
-      "m_genres = 'Comedy'",
-      "m_genres = 'Drama'",
-      "m_genres = 'Horror'",
-      "m_genres = 'Sci-Fi'",
-      "m_genres = 'Romance'",
-      "m_genres = 'Adventure'",
-      "m_genres = 'Thriller'",
-      "m_genres = 'Fantasy'",
-      "m_genres = 'Documentary'",
+      "m_genres LIKE '\%Action\%'",
+      "m_genres LIKE '\%Comedy\%'",
+      "m_genres LIKE '\%Drama\%'",
+      "m_genres LIKE '\%Horror\%'",
+      "m_genres LIKE '\%Sci-Fi\%'",
+      "m_genres LIKE '\%Romance\%'",
+      "m_genres LIKE '\%Adventure\%'",
+      "m_genres LIKE '\%Thriller\%'",
+      "m_genres LIKE '\%Fantasy\%'",
+      "m_genres LIKE '\%Documentary\%'",
   };
 
   std::vector<std::string> movieSpokenLanguageFilterExprs = {
-      "m_spoken_languages = 'English'",
-      "m_spoken_languages = 'French'",
-      "m_spoken_languages = 'German'",
-      "m_spoken_languages = 'Japanese'",
-      "m_spoken_languages = 'Spanish'",
-      "m_spoken_languages = 'Italian'",
-      "m_spoken_languages = 'Korean'",
-      "m_spoken_languages = 'Mandarin'",
+      "m_spoken_languages LIKE '\%English\%'",
+      "m_spoken_languages LIKE '\%French\%'",
+      "m_spoken_languages LIKE '\%German\%'",
+      "m_spoken_languages LIKE '\%Japanese\%'",
+      "m_spoken_languages LIKE '\%Spanish\%'",
+      "m_spoken_languages LIKE '\%Italian\%'",
+      "m_spoken_languages LIKE '\%Korean\%'",
+      "m_spoken_languages LIKE '\%Mandarin\%'",
   };
 
   std::vector<std::string> moviePopularityFilterExprs = {
@@ -2507,6 +2507,30 @@ std::vector<std::string> sampleUserMovieFilterExpr(
     combinedFilterExprSets.insert(
         combinedFilterExprSets.end(),
         movieGenresFilterExprs);
+    sampleFilterPool = combinedFilterExprSets;
+  } else if (filterTable == "template1") {
+    randomGenerator.setIntRange(0, 2);
+    std::vector<std::vector<std::string>> template3FilterExprs = {movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
+    combinedFilterExprSets.insert(
+      combinedFilterExprSets.end(),
+      template3FilterExprs.begin(),
+      template3FilterExprs.end());
+    sampleFilterPool = combinedFilterExprSets;
+  } else if (filterTable == "template2") {
+    randomGenerator.setIntRange(0, 2);
+    std::vector<std::vector<std::string>> template2FilterExprs = {movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
+    combinedFilterExprSets.insert(
+      combinedFilterExprSets.end(),
+      template2FilterExprs.begin(),
+      template2FilterExprs.end());
+    sampleFilterPool = combinedFilterExprSets;
+  } else if (filterTable == "template3") {
+    randomGenerator.setIntRange(0, 2);
+    std::vector<std::vector<std::string>> template3FilterExprs = {movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
+    combinedFilterExprSets.insert(
+      combinedFilterExprSets.end(),
+      template3FilterExprs.begin(),
+      template3FilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
   } else {
     throw std::invalid_argument(
