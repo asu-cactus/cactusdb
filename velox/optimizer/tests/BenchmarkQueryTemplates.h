@@ -1257,7 +1257,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
     timestampSeed = randomSeed;
   }
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
-  randomGenerator.setIntRange(0, 1);
+  randomGenerator.setIntRange(10, 3000);
   PlanBuilder queryPlan;
 
   if (workload == "movielens1") {
@@ -1380,22 +1380,29 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
     // TODO
     // template 4 
     else if (queryTemplate == "template4") {
-        registerGenderEncoder(cataLog, pool_, false /*isVerticalPartition*/);
+        registerGenderEncoder(cataLog, pool_);
         //gender_encoder
-        normalizeAge(cataLog,pool_,false);
-        //user_age_minmax_scaler
-        normalizeOccupation(cataLog,pool_,false);
+        normalizeAge(cataLog,pool_, "q5_user_age_minmax_scaler.txt");
+        // user_occupation_minmax_scaler
+        normalizeOccupation(cataLog,pool_, "q5_user_occupation_minmax_scaler.txt");
         //user_occupation_minmax_scaler
-        oneHotEncodeGenres(cataLog, pool_, false /*isVerticalPartition*/);
+        oneHotEncodeGenres(cataLog, pool_ );
         //genres_encode
         //registerNNfunctions
+        // Register model
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        int hidden3 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 <<", " << hidden3 << std::endl;
+        // auto modelStr = registerNNModel({4, hidden1, hidden2, 384}, cataLog, modelGroupId_, false);
+
         int modelGroupId_ = 0;
         std::string ffnnstring = registerNNModel(
-          {21,128,64,32,1},
+          {21,hidden1,hidden2,hidden3,1},
           cataLog,
           modelGroupId_,
           randomGenerator.genRandomIntValue());
-        std::cout << ffnnstring << "\n";
+        // std::cout << ffnnstring << "\n";
     queryPlan =
     PlanBuilder(planNodeIdGenerator)
       .tableScan(userDataRowType, {}, "")
@@ -1411,23 +1418,13 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
                    "u_gender",
                    "u_occupation",
                    "m_movie_id",
-<<<<<<< HEAD
                    "m_genres"  }
-=======
-                   "m_genres",
-                    "m_title",
-                    "m_spoken_languages","m_popularity","m_vote_average","m_vote_count"   }
->>>>>>> bbfa0f88c (movielens t4,8,9 tpcxai t5,10,9(partial))
         );
       
         //Filter here
       if (generateFilter) {
         std::vector<std::string> filterExpr =
-<<<<<<< HEAD
             sampleUserMovieFilterExpr("age_gender_occupation_genre", timestampSeed);
-=======
-            sampleUserMovieFilterExpr("movie_user", timestampSeed);
->>>>>>> bbfa0f88c (movielens t4,8,9 tpcxai t5,10,9(partial))
         for (auto expr : filterExpr) {
           queryPlan = queryPlan.filter(expr);
         }
@@ -1471,19 +1468,16 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
     }
 
     else if(queryTemplate == "template9") {
-        normalizePopularity(cataLog, pool_, false);
-        normalizeVoteAverage(cataLog, pool_, false);
-        normalizeVoteCount(cataLog, pool_, false);
-        normalizeRating(cataLog, pool_, false);
-        oneHotEncodeGenres(cataLog, pool_, false);
-
+        normalizePopularity(cataLog, pool_);
+        normalizeVoteAverage(cataLog, pool_);
+        normalizeVoteCount(cataLog, pool_);
+        normalizeRating(cataLog, pool_);
+        oneHotEncodeGenres(cataLog, pool_);
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << std::endl;
         int modelGroupId = 0;
-        auto dnnString = registerNNModel(
-            /*layers=*/{22, 128, 64, 1},
-            cataLog,
-            modelGroupId,
-            randomGenerator.genRandomIntValue()
-        );
+        auto dnnString = registerNNModel({4, hidden1, hidden2, 384}, cataLog, modelGroupId_, false);
         queryPlan =
             PlanBuilder(planNodeIdGenerator)
                 .tableScan(movieDataRowType, {}, "")
@@ -1510,11 +1504,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
                 //filter expressions
                 if (generateFilter) {
             std::vector<std::string> filterExpr =
-<<<<<<< HEAD
                 sampleUserMovieFilterExpr("genre_rating", timestampSeed);
-=======
-                sampleUserMovieFilterExpr("movie", timestampSeed);
->>>>>>> bbfa0f88c (movielens t4,8,9 tpcxai t5,10,9(partial))
             for (auto expr : filterExpr) {
             queryPlan = queryPlan.filter(expr);
             }
@@ -1602,8 +1592,12 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
 
 
         int modelGroupId = 0;
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        int hidden3 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 <<", " << hidden3 << std::endl;
         auto autoencoder = registerNNModel(
-            /*layers=*/{3706,512,256, 128, 1},
+            /*layers=*/{3706,hidden1,hidden2, hidden3, 1},
             cataLog,
             modelGroupId,
             randomGenerator.genRandomIntValue()
@@ -1813,8 +1807,12 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         ExtractTfFeatures(cataLog, pool_);
 
         int modelGroupId_ = 0;
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        // int hidden3 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 <<", "  << std::endl;
         auto modelStr =
-            registerNNModel({50265, 2048, 512, 1}, cataLog, modelGroupId_, false);
+            registerNNModel({50265, hidden1, hidden2, 1}, cataLog, modelGroupId_, false);
 
         queryPlan = PlanBuilder(planNodeIdGenerator)
               .tableScan(reviewDataRowType, {}, "")
@@ -1966,16 +1964,21 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
                         Source::Type::FILE,
                         std::make_shared<OutputStat>(orderReturnNumRows, orderReturnNumCols))));  
               return plan;
+    };
+    
     }
 
     else if (queryTemplate == "template10"){
 
         //department_encode
         RegisterDepartmentEncoder(cataLog, pool_);
-
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        int hidden3 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 <<", " << hidden3 << std::endl;
         int modelGroupId_ = 0;
       auto modelStr =
-          registerNNModel({4, 256, 128, 64, 1}, cataLog, modelGroupId_, false);
+          registerNNModel({4, hidden1, hidden2, hidden3, 1}, cataLog, modelGroupId_, false);
         
 
         queryPlan = PlanBuilder(planNodeIdGenerator)
