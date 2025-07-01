@@ -301,10 +301,158 @@ class OneHotEncoder : public MLFunction {
   CostEstimate getCost(std::vector<int> inputDims) {
     // TODO: need to implement
     return CostEstimate(0, inputDims[0], inputDims[1]);
+    // return 0;
   }
 
  private:
   std::unordered_map<std::string, int> mapping_;
+};
+
+class TokenFreqVector : public MLFunction {
+ public:
+  explicit TokenFreqVector(int vocabSize)
+      : vocabSize_(vocabSize) {}
+
+  /// Signature must match VectorFunction
+  void apply(
+      const SelectivityVector& rows,
+       std::vector<VectorPtr>& args,
+      const TypePtr& outputType,
+      EvalCtx& context,
+      VectorPtr& result) const override {
+    BaseVector::ensureWritable(rows, outputType, context.pool(), result);
+    auto arrayVec = args[0]->as<ArrayVector>();
+    auto elements = arrayVec->elements()->asFlatVector<int>();
+    const auto& offsets = arrayVec->rawOffsets();
+    const auto& sizes = arrayVec->rawSizes();
+
+    int numRows = rows.size();
+    std::vector<std::vector<float>> buffer(
+        numRows, std::vector<float>(vocabSize_, 0.0f));
+
+    rows.applyToSelected([&](vector_size_t row) {
+      int offset = offsets[row];
+      int size = sizes[row];
+      for (int i = 0; i < size; ++i) {
+        int tokenId = elements->valueAt(offset + i);
+        if (tokenId >= 0 && tokenId < vocabSize_) {
+          buffer[row][tokenId] += 1.0f;
+        }
+      }
+    });
+    rows.applyToSelected([&](vector_size_t row) {
+      float sum = 0.0f;
+      for (int i = 0; i < vocabSize_; ++i) {
+        sum += buffer[row][i];
+      }
+      if (sum > 0.0f) {
+        for (int i = 0; i < vocabSize_; ++i) {
+          buffer[row][i] /= sum;
+        }
+      }
+    });
+
+    // Build the output ArrayVector<REAL>
+    VectorMaker maker{context.pool()};
+    result = maker.arrayVector<float>(buffer, REAL());
+  }
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  static std::string name() {
+    return "extract_tf_features";
+  }
+
+  /// Declare signature: array(INTEGER) -> array(REAL)
+  static std::vector<std::shared_ptr<FunctionSignature>> signatures() {
+    return {FunctionSignatureBuilder()
+                .argumentType("array(INTEGER)")
+                .returnType("array(REAL)")
+                .build()};
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+    // return 0;
+  }
+
+ private:
+  const int vocabSize_;
+};
+
+
+class RatingMapToArray : public MLFunction {
+ public:
+  /// numItems should be 3706 for your use case
+  explicit RatingMapToArray(int numItems)
+      : numItems_(numItems) {}
+
+  /// Must match VectorFunction signature exactly
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& outputType,
+      EvalCtx& context,
+      VectorPtr& result) const override {
+    BaseVector::ensureWritable(rows, outputType, context.pool(), result);
+
+    // Input is a MapVector<INTEGER,INTEGER>
+    auto mapVec = args[0]->as<MapVector>();
+    auto keys   = mapVec->mapKeys()->asFlatVector<int>();
+    auto vals   = mapVec->mapValues()->asFlatVector<int>();
+    const auto& offsets = mapVec->rawOffsets();
+    const auto& sizes   = mapVec->rawSizes();
+
+    int numRows = rows.size();
+    // buffer[row][i] will hold rating for movie (i+1), default 0
+    std::vector<std::vector<float>> buffer(
+        numRows, std::vector<float>(numItems_, 0.0f));
+
+    rows.applyToSelected([&](vector_size_t row) {
+      int off = offsets[row];
+      int sz  = sizes[row];
+      for (int i = 0; i < sz; ++i) {
+        int movieId = keys->valueAt(off + i);
+        int rating  = vals->valueAt(off + i);
+        int idx     = movieId - 1;
+        if (idx >= 0 && idx < numItems_) {
+          buffer[row][idx] = static_cast<float>(rating);
+        }
+      }
+    });
+
+    VectorMaker maker{context.pool()};
+    result = maker.arrayVector<float>(buffer, REAL());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {exec::FunctionSignatureBuilder()
+                .argumentType("map(INTEGER,INTEGER)")
+                .returnType("array(REAL)")
+                .build()};
+  }
+
+  static std::string getName() {
+    return "map_to_array";
+  };
+
+  float* getTensor() const override {
+    // TODO: need to implement
+    return nullptr;
+  }
+
+  CostEstimate getCost(std::vector<int> inputDims) {
+    // TODO: need to implement
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+    // return 0;
+  }
+
+ private:
+  const int numItems_;
 };
 
 class MultiHotNormalizedEncoder : public MLFunction {
