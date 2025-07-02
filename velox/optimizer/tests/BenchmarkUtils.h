@@ -2353,6 +2353,14 @@ std::vector<std::string> sampleUserMovieFilterExpr(
 
   RandomSampler randomSampler = RandomSampler(timestampSeed);
 
+  std::vector<std::string> ratingTimestampFilterExprs = { // range  max : 1046454590 | min : 956703932
+      "r_timestamp <= 964152800",
+      "r_timestamp >= 964152816",
+      "r_timestamp < 974687965",
+      "r_timestamp >= 975768738",
+      "r_timestamp < 967588077",
+  };
+
   std::vector<std::string> userGenderFilterExprs = {
       "u_gender = 'M'",
       "u_gender = 'F'",
@@ -2532,6 +2540,25 @@ std::vector<std::string> sampleUserMovieFilterExpr(
       template3FilterExprs.begin(),
       template3FilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
+  } else if(filterTable == "age_gender_occupation_genre"){
+    randomGenerator.setIntRange(1, 3);
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        predefinedUserFilterExprs.begin(),
+        predefinedUserFilterExprs.end()-1);
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        movieGenresFilterExprs);
+    sampleFilterPool = combinedFilterExprSets;
+  } else if(filterTable == "genre_rating"){
+    randomGenerator.setIntRange(1, 3);
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        movieGenresFilterExprs);
+    combinedFilterExprSets.insert(
+        combinedFilterExprSets.end(),
+        ratingTimestampFilterExprs);
+    sampleFilterPool = combinedFilterExprSets;
   } else {
     throw std::invalid_argument(
         "Invalid table for sampling filter expression: " + filterTable);
@@ -2665,6 +2692,14 @@ std::vector<std::string> sampleTPCxAIFilterExpr(
         "product_id >= 600",
     };
 
+    std::vector<std::string> idReviewFilterExprs = { //range from 0 to 13432
+        "id < 1243",
+        "id >= 5834",
+        "id <= 10341",
+        "id > 2587",
+        "id >= 9476",
+    };
+
   
     RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
     std::vector<std::vector<std::string>> sampleFilterPool;
@@ -2708,6 +2743,10 @@ std::vector<std::string> sampleTPCxAIFilterExpr(
     if (filterTable.find("product") != std::string::npos) {
         sampleFilterPool.insert(
             sampleFilterPool.end(), productIDFilterExprs);
+    }
+    if (filterTable.find("idReview") != std::string::npos) {
+        sampleFilterPool.insert(
+            sampleFilterPool.end(), idReviewFilterExprs);
     }
 
     RandomSampler randomSampler = RandomSampler(timestampSeed);
