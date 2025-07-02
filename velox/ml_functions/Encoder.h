@@ -242,45 +242,44 @@ class OneHotEncoder : public MLFunction {
   }
 
   void apply(
-    const SelectivityVector& rows,
-    std::vector<VectorPtr>& args,
-    const TypePtr& type,
-    exec::EvalCtx& context,
-    VectorPtr& output) const override {
-  
-  BaseVector::ensureWritable(rows, type, context.pool(), output);
-  auto inputVector = args[0]->asFlatVector<StringView>();
-  auto numRows = rows.size();
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& type,
+      exec::EvalCtx& context,
+      VectorPtr& output) const override {
+    BaseVector::ensureWritable(rows, type, context.pool(), output);
+    auto inputVector = args[0]->asFlatVector<StringView>();
+    auto numRows = rows.size();
 
-  // Determine fixed one-hot length
-  int numCategories = mapping_.size();
+    // Determine fixed one-hot length
+    int numCategories = mapping_.size();
 
-  std::vector<std::vector<int>> result(numRows, std::vector<int>(numCategories, 0));
+    std::vector<std::vector<int>> result(
+        numRows, std::vector<int>(numCategories, 0));
 
-  rows.applyToSelected([&](vector_size_t row) {
-    StringView val = inputVector->valueAt(row);
-    std::string raw = val.getString();
+    rows.applyToSelected([&](vector_size_t row) {
+      StringView val = inputVector->valueAt(row);
+      std::string raw = val.getString();
 
-    std::stringstream ss(raw);
-    std::string token;
-    while (std::getline(ss, token, '|')) {
-      // Optionally trim and capitalize/lowercase here
-      auto it = mapping_.find(token);
-      if (it != mapping_.end()) {
-        int index = it->second - 1; // Assuming mapping values are 1-based
-        if (index >= 0 && index < numCategories) {
-          result[row][index] = 1;
+      std::stringstream ss(raw);
+      std::string token;
+      while (std::getline(ss, token, '|')) {
+        // Optionally trim and capitalize/lowercase here
+        auto it = mapping_.find(token);
+        if (it != mapping_.end()) {
+          int index = it->second - 1; // Assuming mapping values are 1-based
+          if (index >= 0 && index < numCategories) {
+            result[row][index] = 1;
+          }
+        } else {
+          std::cout << "[ERROR] Unknown genre: " << token << std::endl;
         }
-      } else {
-        std::cout << "[ERROR] Unknown genre: " << token << std::endl;
       }
-    }
-  });
+    });
 
-  VectorMaker maker{context.pool()};
-  output = maker.arrayVector<int>(result, INTEGER());
-}
-
+    VectorMaker maker{context.pool()};
+    output = maker.arrayVector<int>(result, INTEGER());
+  }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
@@ -310,13 +309,12 @@ class OneHotEncoder : public MLFunction {
 
 class TokenFreqVector : public MLFunction {
  public:
-  explicit TokenFreqVector(int vocabSize)
-      : vocabSize_(vocabSize) {}
+  explicit TokenFreqVector(int vocabSize) : vocabSize_(vocabSize) {}
 
   /// Signature must match VectorFunction
   void apply(
       const SelectivityVector& rows,
-       std::vector<VectorPtr>& args,
+      std::vector<VectorPtr>& args,
       const TypePtr& outputType,
       EvalCtx& context,
       VectorPtr& result) const override {
@@ -384,12 +382,10 @@ class TokenFreqVector : public MLFunction {
   const int vocabSize_;
 };
 
-
 class RatingMapToArray : public MLFunction {
  public:
   /// numItems should be 3706 for your use case
-  explicit RatingMapToArray(int numItems)
-      : numItems_(numItems) {}
+  explicit RatingMapToArray(int numItems) : numItems_(numItems) {}
 
   /// Must match VectorFunction signature exactly
   void apply(
@@ -402,10 +398,10 @@ class RatingMapToArray : public MLFunction {
 
     // Input is a MapVector<INTEGER,INTEGER>
     auto mapVec = args[0]->as<MapVector>();
-    auto keys   = mapVec->mapKeys()->asFlatVector<int>();
-    auto vals   = mapVec->mapValues()->asFlatVector<int>();
+    auto keys = mapVec->mapKeys()->asFlatVector<int>();
+    auto vals = mapVec->mapValues()->asFlatVector<int>();
     const auto& offsets = mapVec->rawOffsets();
-    const auto& sizes   = mapVec->rawSizes();
+    const auto& sizes = mapVec->rawSizes();
 
     int numRows = rows.size();
     // buffer[row][i] will hold rating for movie (i+1), default 0
@@ -414,11 +410,11 @@ class RatingMapToArray : public MLFunction {
 
     rows.applyToSelected([&](vector_size_t row) {
       int off = offsets[row];
-      int sz  = sizes[row];
+      int sz = sizes[row];
       for (int i = 0; i < sz; ++i) {
         int movieId = keys->valueAt(off + i);
-        int rating  = vals->valueAt(off + i);
-        int idx     = movieId - 1;
+        int rating = vals->valueAt(off + i);
+        int idx = movieId - 1;
         if (idx >= 0 && idx < numItems_) {
           buffer[row][idx] = static_cast<float>(rating);
         }
