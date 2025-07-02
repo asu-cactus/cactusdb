@@ -68,9 +68,9 @@
 #include "velox/optimizer/RewriteAction.h"
 #include "velox/optimizer/RuleManager.h"
 #include "velox/optimizer/TwoLayerUDF2TorchNNRewriteAction.h"
+#include "velox/optimizer/tests/BenchmarkQueryTemplates.h"
 #include "velox/optimizer/tests/BenchmarkUtils.h"
 #include "velox/optimizer/tests/ModelRegister.h"
-#include "velox/optimizer/tests/BenchmarkQueryTemplates.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec::test;
@@ -415,7 +415,8 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
       }
 
     } else {
-      throw std::runtime_error(fmt::format("Non-supported workload: {}", workload));
+      throw std::runtime_error(
+          fmt::format("Non-supported workload: {}", workload));
     }
 
     std::cout << "[INFO] Original Query Plan: \n"
@@ -431,7 +432,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << myPlan.planNode()->toString(true, true) << std::endl;
     auto serializedPlan = myPlan.planNode()->serialize();
     std::string queryOutPutPath =
-        "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
+        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
     augmentSerializedPlan(serializedPlan, cataLog);
     writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
@@ -445,7 +446,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
 
     std::string latencyOutputPath =
-        "/home/cactusdb/velox/optimizer/tests/executionLatency.txt";
+        "/home/velox/velox/optimizer/tests/executionLatency.txt";
     writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
@@ -507,7 +508,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto [minLatency, optimalRuleName] = minHeapOfRuleLatency.top();
 
     std::string optimalRuleOutputPath =
-        "/home/cactusdb/velox/optimizer/tests/optimalRule.txt";
+        "/home/velox/velox/optimizer/tests/optimalRule.txt";
     writeStringToFile(optimalRuleName, optimalRuleOutputPath);
 
     std::cout << "[INFO] Optimal Rule: " << optimalRuleName << std::endl;
@@ -534,37 +535,37 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::string> inputFilePaths;
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
 
-    // During the benchmark, we are going to use the real movielens & TPCx-AI datasets
+    // During the benchmark, we are going to use the real movielens & TPCx-AI
+    // datasets
 
-    queryPlan = setupProfileQueryPlanFromTemplate(workload,
-            queryTemplate,
-            modelGroupId_,
-            cataLog,
-            pool_,
-            planNodeIdGenerator);
-
+    queryPlan = setupProfileQueryPlanFromTemplate(
+        workload,
+        queryTemplate,
+        modelGroupId_,
+        cataLog,
+        pool_,
+        planNodeIdGenerator);
 
     float executeTime = runPlanWithCataLog(
         pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
 
     std::string latencyOutputPath =
-        "/home/cactusdb/velox/optimizer/tests/executionLatency.txt";
+        "/home/velox/velox/optimizer/tests/executionLatency.txt";
     writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
     auto serializedPlan = queryPlan.planNode()->serialize();
     std::string queryOutPutPath =
-        "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
+        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
     augmentSerializedPlan(serializedPlan, cataLog);
     writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
     auto queryPlanStr = queryPlan.planNode()->toString(true, true);
     std::string queryPlanStrOutputPath =
-        "/home/cactusdb/velox/optimizer/tests/queryPlanStr.txt";
+        "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
     writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
   }
-
 
   void benchmarkQueryFromTemplate1(
       std::string workload,
@@ -584,36 +585,36 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::string> inputFilePaths;
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
 
-    // During the benchmark, we are going to use the real movielens & TPCx-AI datasets
+    // During the benchmark, we are going to use the real movielens & TPCx-AI
+    // datasets
 
-    queryPlan = setupProfileQueryPlanFromTemplate1(workload,
-            queryTemplate,
-            modelGroupId_,
-            cataLog,
-            pool_,
-            planNodeIdGenerator);
-
+    queryPlan = setupProfileQueryPlanFromTemplate1(
+        workload,
+        queryTemplate,
+        modelGroupId_,
+        cataLog,
+        pool_,
+        planNodeIdGenerator);
 
     float executeTime = runPlanWithCataLog(
         pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
-    
+
     std::cout << "[INFO] Executed Query Plan: \n"
               << queryPlan.planNode()->toString(true, true) << std::endl;
 
-              
     std::string latencyOutputPath =
-        "/home/cactusdb/velox/optimizer/tests/executionLatency.txt";
+        "/home/velox/velox/optimizer/tests/executionLatency.txt";
     writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
     auto serializedPlan = queryPlan.planNode()->serialize();
     std::string queryOutPutPath =
-        "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
+        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
     augmentSerializedPlan(serializedPlan, cataLog);
     writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
     auto queryPlanStr = queryPlan.planNode()->toString(true, true);
     std::string queryPlanStrOutputPath =
-        "/home/cactusdb/velox/optimizer/tests/queryPlanStr.txt";
+        "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
     writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
@@ -724,7 +725,7 @@ int main(int argc, char** argv) {
     dummyFeatureSizes.push_back(movieFeatureSize);
     std::cout << "numberOfTuples: " << numberOfTuples << std::endl;
     std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
-    std::cout << "Let's begin!!!";
+
     demo.benchmarkQueryFromTemplate1(
         workload,
         queryTemplate,
@@ -736,8 +737,8 @@ int main(int argc, char** argv) {
         rewrite,
         dataBatchSize,
         dataPath);
-  }
-  else {
-    throw std::runtime_error(fmt::format("Non-supported workload: {}", workload));
+  } else {
+    throw std::runtime_error(
+        fmt::format("Non-supported workload: {}", workload));
   }
 }

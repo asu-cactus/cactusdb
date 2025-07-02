@@ -15,7 +15,7 @@
 void registerTwoTowerFunc(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_,
-    bool isVerticalPartition) {
+    bool isVerticalPartition = false) {
   VectorMaker maker{pool_.get()};
   std::cout << "[INFO]: Register two tower model functions" << std::endl;
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, 0);
@@ -1961,10 +1961,10 @@ void registerTPCxAIUC8MLModelFunctions(
       catalog);
 };
 
-void registerDepartmentEncoder(
+void registerTPCxAIDepartmentEncoder(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
-    std::vector<std::string> departmentList = {
+  std::vector<std::string> departmentList = {
       "AUTOMOTIVE",
       "BATH AND SHOWER",
       "BEAUTY",
@@ -2026,63 +2026,59 @@ void registerDepartmentEncoder(
 
 void registerGenderEncoder(
     CataLog& catalog,
-    std::shared_ptr<memory::MemoryPool> pool_){
-        VectorMaker maker{pool_.get()};
-        std::unordered_map<std::string, int> genderMapping;
-        genderMapping["F"] = 0;
-        genderMapping["M"] = 1;
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+  std::unordered_map<std::string, int> genderMapping;
+  genderMapping["F"] = 0;
+  genderMapping["M"] = 1;
 
-        optimization::registerVectorFunction(
-            "gender_encoder",
-            StringEncoder::signatures(),
-            std::make_unique<StringEncoder>(std::move(genderMapping)),
-            {},
-            true,
-            catalog
-            );
+  optimization::registerVectorFunction(
+      "gender_encoder",
+      StringEncoder::signatures(),
+      std::make_unique<StringEncoder>(std::move(genderMapping)),
+      {},
+      true,
+      catalog);
+}
 
-    }
-
-void normalizeAge(
+void registerMovielensAgeMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_,
-    const std::string& fileName){
-        VectorMaker maker{pool_.get()};
-        
-    optimization::registerVectorFunction(
+    const std::string& fileName) {
+  VectorMaker maker{pool_.get()};
+
+  optimization::registerVectorFunction(
       "user_age_minmax_scaler",
       MinMaxScaler::signatures(),
-      std::make_unique<MinMaxScaler>(
-          "/home/velox/resources/model/movielens/final/velox/q4_user_age_minmax_scaler.txt"),
+      std::make_unique<MinMaxScaler>(fmt::format(
+          "/home/velox/resources/model/movielens/final/velox/{}", fileName)),
       {},
       true,
-      catalog);   
+      catalog);
+}
 
-    }
-
-void normalizeOccupation(
+void registerMovielensOccupationMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_,
-    const std::string& fileName){
-        VectorMaker maker{pool_.get()};
-        
-    optimization::registerVectorFunction(
+    const std::string& fileName) {
+  VectorMaker maker{pool_.get()};
+
+  optimization::registerVectorFunction(
       "user_occupation_minmax_scaler",
       MinMaxScaler::signatures(),
-      std::make_unique<MinMaxScaler>(
-          "/home/velox/resources/model/movielens/final/velox/q4_user_occupation_minmax_scaler.txt"),
+      std::make_unique<MinMaxScaler>(fmt::format(
+          "/home/velox/resources/model/movielens/final/velox/{}", fileName)),
       {},
       true,
-      catalog);   
+      catalog);
+}
 
-    }
-
-void oneHotEncodeGenres(
+void registerMovielensGenerOneHotEncoder(
     CataLog& catalog,
-    std::shared_ptr<memory::MemoryPool> pool_){
-    VectorMaker maker{pool_.get()};
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
 
-    std::unordered_map<std::string, int> genresMapping = {
+  std::unordered_map<std::string, int> genresMapping = {
       {"Animation", 1},
       {"Children's", 2},
       {"Comedy", 3},
@@ -2109,10 +2105,9 @@ void oneHotEncodeGenres(
       {},
       true,
       catalog);
-
 }
 
-void normalizePopularity(
+void registerMovielensPopularityMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
@@ -2126,7 +2121,7 @@ void normalizePopularity(
       catalog);
 }
 
-void normalizeVoteAverage(
+void registerMovielensVoteAverageMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
@@ -2140,7 +2135,7 @@ void normalizeVoteAverage(
       catalog);
 }
 
-void normalizeVoteCount(
+void registerMovielensVoteCountMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
@@ -2154,7 +2149,7 @@ void normalizeVoteCount(
       catalog);
 }
 
-void normalizeRating(
+void registerMovielensRatingMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
@@ -2168,21 +2163,20 @@ void normalizeRating(
       catalog);
 }
 
-void MaptoArray(
+void registerMovielensRatingMapToArray(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
   optimization::registerVectorFunction(
       "map_to_array",
       RatingMapToArray::signatures(),
-      std::make_unique<RatingMapToArray>(
-          3706),
+      std::make_unique<RatingMapToArray>(3706),
       {},
       true,
       catalog);
 }
 
-void HF_Tokenizer(
+void registerTPCxAIHFTokenizer(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
@@ -2191,86 +2185,19 @@ void HF_Tokenizer(
       HuggingFaceTokenizer::signatures(),
       std::make_unique<HuggingFaceTokenizer>(
           "/home/velox/resources/model/tokenizer/roberta.json"),
-          {},
-          true,
-          catalog);
+      {},
+      true,
+      catalog);
 }
 
-void ExtractTfFeatures(
+void registerTPCxAITFFeatureExtractor(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
   optimization::registerVectorFunction(
       "extract_tf_features",
       TokenFreqVector::signatures(),
-      std::make_unique<TokenFreqVector>(
-         50265),
-      {},
-      true,
-      catalog);
-}
-
-void RegisterDepartmentEncoder(
-    CataLog& catalog,
-    std::shared_ptr<memory::MemoryPool> pool_) {
-  VectorMaker maker{pool_.get()};
-
-
-  std::vector<std::string> departmentList = {
-      "AUTOMOTIVE",
-      "BATH AND SHOWER",
-      "BEAUTY",
-      "BEDDING",
-      "BOYS WEAR",
-      "CANDY, TOBACCO, COOKIES",
-      "CELEBRATION",
-      "COMM BREAD",
-      "COOK AND DINE",
-      "DAIRY",
-      "DSD GROCERY",
-      "ELECTRONICS",
-      "FABRICS AND CRAFTS",
-      "FINANCIAL SERVICES",
-      "FROZEN FOODS",
-      "GIRLS WEAR, 4-6X  AND 7-14",
-      "GROCERY DRY GOODS",
-      "HARDWARE",
-      "HOME DECOR",
-      "HOME MANAGEMENT",
-      "HORTICULTURE AND ACCESS",
-      "HOUSEHOLD CHEMICALS/SUPP",
-      "HOUSEHOLD PAPER GOODS",
-      "IMPULSE MERCHANDISE",
-      "INFANT APPAREL",
-      "INFANT CONSUMABLE HARDLINES",
-      "JEWELRY AND SUNGLASSES",
-      "LADIESWEAR",
-      "LAWN AND GARDEN",
-      "LIQUOR,WINE,BEER",
-      "MEAT - FRESH & FROZEN",
-      "MEDIA AND GAMING",
-      "MENS WEAR",
-      "OFFICE SUPPLIES",
-      "PAINT AND ACCESSORIES",
-      "PERSONAL CARE",
-      "PETS AND SUPPLIES",
-      "PHARMACY OTC",
-      "PHARMACY RX",
-      "PLAYERS AND ELECTRONICS",
-      "PRODUCE",
-      "SERVICE DELI",
-      "SHOES",
-      "SPORTING GOODS",
-      "TOYS",
-      "WIRELESS"};
-  std::unordered_map<std::string, int> departmentMapping;
-  for (int i = 0; i < departmentList.size(); i++) {
-    departmentMapping[departmentList[i]] = i;
-  }
-  optimization::registerVectorFunction(
-      "department_encoder",
-      StringEncoder::signatures(),
-      std::make_unique<StringEncoder>(std::move(departmentMapping)),
+      std::make_unique<TokenFreqVector>(50265),
       {},
       true,
       catalog);
