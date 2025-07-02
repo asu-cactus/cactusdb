@@ -734,9 +734,9 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
         // gender_encoder
         registerGenderEncoder(cataLog, pool_);
         // user_age_minmax_scaler
-        normalizeAge(cataLog,pool_, "q5_user_age_minmax_scaler.txt");
+        registerMovielensAgeMinMaxScaler(cataLog,pool_, "q4_user_age_minmax_scaler.txt");
         // user_occupation_minmax_scaler
-        normalizeOccupation(cataLog,pool_, "q5_user_occupation_minmax_scaler.txt");
+        registerMovielensOccupationMinMaxScaler(cataLog,pool_, "q4_user_occupation_minmax_scaler.txt");
 
 
       std::vector<std::vector<int>> userModelStructures = readModelStructureFromFile(
@@ -992,9 +992,9 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
         // gender_encoder
         registerGenderEncoder(cataLog, pool_);
         // user_age_minmax_scaler
-        normalizeAge(cataLog,pool_, "q10_user_age_minmax_scaler.txt");
+        registerMovielensAgeMinMaxScaler(cataLog,pool_, "q4_user_age_minmax_scaler.txt");
         // user_occupation_minmax_scaler
-        normalizeOccupation(cataLog,pool_, "q10_user_occupation_minmax_scaler.txt");
+        registerMovielensOccupationMinMaxScaler(cataLog,pool_, "q4_user_occupation_minmax_scaler.txt");
         // Feed forward Neural Network
         int hidden1 = randomGenerator.genRandomIntValue();
         std::cout << "[INFO] hidden units: " << hidden1 << std::endl;
@@ -1297,7 +1297,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
         std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << std::endl;
         auto modelStr = registerNNModel({4, hidden1, hidden2, 384}, cataLog, modelGroupId_, false);
         // Register functions: department_encoder
-        registerDepartmentEncoder(cataLog, pool_);
+        registerTPCxAIDepartmentEncoder(cataLog, pool_);
 
         // Query Plan
         queryPlan = PlanBuilder(planNodeIdGenerator)
@@ -1504,7 +1504,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     cataLog.addSource(std::make_shared<Source>(customerSrc));
     } else if (queryTemplate == "template8") { // uc3
         // Register functions: department_encoder
-        registerDepartmentEncoder(cataLog, pool_);
+        registerTPCxAIDepartmentEncoder(cataLog, pool_);
 
         // Register model
         int hidden1 = randomGenerator.genRandomIntValue();
@@ -1769,7 +1769,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
     timestampSeed = randomSeed;
   }
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
-  randomGenerator.setIntRange(0, 1);
+  randomGenerator.setIntRange(10, 3000);
   PlanBuilder queryPlan;
 
   if (workload == "movielens1") {
@@ -1877,56 +1877,198 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           readUserDataPlanNodeId,
           userDataPaths,
           dwio::common::FileFormat::PARQUET);
-      // cataLog.setIdAddressMap(
-      //     readMovieDataPlanNodeId,
-      //     movieDataPaths,
-      //     dwio::common::FileFormat::PARQUET);
-      // cataLog.setIdAddressMap(
-      //     readRatingDataPlanNodeId1,
-      //     ratingDataPaths,
-      //     dwio::common::FileFormat::PARQUET);
-      // cataLog.setIdAddressMap(
-      //     readRatingDataPlanNodeId2,
-      //     ratingDataPaths,
-      //     dwio::common::FileFormat::PARQUET);
 
       cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-      // cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-      // cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1,
-      // "movie_rating");
-      // cataLog.addNodeIdRelationName(readRatingDataPlanNodeId2,
-      // "movie_rating"); cataLog.addNodeIdRelationName(
-      //     readMovieTagDataPlanNodeId, "movie_relevance_tag");
-
+     
       std::shared_ptr<OutputStat> userStats =
           std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
       Source userSrc =
           Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
       cataLog.addSource(std::make_shared<Source>(userSrc));
 
-      // std::shared_ptr<OutputStat> movieStats =
-      //     std::make_shared<OutputStat>(OutputStat(movieNumRows,
-      //     movieNumCols));
-      // Source movieSrc =
-      //     Source(readMovieDataPlanNodeId, Source::Type::FILE, movieStats);
-      // cataLog.addSource(std::make_shared<Source>(movieSrc));
+      
+    } 
 
-      // std::shared_ptr<OutputStat> ratingStats = std::make_shared<OutputStat>(
-      //     OutputStat(ratingNumRows, ratingNumCols));
-      // Source ratingSrc1 =
-      //     Source(readRatingDataPlanNodeId1, Source::Type::FILE, ratingStats);
-      // cataLog.addSource(std::make_shared<Source>(ratingSrc1));
-      // Source ratingSrc2 =
-      //     Source(readRatingDataPlanNodeId2, Source::Type::FILE, ratingStats);
-      // cataLog.addSource(std::make_shared<Source>(ratingSrc2));
-      // std::shared_ptr<OutputStat> movieTagStats =
-      // std::make_shared<OutputStat>(
-      //     OutputStat(movieTagNumRows, movieTagNumCols));
-      // Source movieTagSrc =
-      //     Source(readMovieTagDataPlanNodeId, Source::Type::FILE,
-      //     movieTagStats);
-      // cataLog.addSource(std::make_shared<Source>(movieTagSrc));
-    } else if (queryTemplate == "movie_rating_pivot") {
+    // TODO
+    // template 4 
+    else if (queryTemplate == "template4") {
+        registerGenderEncoder(cataLog, pool_);
+        //gender_encoder
+        registerMovielensAgeMinMaxScaler(cataLog,pool_, "q4_user_age_minmax_scaler.txt");
+        // user_occupation_minmax_scaler
+        registerMovielensOccupationMinMaxScaler(cataLog,pool_, "q4_user_occupation_minmax_scaler.txt");
+        //user_occupation_minmax_scaler
+        registerMovielensGenerOneHotEncoder(cataLog, pool_ );
+        //genres_encode
+        //registerNNfunctions
+        // Register model
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        int hidden3 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 <<", " << hidden3 << std::endl;
+        // auto modelStr = registerNNModel({4, hidden1, hidden2, 384}, cataLog, modelGroupId_, false);
+
+        int modelGroupId_ = 0;
+        std::string ffnnstring = registerNNModel(
+          {21,hidden1,hidden2,hidden3,1},
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+        // std::cout << ffnnstring << "\n";
+    queryPlan =
+    PlanBuilder(planNodeIdGenerator)
+      .tableScan(userDataRowType, {}, "")
+      .capturePlanNodeId(readUserDataPlanNodeId)
+      .nestedLoopJoin(
+        PlanBuilder(planNodeIdGenerator)
+          .tableScan(movieDataRowType, {}, "")
+          .capturePlanNodeId(readMovieDataPlanNodeId)
+          .planNode(),
+                { // what columns to project from the join
+                   "u_user_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "m_movie_id",
+                   "m_genres"  }
+        );
+      
+        //Filter here
+      if (generateFilter) {
+        std::vector<std::string> filterExpr =
+            sampleUserMovieFilterExpr("age_gender_occupation_genre", timestampSeed);
+        for (auto expr : filterExpr) {
+          queryPlan = queryPlan.filter(expr);
+        }
+        // myPlan = myPlan.filter(filterExpr);
+      }
+
+      queryPlan = queryPlan.project({
+        "gender_encoder(u_gender) as u_gender_encoded",
+        "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as u_age_encoded",
+        "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as u_occupation_encoded",
+        "genres_encoder(m_genres) as m_genres_encoded"
+      })
+      .project(
+        {"transform(concat(u_gender_encoded,u_age_encoded,u_occupation_encoded,m_genres_encoded), x-> CAST(x AS REAL)) as features"} // ARRAY(REAL)
+        )
+      .project(
+        {fmt::format(ffnnstring, "features")}
+      );
+
+  // — user side
+  cataLog.setIdAddressMap(
+    readUserDataPlanNodeId,
+    userDataPaths,
+    dwio::common::FileFormat::PARQUET);
+  cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+  cataLog.addSource(std::make_shared<Source>(
+    Source(readUserDataPlanNodeId,
+           Source::Type::FILE,
+           std::make_shared<OutputStat>(userNumRows, userNumCols))));
+
+  // — movie side
+  cataLog.setIdAddressMap(
+    readMovieDataPlanNodeId,
+    movieDataPaths,
+    dwio::common::FileFormat::PARQUET);
+  cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+  cataLog.addSource(std::make_shared<Source>(
+    Source(readMovieDataPlanNodeId,
+           Source::Type::FILE,
+           std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+    }
+
+    else if(queryTemplate == "template9") {
+        registerMovielensPopularityMinMaxScaler(cataLog, pool_);
+        registerMovielensVoteAverageMinMaxScaler(cataLog, pool_);
+        registerMovielensVoteCountMinMaxScaler(cataLog, pool_);
+        registerMovielensRatingMinMaxScaler(cataLog, pool_);
+        registerMovielensGenerOneHotEncoder(cataLog, pool_);
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << std::endl;
+        int modelGroupId = 0;
+        auto dnnString = registerNNModel({4, hidden1, hidden2, 384}, cataLog, modelGroupId_, false);
+        queryPlan =
+            PlanBuilder(planNodeIdGenerator)
+                .tableScan(movieDataRowType, {}, "")
+                .capturePlanNodeId(readMovieDataPlanNodeId)
+                .hashJoin(
+                    {"m_movie_id"},
+                    {"r_movie_id"},
+                    PlanBuilder(planNodeIdGenerator)
+                        .tableScan(ratingDataRowType, {}, "")
+                        .capturePlanNodeId(readRatingDataPlanNodeId1)
+                        .project({"r_movie_id", "r_rating"})
+                        .planNode(),
+                    "",
+                    {
+                    "m_movie_id",
+                   "m_genres",
+                    "m_title",
+                    "m_spoken_languages","m_popularity","m_vote_average","m_vote_count",
+                    "r_rating" 
+                    },
+                    /*joinType=*/core::JoinType::kInner  
+                );
+                
+                //filter expressions
+                if (generateFilter) {
+            std::vector<std::string> filterExpr =
+                sampleUserMovieFilterExpr("genre_rating", timestampSeed);
+            for (auto expr : filterExpr) {
+            queryPlan = queryPlan.filter(expr);
+            }
+            // myPlan = myPlan.filter(filterExpr);
+            }
+
+        queryPlan = queryPlan.project({
+        "movie_popularity_minmax_scaler(transform(array_constructor(m_popularity),    x-> CAST(x AS REAL))) as m_popularity_norm",
+        "movie_vote_average_minmax_scaler(transform(array_constructor(m_vote_average), x-> CAST(x AS REAL))) as m_vote_avg_norm",
+        "movie_vote_count_minmax_scaler(transform(array_constructor(m_vote_count),    x-> CAST(x AS REAL))) as m_vote_count_norm",
+        "rating_minmax_scaler(transform(array_constructor(r_rating),  x-> CAST(x AS REAL))) as r_rating_norm",
+        // one-hot encode genres
+        "genres_encoder(m_genres)  as m_genres_one_hot"
+        })
+        .project({"transform(concat(m_popularity_norm,m_vote_avg_norm,m_vote_count_norm,r_rating_norm,m_genres_one_hot),x -> CAST(x AS REAL)) as features"
+        })
+        .project({fmt::format(dnnString, "features")});
+
+        
+
+        // movie side
+        cataLog.setIdAddressMap(
+        readMovieDataPlanNodeId,
+        movieDataPaths,
+        dwio::common::FileFormat::PARQUET
+        );
+        cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+        cataLog.addSource(std::make_shared<Source>(
+        Source(
+            readMovieDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(movieNumRows, movieNumCols)
+        )
+        ));
+
+        // rating side
+        cataLog.setIdAddressMap(
+        readRatingDataPlanNodeId1,
+        ratingDataPaths,
+        dwio::common::FileFormat::PARQUET
+        );
+        cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "ratings");
+        cataLog.addSource(std::make_shared<Source>(
+        Source(
+            readRatingDataPlanNodeId1,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(ratingNumRows, ratingNumCols)
+        )
+        ));
+    }
+
+    else if (queryTemplate == "movie_rating_pivot") {
 
       queryPlan =
           PlanBuilder(planNodeIdGenerator)
@@ -1951,11 +2093,509 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
       Source ratingSrc1 =
           Source(readRatingDataPlanNodeId1, Source::Type::FILE, ratingStats);
       cataLog.addSource(std::make_shared<Source>(ratingSrc1));
+    
+    
     }
 
-    // TODO
-  } else if (workload == "tpcxai") {
-    // TODO
+    else if(queryTemplate == "template8"){
+
+        //register vector function 
+        registerMovielensRatingMapToArray(cataLog, pool_);
+
+
+        int modelGroupId = 0;
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        int hidden3 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 <<", " << hidden3 << std::endl;
+        auto autoencoder = registerNNModel(
+            /*layers=*/{3706,hidden1,hidden2, hidden3, 1},
+            cataLog,
+            modelGroupId,
+            randomGenerator.genRandomIntValue()
+        );
+
+        queryPlan = PlanBuilder(planNodeIdGenerator)
+              .tableScan(userDataRowType, {}, "")
+              .capturePlanNodeId(readUserDataPlanNodeId)
+              .hashJoin(
+                {"u_user_id"},
+                {"r_user_id"},
+                PlanBuilder(planNodeIdGenerator)
+                        .tableScan(ratingDataRowType, {}, "")
+                        .capturePlanNodeId(readRatingDataPlanNodeId1)
+                        .project({"r_user_id","r_timestamp","r_movie_id", "r_rating"})
+                        .planNode(),
+                    {}, //extra filters
+                    // join project columns
+                    {
+                    "u_user_id","u_gender", "u_age", "u_occupation", "u_zipcode",
+                    "r_movie_id",
+                    "r_rating"
+                    },
+                    /*joinType=*/core::JoinType::kInner
+              );
+        
+        if (generateFilter) {
+            std::vector<std::string> filterExpr =
+                sampleUserMovieFilterExpr("user", timestampSeed);
+            for (auto expr : filterExpr) {
+            queryPlan = queryPlan.filter(expr);
+            }
+            // myPlan = myPlan.filter(filterExpr);
+            }
+
+        queryPlan = queryPlan.partialAggregation(
+                {"u_user_id"}, {"(map_agg(r_movie_id, r_rating)) as map_ratings"})
+              .finalAggregation()
+              .project({
+                "u_user_id",
+                "map_to_array(map_ratings) as mappings_"
+                }
+                )
+                .project({fmt::format(autoencoder, "mappings_")});;
+        
+        //user_side
+        cataLog.setIdAddressMap(
+            readUserDataPlanNodeId,
+            userDataPaths,
+            dwio::common::FileFormat::PARQUET);
+            cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+            cataLog.addSource(std::make_shared<Source>(
+            Source(readUserDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(userNumRows, userNumCols))
+            )
+        );
+
+        // rating side
+        cataLog.setIdAddressMap(
+        readRatingDataPlanNodeId1,
+        ratingDataPaths,
+        dwio::common::FileFormat::PARQUET
+        );
+        cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "ratings");
+        cataLog.addSource(std::make_shared<Source>(
+        Source(
+            readRatingDataPlanNodeId1,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(ratingNumRows, ratingNumCols)
+        )
+        ));
+    }
+
+
+  }
+  
+  /*************************************tpcxai*************************************/
+  
+  else if (workload == "tpcxai1") {
+
+    auto finicialAccountDataRowType =
+      ROW({"fa_customer_sk", "transaction_limit"}, {BIGINT(), DOUBLE()});
+    auto finicialTransactionsDataRowType = ROW(
+        {"amount", "iban", "sender_id", "receiver_id", "transaction_id", "time"},
+        {DOUBLE(), VARCHAR(), BIGINT(), VARCHAR(), BIGINT(), VARCHAR()});
+    auto orderDataRowType =
+        ROW({"o_order_id", "o_customer_sk", "weekday", "date", "store"},
+            {BIGINT(), BIGINT(), VARCHAR(), VARCHAR(), BIGINT()});
+    auto lineitemDataRowType =
+        ROW({"li_order_id", "li_product_id", "quantity", "price"},
+            {BIGINT(), BIGINT(), BIGINT(), DOUBLE()});
+    auto productDataRowType = ROW(
+        {"p_product_id", "name", "department"}, {BIGINT(), VARCHAR(), VARCHAR()});
+    auto storeDeptDataRowType = ROW(
+        {"store", "department", "num_of_week"}, {BIGINT(), VARCHAR(), BIGINT()});
+    auto productRatingRowType =
+        ROW({"user_id", "product_id"}, {BIGINT(), BIGINT()});
+    auto customerDataRowType =
+        ROW({"c_customer_sk",
+            "c_customer_id",
+            "c_current_addr_sk",
+            "c_first_name",
+            "c_last_name",
+            "c_preferred_cust_flag",
+            "c_birth_day",
+            "c_birth_month",
+            "c_birth_year",
+            "c_birth_country",
+            "c_login",
+            "c_email_address"},
+            {INTEGER(),
+            VARCHAR(),
+            INTEGER(),
+            VARCHAR(),
+            VARCHAR(),
+            VARCHAR(),
+            INTEGER(),
+            INTEGER(),
+            INTEGER(),
+            VARCHAR(),
+            VARCHAR(),
+            VARCHAR()});
+    auto orderReturnDataRowType =
+        ROW({"or_order_id", "or_product_id", "or_return_quantity"},
+            {BIGINT(), BIGINT(), INTEGER()});
+    auto reviewDataRowType = ROW({"id", "text"}, {INTEGER(), VARCHAR()});
+
+    std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+    if (dataDirPrefix == "") {
+        // use default value:
+        dataDirPrefix =
+            "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
+    }
+
+    std::vector<std::string> finicialAccountDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "financial_account");
+    std::vector<std::string> finicialTransactionsDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "financial_transactions");
+    std::vector<std::string> orderDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "order");
+    std::vector<std::string> lineitemDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "lineitem");
+    std::vector<std::string> productDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "product");
+    std::vector<std::string> storeDeptDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "store_dept");
+    std::vector<std::string> productRatingDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "product_rating");
+    std::vector<std::string> customerDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "customer");
+    std::vector<std::string> orderReturnDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "order_returns");
+    std::vector<std::string> reviewDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "review");
+
+    int finicialAccountNumRows, finicialAccountNumCols,
+        finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
+        orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
+        productNumCols, storeDeptNumRows, storeDeptNumCols, productRatingNumRows,
+        productRatingNumCols, customerNumRows, customerNumCols,
+        orderReturnNumRows, orderReturnNumCols, reviewNumRows, reviewNumCols;
+
+    readDataStats(
+        dataDirPrefix + "financial_account_stats.txt",
+        finicialAccountNumRows,
+        finicialAccountNumCols);
+    readDataStats(
+        dataDirPrefix + "financial_transactions_stats.txt",
+        finicialTransactionsNumRows,
+        finicialTransactionsNumCols);
+    readDataStats(dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
+    readDataStats(
+        dataDirPrefix + "lineitem_stats.txt", lineitemNumRows, lineitemNumCols);
+    readDataStats(
+        dataDirPrefix + "product_stats.txt", productNumRows, productNumCols);
+    readDataStats(
+        dataDirPrefix + "store_dept_stats.txt",
+        storeDeptNumRows,
+        storeDeptNumCols);
+    readDataStats(
+        dataDirPrefix + "product_rating_stats.txt",
+        productRatingNumRows,
+        productRatingNumCols);
+    readDataStats(
+        dataDirPrefix + "customer_stats.txt", customerNumRows, customerNumCols);
+    readDataStats(
+        dataDirPrefix + "order_returns_stats.txt",
+        orderReturnNumRows,
+        orderReturnNumCols);
+    readDataStats(
+        dataDirPrefix + "review_stats.txt", reviewNumRows, reviewNumCols);
+    
+    PlanNodeId readOrderDataPlanNodeId;
+    PlanNodeId readOrderReturnDataPlanNodeId;
+    PlanNodeId readLineitemDataPlanNodeId;
+    PlanNodeId readProductDataPlanNodeId;
+    PlanNodeId readReviewDataPlanNodeId;
+    PlanNodeId readCustomerDataPlanNodeId;
+    PlanNodeId readProductRatingPlanNodeId;
+
+    if(queryTemplate == "template5"){
+        
+        // registerTPCxAIHFTokenizer
+        registerTPCxAIHFTokenizer(cataLog, pool_);
+        registerTPCxAITFFeatureExtractor(cataLog, pool_);
+
+        int modelGroupId_ = 0;
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        // int hidden3 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 <<", "  << std::endl;
+        auto modelStr =
+            registerNNModel({50265, hidden1, hidden2, 1}, cataLog, modelGroupId_, false);
+
+        queryPlan = PlanBuilder(planNodeIdGenerator)
+              .tableScan(reviewDataRowType, {}, "")
+              .capturePlanNodeId(readReviewDataPlanNodeId)
+              .project({
+                "id",
+                "extract_tf_features(hf_tokenizer(text)) as feature"
+            });
+
+        if (generateFilter) {
+            std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr("idReview", timestampSeed);
+            for (auto expr : filterExpr) {
+                queryPlan = queryPlan.filter(expr);
+            }
+        }
+        queryPlan = queryPlan.project({fmt::format(modelStr, "feature")});
+
+        //review Data read 
+        cataLog.setIdAddressMap(
+            readReviewDataPlanNodeId,
+            reviewDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readReviewDataPlanNodeId, "review");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readReviewDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(reviewNumRows, reviewNumCols))));
+    }
+
+    else if (queryTemplate == "template9"){
+
+        // Register model
+        int hidden1 = randomGenerator.genRandomIntValue();
+
+        std::cout << "[INFO] hidden units: " << hidden1 << std::endl;
+        auto modelStr = registerNNModel({2, hidden1, 30}, cataLog, modelGroupId_, false);
+        auto makeGroupsBuilder = [&]() {
+            auto plan = PlanBuilder(planNodeIdGenerator)
+                .tableScan(orderDataRowType, {}, "")
+                .capturePlanNodeId(readOrderDataPlanNodeId)
+                .hashJoin(
+                    { "o_order_id" },
+                    { "li_order_id" },
+                    PlanBuilder(planNodeIdGenerator)
+                        .tableScan(lineitemDataRowType, {}, "")
+                        .capturePlanNodeId(readLineitemDataPlanNodeId).planNode(),
+                    /*extraFilter=*/{},
+                    /*outputCols=*/{
+                    "o_customer_sk", "o_order_id", "date","weekday","store",
+                    "li_product_id", "quantity", "price"},
+                    JoinType::kInner)
+                .hashJoin(
+                    { "li_product_id" },
+                    { "p_product_id" },
+                    PlanBuilder(planNodeIdGenerator)
+                        .tableScan(productDataRowType, {}, "")
+                        .capturePlanNodeId(readProductDataPlanNodeId).planNode(),
+                    /*extraFilter=*/{},
+                    /*outputCols=*/{
+                    "o_customer_sk", "o_order_id", "date","weekday","store", //from order table
+                    "li_product_id", "quantity", "price", //from lineitem table
+                    "name","department" //from product table
+                    },
+                    JoinType::kInner)
+                .project({
+                    "o_customer_sk", "date", "weekday", //from order table
+                    "store AS store_id", //from order table
+                    "CAST(o_order_id AS INTEGER) AS o_order_id",
+                    "quantity", "price", //from lineitem table
+                    "li_product_id AS product_id", //from lineitem table
+                    "name","department"}) //from product table
+                .hashJoin(
+                    { "o_order_id" },
+                    { "or_order_id" },
+                    PlanBuilder(planNodeIdGenerator)
+                        .tableScan(orderReturnDataRowType, {}, "")
+                        .capturePlanNodeId(readOrderReturnDataPlanNodeId).planNode(),
+                    /*extraFilter=*/{},
+                    /*outputCols=*/{
+                    "o_customer_sk", "o_order_id", "date", "store_id", "product_id", "department",
+                    "quantity", "price", "or_return_quantity"
+                    },
+                    JoinType::kInner)
+                .project({"o_customer_sk", "o_order_id", "date", "store_id", "product_id","department",
+                    "year(parse_datetime(date, 'yyyy-MM-dd HH:mm:ss')) AS year_",
+                    "quantity", "price", "or_return_quantity",
+                    "(cast(or_return_quantity as DOUBLE) * price) as rq_p",
+                    "(cast(quantity as DOUBLE) * price) as q_p"
+                })
+                .partialAggregation(
+                    /*groupKeys=*/{"o_customer_sk", "o_order_id", "date", "store_id", "product_id","department"},
+                    /*aggregates=*/{
+                    "min(year_) as invoice_year",
+                    "sum(rq_p) as num",
+                    "sum(q_p) as den"
+                    })
+                .finalAggregation()
+                .project({
+                    "o_customer_sk", "o_order_id", "invoice_year", "(num / den) AS ratio",
+                    "date", "store_id", "product_id","department"
+                });
+            if (generateFilter) {
+                std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr("orderTime_store_product_department", timestampSeed);
+                for (auto expr : filterExpr) {
+                    plan = plan.filter(expr);
+                }
+              }
+            //order
+            cataLog.setIdAddressMap(
+                    readOrderDataPlanNodeId,
+                    orderDataPaths,
+                    dwio::common::FileFormat::PARQUET);
+                cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
+                cataLog.addSource(std::make_shared<Source>(
+                    Source(readOrderDataPlanNodeId,
+                        Source::Type::FILE,
+                        std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
+
+            //lineitem
+            cataLog.setIdAddressMap(
+                    readLineitemDataPlanNodeId,
+                    lineitemDataPaths,
+                    dwio::common::FileFormat::PARQUET);
+                cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
+                cataLog.addSource(std::make_shared<Source>(
+                    Source(readLineitemDataPlanNodeId,
+                        Source::Type::FILE,
+                        std::make_shared<OutputStat>(lineitemNumRows, lineitemNumCols))));
+
+            //Product
+            cataLog.setIdAddressMap(
+                    readProductDataPlanNodeId,
+                    productDataPaths,
+                    dwio::common::FileFormat::PARQUET);
+                cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+                cataLog.addSource(std::make_shared<Source>(
+                    Source(readProductDataPlanNodeId,
+                        Source::Type::FILE,
+                        std::make_shared<OutputStat>(productNumRows, productNumCols))));
+
+            //order_return
+            cataLog.setIdAddressMap(
+                    readOrderReturnDataPlanNodeId,
+                    orderReturnDataPaths,
+                    dwio::common::FileFormat::PARQUET);
+                cataLog.addNodeIdRelationName(readOrderReturnDataPlanNodeId, "order_returns");
+                cataLog.addSource(std::make_shared<Source>(
+                    Source(readOrderReturnDataPlanNodeId,
+                        Source::Type::FILE,
+                        std::make_shared<OutputStat>(orderReturnNumRows, orderReturnNumCols))));  
+              return plan;
+    };
+    
+    }
+
+    else if (queryTemplate == "template10"){
+
+        //department_encode
+        registerTPCxAIDepartmentEncoder(cataLog, pool_);
+        int hidden1 = randomGenerator.genRandomIntValue();
+        int hidden2 = randomGenerator.genRandomIntValue();
+        int hidden3 = randomGenerator.genRandomIntValue();
+        std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 <<", " << hidden3 << std::endl;
+        int modelGroupId_ = 0;
+      auto modelStr =
+          registerNNModel({4, hidden1, hidden2, hidden3, 1}, cataLog, modelGroupId_, false);
+        
+
+        queryPlan = PlanBuilder(planNodeIdGenerator)
+    .tableScan(
+      productRatingRowType, {}, "")
+    .capturePlanNodeId(readProductRatingPlanNodeId)
+    .hashJoin(
+        {"user_id"},
+        {"c_customer_sk"},
+        PlanBuilder(planNodeIdGenerator)
+            .tableScan(
+                customerDataRowType,  
+                {},
+                "")
+            .capturePlanNodeId(readCustomerDataPlanNodeId)
+            .project({"cast(c_customer_sk as BIGINT) as c_customer_sk",
+                "c_birth_day",
+                "c_birth_month",
+                "c_birth_year","c_birth_country"})
+            .planNode(),
+     "",
+      {
+        "user_id",
+        "product_id",
+        "c_customer_sk",
+        "c_birth_day",
+        "c_birth_month",
+        "c_birth_year",
+        "c_birth_country"
+      },
+      JoinType::kInner)
+    .hashJoin(
+        {"product_id"},
+        {"p_product_id"},
+        PlanBuilder(planNodeIdGenerator)
+                           .tableScan(
+                             productDataRowType,  // { p_product_id BIGINT, name VARCHAR, department VARCHAR }
+                             {},
+                             "")
+                           .capturePlanNodeId(readProductDataPlanNodeId)
+                           .planNode(),
+        "",
+        {
+        "c_birth_day",
+        "c_birth_month",
+        "c_birth_year",
+        "c_birth_country",
+        "department"
+      },
+      JoinType::kInner);
+    
+      if (generateFilter) {
+            std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr("department_birthDay_birthCountry", timestampSeed);
+            for (auto expr : filterExpr) {
+                queryPlan = queryPlan.filter(expr);
+            }
+        }
+    
+    queryPlan = queryPlan.project({
+      "department_encoder(department) department_",
+      "(1922.0 -   cast(c_birth_year as double))/(79.0) AS birth_year",
+      "(12.0   -   cast(c_birth_month as double))/(11.0) AS birth_month",
+      "(31.0   -   cast(c_birth_day as double))/(30.0) AS birth_day"
+    })
+    .project({
+        "transform(concat(department_,array_constructor(birth_year),array_constructor(birth_month),array_constructor(birth_day)),x-> CAST(x AS REAL)) as features"
+    })
+    .project({fmt::format(modelStr, "features")});
+   
+
+    cataLog.setIdAddressMap(
+            readCustomerDataPlanNodeId,
+            customerDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readCustomerDataPlanNodeId, "customer");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readCustomerDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(customerNumRows, customerNumCols))));
+    
+    // rating
+    cataLog.setIdAddressMap(
+            readProductRatingPlanNodeId,
+            productRatingDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readProductRatingPlanNodeId, "rating");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readProductRatingPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(productRatingNumRows, productRatingNumCols))));
+    
+    // product
+    cataLog.setIdAddressMap(
+            readProductDataPlanNodeId,
+            productDataPaths,
+            dwio::common::FileFormat::PARQUET);
+        cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+        cataLog.addSource(std::make_shared<Source>(
+            Source(readProductDataPlanNodeId,
+                Source::Type::FILE,
+                std::make_shared<OutputStat>(productNumRows, productNumCols))));
+    }
+
+    
+        
   } else {
     throw std::runtime_error(
         "Unsupported workload: " + workload +

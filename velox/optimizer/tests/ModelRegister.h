@@ -1961,7 +1961,7 @@ void registerTPCxAIUC8MLModelFunctions(
       catalog);
 };
 
-void registerDepartmentEncoder(
+void registerTPCxAIDepartmentEncoder(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
     std::vector<std::string> departmentList = {
@@ -2043,7 +2043,7 @@ void registerGenderEncoder(
 
     }
 
-void normalizeAge(
+void registerMovielensAgeMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_,
     const std::string& fileName){
@@ -2059,7 +2059,7 @@ void normalizeAge(
       catalog);   
     }
 
-void normalizeOccupation(
+void registerMovielensOccupationMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_,
     const std::string& fileName){
@@ -2076,7 +2076,7 @@ void normalizeOccupation(
 
     }
 
-void oneHotEncodeGenres(
+void registerMovielensGenerOneHotEncoder(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_){
     VectorMaker maker{pool_.get()};
@@ -2111,7 +2111,7 @@ void oneHotEncodeGenres(
 
 }
 
-void normalizePopularity(
+void registerMovielensPopularityMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
@@ -2125,7 +2125,7 @@ void normalizePopularity(
       catalog);
 }
 
-void normalizeVoteAverage(
+void registerMovielensVoteAverageMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
@@ -2139,7 +2139,7 @@ void normalizeVoteAverage(
       catalog);
 }
 
-void normalizeVoteCount(
+void registerMovielensVoteCountMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
@@ -2153,7 +2153,7 @@ void normalizeVoteCount(
       catalog);
 }
 
-void normalizeRating(
+void registerMovielensRatingMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
   VectorMaker maker{pool_.get()};
@@ -2162,6 +2162,48 @@ void normalizeRating(
       MinMaxScaler::signatures(),
       std::make_unique<MinMaxScaler>(
           "/home/velox/resources/model/movielens/final/velox/q9_rating_rating_minmax_scaler.txt"),
+      {},
+      true,
+      catalog);
+}
+
+void registerMovielensRatingMapToArray(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+  optimization::registerVectorFunction(
+      "map_to_array",
+      RatingMapToArray::signatures(),
+      std::make_unique<RatingMapToArray>(
+          3706),
+      {},
+      true,
+      catalog);
+}
+
+void registerTPCxAIHFTokenizer(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+  optimization::registerVectorFunction(
+      "hf_tokenizer",
+      HuggingFaceTokenizer::signatures(),
+      std::make_unique<HuggingFaceTokenizer>(
+          "/home/velox/resources/model/tokenizer/roberta.json"),
+          {},
+          true,
+          catalog);
+}
+
+void registerTPCxAITFFeatureExtractor(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+  optimization::registerVectorFunction(
+      "extract_tf_features",
+      TokenFreqVector::signatures(),
+      std::make_unique<TokenFreqVector>(
+         50265),
       {},
       true,
       catalog);
