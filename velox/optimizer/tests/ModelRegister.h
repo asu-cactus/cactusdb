@@ -1964,7 +1964,7 @@ void registerTPCxAIUC8MLModelFunctions(
 void registerTPCxAIDepartmentEncoder(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_) {
-    std::vector<std::string> departmentList = {
+  std::vector<std::string> departmentList = {
       "AUTOMOTIVE",
       "BATH AND SHOWER",
       "BEAUTY",
@@ -2026,62 +2026,59 @@ void registerTPCxAIDepartmentEncoder(
 
 void registerGenderEncoder(
     CataLog& catalog,
-    std::shared_ptr<memory::MemoryPool> pool_){
-        VectorMaker maker{pool_.get()};
-        std::unordered_map<std::string, int> genderMapping;
-        genderMapping["F"] = 0;
-        genderMapping["M"] = 1;
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
+  std::unordered_map<std::string, int> genderMapping;
+  genderMapping["F"] = 0;
+  genderMapping["M"] = 1;
 
-        optimization::registerVectorFunction(
-            "gender_encoder",
-            StringEncoder::signatures(),
-            std::make_unique<StringEncoder>(std::move(genderMapping)),
-            {},
-            true,
-            catalog
-            );
-
-    }
+  optimization::registerVectorFunction(
+      "gender_encoder",
+      StringEncoder::signatures(),
+      std::make_unique<StringEncoder>(std::move(genderMapping)),
+      {},
+      true,
+      catalog);
+}
 
 void registerMovielensAgeMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_,
-    const std::string& fileName){
-        VectorMaker maker{pool_.get()};
-        
-    optimization::registerVectorFunction(
+    const std::string& fileName) {
+  VectorMaker maker{pool_.get()};
+
+  optimization::registerVectorFunction(
       "user_age_minmax_scaler",
       MinMaxScaler::signatures(),
-      std::make_unique<MinMaxScaler>(
-          fmt::format("/home/velox/resources/model/movielens/final/velox/{}", fileName)),
+      std::make_unique<MinMaxScaler>(fmt::format(
+          "/home/velox/resources/model/movielens/final/velox/{}", fileName)),
       {},
       true,
-      catalog);   
-    }
+      catalog);
+}
 
 void registerMovielensOccupationMinMaxScaler(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool_,
-    const std::string& fileName){
-        VectorMaker maker{pool_.get()};
-        
-    optimization::registerVectorFunction(
+    const std::string& fileName) {
+  VectorMaker maker{pool_.get()};
+
+  optimization::registerVectorFunction(
       "user_occupation_minmax_scaler",
       MinMaxScaler::signatures(),
-      std::make_unique<MinMaxScaler>(
-          fmt::format("/home/velox/resources/model/movielens/final/velox/{}", fileName)),
+      std::make_unique<MinMaxScaler>(fmt::format(
+          "/home/velox/resources/model/movielens/final/velox/{}", fileName)),
       {},
       true,
-      catalog);   
-
-    }
+      catalog);
+}
 
 void registerMovielensGenerOneHotEncoder(
     CataLog& catalog,
-    std::shared_ptr<memory::MemoryPool> pool_){
-    VectorMaker maker{pool_.get()};
+    std::shared_ptr<memory::MemoryPool> pool_) {
+  VectorMaker maker{pool_.get()};
 
-    std::unordered_map<std::string, int> genresMapping = {
+  std::unordered_map<std::string, int> genresMapping = {
       {"Animation", 1},
       {"Children's", 2},
       {"Comedy", 3},
@@ -2108,7 +2105,6 @@ void registerMovielensGenerOneHotEncoder(
       {},
       true,
       catalog);
-
 }
 
 void registerMovielensPopularityMinMaxScaler(
@@ -2174,8 +2170,7 @@ void registerMovielensRatingMapToArray(
   optimization::registerVectorFunction(
       "map_to_array",
       RatingMapToArray::signatures(),
-      std::make_unique<RatingMapToArray>(
-          3706),
+      std::make_unique<RatingMapToArray>(3706),
       {},
       true,
       catalog);
@@ -2190,9 +2185,9 @@ void registerTPCxAIHFTokenizer(
       HuggingFaceTokenizer::signatures(),
       std::make_unique<HuggingFaceTokenizer>(
           "/home/velox/resources/model/tokenizer/roberta.json"),
-          {},
-          true,
-          catalog);
+      {},
+      true,
+      catalog);
 }
 
 void registerTPCxAITFFeatureExtractor(
@@ -2202,8 +2197,7 @@ void registerTPCxAITFFeatureExtractor(
   optimization::registerVectorFunction(
       "extract_tf_features",
       TokenFreqVector::signatures(),
-      std::make_unique<TokenFreqVector>(
-         50265),
+      std::make_unique<TokenFreqVector>(50265),
       {},
       true,
       catalog);
