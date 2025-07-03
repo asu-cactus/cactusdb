@@ -152,20 +152,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               serializedPlan, pool_.get());
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
-      throw std::runtime_error(
-          fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
-              queryPlanCacheId));
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
+          queryPlanCacheId));
     }
 
     auto it2 = cataLogIdAddressMapCaches_.find(queryPlanCacheId);
     if (it2 != cataLogIdAddressMapCaches_.end()) {
       cataLog.setIdAddressMap(it2->second);
     } else {
-      throw std::runtime_error(
-          fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
-              queryPlanCacheId));
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
+          queryPlanCacheId));
     }
   }
 
@@ -371,7 +369,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
 
     if (workload == "ml") {
       if (queryTemplate == "ml-q1" || queryTemplate == "ml-q2" ||
-          queryTemplate == "ml-q3") {
+          queryTemplate == "ml-q3" || queryTemplate == "ml-q4") {
         if (queryTemplate == "ml-q1") {
           // register ml-q1 models
           registerTwoTowerFunc(cataLog, pool_, false /*isVerticalPartition*/);
@@ -383,6 +381,10 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
           registerMLDLRMModelFunctions(cataLog, pool_);
         } else if (queryTemplate == "ml-q3") {
           registerMLQ3UserMovieInterestModelFunctions(cataLog, pool_);
+          registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
+          registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
+        } else if (queryTemplate == "ml-q4") {
           registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
           registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
           registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);

@@ -38,14 +38,13 @@ using namespace optimization;
 
 namespace optimization {
 
-class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
+class MatMulDense2SparseRewriteAction : public RewriteAction {
  public:
-  MultiLayerUDF2TorchNNRewriteAction() {}
+  MatMulDense2SparseRewriteAction() {}
 
   void clearVectors() {
     dims.clear();
     weights.clear();
-    bias.clear();
   }
 
   /**
@@ -119,119 +118,62 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                 // TODO: to support this should update check function
                 // correspondingly.
 
-                // Example:
-                // Support:        |<------------Fuse:------------->|
-                // softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))
-                // Not-Support:    |<------Fuse:---->|
-                // softmax(mat_add(mat_mul(relu(mat_add(mat_mul(v))))))
-
                 targetExprStr = exprStr;
                 core::QueryConfig config({});
-                std::vector<std::string> parsedSingleExprs;
-                std::vector<std::string> matchedExprs;
+                std::string parsedSingleExpr;
+                std::string matchedExpr;
                 // parse the target string into a std::vecotor<DLKernel(string)>
-                parseDLExpressions(target, parsedSingleExprs, matchedExprs);
-                std::reverse(
-                    parsedSingleExprs.begin(), parsedSingleExprs.end());
+                parseInnerExpressions(target, parsedSingleExpr, matchedExpr);
 
                 std::vector<velox::dl::KernelType> kernelTypes;
                 std::vector<float*> weights;
                 std::vector<int> dims;
                 bool hasArgmax = false;
                 // process each expression from the innermost DL kernel
-                for (int i = 0; i < parsedSingleExprs.size(); i++) {
-                  // double check it is supported DL kernel
-                  assert(isSupportedDLKernel(parsedSingleExprs[i]));
-                  auto dlKernelName = parsedSingleExprs[i];
-                  std::vector<int> udfDims;
-                  if (dlKernelName.find("mat_mul") != std::string::npos) {
-                    auto myDL = getVectorFunction(
-                        dlKernelName, {ARRAY(REAL())}, {}, config);
-                    assert(myDL);
-                    auto myDLFunc =
-                        std::dynamic_pointer_cast<MatrixMultiply>(myDL);
-                    assert(myDLFunc);
-                    weights.push_back(myDLFunc->getTensor());
-                    udfDims = myDLFunc->getDims();
-                    kernelTypes.push_back(velox::dl::KernelType::MatMul);
-                  } else if (
-                      dlKernelName.find("mat_add") != std::string::npos ||
-                      dlKernelName.find("mat_vector_add") !=
-                          std::string::npos) {
-                    auto myDL = getVectorFunction(
-                        dlKernelName, {ARRAY(REAL())}, {}, config);
-                    assert(myDL);
-                    auto myDLFunc =
-                        std::dynamic_pointer_cast<MatrixVectorAddition>(myDL);
-                    assert(myDLFunc);
-                    weights.push_back(myDLFunc->getTensor());
-                    udfDims = myDLFunc->getDims();
-                    kernelTypes.push_back(velox::dl::KernelType::MatAdd);
-                  } else if (dlKernelName.find("relu") != std::string::npos) {
-                    // Relu itself does not have dims stored in the UDF will use
-                    // the last element in dims. current limitation: relu cannot
-                    // be the innermost UDF.
-                    assert(!dims.empty());
-                    udfDims = {dims.back()};
-                    kernelTypes.push_back(velox::dl::KernelType::ReLU);
-                  } else if (
-                      dlKernelName.find("batch_norm") != std::string::npos) {
-                    // BachNorm
-                    auto myDL = getVectorFunction(
-                        dlKernelName, {ARRAY(REAL())}, {}, config);
-                    assert(myDL);
-                    auto myDLFunc =
-                        std::dynamic_pointer_cast<BatchNorm1D>(myDL);
-                    assert(myDLFunc);
-                    weights.push_back(myDLFunc->getWeight());
-                    weights.push_back(myDLFunc->getBias());
-                    udfDims = myDLFunc->getDims();
-                    kernelTypes.push_back(velox::dl::KernelType::BatchNorm);
-                  } else if (
-                      dlKernelName.find("softmax") != std::string::npos) {
-                    // Softmax itself does not have dims stored in the UDF will
-                    // use the last element in dims. current limitation: softmax
-                    // cannot be the innermost UDF.
-                    udfDims = {dims.back()};
-                    kernelTypes.push_back(velox::dl::KernelType::Softmax);
-                  } else if (dlKernelName.find("argmax") != std::string::npos) {
-                    // Argmax itself does not have dims stored in the UDF will
-                    // use the last element in dims. current limitation: argmax
-                    // cannot be the innermost UDF.
-                    udfDims = {dims.back(), 1};
-                    kernelTypes.push_back(velox::dl::KernelType::Argmax);
-                    hasArgmax = true;
-                  } else if (
-                      dlKernelName.find("sigmoid") != std::string::npos) {
-                    udfDims = {dims.back(), 1};
-                    kernelTypes.push_back(velox::dl::KernelType::Sigmoid);
-                  } else {
-                    std::cout
-                        << "ERROR, Unsupported DL kernel: " << dlKernelName
-                        << std::endl;
-                  }
-
-                  // Size of dimension should equal to 2*(Number of DL Ops)
-                  // dims with index 2*i and 2*i+1 are the input and output
-
-                  if (udfDims.size() == 2) {
-                    // For DLs have two dimensions, like MatMul
-                    dims.push_back(udfDims[0]);
-                    dims.push_back(udfDims[1]);
-                  } else {
-                    // For DLs have one dimension, like Relu
-                    dims.push_back(udfDims[0]);
-                    dims.push_back(udfDims[0]);
-                  }
+                // for (int i = 0; i < parsedSingleExprs.size(); i++) {
+                // double check it is supported DL kernel
+                assert(isSupportedDLKernel(parsedSingleExpr));
+                auto dlKernelName = parsedSingleExpr;
+                std::vector<int> udfDims;
+                if (dlKernelName.find("mat_mul") != std::string::npos) {
+                  auto myDL = getVectorFunction(
+                      dlKernelName, {ARRAY(REAL())}, {}, config);
+                  assert(myDL);
+                  auto myDLFunc =
+                      std::dynamic_pointer_cast<MatrixMultiply>(myDL);
+                  assert(myDLFunc);
+                  weights.push_back(myDLFunc->getTensor());
+                  udfDims = myDLFunc->getDims();
+                  kernelTypes.push_back(velox::dl::KernelType::MatMul);
+                } else {
+                  std::cout << "ERROR, Unsupported DL kernel: " << dlKernelName
+                            << std::endl;
                 }
 
-                std::string torchDNNName =
-                    fmt::format("torchDNN_{}", rewriteTorchDNNCounter++);
+                // Size of dimension should equal to 2*(Number of DL Ops)
+                // dims with index 2*i and 2*i+1 are the input and output
+
+                if (udfDims.size() == 2) {
+                  // For DLs have two dimensions, like MatMul
+                  dims.push_back(udfDims[0]);
+                  dims.push_back(udfDims[1]);
+                } else {
+                  // For DLs have one dimension, like Relu
+                  dims.push_back(udfDims[0]);
+                  dims.push_back(udfDims[0]);
+                }
+                //}
+
+                std::string sparseMatrixName =
+                    fmt::format("mat_sparse_mul_{}", rewriteTorchDNNCounter++);
 
                 exec::registerVectorFunction(
-                    torchDNNName,
-                    TorchDNNV2::signatures(),
-                    std::make_unique<TorchDNNV2>(kernelTypes, weights, dims));
+                    sparseMatrixName,
+                    SparseMatrixMultiply::signatures(),
+                    std::make_unique<SparseMatrixMultiply>(
+                        weights[0],
+                        dims[0],
+                        dims[1])); // TODO: dims[0], dims[1]
 
                 // Capture the data src
                 std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
@@ -248,22 +190,18 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                 }
 
                 std::regex pattern(escapeRegex(target));
-                // To distinguish the argmax and non-argmax case, the TorchDNN
-                // function requires different signatures to handle the output
-                // type TorchDNNV2(input: array(REAL)) -> array(REAL)
-                // TorchDNNV2(input: array(REAL), 1 :INTEGER) -> INTEGER
-                // Replace the expression
+
                 if (hasArgmax) {
                   targetExprStr = std::regex_replace(
                       targetExprStr,
                       pattern,
                       fmt::format(
-                          "{}({},{})", torchDNNName, matchedDataSrc, 1));
+                          "{}({},{})", sparseMatrixName, matchedDataSrc, 1));
                 } else {
                   targetExprStr = std::regex_replace(
                       targetExprStr,
                       pattern,
-                      fmt::format("{}({})", torchDNNName, matchedDataSrc));
+                      fmt::format("{}({})", sparseMatrixName, matchedDataSrc));
                 }
 
                 finalProjectExprSets.insert(
@@ -374,9 +312,6 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                 // Dynamically cast to MatrixVectorAddition
                 auto myAddUDF =
                     std::dynamic_pointer_cast<MatrixVectorAddition>(*it);
-                if (myAddUDF) {
-                  bias.push_back(myAddUDF->getTensor());
-                }
               }
               // Search the pointer for registed mul function
               std::vector<std::shared_ptr<VectorFunction>> myMulFunc;
@@ -404,11 +339,17 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                   }
                 }
               }
+              std::string sparseMatrixName =
+                    fmt::format("mat_sparse_mul_{}", rewriteTorchDNNCounter++);
               // Register torchdnn_multi
               registerVectorFunction(
-                  "torchDNN",
-                  TorchDNN::signatures(),
-                  std::make_unique<TorchDNN>(weights, bias, dims));
+                  "sparseMatrixName",
+                  SparseMatrixMultiply::signatures(),
+                  std::make_unique<SparseMatrixMultiply>(
+                      weights[0],
+                      dims[0],
+                      dims[1])); // TODO: dims[0],
+                                 //  dims[1]
               // TODO:catalog process
 
               if (curNode->sources().size() > 0) {
@@ -482,7 +423,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
    * @return A string value denoting the name of the rule
    */
   std::string name() override {
-    return "MultiLayerUDF2TorchNNRewriteAction";
+    return "MatMulDense2SparseRewriteAction";
   }
 
   bool isSupportedDLKernel(std::string dlKernelName) {
@@ -492,6 +433,14 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
           dlKernelName.find("_h") == std::string::npos) {
         return true;
       }
+    }
+    return false;
+  }
+
+  bool isSparseMatrix(const std::string& matchedExpr, const CataLog& cataLog) {
+    auto inputName = getInputExprName(matchedExpr);
+    if (cataLog.getDataSrcSparsity(inputName) <= 1) {
+      return true;
     }
     return false;
   }
@@ -545,52 +494,19 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
       for (const auto& expression : expressions) {
         std::string expr = expression->toString();
         // std::cout << "expr: " << expr << std::endl;
-        std::vector<std::string> parsedSingleExprs;
-        std::vector<std::string> matchedExprs;
-        parseDLExpressions(expr, parsedSingleExprs, matchedExprs);
+        std::string parsedSingleExpr; // function name
+        std::string matchedExpr; // matched expression
+        parseInnerExpressions(expr, parsedSingleExpr, matchedExpr);
         // reverse to get the innermost function first
-        std::reverse(parsedSingleExprs.begin(), parsedSingleExprs.end());
-        std::reverse(matchedExprs.begin(), matchedExprs.end());
         std::string targetExprStr;
-        for (int i = 0; i < parsedSingleExprs.size(); i++) {
-          if (isSupportedDLKernel(parsedSingleExprs[i])) {
-            targetExprStr = matchedExprs[i];
-          } else {
-            break;
-          }
+        if (isSupportedDLKernel(parsedSingleExpr) &&
+            isSparseMatrix(matchedExpr, cataLog)) {
+          targetExprStr = matchedExpr;
         }
 
         if (!targetExprStr.empty()) {
           targetActions.push_back(targetExprStr);
         }
-        // std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
-        // std::smatch matches;
-        // if (std::regex_search(
-        //         exprStr, matches, patternToMatchRawSource)) {
-        //   auto matchedDataSrc = matches[1].str();
-        //   auto rewriteExpr = std::regex_replace(
-        //       exprStr, patternToMatchRawSource, matchedDataSrc);
-
-        //   finalProjectExprSets.insert(
-        //       rewriteExpr + " AS " + projectionsNames[exprIdx]);
-        // } else {
-        //   LOG(ERROR)
-        //       << "Error: undefined-edge case detected: " << exprStr
-        //       << std::endl;
-        // }
-
-        // // Regular expression match
-        // std::regex pattern(R"(softmax\d+\(.*\)\))");
-
-        // auto wordsBegin =
-        //     std::sregex_iterator(expr.begin(), expr.end(), pattern);
-
-        // auto wordsEnd = std::sregex_iterator();
-        // // Retrieve the possible UDF name applicable for this rule, stored in
-        // // targetAction.
-        // for (auto it = wordsBegin; it != wordsEnd; ++it) {
-        //   targetActions.push_back(it->str());
-        // }
       }
 
       std::vector<std::shared_ptr<const core::PlanNode>> sources =
@@ -618,17 +534,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
   std::vector<int> dims;
   std::string targetExprStr;
   std::vector<float*> weights;
-  std::vector<float*> bias;
-  std::vector<std::string> supportedDLKernels = {
-      "mat_mul",
-      "mat_sparse_mul", // Add sparse matrix multiplication
-      "mat_vector_add",
-      "mat_add",
-      "relu",
-      "batch_norm",
-      "softmax",
-      "argmax",
-      "sigmoid"};
+  std::vector<std::string> supportedDLKernels = {"mat_mul"};
   static inline int rewriteTorchDNNCounter = 0;
 };
 
