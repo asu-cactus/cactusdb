@@ -136,7 +136,7 @@ def write_model_structure_to_file(model_structure, table):
 
 
 def configure_model_params(query_template, input_size, output_size):
-    if query_template == "template5":
+    if "template" in query_template:
         user_model_structure = sample_model_structure(
             sample_model_num_layer(), sample_model_scale("user"), input_size, output_size
         )
@@ -197,7 +197,7 @@ if __name__ == "__main__":
     # if os.path.exists(result_df_name):
     #   new_result_df_name = "result_optimizer_profile_{}.csv".format(get_current_time(-3600))
     #   os.rename(result_df_name, new_result_df_name)
-    query_template = "template5"  # hard code for now, can be changed later
+    query_template = "template7"  # hard code for now, can be changed later
     input_size = 3
     output_size = 3706
     for _ in tqdm(range(100)):
@@ -260,20 +260,19 @@ if __name__ == "__main__":
             )
         except Exception as e:
             print("Error occurred: ", e)
-            pdb.set_trace()
-            # df = pd.DataFrame(
-            #     {
-            #         "num_user": 1,
-            #         "num_movie": 1,
-            #         "num_tag": 1,
-            #         "serializedPlanPath": serializedPlanPath,
-            #         "tableStatsPath": tableStatsPath,
-            #         "executionTime": "",
-            #         "params": params_base,
-            #         "error": e,
-            #     },
-            #     index=[0],
-            # )
+            df = pd.DataFrame(
+                {
+                    "num_user": 1,
+                    "num_movie": 1,
+                    "num_tag": 1,
+                    "serializedPlanPath": serializedPlanPath,
+                    "tableStatsPath": tableStatsPath,
+                    "executionTime": "",
+                    "params": params_base,
+                    "error": e,
+                },
+                index=[0],
+            )
         if result_df is None:
             result_df = df
         else:

@@ -537,15 +537,16 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::string> inputFilePaths;
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
 
-    // During the benchmark, we are going to use the real movielens & TPCx-AI datasets
+    // During the benchmark, we are going to use the real movielens & TPCx-AI
+    // datasets
 
-    queryPlan = setupProfileQueryPlanFromTemplate(workload,
-            queryTemplate,
-            modelGroupId_,
-            cataLog,
-            pool_,
-            planNodeIdGenerator);
-
+    queryPlan = setupProfileQueryPlanFromTemplate(
+        workload,
+        queryTemplate,
+        modelGroupId_,
+        cataLog,
+        pool_,
+        planNodeIdGenerator);
 
     float executeTime = runPlanWithCataLog(
         pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
@@ -568,7 +569,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
   }
 
-
   void benchmarkQueryFromTemplate1(
       std::string workload,
       std::string queryTemplate,
@@ -587,22 +587,22 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::vector<std::string> inputFilePaths;
     std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
 
-    // During the benchmark, we are going to use the real movielens & TPCx-AI datasets
+    // During the benchmark, we are going to use the real movielens & TPCx-AI
+    // datasets
 
-    queryPlan = setupProfileQueryPlanFromTemplate1(workload,
-            queryTemplate,
-            modelGroupId_,
-            cataLog,
-            pool_,
-            planNodeIdGenerator);
-
+    queryPlan = setupProfileQueryPlanFromTemplate1(
+        workload,
+        queryTemplate,
+        modelGroupId_,
+        cataLog,
+        pool_,
+        planNodeIdGenerator);
 
     float executeTime = runPlanWithCataLog(
         pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
-    
+
     std::cout << "[INFO] Executed Query Plan: \n"
               << queryPlan.planNode()->toString(true, true) << std::endl;
-
 
     std::string latencyOutputPath =
         "/home/velox/velox/optimizer/tests/executionLatency.txt";
@@ -740,6 +740,7 @@ int main(int argc, char** argv) {
         dataBatchSize,
         dataPath);
   } else {
-    throw std::runtime_error(fmt::format("Non-supported workload: {}", workload));
+    throw std::runtime_error(
+        fmt::format("Non-supported workload: {}", workload));
   }
 }
