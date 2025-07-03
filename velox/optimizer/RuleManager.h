@@ -14,75 +14,89 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
-#include <memory>
 #include <iostream>
+#include <memory>
+#include "RewriteAction.h"
 #include "velox/core/PlanNode.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
-#include "RewriteAction.h"
 
+#include "DecisionForestUDF2RelationRewriteAction.h"
+#include "MatMulDense2SparseRewriteAction.h"
+#include "MLDecompositionPushdownRewriteAction.h"
+#include "Mul2JoinAggHorizontalRewriteAction.h"
+#include "Mul2JoinAggRewriteAction.h"
+#include "MultiLayerUDF2TorchNNCUDARewriteAction.h"
+#include "MultiLayerUDF2TorchNNRewriteAction.h"
 #include "TorchNN2TwoLayerUDFRewriteAction.h"
 #include "TwoLayerUDF2TorchNNRewriteAction.h"
-#include "DecisionForestUDF2RelationRewriteAction.h"
-#include "Mul2JoinAggRewriteAction.h"
-#include "Mul2JoinAggHorizontalRewriteAction.h"
-#include "MultiLayerUDF2TorchNNRewriteAction.h"
-#include "MultiLayerUDF2TorchNNCUDARewriteAction.h"
-#include "MLDecompositionPushdownRewriteAction.h"
-
 
 namespace optimization {
 
 class RuleManager {
-public:
-    RuleManager() {
-        // Initialize the rules
-        rules.emplace("TorchNN2TwoLayerUDFRewriteAction", std::make_shared<TorchNN2TwoLayerUDFRewriteAction>());
+ public:
+  RuleManager() {
+    // Initialize the rules
+    rules.emplace(
+        "TorchNN2TwoLayerUDFRewriteAction",
+        std::make_shared<TorchNN2TwoLayerUDFRewriteAction>());
 
-        rules.emplace("Mul2JoinAggHorizontalRewriteAction", std::make_shared<Mul2JoinAggHorizontalRewriteAction>());
+    rules.emplace(
+        "Mul2JoinAggHorizontalRewriteAction",
+        std::make_shared<Mul2JoinAggHorizontalRewriteAction>());
 
-        // rules.emplace("TwoLayerUDF2TorchNNRewriteAction", std::make_shared<TwoLayerUDF2TorchNNRewriteAction>());
+    // rules.emplace("TwoLayerUDF2TorchNNRewriteAction",
+    // std::make_shared<TwoLayerUDF2TorchNNRewriteAction>());
 
-        rules.emplace("DecisionForestUDF2RelationRewriteAction", std::make_shared<DecisionForestUDF2RelationRewriteAction>());
+    rules.emplace(
+        "DecisionForestUDF2RelationRewriteAction",
+        std::make_shared<DecisionForestUDF2RelationRewriteAction>());
 
-        rules.emplace("Mul2JoinAggRewriteAction", std::make_shared<Mul2JoinAggRewriteAction>());
+    rules.emplace(
+        "Mul2JoinAggRewriteAction",
+        std::make_shared<Mul2JoinAggRewriteAction>());
 
-        rules.emplace("MultiLayerUDF2TorchNNRewriteAction", std::make_shared<MultiLayerUDF2TorchNNRewriteAction>());
+    rules.emplace(
+        "MultiLayerUDF2TorchNNRewriteAction",
+        std::make_shared<MultiLayerUDF2TorchNNRewriteAction>());
 
-        // rules.emplace("MultiLayerUDF2TorchNNCUDARewriteAction", std::make_shared<MultiLayerUDF2TorchNNCUDARewriteAction>());
+    // rules.emplace("MultiLayerUDF2TorchNNCUDARewriteAction",
+    // std::make_shared<MultiLayerUDF2TorchNNCUDARewriteAction>());
 
-        rules.emplace("MLDecompositionPushdownRewriteAction", std::make_shared<MLDecompositionPushdownRewriteAction>());
+    rules.emplace(
+        "MLDecompositionPushdownRewriteAction",
+        std::make_shared<MLDecompositionPushdownRewriteAction>());
 
-        // rules.emplace("MLFactorizationRewriteAction", std::make_shared<MLFactorizationRewriteAction>());
+    // rules.emplace("MLFactorizationRewriteAction",
+    // std::make_shared<MLFactorizationRewriteAction>());
 
-        // Add more rules if needed
+    rules.emplace(
+        "MatMulDense2SparseRewriteAction",
+        std::make_shared<MatMulDense2SparseRewriteAction>());
+    // Add more rules if needed
+  }
+  /**
+   * @brief A function to obtain the pointer for a rule given its name.
+   *
+   * @param ruleName A string for the rule name.
+   *
+   * @return A pointer to the rule.
+   */
+  std::shared_ptr<RewriteAction> pickRule(const std::string& ruleName) {
+    // Search for the rule by name
+    auto it = rules.find(ruleName);
+
+    if (it != rules.end()) {
+      return it->second;
     }
-    /**
-     * @brief A function to obtain the pointer for a rule given its name.
-     * 
-     * @param ruleName A string for the rule name.
-     * 
-     * @return A pointer to the rule.
-    */
-    std::shared_ptr<RewriteAction> pickRule(const std::string& ruleName) {
-        // Search for the rule by name
-        auto it = rules.find(ruleName);
 
-        if (it != rules.end()) {
+    // Rule not found, handle the case (throw an exception, return a default
+    // rule, etc.) For now, just return nullptr
+    return nullptr;
+  }
 
-            return it->second;
-            
-        }
-
-        // Rule not found, handle the case (throw an exception, return a default rule, etc.)
-        // For now, just return nullptr
-        return nullptr;
-    }
-
-    std::map<std::string, std::shared_ptr<RewriteAction>> rules;
+  std::map<std::string, std::shared_ptr<RewriteAction>> rules;
 };
 
-
-}
+} // namespace optimization
