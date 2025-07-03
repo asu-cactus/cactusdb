@@ -387,6 +387,29 @@ class CataLog {
     }
   }
 
+  void setDataSrcSparsity(std::string name, float sparsity) {
+    // the name should be in tableName_colName
+    dataSrcSparsityMap[name] = sparsity;
+  }
+
+  float getDataSrcSparsity(std::string name) const {
+    // TODO: need to add table name to form the full name
+    // e.g. movie_tag_relevance_mt_relevance
+    auto it = dataSrcSparsityMap.find(name);
+    if (it != dataSrcSparsityMap.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] name: {} not exist in dataSrcSparsityMap, return default value: 1",
+          name);
+      return 1; // Default sparsity
+    }
+  }
+
+  void clearDataSrcSparsity() {
+    dataSrcSparsityMap.clear();
+  }
+
   std::vector<std::string> getRegisteredDataSrcFiles(std::string name) {
     auto it = registeredDataSrcFiles.find(name);
     if (it != registeredDataSrcFiles.end()) {
@@ -735,7 +758,8 @@ class CataLog {
           outFile << ",";
         }
       }
-      outFile << "]" << "\n";
+      outFile << "]"
+              << "\n";
     }
     outFile.close();
   }
@@ -754,12 +778,12 @@ class CataLog {
   }
 
   void setIntermediateStateTupleCounter(
-      std::string intermediateStateName, int counter) {
+      std::string intermediateStateName,
+      int counter) {
     intermediateStateTupleCounterMap[intermediateStateName] = counter;
   }
 
-  void clearIntermediateStateTupleCounter(
-      std::string intermediateStateName) {
+  void clearIntermediateStateTupleCounter(std::string intermediateStateName) {
     intermediateStateTupleCounterMap.erase(intermediateStateName);
   }
 
@@ -806,6 +830,7 @@ class CataLog {
   std::unordered_map<std::string, std::vector<std::string>>
       factorizableSrcPushdownNodesMap;
   std::unordered_map<std::string, int> intermediateStateTupleCounterMap;
+  std::unordered_map<std::string, float> dataSrcSparsityMap;
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(

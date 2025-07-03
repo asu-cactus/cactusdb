@@ -272,6 +272,32 @@ class PlanState {
     return targetExprRulePairs;
   }
 
+  std::pair<std::string, std::string> configureMatMulDense2SparseAction(
+      CataLog& cataLog) {
+    // Configure the MatMulDense2Sparse based on the sparsity, choose the one
+    // with highest sparsity
+    std::pair<std::string, std::string> selectedAction;
+    float maxSparsity = 0.0;
+    for (const auto& action : actionsPair) {
+      std::string targetExpr = action.first;
+      std::vector<std::string> applicableRules = action.second;
+      // Check if the action is MatMulDense2Sparse
+      if (std::find(
+              applicableRules.begin(),
+              applicableRules.end(),
+              "MatMulDense2SparseRewriteAction") != applicableRules.end()) {
+        // Get the sparsity from the catalog
+        auto inputName = getInputExprName(action.first);
+        float sparsity = cataLog.getDataSrcSparsity(inputName);
+        if (sparsity > maxSparsity) {
+          maxSparsity = sparsity;
+          selectedAction = {targetExpr, "MatMulDense2SparseRewriteAction"};
+        }
+      }
+    }
+    return selectedAction;
+  }
+
   // Store the possible actions in the form of targetExpr: [rule1, rule2, ...]
   std::map<std::string, std::vector<std::string>> actionsPair;
   std::vector<std::string> actions;
