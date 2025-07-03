@@ -102,6 +102,7 @@ class MLFunctionsTest : public HiveConnectorTestBase {
       bool enableSpill,
       int repeatRun);
   void test_mat_mul();
+  void test_mat_mul_both();
   void test_mat_add();
   void test_relu();
   void test_softmax();
@@ -193,6 +194,114 @@ class MLFunctionsTest : public HiveConnectorTestBase {
   // rootPool_->addAggregateChild("HiveConnectorTestBase.Writer");
   VectorMaker maker{pool_.get()};
 };
+
+void MLFunctionsTest::test_mat_mul_both() {
+  int output_size = 500;
+  int input_size = 100;
+  int num_samples = 500;
+  int size = output_size * input_size;
+
+  auto weights = maker.flatVector<float>(size);
+  auto col = maker.flatVector<int>(num_samples);
+  for (int i = 0; i < size; i++) {
+    weights->set(i, i % 5);
+  }
+
+  std::vector<std::vector<float>> featureVectors;
+  for (int i = 0; i < num_samples; i++) {
+    col->set(i, i * 7 - i * (i % 3));
+    std::vector<float> featureVector;
+    for (int j = 0; j < input_size; j++) {
+      featureVector.push_back(static_cast<float>(i * j));
+    }
+    featureVectors.push_back(featureVector);
+  }
+  auto featureArrayVector = maker.arrayVector<float>(featureVectors, REAL());
+  auto inputRowVector =
+      maker.rowVector({"x", "col"}, {featureArrayVector, col});
+
+  auto weightsRaw = weights->values()->asMutable<float>();
+
+  // Register Dense MatMul
+  exec::registerVectorFunction(
+      "mat_mul_dense",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(weightsRaw, input_size, output_size));
+
+  // Register Sparse MatMul
+  exec::registerVectorFunction(
+      "mat_mul_sparse",
+      SparseMatrixMultiply::signatures(),
+      std::make_unique<SparseMatrixMultiply>(
+          weightsRaw, input_size, output_size));
+
+  // Run Dense MatMul
+  auto densePlan = exec::test::PlanBuilder(pool_.get())
+                       .values({inputRowVector})
+                       .project({"mat_mul_dense(x)"})
+                       .planNode();
+
+  auto denseResults =
+      exec::test::AssertQueryBuilder(densePlan).maxDrivers(4).copyResults(
+          pool_.get());
+
+  // Run Sparse MatMul
+  auto sparsePlan = exec::test::PlanBuilder(pool_.get())
+                        .values({inputRowVector})
+                        .project({"mat_mul_sparse(x)"})
+                        .planNode();
+
+  auto sparseResults = exec::test::AssertQueryBuilder(sparsePlan)
+                           .maxDrivers(4)
+                           .copyResults(pool_.get());
+
+  // Extract vectors
+  auto denseVec =
+      std::dynamic_pointer_cast<ArrayVector>(denseResults->childAt(0));
+  auto sparseVec =
+      std::dynamic_pointer_cast<ArrayVector>(sparseResults->childAt(0));
+
+  VELOX_CHECK_EQ(
+      denseVec->size(),
+      sparseVec->size(),
+      "Dense and sparse result row count mismatch");
+
+  auto denseVals = denseVec->elements()->asFlatVector<float>()->rawValues();
+  auto sparseVals = sparseVec->elements()->asFlatVector<float>()->rawValues();
+
+  auto denseOffsets = denseVec->rawOffsets();
+  auto sparseOffsets = sparseVec->rawOffsets();
+
+  auto denseSizes = denseVec->rawSizes();
+  auto sparseSizes = sparseVec->rawSizes();
+
+  // Compare outputs row by row
+  double maxDiff = 0.0;
+  for (int i = 0; i < denseVec->size(); ++i) {
+    VELOX_CHECK_EQ(denseSizes[i], sparseSizes[i], "Size mismatch at row {}", i);
+    int dOffset = denseOffsets[i];
+    int sOffset = sparseOffsets[i];
+    for (int j = 0; j < denseSizes[i]; ++j) {
+      float d = denseVals[dOffset + j];
+      float s = sparseVals[sOffset + j];
+      double diff = std::abs(d - s);
+      maxDiff = std::max(maxDiff, diff);
+      VELOX_CHECK_LT(
+          diff,
+          1e-3,
+          "Mismatch at row {}, col {}: dense={}, sparse={}, diff={}",
+          i,
+          j,
+          d,
+          s,
+          diff);
+    }
+  }
+
+  std::cout
+      << "✅ Sparse and dense matrix multiplication match. Max difference: "
+      << maxDiff << std::endl;
+}
 
 void MLFunctionsTest::test_mat_mul() {
   // Eigen::setNbThreads(48);
@@ -2162,6 +2271,7 @@ void MLFunctionsTest::run(
     bool enableSpill,
     int repeatRun) {
   //  test_mat_mul();
+  test_mat_mul_both();
   test_mat_add();
   test_relu();
   test_softmax();

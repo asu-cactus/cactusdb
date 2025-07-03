@@ -2319,6 +2319,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
 
     // Get the logical plan
     auto planNode = myPlan.planNode();
+    // std::cout << "[INFO] Query Plan Before Optimization: \n" <<
+    // planNode->toString(true, true) << std::endl;
 
     // Create ruleManager
     RuleManager ruleManager;
@@ -2644,7 +2646,58 @@ class AblationStudyTest : public HiveConnectorTestBase {
       planState.getPossibleActions(planNode, cataLog);
     }
 
-    if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized") {
+    if (queryOptType == "mlq3-dense2sparse" ||
+        queryOptType == "mlq3-optimized-d2s") {
+      // FIXME: sparsity needs to be set when loading the data
+      cataLog.setDataSrcSparsity("mt_relevance_score", 0.5);
+      std::pair<std::string, std::string> mostSparsityAction =
+          planState.configureMatMulDense2SparseAction(cataLog);
+      std::cout << "[DEBUG] mostSparsityAction: " << mostSparsityAction
+                << std::endl;
+
+      testAction = std::make_pair(
+          "mat_mul20_1(ROW[\"mt_relevance_score\"])",
+          "MatMulDense2SparseRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      mostSparsityAction = planState.configureMatMulDense2SparseAction(cataLog);
+      std::cout << "[DEBUG] mostSparsityAction: " << mostSparsityAction
+                << std::endl;
+
+      testAction = std::make_pair(
+          "mat_mul10_1(ROW[\"mt_relevance_score\"])",
+          "MatMulDense2SparseRewriteAction");
+
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+      // planState.showAllActions();
+    }
+
+    if (queryOptType == "mlq3-fusion" || queryOptType == "mlq3-optimized" ||
+        queryOptType == "mlq3-optimized-d2s") {
       testAction = std::make_pair(
           "argmax(mat_vector_add15_6(mat_mul15_5(relu(mat_vector_add15_4(mat_mul15_3(relu(mat_vector_add15_2(mat_mul15_1(ROW[\"model_features\"])))))))))",
           "MultiLayerUDF2TorchNNRewriteAction");
@@ -2870,8 +2923,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
           float executeTime =
               runPlanWithCataLog(pool_, 8, myPlan, cataLog, repeatRun, verbose);
           jsonMessage["reward"] = executeTime;
-          LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
-                    << std::endl;
+          LOG(INFO) << "[INFO] get Cost(offline): "
+                    << " time: " << executeTime << std::endl;
         } else if (receivedJsonMessage["costMode"] == "online") {
           CostModel* cm = new SimpleCostModel(cataLog);
           CostEstimator* ce =
