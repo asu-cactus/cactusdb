@@ -87,6 +87,12 @@ target_link_libraries(
   ml_functions
 )
 
+add_executable(matmuldense2sparse_test MatMulDense2SparseRewriteActionTest.cpp)
+target_link_libraries(
+  matmuldense2sparse_test
+  ml_functions
+)
+
 add_executable(conv_test Conv2dActionTest.cpp)
 target_link_libraries(
   conv_test
