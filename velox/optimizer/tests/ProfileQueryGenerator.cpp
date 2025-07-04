@@ -569,59 +569,6 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
   }
 
-  void benchmarkQueryFromTemplate1(
-      std::string workload,
-      std::string queryTemplate,
-      std::vector<int> numberOfTuples,
-      std::vector<int> dummyFeatureSizes,
-      int numThreads,
-      int repeatRun,
-      int verbose,
-      bool rewrite,
-      int dataBatchSize = 256,
-      std::string dataPath = "") {
-    PlanBuilder queryPlan;
-    CataLog cataLog;
-    // Initialize planNodeIdGenerator
-    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    std::vector<std::string> inputFilePaths;
-    std::vector<std::shared_ptr<TempFilePath>> inputTempFiles;
-
-    // During the benchmark, we are going to use the real movielens & TPCx-AI
-    // datasets
-
-    queryPlan = setupProfileQueryPlanFromTemplate1(
-        workload,
-        queryTemplate,
-        modelGroupId_,
-        cataLog,
-        pool_,
-        planNodeIdGenerator);
-
-    float executeTime = runPlanWithCataLog(
-        pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
-
-    std::cout << "[INFO] Executed Query Plan: \n"
-              << queryPlan.planNode()->toString(true, true) << std::endl;
-
-    std::string latencyOutputPath =
-        "/home/velox/velox/optimizer/tests/executionLatency.txt";
-    writeStringToFile(std::to_string(executeTime), latencyOutputPath);
-
-    auto serializedPlan = queryPlan.planNode()->serialize();
-    std::string queryOutPutPath =
-        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
-    augmentSerializedPlan(serializedPlan, cataLog);
-    writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
-
-    auto queryPlanStr = queryPlan.planNode()->toString(true, true);
-    std::string queryPlanStrOutputPath =
-        "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
-    writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
-
-    std::cout << "[INFO] Execution time: " << executeTime << std::endl;
-  }
-
  private:
   std::shared_ptr<memory::MemoryPool> rootPool_{
       memory::MemoryManager::getInstance()->addRootPool()};
@@ -709,26 +656,6 @@ int main(int argc, char** argv) {
     std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
 
     demo.benchmarkQueryFromTemplate(
-        workload,
-        queryTemplate,
-        numberOfTuples,
-        dummyFeatureSizes,
-        numDriver,
-        repeatRun,
-        verbose,
-        rewrite,
-        dataBatchSize,
-        dataPath);
-  } else if (workload == "movielens1" || workload == "tpcxai1") {
-    numberOfTuples.push_back(numUser);
-    numberOfTuples.push_back(numMovie);
-    numberOfTuples.push_back(numTag);
-    dummyFeatureSizes.push_back(userFeatureSize);
-    dummyFeatureSizes.push_back(movieFeatureSize);
-    std::cout << "numberOfTuples: " << numberOfTuples << std::endl;
-    std::cout << "dummyFeatureSizes: " << dummyFeatureSizes << std::endl;
-
-    demo.benchmarkQueryFromTemplate1(
         workload,
         queryTemplate,
         numberOfTuples,
