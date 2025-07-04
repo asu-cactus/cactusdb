@@ -888,11 +888,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           userDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readUserDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(userNumRows, userNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readUserDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(userNumRows, userNumCols))));
 
       // — movie side
       cataLog.setIdAddressMap(
@@ -900,11 +899,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           movieDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readMovieDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readMovieDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
 
     } else if (queryTemplate == "template7") {
       // Embedding
@@ -994,11 +992,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           userDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readUserDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(userNumRows, userNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readUserDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(userNumRows, userNumCols))));
 
       // — movie side
       cataLog.setIdAddressMap(
@@ -1006,11 +1003,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           movieDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readMovieDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readMovieDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
     } else if (queryTemplate == "template10") {
       // Embedding
       VectorMaker maker{pool_.get()};
@@ -1109,11 +1105,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           userDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readUserDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(userNumRows, userNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readUserDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(userNumRows, userNumCols))));
 
       // — movie side
       cataLog.setIdAddressMap(
@@ -1121,11 +1116,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           movieDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readMovieDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readMovieDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
     } else {
       throw std::runtime_error(
           "Unsupported query template for movielens workload: " +
@@ -1200,7 +1194,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
 
     std::vector<std::string> finicialAccountDataPaths =
         getFilePathsFromDir(dataDirPrefix + "financial_account");
-    std::vector<std::string> finicialTransactionsDataPaths =
+    std::vector<std::string> financialTransactionsDataPaths =
         getFilePathsFromDir(dataDirPrefix + "financial_transactions");
     std::vector<std::string> orderDataPaths =
         getFilePathsFromDir(dataDirPrefix + "order");
@@ -1269,8 +1263,282 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     PlanNodeId readOrderReturnDataPlanNodeId;
 
     if (queryTemplate == "template1") {
+      PlanNodeId readStoreDataPlanNodeId;
+      PlanNodeId readOrderDataPlanNodeId;
+
+      queryPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(storeDeptDataRowType, {}, "")
+              .capturePlanNodeId(readStoreDataPlanNodeId)
+              .localPartition({"s_store"})
+              .project({"s_store", "s_features as store_feature"})
+              .filter("is_popular_store(store_feature) = 1")
+              .project(
+                  {"s_store",
+                   "mat_vector_add_1(mat_mul_12(store_feature)) as dnn_part2"})
+              .hashJoin(
+                  {"s_store"},
+                  {"o_store"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(orderDataRowType, {}, "")
+                      .capturePlanNodeId(readOrderDataPlanNodeId)
+                      .localPartition({"o_store"})
+                      .filter("o_weekday != 'Sunday'")
+                      .project(
+                          {"o_order_id",
+                           "o_customer_sk",
+                           "o_store",
+                           "o_date",
+                           "o_weekday"})
+                      .project(
+                          {"o_order_id",
+                           "o_store",
+                           "mat_mul_11(concat(customer_id_embedding(convert_int_array(o_customer_sk)), get_order_features(o_date, o_weekday))) as dnn_part1"})
+                      .planNode(),
+                  "",
+                  {"o_order_id", "dnn_part1", "dnn_part2"})
+              .project(
+                  {"o_order_id",
+                   "get_max_index(softmax(mat_vector_add_3(mat_mul_3(relu(mat_vector_add_2(mat_mul_2(relu(vector_addition(dnn_part1, dnn_part2))))))))) AS predicted_trip_type"});
+      cataLog.setIdAddressMap(
+          readStoreDataPlanNodeId,
+          storeDeptDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readOrderDataPlanNodeId,
+          orderDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readStoreDataPlanNodeId, "store");
+      cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readStoreDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(
+              OutputStat(storeDeptNumRows, storeDeptNumCols)))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readOrderDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
     } else if (queryTemplate == "template2") {
+      PlanNodeId readFinancialTransactionsDataPlanNodeId;
+      queryPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(finicialTransactionsDataRowType, {}, "")
+              .capturePlanNodeId(readFinancialTransactionsDataPlanNodeId)
+              .project(
+                  {"transaction_id",
+                   "t_sender",
+                   "t_amount",
+                   "date_to_timestamp(t_time) as t_timestamp"})
+              .filter("is_working_day(t_timestamp) = 1")
+              .project(
+                  {"transaction_id",
+                   "t_sender",
+                   "t_timestamp",
+                   "get_transaction_features(t_amount, t_timestamp) as transaction_feature"})
+              .filter("xgboost_fraud_transaction(transaction_feature) >= 0.5")
+              .project(
+                  {"transaction_id",
+                   "t_sender",
+                   "t_timestamp",
+                   "mat_mul_12(transaction_feature) AS dnn_part12"})
+              .hashJoin(
+                  {"t_sender"},
+                  {"c_customer_sk"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(customerDataRowType, {}, "")
+                      .capturePlanNodeId(readCustomerDataPlanNodeId)
+                      //  .values(batchesCustomer)
+                      .project(
+                          {"c_customer_sk",
+                           "c_address_num",
+                           "c_cust_flag",
+                           "c_birth_day",
+                           "c_birth_month",
+                           "c_birth_year",
+                           "c_birth_country"})
+                      .hashJoin(
+                          {"c_customer_sk"},
+                          {"fa_customer_sk"},
+                          PlanBuilder(planNodeIdGenerator, pool_.get())
+                              .tableScan(finicialAccountDataRowType, {}, "")
+                              .capturePlanNodeId(
+                                  readFinancialAccountDataPlanNodeId)
+                              //  .values(batchesAccount)
+                              .project(
+                                  {"fa_customer_sk", "fa_transaction_limit"})
+                              .planNode(),
+                          "",
+                          {"c_customer_sk",
+                           "c_address_num",
+                           "c_cust_flag",
+                           "c_birth_day",
+                           "c_birth_month",
+                           "c_birth_year",
+                           "c_birth_country",
+                           "fa_transaction_limit"})
+                      .project(
+                          {"c_customer_sk",
+                           "c_birth_year",
+                           "mat_vector_add_1(mat_mul_11(get_customer_features(c_address_num, c_cust_flag, c_birth_day, c_birth_month, c_birth_year, c_birth_country, fa_transaction_limit))) as dnn_part11"})
+                      .planNode(),
+                  "",
+                  {"transaction_id",
+                   "t_timestamp",
+                   "dnn_part12",
+                   "c_birth_year",
+                   "dnn_part11"})
+              .filter("age_during_transaction(t_timestamp, c_birth_year) >= 18")
+              .project(
+                  {"transaction_id",
+                   "get_binary_class(softmax(mat_vector_add_3(mat_mul_3(relu(mat_vector_add_2(mat_mul_2(relu(vector_addition(dnn_part11, dnn_part12))))))))) AS fraud_type"});
+      cataLog.setIdAddressMap(
+          readFinancialTransactionsDataPlanNodeId,
+          financialTransactionsDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readCustomerDataPlanNodeId,
+          customerDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(
+          readFinancialTransactionsDataPlanNodeId, "financial_transaction");
+      cataLog.addNodeIdRelationName(readCustomerDataPlanNodeId, "customer");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readFinancialTransactionsDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(OutputStat(
+              finicialTransactionsNumRows, finicialTransactionsNumCols)))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readCustomerDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(customerNumRows, customerNumCols))));
     } else if (queryTemplate == "template3") {
+      PlanNodeId readProductDataPlanNodeId;
+      PlanNodeId readProductRatingDataPlanNodeId;
+      PlanNodeId readProductRatingDataPlanNodeId1;
+      PlanNodeId readCustomerDataPlanNodeId;
+
+      auto productPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(productDataRowType, {}, "")
+              .capturePlanNodeId(readProductDataPlanNodeId)
+              .localPartition({"p_product_id"})
+              .project({"p_product_id", "p_dept"})
+              .hashJoin(
+                  {"p_product_id"},
+                  {"r_product_id"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(productRatingRowType, {}, "")
+                      .capturePlanNodeId(readProductRatingDataPlanNodeId)
+                      .localPartition({"r_product_id"})
+                      .project({"r_product_id", "r_rating"})
+                      .singleAggregation(
+                          {"r_product_id"},
+                          {"avg(r_rating) as avg_product_rating"})
+                      .planNode(),
+                  "",
+                  {"p_product_id", "p_dept", "avg_product_rating"})
+              .project(
+                  {"p_product_id",
+                   "concat(embedding_product(convert_int_array(p_product_id)), embedding_dept(convert_int_array(p_dept)), get_product_rating(CAST(avg_product_rating AS REAL))) as product_feature"})
+              .project(
+                  {"p_product_id",
+                   "relu(batch_norm3_product(mat_vector_add_3_product(mat_mul_3_product(relu(batch_norm2_product(mat_vector_add_2_product(mat_mul_2_product(relu(batch_norm1_product(mat_vector_add_1_product(mat_mul_1_product(product_feature)))))))))))) AS product_encoding"});
+
+      queryPlan =
+          PlanBuilder(planNodeIdGenerator, pool_.get())
+              .tableScan(customerDataRowType, {}, "")
+              .capturePlanNodeId(readCustomerDataPlanNodeId)
+              .localPartition({"c_customer_sk"})
+              .project(
+                  {"c_customer_sk",
+                   "c_address_num",
+                   "get_age(c_birth_year) as age",
+                   "c_birth_country",
+                   "c_cust_flag"})
+              .hashJoin(
+                  {"c_customer_sk"},
+                  {"r_user_id"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(productRatingRowType, {}, "")
+                      .capturePlanNodeId(readProductRatingDataPlanNodeId1)
+                      .localPartition({"r_user_id"})
+                      .project({"r_user_id", "r_rating"})
+                      .singleAggregation(
+                          {"r_user_id"},
+                          {"avg(r_rating) as avg_customer_rating"})
+                      .filter("avg_customer_rating >= 4.0")
+                      .planNode(),
+                  "",
+                  {"c_customer_sk",
+                   "c_address_num",
+                   "age",
+                   "c_birth_country",
+                   "c_cust_flag",
+                   "avg_customer_rating"})
+              .project(
+                  {"c_customer_sk",
+                   "avg_customer_rating",
+                   "concat(embedding_customer(convert_int_array(c_customer_sk)), embedding_addr(convert_int_array(c_address_num)), embedding_age(convert_int_array(age)), embedding_country(convert_int_array(c_birth_country)), get_customer_extra_feature(c_cust_flag, CAST(avg_customer_rating AS REAL))) as customer_feature"})
+              .project(
+                  {"c_customer_sk",
+                   "avg_customer_rating",
+                   "relu(batch_norm3_customer(mat_vector_add_3_customer(mat_mul_3_customer(relu(batch_norm2_customer(mat_vector_add_2_customer(mat_mul_2_customer(relu(batch_norm1_customer(mat_vector_add_1_customer(mat_mul_1_customer(customer_feature)))))))))))) AS customer_encoding"})
+              .nestedLoopJoin(
+                  productPlan.planNode(),
+                  {"c_customer_sk",
+                   "avg_customer_rating",
+                   "customer_encoding",
+                   "p_product_id",
+                   "product_encoding"})
+              .project(
+                  {"c_customer_sk",
+                   "p_product_id",
+                   "avg_customer_rating",
+                   "vector_addition(customer_encoding, product_encoding) as final_encoding"});
+      cataLog.setIdAddressMap(
+          readProductDataPlanNodeId,
+          productDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readProductRatingDataPlanNodeId,
+          productRatingDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readProductRatingDataPlanNodeId1,
+          productRatingDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readCustomerDataPlanNodeId,
+          customerDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+      cataLog.addNodeIdRelationName(
+          readProductRatingDataPlanNodeId, "product_rating");
+      cataLog.addNodeIdRelationName(
+          readProductRatingDataPlanNodeId1, "product_rating");
+      cataLog.addNodeIdRelationName(readCustomerDataPlanNodeId, "customer");
+      Source productSrc = Source(
+          readProductDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(
+              OutputStat(productNumRows, productNumCols)));
+      Source productRatingSrc = Source(
+          readProductRatingDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(
+              OutputStat(productRatingNumRows, productRatingNumCols)));
+      Source productRatingSrc1 = Source(
+          readProductRatingDataPlanNodeId1,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(
+              OutputStat(productRatingNumRows, productRatingNumCols)));
+      Source customerSrc = Source(
+          readCustomerDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(
+              OutputStat(customerNumRows, customerNumCols)));
+
     } else if (queryTemplate == "template4") { // uc7
       std::string svdModelPath =
           "/home/velox/resources/model/tpcxai_sf1/final/velox/tpcxai_template4_svd.h5";
@@ -1600,7 +1868,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           dwio::common::FileFormat::PARQUET);
       cataLog.setIdAddressMap(
           readFinancialTransactionsDataPlanNodeId,
-          finicialTransactionsDataPaths,
+          financialTransactionsDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.setIdAddressMap(
           readCustomerDataPlanNodeId,
@@ -1818,11 +2086,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
             orderDataPaths,
             dwio::common::FileFormat::PARQUET);
         cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
-        cataLog.addSource(
-            std::make_shared<Source>(Source(
-                readOrderDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
+        cataLog.addSource(std::make_shared<Source>(Source(
+            readOrderDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
 
         // lineitem
         cataLog.setIdAddressMap(
@@ -1830,12 +2097,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
             lineitemDataPaths,
             dwio::common::FileFormat::PARQUET);
         cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
-        cataLog.addSource(
-            std::make_shared<Source>(Source(
-                readLineitemDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(
-                    lineitemNumRows, lineitemNumCols))));
+        cataLog.addSource(std::make_shared<Source>(Source(
+            readLineitemDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(lineitemNumRows, lineitemNumCols))));
 
         // Product
         cataLog.setIdAddressMap(
@@ -1843,11 +2108,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
             productDataPaths,
             dwio::common::FileFormat::PARQUET);
         cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
-        cataLog.addSource(
-            std::make_shared<Source>(Source(
-                readProductDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(productNumRows, productNumCols))));
+        cataLog.addSource(std::make_shared<Source>(Source(
+            readProductDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(productNumRows, productNumCols))));
 
         // order_return
         cataLog.setIdAddressMap(
@@ -1856,12 +2120,11 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
             dwio::common::FileFormat::PARQUET);
         cataLog.addNodeIdRelationName(
             readOrderReturnDataPlanNodeId, "order_returns");
-        cataLog.addSource(
-            std::make_shared<Source>(Source(
-                readOrderReturnDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(
-                    orderReturnNumRows, orderReturnNumCols))));
+        cataLog.addSource(std::make_shared<Source>(Source(
+            readOrderReturnDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(
+                orderReturnNumRows, orderReturnNumCols))));
         return plan;
       };
 
@@ -2130,11 +2393,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           userDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readUserDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(userNumRows, userNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readUserDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(userNumRows, userNumCols))));
 
       // — movie side
       cataLog.setIdAddressMap(
@@ -2142,11 +2404,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           movieDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readMovieDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readMovieDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
     }
 
     else if (queryTemplate == "template9") {
@@ -2213,11 +2474,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           movieDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readMovieDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readMovieDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
 
       // rating side
       cataLog.setIdAddressMap(
@@ -2225,11 +2485,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           ratingDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "ratings");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readRatingDataPlanNodeId1,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(ratingNumRows, ratingNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readRatingDataPlanNodeId1,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(ratingNumRows, ratingNumCols))));
     }
 
     else if (queryTemplate == "movie_rating_pivot") {
@@ -2321,11 +2580,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           userDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readUserDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(userNumRows, userNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readUserDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(userNumRows, userNumCols))));
 
       // rating side
       cataLog.setIdAddressMap(
@@ -2333,11 +2591,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           ratingDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "ratings");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readRatingDataPlanNodeId1,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(ratingNumRows, ratingNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readRatingDataPlanNodeId1,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(ratingNumRows, ratingNumCols))));
     }
 
   }
@@ -2409,7 +2666,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
 
     std::vector<std::string> finicialAccountDataPaths =
         getFilePathsFromDir(dataDirPrefix + "financial_account");
-    std::vector<std::string> finicialTransactionsDataPaths =
+    std::vector<std::string> financialTransactionsDataPaths =
         getFilePathsFromDir(dataDirPrefix + "financial_transactions");
     std::vector<std::string> orderDataPaths =
         getFilePathsFromDir(dataDirPrefix + "order");
@@ -2511,11 +2768,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           reviewDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readReviewDataPlanNodeId, "review");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readReviewDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(reviewNumRows, reviewNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readReviewDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(reviewNumRows, reviewNumCols))));
     }
 
     else if (queryTemplate == "template9") {
@@ -2648,11 +2904,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             orderDataPaths,
             dwio::common::FileFormat::PARQUET);
         cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
-        cataLog.addSource(
-            std::make_shared<Source>(Source(
-                readOrderDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
+        cataLog.addSource(std::make_shared<Source>(Source(
+            readOrderDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
 
         // lineitem
         cataLog.setIdAddressMap(
@@ -2660,12 +2915,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             lineitemDataPaths,
             dwio::common::FileFormat::PARQUET);
         cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
-        cataLog.addSource(
-            std::make_shared<Source>(Source(
-                readLineitemDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(
-                    lineitemNumRows, lineitemNumCols))));
+        cataLog.addSource(std::make_shared<Source>(Source(
+            readLineitemDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(lineitemNumRows, lineitemNumCols))));
 
         // Product
         cataLog.setIdAddressMap(
@@ -2673,11 +2926,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             productDataPaths,
             dwio::common::FileFormat::PARQUET);
         cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
-        cataLog.addSource(
-            std::make_shared<Source>(Source(
-                readProductDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(productNumRows, productNumCols))));
+        cataLog.addSource(std::make_shared<Source>(Source(
+            readProductDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(productNumRows, productNumCols))));
 
         // order_return
         cataLog.setIdAddressMap(
@@ -2686,12 +2938,11 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             dwio::common::FileFormat::PARQUET);
         cataLog.addNodeIdRelationName(
             readOrderReturnDataPlanNodeId, "order_returns");
-        cataLog.addSource(
-            std::make_shared<Source>(Source(
-                readOrderReturnDataPlanNodeId,
-                Source::Type::FILE,
-                std::make_shared<OutputStat>(
-                    orderReturnNumRows, orderReturnNumCols))));
+        cataLog.addSource(std::make_shared<Source>(Source(
+            readOrderReturnDataPlanNodeId,
+            Source::Type::FILE,
+            std::make_shared<OutputStat>(
+                orderReturnNumRows, orderReturnNumCols))));
         return plan;
       };
 
@@ -2778,11 +3029,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           customerDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readCustomerDataPlanNodeId, "customer");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readCustomerDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(customerNumRows, customerNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readCustomerDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(customerNumRows, customerNumCols))));
 
       // rating
       cataLog.setIdAddressMap(
@@ -2790,12 +3040,11 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           productRatingDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readProductRatingPlanNodeId, "rating");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readProductRatingPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(
-                  productRatingNumRows, productRatingNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readProductRatingPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(
+              productRatingNumRows, productRatingNumCols))));
 
       // product
       cataLog.setIdAddressMap(
@@ -2803,11 +3052,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           productDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
-      cataLog.addSource(
-          std::make_shared<Source>(Source(
-              readProductDataPlanNodeId,
-              Source::Type::FILE,
-              std::make_shared<OutputStat>(productNumRows, productNumCols))));
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readProductDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(productNumRows, productNumCols))));
     }
 
   } else {
