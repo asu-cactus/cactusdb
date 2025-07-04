@@ -251,10 +251,9 @@ if __name__ == "__main__":
 
     # TODO: use time_stamp to name the result file after finalizing the code
 
-    result_df_name1 = "./generatedQueryPlan/result_optimizer_profile_{}.csv".format(
+    result_df_name1 = "./generatedQueryPlan/result_optimizer_profile_v1_{}.csv".format(
         time_stamp
     )
-    result_df_name2 = "result_optimizer_profile.csv"
 
     # if os.path.exists(result_df_name):
     #   new_result_df_name = "result_optimizer_profile_{}.csv".format(get_current_time(-3600))
@@ -337,7 +336,6 @@ if __name__ == "__main__":
             result_df = pd.concat([result_df, df], axis=0)
 
         result_df.to_csv(result_df_name1, index=False, sep="|")
-        result_df.to_csv(result_df_name2, index=False, sep="|")
 
     pd.set_option("display.max_rows", None)
     pd.set_option("display.max_columns", None)
