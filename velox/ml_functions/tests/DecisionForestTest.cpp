@@ -187,7 +187,8 @@ void DecisionForestTest::registerFunctions(
 
   exec::registerVectorFunction(
       "decision_forest_predict",
-      TreePrediction::signatures(),
+      // TreePrediction::signatures(),
+      ForestPrediction::signatures(),
       std::make_unique<ForestPrediction>(modelFilePath, numCols, true));
 }
 

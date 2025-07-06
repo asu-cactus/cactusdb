@@ -16,9 +16,14 @@
 #pragma once
 #include <H5Cpp.h>
 #include <json/json.h>
+#include <algorithm>
+#include <filesystem>
 #include <iostream>
+#include <iterator>
+#include <random>
 #include <sstream>
 #include <string>
+#include <vector>
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
@@ -2353,7 +2358,8 @@ std::vector<std::string> sampleUserMovieFilterExpr(
 
   RandomSampler randomSampler = RandomSampler(timestampSeed);
 
-  std::vector<std::string> ratingTimestampFilterExprs = { // range  max : 1046454590 | min : 956703932
+  std::vector<std::string> ratingTimestampFilterExprs = {
+      // range  max : 1046454590 | min : 956703932
       "r_timestamp <= 964152800",
       "r_timestamp >= 964152816",
       "r_timestamp < 974687965",
@@ -2506,58 +2512,57 @@ std::vector<std::string> sampleUserMovieFilterExpr(
         predefinedMovieFilterExprs.begin(),
         predefinedMovieFilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
-  } else if (filterTable == "user_movie_genres"){
+  } else if (filterTable == "user_movie_genres") {
     randomGenerator.setIntRange(1, 3);
     combinedFilterExprSets.insert(
         combinedFilterExprSets.end(),
         predefinedUserFilterExprs.begin(),
         predefinedUserFilterExprs.end());
     combinedFilterExprSets.insert(
-        combinedFilterExprSets.end(),
-        movieGenresFilterExprs);
+        combinedFilterExprSets.end(), movieGenresFilterExprs);
     sampleFilterPool = combinedFilterExprSets;
   } else if (filterTable == "template1") {
     randomGenerator.setIntRange(0, 2);
-    std::vector<std::vector<std::string>> template3FilterExprs = {movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
+    std::vector<std::vector<std::string>> template3FilterExprs = {
+        movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
     combinedFilterExprSets.insert(
-      combinedFilterExprSets.end(),
-      template3FilterExprs.begin(),
-      template3FilterExprs.end());
+        combinedFilterExprSets.end(),
+        template3FilterExprs.begin(),
+        template3FilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
   } else if (filterTable == "template2") {
     randomGenerator.setIntRange(0, 2);
-    std::vector<std::vector<std::string>> template2FilterExprs = {movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
+    std::vector<std::vector<std::string>> template2FilterExprs = {
+        movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
     combinedFilterExprSets.insert(
-      combinedFilterExprSets.end(),
-      template2FilterExprs.begin(),
-      template2FilterExprs.end());
+        combinedFilterExprSets.end(),
+        template2FilterExprs.begin(),
+        template2FilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
   } else if (filterTable == "template3") {
     randomGenerator.setIntRange(0, 2);
-    std::vector<std::vector<std::string>> template3FilterExprs = {movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
+    std::vector<std::vector<std::string>> template3FilterExprs = {
+        movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
     combinedFilterExprSets.insert(
-      combinedFilterExprSets.end(),
-      template3FilterExprs.begin(),
-      template3FilterExprs.end());
+        combinedFilterExprSets.end(),
+        template3FilterExprs.begin(),
+        template3FilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
-  } else if(filterTable == "age_gender_occupation_genre"){
+  } else if (filterTable == "age_gender_occupation_genre") {
     randomGenerator.setIntRange(1, 3);
     combinedFilterExprSets.insert(
         combinedFilterExprSets.end(),
         predefinedUserFilterExprs.begin(),
-        predefinedUserFilterExprs.end()-1);
+        predefinedUserFilterExprs.end() - 1);
     combinedFilterExprSets.insert(
-        combinedFilterExprSets.end(),
-        movieGenresFilterExprs);
+        combinedFilterExprSets.end(), movieGenresFilterExprs);
     sampleFilterPool = combinedFilterExprSets;
-  } else if(filterTable == "genre_rating"){
+  } else if (filterTable == "genre_rating") {
     randomGenerator.setIntRange(1, 3);
     combinedFilterExprSets.insert(
-        combinedFilterExprSets.end(),
-        movieGenresFilterExprs);
+        combinedFilterExprSets.end(), movieGenresFilterExprs);
     combinedFilterExprSets.insert(
-        combinedFilterExprSets.end(),
-        ratingTimestampFilterExprs);
+        combinedFilterExprSets.end(), ratingTimestampFilterExprs);
     sampleFilterPool = combinedFilterExprSets;
   } else {
     throw std::invalid_argument(
@@ -2588,179 +2593,185 @@ std::vector<std::string> sampleTPCxAIFilterExpr(
   }
 
   std::vector<std::string> departmentFilterExprs = {
-        "department = 'DSD GROCERY'",
-        "department = 'IMPULSE MERCHANDISE'",
-        "department = 'PERSONAL CARE'",
-        "department = 'GROCERY DRY GOODS'",
-        "department = 'PHARMACY OTC'",
-        "department = 'PRODUCE'",
-        "department = 'FINANCIAL SERVICES'",
-        "department = 'MENS WEAR'",
-        "department = 'DAIRY'",
-        "department = 'AUTOMOTIVE'",
-        "department = 'ELECTRONICS'",
+      "department = 'DSD GROCERY'",
+      "department = 'IMPULSE MERCHANDISE'",
+      "department = 'PERSONAL CARE'",
+      "department = 'GROCERY DRY GOODS'",
+      "department = 'PHARMACY OTC'",
+      "department = 'PRODUCE'",
+      "department = 'FINANCIAL SERVICES'",
+      "department = 'MENS WEAR'",
+      "department = 'DAIRY'",
+      "department = 'AUTOMOTIVE'",
+      "department = 'ELECTRONICS'",
   };
-  std::vector<std::string> customerBirthDayFilterExprs = { // range from 1 to 31
-        "c_birth_day < 15",
-        "c_birth_day > 20",
-        "c_birth_day >= 10",
-        "c_birth_day <= 25",
-        "c_birth_day <= 5",
+  std::vector<std::string> customerBirthDayFilterExprs = {
+      // range from 1 to 31
+      "c_birth_day < 15",
+      "c_birth_day > 20",
+      "c_birth_day >= 10",
+      "c_birth_day <= 25",
+      "c_birth_day <= 5",
   };
   std::vector<std::string> customerBirthCountryFilterExprs = {
-        "c_birth_country = 'QATAR'",
-        "c_birth_country = 'UZBEKISTAN'",
-        "c_birth_country = 'SAINT HELENA'",
-        "c_birth_country = 'ECUADOR'",
-        "c_birth_country = 'MONGOLIA'",
-        "c_birth_country = 'NORFOLK ISLAND'",
-        "c_birth_country = 'HONDURAS'",
-        "c_birth_country = 'SAUDI ARABIA'",
-        "c_birth_country = 'PARAGUAY'",
-        "c_birth_country = 'CYPRUS'",
-        "c_birth_country = 'LEBANON'",
-        "c_birth_country = 'NEW CALEDONIA'",
-        "c_birth_country = 'ANGOLA'",
-        "c_birth_country = 'MAYOTTE'",
-        "c_birth_country = 'GUINEA-BISSAU'",
+      "c_birth_country = 'QATAR'",
+      "c_birth_country = 'UZBEKISTAN'",
+      "c_birth_country = 'SAINT HELENA'",
+      "c_birth_country = 'ECUADOR'",
+      "c_birth_country = 'MONGOLIA'",
+      "c_birth_country = 'NORFOLK ISLAND'",
+      "c_birth_country = 'HONDURAS'",
+      "c_birth_country = 'SAUDI ARABIA'",
+      "c_birth_country = 'PARAGUAY'",
+      "c_birth_country = 'CYPRUS'",
+      "c_birth_country = 'LEBANON'",
+      "c_birth_country = 'NEW CALEDONIA'",
+      "c_birth_country = 'ANGOLA'",
+      "c_birth_country = 'MAYOTTE'",
+      "c_birth_country = 'GUINEA-BISSAU'",
   };
-  std::vector<std::string> orderWeekDayFilterExprs = { // range from 0 to 6
-        "weekday < 2",
-        "weekday > 3",
-        "weekday >= 1",
-        "weekday <= 5"
-  };
-  std::vector<std::string> orderTimeFilterExprs = { // range from 2012-01-02 to 2013-12-29
-        "date < '2012-06-01 00:00:00'",
-        "date > '2012-07-01 00:00:00'",
-        "date >= '2013-08-01 00:00:00'",
-        "date <= '2013-09-01 00:00:00'",
+  std::vector<std::string> orderWeekDayFilterExprs = {
+      // range from 0 to 6
+      "weekday < 2",
+      "weekday > 3",
+      "weekday >= 1",
+      "weekday <= 5"};
+  std::vector<std::string> orderTimeFilterExprs = {
+      // range from 2012-01-02 to 2013-12-29
+      "date < cast('2012-06-01 00:00:00' as timestamp)",
+      "date > cast('2012-07-01 00:00:00' as timestamp)",
+      "date >= cast('2013-08-01 00:00:00' as timestamp)",
+      "date <= cast('2013-09-01 00:00:00' as timestamp)",
   };
 
-  std::vector<std::string> lineitemPriceFilterExprs = { // range from 0.1 to 17.06
-        "price < 3.0",
-        "price > 6.0",
-        "price >= 9.0",
-        "price <= 12.0",
-        "price >= 15.0",
+  std::vector<std::string> lineitemPriceFilterExprs = {
+      // range from 0.1 to 17.06
+      "price < 3.0",
+      "price > 6.0",
+      "price >= 9.0",
+      "price <= 12.0",
+      "price >= 15.0",
   };
-  std::vector<std::string> lineitemQuantityFilterExprs = { // range from 1 to 7
-        "quantity < 7",
-        "quantity > 3",
-        "quantity >= 4",
-        "quantity <= 5",
-        "quantity = 6",
-        "quantity = 2",
+  std::vector<std::string> lineitemQuantityFilterExprs = {
+      // range from 1 to 7
+      "quantity < 7",
+      "quantity > 3",
+      "quantity >= 4",
+      "quantity <= 5",
+      "quantity = 6",
+      "quantity = 2",
   };
-  std::vector<std::string> financialTransactionsAmountFilterExprs = { // range from 0.01 to 15039.84
-        "amount < 1000.0",
-        "amount > 5000.0",
-        "amount >= 10000.0",
-        "amount <= 2000.0",
+  std::vector<std::string> financialTransactionsAmountFilterExprs = {
+      // range from 0.01 to 15039.84
+      "amount < 1000.0",
+      "amount > 5000.0",
+      "amount >= 10000.0",
+      "amount <= 2000.0",
   };
-  std::vector<std::string> financialTransactionsTimeFilterExprs = { // range from "2012-01-01 00:14:00" to "2013-12-30 23:16:00
-        "time < cast('2012-06-01 00:00:00' as timestamp)",
-        "time > cast('2012-07-01 00:00:00' as timestamp)",
-        "time >= cast('2013-08-01 00:00:00' as timestamp)",
-        "time <= cast('2013-09-01 00:00:00' as timestamp)"        
+  std::vector<std::string> financialTransactionsTimeFilterExprs = {
+      // range from "2012-01-01 00:14:00" to "2013-12-30 23:16:00
+      "time < cast('2012-06-01 00:00:00' as timestamp)",
+      "time > cast('2012-07-01 00:00:00' as timestamp)",
+      "time >= cast('2013-08-01 00:00:00' as timestamp)",
+      "time <= cast('2013-09-01 00:00:00' as timestamp)"};
+  std::vector<std::string> storeFilterExprs = {
+      // range from 1 to 11
+      "store_id = 1",
+      "store_id = 2",
+      "store_id = 3",
+      "store_id = 4",
+      "store_id = 5",
+      "store_id = 6",
+      "store_id = 7",
+      "store_id = 8",
+      "store_id = 9",
+      "store_id = 10",
+      "store_id = 11"};
+  std::vector<std::string> numWeekFilterExprs = {
+      // range from 104 to 155
+      "num_of_week < 120",
+      "num_of_week > 130",
+      "num_of_week >= 140",
+      "num_of_week <= 150",
   };
-  std::vector<std::string> storeFilterExprs = { // range from 1 to 11
-        "store_id = 1",
-        "store_id = 2",
-        "store_id = 3",
-        "store_id = 4",
-        "store_id = 5",
-        "store_id = 6",
-        "store_id = 7",
-        "store_id = 8",
-        "store_id = 9",
-        "store_id = 10",
-        "store_id = 11"
-    };
-    std::vector<std::string> numWeekFilterExprs = { //range from 104 to 155
-        "num_of_week < 120",
-        "num_of_week > 130",
-        "num_of_week >= 140",
-        "num_of_week <= 150",
-    };
-    std::vector<std::string> productIDFilterExprs = { // range from 1 to 706
-        "product_id < 100",
-        // "product_id < 200",
-        // "product_id <= 300",
-        // "product_id >= 400",
-        // "product_id >= 500",
-        "product_id >= 600",
-    };
+  std::vector<std::string> productIDFilterExprs = {
+      // range from 1 to 706
+      "product_id < 100",
+      // "product_id < 200",
+      // "product_id <= 300",
+      // "product_id >= 400",
+      // "product_id >= 500",
+      "product_id >= 600",
+  };
 
-    std::vector<std::string> idReviewFilterExprs = { //range from 0 to 13432
-        "id < 1243",
-        "id >= 5834",
-        "id <= 10341",
-        "id > 2587",
-        "id >= 9476",
-    };
+  std::vector<std::string> idReviewFilterExprs = {
+      // range from 0 to 13432
+      "id < 1243",
+      "id >= 5834",
+      "id <= 10341",
+      "id > 2587",
+      "id >= 9476",
+  };
 
-  
-    RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
-    std::vector<std::vector<std::string>> sampleFilterPool;
-    if (filterTable.find("department") != std::string::npos) {
-        sampleFilterPool.insert(sampleFilterPool.end(), departmentFilterExprs);
-    }
-    if (filterTable.find("birthDay") != std::string::npos) {
-        sampleFilterPool.insert(sampleFilterPool.end(), customerBirthDayFilterExprs);
-    } 
-    if (filterTable.find("birthCountry") != std::string::npos) {
-        sampleFilterPool.insert(sampleFilterPool.end(), customerBirthCountryFilterExprs);
-    } 
-    if (filterTable.find("weekday") != std::string::npos) {
-        sampleFilterPool.insert(sampleFilterPool.end(), orderWeekDayFilterExprs);
-    } 
-    if (filterTable.find("orderTime") != std::string::npos) {
-        sampleFilterPool.insert(sampleFilterPool.end(), orderTimeFilterExprs);
-    } 
-    if (filterTable.find("price") != std::string::npos) {
-        sampleFilterPool.insert(sampleFilterPool.end(), lineitemPriceFilterExprs);
-    } 
-    if (filterTable.find("quantity") != std::string::npos) {
-        sampleFilterPool.insert(sampleFilterPool.end(), lineitemQuantityFilterExprs);
-    } 
-    if (filterTable.find("amount") != std::string::npos) {
-        sampleFilterPool.insert(
-            sampleFilterPool.end(), financialTransactionsAmountFilterExprs);
-    } 
-    if (filterTable.find("transactionTime") != std::string::npos) {
-        sampleFilterPool.insert(
-            sampleFilterPool.end(), financialTransactionsTimeFilterExprs);
-    } 
-    if (filterTable.find("store") != std::string::npos) {
-        sampleFilterPool.insert(
-            sampleFilterPool.end(), storeFilterExprs);
-    }
-    if (filterTable.find("numWeek") != std::string::npos) {
-        sampleFilterPool.insert(
-            sampleFilterPool.end(), numWeekFilterExprs);
-    }
-    if (filterTable.find("product") != std::string::npos) {
-        sampleFilterPool.insert(
-            sampleFilterPool.end(), productIDFilterExprs);
-    }
-    if (filterTable.find("idReview") != std::string::npos) {
-        sampleFilterPool.insert(
-            sampleFilterPool.end(), idReviewFilterExprs);
-    }
+  RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
+  std::vector<std::vector<std::string>> sampleFilterPool;
+  if (filterTable.find("department") != std::string::npos) {
+    sampleFilterPool.insert(sampleFilterPool.end(), departmentFilterExprs);
+  }
+  if (filterTable.find("birthDay") != std::string::npos) {
+    sampleFilterPool.insert(
+        sampleFilterPool.end(), customerBirthDayFilterExprs);
+  }
+  if (filterTable.find("birthCountry") != std::string::npos) {
+    sampleFilterPool.insert(
+        sampleFilterPool.end(), customerBirthCountryFilterExprs);
+  }
+  if (filterTable.find("weekday") != std::string::npos) {
+    sampleFilterPool.insert(sampleFilterPool.end(), orderWeekDayFilterExprs);
+  }
+  if (filterTable.find("orderTime") != std::string::npos) {
+    sampleFilterPool.insert(sampleFilterPool.end(), orderTimeFilterExprs);
+  }
+  if (filterTable.find("price") != std::string::npos) {
+    sampleFilterPool.insert(sampleFilterPool.end(), lineitemPriceFilterExprs);
+  }
+  if (filterTable.find("quantity") != std::string::npos) {
+    sampleFilterPool.insert(
+        sampleFilterPool.end(), lineitemQuantityFilterExprs);
+  }
+  if (filterTable.find("amount") != std::string::npos) {
+    sampleFilterPool.insert(
+        sampleFilterPool.end(), financialTransactionsAmountFilterExprs);
+  }
+  if (filterTable.find("transactionTime") != std::string::npos) {
+    sampleFilterPool.insert(
+        sampleFilterPool.end(), financialTransactionsTimeFilterExprs);
+  }
+  if (filterTable.find("store") != std::string::npos) {
+    sampleFilterPool.insert(sampleFilterPool.end(), storeFilterExprs);
+  }
+  if (filterTable.find("numWeek") != std::string::npos) {
+    sampleFilterPool.insert(sampleFilterPool.end(), numWeekFilterExprs);
+  }
+  if (filterTable.find("product") != std::string::npos) {
+    sampleFilterPool.insert(sampleFilterPool.end(), productIDFilterExprs);
+  }
+  if (filterTable.find("idReview") != std::string::npos) {
+    sampleFilterPool.insert(sampleFilterPool.end(), idReviewFilterExprs);
+  }
 
-    RandomSampler randomSampler = RandomSampler(timestampSeed);
-    std::set<std::vector<std::string>> usedExprSets;
-    std::vector<std::string> sampledFilterExprs;
-    while (sampledFilterExprs.size() < randomGenerator.genRandomIntValue()) {
-        auto pickedExprSets = randomSampler.sampleFromSets(1, sampleFilterPool)[0];
-        if (usedExprSets.find(pickedExprSets) == usedExprSets.end()) {
-        auto sampledFilterExpr =
-            randomSampler.sampleFromSets(1, pickedExprSets)[0];
-        sampledFilterExprs.push_back(sampledFilterExpr);
-        usedExprSets.insert(pickedExprSets);
-        }
+  RandomSampler randomSampler = RandomSampler(timestampSeed);
+  std::set<std::vector<std::string>> usedExprSets;
+  std::vector<std::string> sampledFilterExprs;
+  while (sampledFilterExprs.size() < randomGenerator.genRandomIntValue()) {
+    auto pickedExprSets = randomSampler.sampleFromSets(1, sampleFilterPool)[0];
+    if (usedExprSets.find(pickedExprSets) == usedExprSets.end()) {
+      auto sampledFilterExpr =
+          randomSampler.sampleFromSets(1, pickedExprSets)[0];
+      sampledFilterExprs.push_back(sampledFilterExpr);
+      usedExprSets.insert(pickedExprSets);
     }
+  }
 
   return sampledFilterExprs;
 }
@@ -3423,6 +3434,79 @@ void generateDummyData(
   }
 }
 
+void randomly_sample_trees(
+    int numTrees,
+    int maxDepth,
+    const std::string& outputPath) {
+  const std::string sourceFolder =
+      fmt::format("resources/model/xgboost_10000_{}_netsdb", maxDepth);
+
+  namespace fs = std::filesystem;
+
+  // Check if source directory exists
+  if (!fs::exists(sourceFolder) || !fs::is_directory(sourceFolder)) {
+    std::cerr << "Source folder does not exist: " << sourceFolder << std::endl;
+    return;
+  }
+
+  if (fs::exists(outputPath)) {
+    for (const auto& entry : fs::directory_iterator(outputPath)) {
+      fs::remove_all(entry); // Works for both files and subdirectories
+    }
+  } else {
+    fs::create_directories(outputPath);
+  }
+
+  // Collect all files in the source folder
+  std::vector<fs::path> treeFiles;
+  for (const auto& entry : fs::directory_iterator(sourceFolder)) {
+    if (entry.is_regular_file()) {
+      treeFiles.push_back(entry.path());
+    }
+  }
+
+  if (treeFiles.empty()) {
+    std::cerr << "No tree files found in " << sourceFolder << std::endl;
+    return;
+  }
+
+  // Shuffle and take the first numTrees files
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::shuffle(treeFiles.begin(), treeFiles.end(), gen);
+
+  int count = std::min(numTrees, static_cast<int>(treeFiles.size()));
+  for (int i = 0; i < count; ++i) {
+    const fs::path& sourceFile = treeFiles[i];
+    fs::path destinationFile = fs::path(outputPath) / sourceFile.filename();
+    fs::copy_file(
+        sourceFile, destinationFile, fs::copy_options::overwrite_existing);
+  }
+
+  std::cout << "Copied " << count << " tree(s) to " << outputPath << std::endl;
+}
+
+void registerDFModel(
+    std::vector<int> units,
+    CataLog& catalog,
+    int& modelGroupId_,
+    bool hasArgmax = false) {
+  int numTrees = units[0];
+  int maxDepth = units[1];
+
+  // std::string modelFilePath =
+  //     fmt::format("resources/model/decision_forest_{}_{}", numTrees,
+  //     maxDepth);
+  std::string modelFilePath = "resources/model/decision_forest_tmp";
+  randomly_sample_trees(numTrees, maxDepth, modelFilePath);
+  int numCols = 4;
+  exec::registerVectorFunction(
+      "decision_forest_predict",
+      ForestPrediction::signatures(),
+      std::make_unique<ForestPrediction>(modelFilePath, numCols, true));
+  return;
+}
+
 std::string registerNNModel(
     std::vector<int> units,
     CataLog& catalog,
@@ -3491,11 +3575,11 @@ std::string registerNNModel(
     if (i != units.size() - 1) {
       modelComputationStr = "relu(" + modelComputationStr + ")";
     } else {
-        if (units.size() > 1) {
-            modelComputationStr = "softmax(" + modelComputationStr + ")";
-        } else {
-            modelComputationStr = "sigmoid(" + modelComputationStr + ")";
-        }
+      if (units.size() > 1) {
+        modelComputationStr = "softmax(" + modelComputationStr + ")";
+      } else {
+        modelComputationStr = "sigmoid(" + modelComputationStr + ")";
+      }
     }
     lastSize = layerSize;
   }

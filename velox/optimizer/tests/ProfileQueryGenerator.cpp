@@ -550,18 +550,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
 
     std::string latencyOutputPath =
-        "/home/velox/velox/optimizer/tests/executionLatency.txt";
+        "/home/cactusdb/velox/optimizer/tests/executionLatency.txt";
     writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
     auto serializedPlan = queryPlan.planNode()->serialize();
     std::string queryOutPutPath =
-        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+        "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
     augmentSerializedPlan(serializedPlan, cataLog);
     writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
     auto queryPlanStr = queryPlan.planNode()->toString(true, true);
     std::string queryPlanStrOutputPath =
-        "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
+        "/home/cactusdb/velox/optimizer/tests/queryPlanStr.txt";
     writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
@@ -603,18 +603,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << queryPlan.planNode()->toString(true, true) << std::endl;
 
     std::string latencyOutputPath =
-        "/home/velox/velox/optimizer/tests/executionLatency.txt";
+        "/home/cactusdb/velox/optimizer/tests/executionLatency.txt";
     writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
     auto serializedPlan = queryPlan.planNode()->serialize();
     std::string queryOutPutPath =
-        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+        "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
     augmentSerializedPlan(serializedPlan, cataLog);
     writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
     auto queryPlanStr = queryPlan.planNode()->toString(true, true);
     std::string queryPlanStrOutputPath =
-        "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
+        "/home/cactusdb/velox/optimizer/tests/queryPlanStr.txt";
     writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;

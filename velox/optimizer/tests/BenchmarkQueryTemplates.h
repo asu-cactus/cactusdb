@@ -23,6 +23,7 @@
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
+#include "velox/ml_functions/DecisionForest.h"
 #include "velox/ml_functions/UtilFunction.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/optimizer/CataLog.h"
@@ -1195,7 +1196,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     if (dataDirPrefix == "") {
       // use default value:
       dataDirPrefix =
-          "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
+          "/home/cactusdb/resources/data/parquet/tpcxai_sf1/final/serving/";
     }
 
     std::vector<std::string> finicialAccountDataPaths =
@@ -1273,7 +1274,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     } else if (queryTemplate == "template3") {
     } else if (queryTemplate == "template4") { // uc7
       std::string svdModelPath =
-          "/home/velox/resources/model/tpcxai_sf1/final/velox/tpcxai_template4_svd.h5";
+          "/home/cactusdb/resources/model/tpcxai_sf1/final/velox/tpcxai_template4_svd.h5";
       std::vector<std::vector<float>> bu = loadHDF5Array(svdModelPath, "bu");
       std::vector<std::vector<float>> bi = loadHDF5Array(svdModelPath, "bi");
       std::vector<std::vector<float>> pu = loadHDF5Array(svdModelPath, "pu");
@@ -1469,6 +1470,145 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                    "quantity",
                    "price",
                    fmt::format(modelStr, "features")});
+      if (generateFilter) {
+        std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr(
+            "orderTime_department_weekday_price_quantity", timestampSeed);
+        for (auto expr : filterExpr) {
+          queryPlan = queryPlan.filter(expr);
+        }
+      }
+
+      cataLog.setIdAddressMap(
+          readOrderDataPlanNodeId,
+          orderDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readLineitemDataPlanNodeId,
+          lineitemDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.setIdAddressMap(
+          readProductDataPlanNodeId,
+          productDataPaths,
+          dwio::common::FileFormat::PARQUET);
+
+      cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
+      cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
+      cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
+
+      Source orderSrc = Source(
+          readOrderDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(OutputStat(orderNumRows, orderNumCols)));
+      Source lineitemSrc = Source(
+          readLineitemDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(
+              OutputStat(lineitemNumRows, lineitemNumCols)));
+      Source productSrc = Source(
+          readProductDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(
+              OutputStat(productNumRows, productNumCols)));
+
+      cataLog.addSource(std::make_shared<Source>(orderSrc));
+      cataLog.addSource(std::make_shared<Source>(lineitemSrc));
+      cataLog.addSource(std::make_shared<Source>(productSrc));
+    } else if (queryTemplate == "template6_DF") { // uc8
+      // Register model
+      RandomGenerator randomGeneratorTrees =
+          RandomGenerator(100, 10000, timestampSeed);
+      RandomGenerator randomGeneratorDepths =
+          RandomGenerator(0, 2, timestampSeed);
+
+      int numberTrees = randomGeneratorTrees.genRandomIntValue();
+      int depIndex = randomGeneratorDepths.genRandomIntValue();
+      std::vector<int> candidateDepths = {6, 8, 10};
+      int maxDepth = candidateDepths[depIndex];
+      std::cout << "[INFO] numberTrees: " << numberTrees << ", "
+                << "maxDepth:" << maxDepth << std::endl;
+      registerDFModel({numberTrees, maxDepth}, cataLog, modelGroupId_, false);
+      // Register functions: department_encoder
+      registerTPCxAIDepartmentEncoder(cataLog, pool_);
+
+      // Query Plan
+      queryPlan =
+          PlanBuilder(planNodeIdGenerator)
+              .tableScan(orderDataRowType, {}, "")
+              .capturePlanNodeId(readOrderDataPlanNodeId)
+              .project({
+                  "o_order_id",
+                  "store",
+                  "CAST (date AS TIMESTAMP) AS date",
+              })
+              .project({
+                  "o_order_id",
+                  "store",
+                  "date",
+                  "day_of_week(date) as weekday",
+              })
+              .hashJoin(
+                  {"o_order_id"},
+                  {"li_order_id"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(lineitemDataRowType, {}, "")
+                      .capturePlanNodeId(readLineitemDataPlanNodeId)
+                      .planNode(),
+                  "",
+                  {"li_product_id",
+                   // "li_order_id",
+                   "o_order_id",
+                   "quantity",
+                   "price",
+                   "date",
+                   "weekday"})
+              .hashJoin(
+                  {"li_product_id"},
+                  {"p_product_id"},
+                  PlanBuilder(planNodeIdGenerator, pool_.get())
+                      .tableScan(productDataRowType, {}, "")
+                      .capturePlanNodeId(readProductDataPlanNodeId)
+                      .planNode(),
+                  "",
+                  {
+                      "o_order_id",
+                      // "li_order_id",
+                      "quantity",
+                      "price",
+                      "date",
+                      "weekday",
+                      "department",
+                  })
+              .partialAggregation(
+                  {"o_order_id", "date", "department", "quantity"},
+                  {"sum(quantity) as scan_count",
+                   "min(weekday) as weekday",
+                   "avg(price) as price"})
+              .finalAggregation()
+              .project(
+                  {"o_order_id",
+                   "date",
+                   "department",
+                   "weekday",
+                   "quantity",
+                   "price",
+                   "array_constructor(quantity, scan_count, weekday) as features",
+                   "department_encoder(department) as department_encoded"})
+              .project(
+                  {"o_order_id",
+                   "date",
+                   "department",
+                   "weekday",
+                   "quantity",
+                   "price",
+                   "transform(concat(features, department_encoded), x-> CAST(x as REAL)) as features"})
+              .project(
+                  {"o_order_id",
+                   "date",
+                   "department",
+                   "weekday",
+                   "quantity",
+                   "price",
+                   "decision_forest_predict(features)"});
       if (generateFilter) {
         std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr(
             "orderTime_department_weekday_price_quantity", timestampSeed);

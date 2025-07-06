@@ -50,6 +50,12 @@ target_link_libraries(
   ml_functions
 )
 
+#add_executable(dense2sparse_test Dense2SparseRewriteActionTest.cpp)
+#target_link_libraries(
+#  dense2sparse_test
+#  ml_functions
+#)
+
 add_executable(multilayer2torch_test MultiLayerUDF2TorchNNRewriteActionTest.cpp)
 target_link_libraries(
   multilayer2torch_test

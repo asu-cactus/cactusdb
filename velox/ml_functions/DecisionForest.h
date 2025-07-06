@@ -37,7 +37,7 @@ using namespace facebook::velox::memory;
 
 namespace ml {
 
-#define MAX_NUM_TREES 1600
+#define MAX_NUM_TREES 10000
 
 class Forest;
 
