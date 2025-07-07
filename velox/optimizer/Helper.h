@@ -599,7 +599,15 @@ bool containsStrButNotEqual(const std::string& str, const std::string& subStr) {
  * expression
  */
 std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
-  std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+  // Regex Explanation:
+  // (lambda\\s+ROW<.*?>\\s*->.*) : Matches and consumes an entire lambda
+  // expression.
+  //      This is the "skip" pattern. It's in the first capture group.
+  // |                             : OR
+  // (ROW\\[\"(.*?)\"\\])           : Matches your desired ROW["..."] pattern.
+  //      The actual source name will be in the third capture group.
+  std::regex patternToMatchRawSource(
+      "(lambda\\s+ROW<.*?>\\s*->.*)|(ROW\\[\"(.*?)\"\\])");
   std::smatch matches;
   // Object to capture the matched data source
   std::vector<std::string> matchedDataSources;
@@ -609,8 +617,12 @@ std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
   // Search out the matched data source and store in matches
   while (std::regex_search(
       searchStart, expr.cend(), matches, patternToMatchRawSource)) {
-    // The captured group is in matches[1]
-    matchedDataSources.push_back(matches[1].str());
+    // The desired capture group for the data source is now group #3.
+    // If matches[3] is valid, it means the second part of the regex
+    // (our target) was matched.
+    if (matches[3].matched) {
+      matchedDataSources.push_back(matches[3].str());
+    }
     // Update the search start position
     searchStart = matches.suffix().first;
   }

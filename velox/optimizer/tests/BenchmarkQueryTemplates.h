@@ -806,15 +806,20 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       queryPlan =
           queryPlan
               .project(
-                  {"gender_encoder(u_gender) as u_gender_encoded",
+                  {"u_user_id",
+                   "m_movie_id",
+                   "gender_encoder(u_gender) as u_gender_encoded",
                    "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as u_age_encoded",
                    "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as u_occupation_encoded",
                    "genres_encoder(m_genres) as m_genres_encoded"})
               .project(
-                  {"transform(concat(u_gender_encoded,u_age_encoded,u_occupation_encoded,m_genres_encoded), x-> CAST(x AS REAL)) as features"}
-                  // ARRAY(REAL)
-                  )
-              .project({fmt::format(ffnnstring, "features")});
+                  {"u_user_id",
+                   "m_movie_id",
+                   "transform(concat(u_gender_encoded,u_age_encoded,u_occupation_encoded,m_genres_encoded), x-> CAST(x AS REAL)) as features"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   fmt::format(ffnnstring, "features")});
 
       // — user side
       cataLog.setIdAddressMap(
@@ -842,10 +847,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       registerGenderEncoder(cataLog, pool_);
       // user_age_minmax_scaler
       registerMovielensAgeMinMaxScaler(
-          cataLog, pool_, "q5_user_age_minmax_scaler.txt");
+          cataLog, pool_, "q4_user_age_minmax_scaler.txt");
       // user_occupation_minmax_scaler
       registerMovielensOccupationMinMaxScaler(
-          cataLog, pool_, "q5_user_occupation_minmax_scaler.txt");
+          cataLog, pool_, "q4_user_occupation_minmax_scaler.txt");
 
       // std::vector<std::vector<int>> userModelStructures =
       //     readModelStructureFromFile(
@@ -945,10 +950,18 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       queryPlan = PlanBuilder(planNodeIdGenerator)
                       .tableScan(userDataRowType, {}, "")
                       .capturePlanNodeId(readUserDataPlanNodeId)
+                      .project(
+                          {"u_user_id",
+                           "u_age",
+                           "u_age",
+                           "u_gender",
+                           "u_occupation",
+                           "u_zipcode"})
                       .nestedLoopJoin(
                           PlanBuilder(planNodeIdGenerator)
                               .tableScan(movieDataRowType, {}, "")
                               .capturePlanNodeId(readMovieDataPlanNodeId)
+                              .project({"m_movie_id", "m_genres"})
                               .planNode(),
                           {// what columns to project from the join
                            "u_user_id",
@@ -958,14 +971,6 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                            "u_occupation",
                            "u_zipcode",
                            "m_genres"})
-                      // .project({
-                      //     "CAST (u_user_id AS INTEGER) AS u_user_id",
-                      //     "CAST (m_movie_id as INTEGER) AS m_movie_id",
-                      //     "u_age",
-                      //     "u_gender",
-                      //     "u_occupation",
-                      //     "u_zipcode",
-                      //     "m_genres"})
                       .project(
                           {"u_user_id",
                            "m_movie_id",
@@ -1047,10 +1052,17 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           PlanBuilder(planNodeIdGenerator)
               .tableScan(userDataRowType, {}, "")
               .capturePlanNodeId(readUserDataPlanNodeId)
+              .project(
+                  {"u_user_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "u_zipcode"})
               .nestedLoopJoin(
                   PlanBuilder(planNodeIdGenerator)
                       .tableScan(movieDataRowType, {}, "")
                       .capturePlanNodeId(readMovieDataPlanNodeId)
+                      .project({"m_movie_id", "m_genres"})
                       .planNode(),
                   {// what columns to project from the join
                    "u_user_id",
@@ -1127,6 +1139,12 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       queryPlan = PlanBuilder(planNodeIdGenerator)
                       .tableScan(userDataRowType, {}, "")
                       .capturePlanNodeId(readUserDataPlanNodeId)
+                      .project(
+                          {"u_user_id",
+                           "u_gender",
+                           "u_age",
+                           "u_occupation",
+                           "u_zipcode"})
                       .hashJoin(
                           {"u_user_id"},
                           {"r_user_id"},
@@ -1166,8 +1184,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                   {"(map_agg(r_movie_id, r_rating)) as map_ratings"})
               .finalAggregation()
               .project({"u_user_id", "map_to_array(map_ratings) as mappings_"})
-              .project({fmt::format(autoencoder, "mappings_")});
-      ;
+              .project({"u_user_id", fmt::format(autoencoder, "mappings_")});
 
       // user_side
       cataLog.setIdAddressMap(
@@ -1203,29 +1220,42 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       int modelGroupId = 0;
       auto dnnString = registerNNModel(
           {4, hidden1, hidden2, 384}, cataLog, modelGroupId_, false);
-      queryPlan =
-          PlanBuilder(planNodeIdGenerator)
-              .tableScan(movieDataRowType, {}, "")
-              .capturePlanNodeId(readMovieDataPlanNodeId)
-              .hashJoin(
-                  {"m_movie_id"},
-                  {"r_movie_id"},
-                  PlanBuilder(planNodeIdGenerator)
-                      .tableScan(ratingDataRowType, {}, "")
-                      .capturePlanNodeId(readRatingDataPlanNodeId1)
-                      .project({"r_movie_id", "r_rating", "r_timestamp"})
-                      .planNode(),
-                  "",
-                  {"m_movie_id",
-                   "m_genres",
-                   "m_title",
-                   "m_spoken_languages",
-                   "m_popularity",
-                   "m_vote_average",
-                   "m_vote_count",
-                   "r_rating",
-                   "r_timestamp"},
-                  /*joinType=*/core::JoinType::kInner);
+      queryPlan = PlanBuilder(planNodeIdGenerator)
+                      .tableScan(movieDataRowType, {}, "")
+                      .capturePlanNodeId(readMovieDataPlanNodeId)
+                      .project(
+                          {"m_movie_id",
+                           "m_genres",
+                           "m_title",
+                           "m_spoken_languages",
+                           "m_popularity",
+                           "m_vote_average",
+                           "m_vote_count"})
+                      .hashJoin(
+                          {"m_movie_id"},
+                          {"r_movie_id"},
+                          PlanBuilder(planNodeIdGenerator)
+                              .tableScan(ratingDataRowType, {}, "")
+                              .capturePlanNodeId(readRatingDataPlanNodeId1)
+                              .project(
+                                  {"r_user_id",
+                                   "r_movie_id",
+                                   "r_rating",
+                                   "r_timestamp"})
+                              .planNode(),
+                          "",
+                          {"r_user_id",
+                           "r_movie_id",
+                           "m_movie_id",
+                           "m_genres",
+                           "m_title",
+                           "m_spoken_languages",
+                           "m_popularity",
+                           "m_vote_average",
+                           "m_vote_count",
+                           "r_rating",
+                           "r_timestamp"},
+                          /*joinType=*/core::JoinType::kInner);
 
       // filter expressions
       if (generateFilter) {
@@ -1240,15 +1270,22 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       queryPlan =
           queryPlan
               .project(
-                  {"movie_popularity_minmax_scaler(transform(array_constructor(m_popularity),    x-> CAST(x AS REAL))) as m_popularity_norm",
+                  {"r_user_id",
+                   "r_movie_id",
+                   "movie_popularity_minmax_scaler(transform(array_constructor(m_popularity),    x-> CAST(x AS REAL))) as m_popularity_norm",
                    "movie_vote_average_minmax_scaler(transform(array_constructor(m_vote_average), x-> CAST(x AS REAL))) as m_vote_avg_norm",
                    "movie_vote_count_minmax_scaler(transform(array_constructor(m_vote_count),    x-> CAST(x AS REAL))) as m_vote_count_norm",
                    "rating_minmax_scaler(transform(array_constructor(r_rating),  x-> CAST(x AS REAL))) as r_rating_norm",
                    // one-hot encode genres
                    "genres_encoder(m_genres)  as m_genres_one_hot"})
               .project(
-                  {"transform(concat(m_popularity_norm,m_vote_avg_norm,m_vote_count_norm,r_rating_norm,m_genres_one_hot),x -> CAST(x AS REAL)) as features"})
-              .project({fmt::format(dnnString, "features")});
+                  {"r_user_id",
+                   "r_movie_id",
+                   "transform(concat(m_popularity_norm,m_vote_avg_norm,m_vote_count_norm,r_rating_norm,m_genres_one_hot),x -> CAST(x AS REAL)) as features"})
+              .project(
+                  {"r_user_id",
+                   "r_movie_id",
+                   fmt::format(dnnString, "features")});
 
       // movie side
       cataLog.setIdAddressMap(
@@ -1312,10 +1349,17 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           PlanBuilder(planNodeIdGenerator)
               .tableScan(userDataRowType, {}, "")
               .capturePlanNodeId(readUserDataPlanNodeId)
+              .project(
+                  {"u_user_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "u_zipcode"})
               .nestedLoopJoin(
                   PlanBuilder(planNodeIdGenerator)
                       .tableScan(movieDataRowType, {}, "")
                       .capturePlanNodeId(readMovieDataPlanNodeId)
+                      .project({"m_movie_id", "m_genres"})
                       .planNode(),
                   {// what columns to project from the join
                    "u_user_id",
@@ -1334,7 +1378,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                    "u_occupation",
                    "u_zipcode",
                    "m_genres",
-                   "gender_encoder(u_gender) as gender_encoded",
+                   "transform(gender_encoder(u_gender), x-> CAST(x AS REAL)) as gender_encoded",
                    "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as age_encoded",
                    "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as occupation_encoded"})
               .project(
@@ -1345,7 +1389,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                    "u_occupation",
                    "u_zipcode",
                    "m_genres",
-                   "transform(concat(gender_encoded,age_encoded,occupation_encoded,embed), x-> CAST(x AS REAL)) as features"})
+                   "concat(gender_encoded,age_encoded,occupation_encoded,embed) as features"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
