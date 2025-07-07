@@ -451,6 +451,140 @@ class RatingMapToArray : public MLFunction {
   const int numItems_;
 };
 
+class OneHotEncoderInt : public MLFunction {
+ public:
+  explicit OneHotEncoderInt(
+      std::vector<std::pair<int64_t,int>> mapping) {
+    int maxPos = 0;
+    for (auto& p : mapping) {
+      valueToIndex_[p.first] = p.second;
+      maxPos = std::max(maxPos, p.second);
+    }
+    numCategories_ = maxPos + 1;
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& outputType,
+      exec::EvalCtx& context,
+      VectorPtr& result) const override {
+    // 1) Prepare result vector
+    BaseVector::ensureWritable(rows, outputType, context.pool(), result);
+
+    // 2) Decode input BIGINT column
+    exec::LocalDecodedVector decoded(context, *args[0], rows);
+    auto decodedVec = decoded.get();
+
+    // 3) Build a [rows.size() × numCategories_] zero buffer
+    auto totalRows = rows.size();
+    std::vector<std::vector<float>> buffer(
+        totalRows, std::vector<float>(numCategories_, 0.0f));
+
+    // 4) Fill in the 1.0f for each selected row
+    rows.applyToSelected([&](vector_size_t row) {
+      int64_t cat = decodedVec->valueAt<int64_t>(row);
+      auto it     = valueToIndex_.find(cat);
+      if (it != valueToIndex_.end()) {
+        buffer[row][it->second] = 1.0f;
+      }
+    });
+
+    // 5) **FIXED**: pass REAL() (the element type), not the array type
+    VectorMaker maker{context.pool()};
+    result = maker.arrayVector<float>(buffer, REAL());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {
+      exec::FunctionSignatureBuilder()
+        .argumentType("BIGINT")
+        .returnType("ARRAY(REAL)")
+        .build()
+    };
+  }
+
+  static std::string name() { return "one_hot_int"; }
+
+  float* getTensor() const override { return nullptr; }
+
+  CostEstimate getCost(std::vector<int> inputDims) override {
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
+
+ private:
+  int numCategories_;
+  std::unordered_map<int64_t,int> valueToIndex_;
+};
+
+class OneHotEncoderString : public MLFunction {
+ public:
+  explicit OneHotEncoderString(
+      std::vector<std::pair<std::string, int>> mapping) {
+    int maxPos = 0;
+    for (const auto& p : mapping) {
+      valueToIndex_[p.first] = p.second;
+      maxPos = std::max(maxPos, p.second);
+    }
+    numCategories_ = maxPos + 1;
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      std::vector<VectorPtr>& args,
+      const TypePtr& outputType,
+      exec::EvalCtx& context,
+      VectorPtr& result) const override {
+    // 1) Prepare result vector
+    BaseVector::ensureWritable(rows, outputType, context.pool(), result);
+
+    // 2) Decode input VARCHAR column
+    exec::LocalDecodedVector decoded(context, *args[0], rows);
+    auto decodedVec = decoded.get();
+
+    // 3) Build a [rows.size() × numCategories_] zero buffer
+    auto totalRows = rows.size();
+    std::vector<std::vector<float>> buffer(
+        totalRows, std::vector<float>(numCategories_, 0.0f));
+
+    // 4) Fill in the 1.0f for each selected row
+    rows.applyToSelected([&](vector_size_t row) {
+      auto strView = decodedVec->valueAt<StringView>(row);
+      std::string key(strView.data(), strView.size());
+      auto it = valueToIndex_.find(key);
+      if (it != valueToIndex_.end()) {
+        buffer[row][it->second] = 1.0f;
+      }
+    });
+
+    // 5) Construct result
+    VectorMaker maker{context.pool()};
+    result = maker.arrayVector<float>(buffer, REAL());
+  }
+
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
+    return {
+      exec::FunctionSignatureBuilder()
+        .argumentType("VARCHAR")
+        .returnType("ARRAY(REAL)")
+        .build()
+    };
+  }
+
+  static std::string name() { return "one_hot_string"; }
+
+  float* getTensor() const override { return nullptr; }
+
+  CostEstimate getCost(std::vector<int> inputDims) override {
+    return CostEstimate(0, inputDims[0], inputDims[1]);
+  }
+
+ private:
+  int numCategories_;
+  std::unordered_map<std::string, int> valueToIndex_;
+};
+
+
 class MultiHotNormalizedEncoder : public MLFunction {
  public:
   MultiHotNormalizedEncoder(int size) {

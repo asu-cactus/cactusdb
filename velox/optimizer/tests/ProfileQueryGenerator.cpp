@@ -719,7 +719,7 @@ int main(int argc, char** argv) {
         rewrite,
         dataBatchSize,
         dataPath);
-  } else if (workload == "movielens1" || workload == "tpcxai1") {
+  } else if (workload == "movielens1" || workload == "tpcxai1" || workload == "imbridge") {
     numberOfTuples.push_back(numUser);
     numberOfTuples.push_back(numMovie);
     numberOfTuples.push_back(numTag);
