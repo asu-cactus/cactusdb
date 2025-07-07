@@ -425,11 +425,11 @@ class DecisionForestUDF2RelationRewriteActionTest
 
 DEFINE_string(
     model_path,
-    "/home/velox/resources/model/fraud_xgboost_10_8",
+    "/home/cactusdb/resources/model/fraud_xgboost_10_8",
     "Path to model");
 DEFINE_string(
     data_path,
-    "/home/velox/resources/data/creditcard_test.csv",
+    "/home/cactusdb/resources/data/creditcard_test.csv",
     "Path to csv file");
 DEFINE_bool(rewrite, true, "Rewrite or not");
 DEFINE_int32(num_split, 1, "Number of splits for input");

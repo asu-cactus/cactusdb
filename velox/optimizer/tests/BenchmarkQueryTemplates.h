@@ -3058,7 +3058,300 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           std::make_shared<OutputStat>(productNumRows, productNumCols))));
     }
 
-  } else {
+  } 
+  else if(workload == "imbridge"){  
+    if(queryTemplate == "expedia"){
+
+        std::cout << "We are here!!!\n";
+        //expedia starts here
+        //std::string dataDir = getenv("CD_DATA_DIR_PREFIX");
+        auto R1_hotelsType = ROW(
+            {"prop_id",
+            "prop_country_id",
+            "prop_starrating",
+            "prop_review_score",
+            "prop_brand_bool",
+            "count_clicks",
+            "avg_bookings_usd",
+            "stdev_bookings_usd",
+            "count_bookings"},
+            {VARCHAR(),   // prop_id
+            VARCHAR(),   // prop_country_id
+            BIGINT(),    // prop_starrating
+            DOUBLE(),    // prop_review_score
+            BIGINT(),    // prop_brand_bool
+            BIGINT(),    // count_clicks
+            DOUBLE(),    // avg_bookings_usd
+            DOUBLE(),    // stdev_bookings_usd
+            BIGINT()});  // count_bookings
+
+        auto R2_searchesType = ROW(
+            {"srch_id",
+            "year",
+            "month",
+            "weekofyear",
+            "time",
+            "site_id",
+            "visitor_location_country_id",
+            "srch_destination_id",
+            "srch_length_of_stay",
+            "srch_booking_window",
+            "srch_adults_count",
+            "srch_children_count",
+            "srch_room_count",
+            "srch_saturday_night_bool",
+            "random_bool"},
+            {VARCHAR(), // srch_id
+            VARCHAR(), // year
+            VARCHAR(), // month
+            VARCHAR(), // weekofyear
+            VARCHAR(), // time
+            VARCHAR(), // site_id
+            VARCHAR(), // visitor_location_country_id
+            VARCHAR(), // srch_destination_id
+            BIGINT(),  // srch_length_of_stay
+            BIGINT(),  // srch_booking_window
+            BIGINT(),  // srch_adults_count
+            BIGINT(),  // srch_children_count
+            BIGINT(),  // srch_room_count
+            BIGINT(),  // srch_saturday_night_bool
+            BIGINT()   // random_bool
+            });
+
+        auto S_listingsExtType = ROW(
+            {"srch_id",
+            "prop_id",
+            "position",
+            "prop_location_score1",
+            "prop_location_score2",
+            "prop_log_historical_price",
+            "price_usd",
+            "promotion_flag",
+            "orig_destination_distance"},
+            {VARCHAR(), // srch_id
+            VARCHAR(), // prop_id
+            VARCHAR(), // position
+            DOUBLE(),  // prop_location_score1
+            DOUBLE(),  // prop_location_score2
+            DOUBLE(),  // prop_log_historical_price
+            DOUBLE(),  // price_usd
+            BIGINT(),  // promotion_flag
+            DOUBLE()   // orig_destination_distance
+            });
+        
+    std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+    if (dataDirPrefix == "") {
+      // use default value:
+      dataDirPrefix =
+          "/home/cactusdb/resources/data/parquet/expedia/";
+    }
+    std::vector<std::string> R1_hotelsDataPaths =
+        getFilePathsFromDir(dataDirPrefix + "R1_hotels");
+    std::vector<std::string> R2_searchesDataPath =
+        getFilePathsFromDir(dataDirPrefix + "R2_searches");
+    std::vector<std::string> S_listings_extensionDataPath =
+        getFilePathsFromDir(dataDirPrefix + "S_listings_extension");
+
+    int R1_hotelsNumRows, R1_hotelsNumCols, R2_searchesNumRows, R2_searchesNumCols, S_listings_extensionNumRows, S_listings_extensionNumCols;
+
+    readDataStats(
+        dataDirPrefix + "R1_hotels_stats.txt",
+        R1_hotelsNumRows,
+        R1_hotelsNumCols);
+
+    readDataStats(
+        dataDirPrefix + "R2_searches_stats.txt",
+        R2_searchesNumRows,
+        R2_searchesNumCols);
+
+    readDataStats(
+        dataDirPrefix + "S_listings_extension_stats.txt",
+        S_listings_extensionNumRows,
+        S_listings_extensionNumCols);
+
+    PlanNodeId readR1_HotelsDataPlanNodeId;
+    PlanNodeId readR2_searchesDataPlanNodeId;
+    PlanNodeId readS_listings_extensionDataPlanNodeId;
+
+    std::cout << "OKAY UPTO QUERYPLAN!!" << "\n";
+
+    std::vector<std::pair<std::string, std::string>> encoderSpecs = {
+    {"one_hot_prop_starrating", "/home/cactusdb/resources/model/expedia/onehotencoders/prop_starrating.csv"},
+    {"one_hot_prop_brand_bool", "/home/cactusdb/resources/model/expedia/onehotencoders/prop_brand_bool.csv"},
+    {"one_hot_count_clicks", "/home/cactusdb/resources/model/expedia/onehotencoders/count_clicks.csv"},
+    {"one_hot_count_bookings", "/home/cactusdb/resources/model/expedia/onehotencoders/count_bookings.csv"},
+    {"one_hot_srch_length_of_stay", "/home/cactusdb/resources/model/expedia/onehotencoders/srch_length_of_stay.csv"},
+    {"one_hot_srch_booking_window", "/home/cactusdb/resources/model/expedia/onehotencoders/srch_booking_window.csv"},
+    {"one_hot_srch_adults_count", "/home/cactusdb/resources/model/expedia/onehotencoders/srch_adults_count.csv"},
+    {"one_hot_srch_children_count", "/home/cactusdb/resources/model/expedia/onehotencoders/srch_children_count.csv"},
+    {"one_hot_srch_room_count", "/home/cactusdb/resources/model/expedia/onehotencoders/srch_room_count.csv"},
+    {"one_hot_srch_saturday_night_bool", "/home/cactusdb/resources/model/expedia/onehotencoders/srch_saturday_night_bool.csv"},
+    {"one_hot_random_bool", "/home/cactusdb/resources/model/expedia/onehotencoders/random_bool.csv"}
+    };
+
+    std::vector<std::pair<std::string, std::string>> stringEncoderSpecs = {
+    {"one_hot_position", "/home/cactusdb/resources/model/expedia/onehotencoders/position.csv"},
+    {"one_hot_prop_country_id", "/home/cactusdb/resources/model/expedia/onehotencoders/prop_country_id.csv"},
+    {"one_hot_year", "/home/cactusdb/resources/model/expedia/onehotencoders/year.csv"},
+    {"one_hot_month", "/home/cactusdb/resources/model/expedia/onehotencoders/month.csv"},
+    {"one_hot_weekofyear", "/home/cactusdb/resources/model/expedia/onehotencoders/weekofyear.csv"},
+    {"one_hot_time", "/home/cactusdb/resources/model/expedia/onehotencoders/time.csv"},
+    {"one_hot_site_id", "/home/cactusdb/resources/model/expedia/onehotencoders/site_id.csv"},
+    {"one_hot_visitor_location_country_id", "/home/cactusdb/resources/model/expedia/onehotencoders/visitor_location_country_id.csv"},
+    {"one_hot_srch_destination_id", "/home/cactusdb/resources/model/expedia/onehotencoders/srch_destination_id.csv"}
+    };
+
+    for (const auto& [functionName, filePath] : encoderSpecs) {
+        registerOneHotInt(functionName, filePath, cataLog, pool_);
+    }
+
+    for (const auto& [functionName, filePath] : stringEncoderSpecs) {
+    registerOneHotString(functionName, filePath, cataLog, pool_);
+    }
+
+    registerTreePredictExpedia(cataLog, pool_);
+    
+    queryPlan = PlanBuilder(planNodeIdGenerator)
+        .tableScan(S_listingsExtType,{}, "")
+        .capturePlanNodeId(readS_listings_extensionDataPlanNodeId)
+        .hashJoin(
+            {"prop_id"},  
+            {"hotels_prop_id"},
+            PlanBuilder(planNodeIdGenerator)
+                .tableScan(R1_hotelsType,{},"")
+                .capturePlanNodeId(readR1_HotelsDataPlanNodeId)
+                .project({
+                    "prop_id as hotels_prop_id","prop_country_id","prop_starrating","prop_review_score","prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings"
+                })
+                .planNode(),
+                {},
+            { //projections
+                //from the s_listings
+                "srch_id","prop_id","position","prop_location_score1","prop_location_score2","prop_log_historical_price","price_usd","promotion_flag","orig_destination_distance",
+                //from the hotels
+                "hotels_prop_id","prop_country_id","prop_starrating","prop_review_score","prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings"
+            },
+            JoinType::kInner
+        )
+        .project(
+            {
+                "srch_id as s_listings_srch_id","prop_id","position","prop_location_score1","prop_location_score2","prop_log_historical_price","price_usd","promotion_flag","orig_destination_distance",
+                //from the hotels
+                "hotels_prop_id","prop_country_id","prop_starrating","prop_review_score","prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings"
+            }
+        )
+        .hashJoin(
+            {"s_listings_srch_id"},
+            {"srch_id"},
+            PlanBuilder(planNodeIdGenerator)
+                .tableScan(
+                R2_searchesType,{},"")
+                .capturePlanNodeId(readR2_searchesDataPlanNodeId)
+                .planNode(),
+            {}, //extra filters
+            {
+                //projections
+                "s_listings_srch_id","prop_id","position","prop_location_score1","prop_location_score2","prop_log_historical_price","price_usd","promotion_flag","orig_destination_distance","hotels_prop_id","prop_country_id","prop_starrating","prop_review_score","prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings",
+                "srch_id","year","month","weekofyear","time","site_id","visitor_location_country_id","srch_destination_id","srch_length_of_stay","srch_booking_window","srch_adults_count","srch_children_count","srch_room_count","srch_saturday_night_bool","random_bool"
+            },
+        JoinType::kInner  
+        )
+        .filter(
+        "prop_location_score1 > 1.0 "
+        " and prop_location_score2 > 0.1 "
+        " and prop_log_historical_price > 4.0 "
+        " and count_bookings > 5 "
+        " and srch_booking_window > 10 "
+        " and srch_length_of_stay > 1"
+        )
+        .project({
+        "prop_location_score1",
+        "prop_location_score2",
+        "prop_log_historical_price",
+        "price_usd",
+        "orig_destination_distance",
+        "prop_review_score",
+        "avg_bookings_usd",
+        "stdev_bookings_usd",
+
+        // One-hot UDFs with alias names
+        "one_hot_prop_starrating(prop_starrating) as oh_prop_starrating",
+        "one_hot_prop_brand_bool(CAST(prop_brand_bool AS INTEGER)) as oh_prop_brand_bool",
+        "one_hot_count_clicks(count_clicks) as oh_count_clicks",
+        "one_hot_count_bookings(count_bookings) as oh_count_bookings",
+        "one_hot_srch_length_of_stay(srch_length_of_stay) as oh_srch_length_of_stay",
+        "one_hot_srch_booking_window(srch_booking_window) as oh_srch_booking_window",
+        "one_hot_srch_adults_count(srch_adults_count) as oh_srch_adults_count",
+        "one_hot_srch_children_count(srch_children_count) as oh_srch_children_count",
+        "one_hot_srch_room_count(srch_room_count) as oh_srch_room_count",
+        "one_hot_srch_saturday_night_bool(CAST(srch_saturday_night_bool AS INTEGER)) as oh_srch_saturday_night_bool",
+        "one_hot_random_bool(CAST(random_bool AS INTEGER)) as oh_random_bool",
+        "one_hot_position(position) as oh_position",
+        "one_hot_prop_country_id(prop_country_id) as oh_prop_country_id",
+        "one_hot_year(year) as oh_year",
+        "one_hot_month(month) as oh_month",
+        "one_hot_weekofyear(weekofyear) as oh_weekofyear",
+        "one_hot_time(time) as oh_time",
+        "one_hot_site_id(site_id) as oh_site_id",
+        "one_hot_visitor_location_country_id(visitor_location_country_id) as oh_visitor_location_country_id",
+        "one_hot_srch_destination_id(srch_destination_id) as oh_srch_destination_id"
+        })
+        .project({
+        "transform(concat("
+
+            // Numerical block
+            "array_constructor(prop_location_score1, prop_location_score2, prop_log_historical_price, price_usd, "
+                            "orig_destination_distance, prop_review_score, avg_bookings_usd, stdev_bookings_usd), "
+
+            // Categorical block
+            "oh_prop_starrating, oh_prop_brand_bool, oh_count_clicks, oh_count_bookings, "
+            "oh_srch_length_of_stay, oh_srch_booking_window, oh_srch_adults_count, oh_srch_children_count, "
+            "oh_srch_room_count, oh_srch_saturday_night_bool, oh_random_bool, "
+            "oh_position, oh_prop_country_id, oh_year, oh_month, oh_weekofyear, "
+            "oh_time, oh_site_id, oh_visitor_location_country_id, oh_srch_destination_id"
+
+        "), x -> CAST(x AS REAL)) as u_features"
+        })
+        .project({"decision_tree_predict(u_features)"});
+
+    cataLog.setIdAddressMap(
+          readS_listings_extensionDataPlanNodeId,
+          S_listings_extensionDataPath,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readS_listings_extensionDataPlanNodeId, "S_listings");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readS_listings_extensionDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(
+              S_listings_extensionNumRows, S_listings_extensionNumCols))));
+
+      // product
+      cataLog.setIdAddressMap(
+          readR1_HotelsDataPlanNodeId,
+          R1_hotelsDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readR1_HotelsDataPlanNodeId, "R1_hotels");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readR1_HotelsDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(R1_hotelsNumRows, R1_hotelsNumCols))));
+
+    cataLog.setIdAddressMap(
+          readR2_searchesDataPlanNodeId,
+          R2_searchesDataPath,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readR2_searchesDataPlanNodeId, "R2_searches");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readR2_searchesDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(R2_searchesNumRows, R2_searchesNumCols))));
+        
+              //expedia ends here
+    }
+    
+  }
+    else {
     throw std::runtime_error(
         "Unsupported workload: " + workload +
         ". Currently only movielens is supported.");

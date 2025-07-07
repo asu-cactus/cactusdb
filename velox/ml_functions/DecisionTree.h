@@ -34,7 +34,7 @@ using namespace facebook::velox::memory;
 
 namespace ml {
 
-#define MAX_NUM_NODES_PER_TREE 512
+#define MAX_NUM_NODES_PER_TREE 2048
 class Tree;
 typedef std::shared_ptr<Tree> TreePtr;
 

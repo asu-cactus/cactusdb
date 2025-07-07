@@ -11,6 +11,8 @@
 #include "velox/optimizer/RuleManager.h"
 #include "velox/optimizer/TwoLayerUDF2TorchNNRewriteAction.h"
 #include "velox/optimizer/tests/BenchmarkUtils.h"
+#include <fstream>
+#include <sstream>
 
 void registerTwoTowerFunc(
     CataLog& catalog,
@@ -2201,4 +2203,103 @@ void registerTPCxAITFFeatureExtractor(
       {},
       true,
       catalog);
+}
+
+void registerOneHotInt(
+    const std::string& functionName,
+    const std::string& mappingFile,
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool) {
+    
+    VectorMaker maker{pool.get()};
+    std::ifstream in(mappingFile);
+    if (!in) {
+        throw std::runtime_error("OneHot mapping file not found: " + mappingFile);
+    }
+
+    std::string line;
+    std::getline(in, line); // skip header
+
+    std::vector<std::pair<int64_t, int>> mapping;
+    while (std::getline(in, line)) {
+        std::istringstream ss(line);
+        std::string valStr, posStr;
+        if (!std::getline(ss, valStr, ',')) continue;
+        if (!std::getline(ss, posStr, ',')) continue;
+        int64_t value = std::stoll(valStr);
+        int position = std::stoi(posStr);
+        mapping.emplace_back(value, position);
+    }
+
+    // std::cout << "Loaded one-hot mappings for " << functionName << ":\n";
+    // for (auto& p : mapping) {
+    //     std::cout << "  value=" << p.first << "  position=" << p.second << "\n";
+    // }
+
+    optimization::registerVectorFunction(
+        functionName,
+        OneHotEncoderInt::signatures(),
+        std::make_unique<OneHotEncoderInt>(std::move(mapping)),
+        /*extraTypeSignatures=*/{},
+        /*deterministic=*/true,
+        catalog);
+}
+
+
+void registerOneHotString(
+    const std::string& functionName,
+    const std::string& mappingFile,
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool) {
+    
+    VectorMaker maker{pool.get()};
+    std::ifstream in(mappingFile);
+    if (!in) {
+        throw std::runtime_error("OneHot mapping file not found: " + mappingFile);
+    }
+
+    std::string line;
+    std::getline(in, line); // skip header
+
+    std::vector<std::pair<std::string, int>> mapping;
+    while (std::getline(in, line)) {
+        std::istringstream ss(line);
+        std::string key, posStr;
+        if (!std::getline(ss, key, ',')) continue;
+        if (!std::getline(ss, posStr, ',')) continue;
+        int position = std::stoi(posStr);
+        mapping.emplace_back(key, position);
+    }
+
+    // std::cout << "Loaded string one-hot mappings for " << functionName << ":\n";
+    // for (auto& p : mapping) {
+    //     std::cout << "  value=\"" << p.first << "\"  position=" << p.second << "\n";
+    // }
+
+    optimization::registerVectorFunction(
+        functionName,
+        OneHotEncoderString::signatures(),
+        std::make_unique<OneHotEncoderString>(std::move(mapping)),
+        /*extraTypeSignatures=*/{},
+        /*deterministic=*/true,
+        catalog);
+}
+
+
+void registerTreePredictExpedia(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool) {
+    
+    VectorMaker maker{pool.get()};
+    optimization::registerVectorFunction(
+        "decision_tree_predict",
+        TreePrediction::signatures(),
+        std::make_unique<TreePrediction>(
+            0,
+            "/home/cactusdb/resources/model/expedia/tree/0.txt",
+            3979,
+        true),
+        {},
+        /*deterministic=*/true,
+        catalog);
 }
