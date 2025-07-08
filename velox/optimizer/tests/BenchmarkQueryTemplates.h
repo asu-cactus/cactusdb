@@ -3210,7 +3210,18 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
     registerOneHotString(functionName, filePath, cataLog, pool_);
     }
 
-    registerTreePredictExpedia(cataLog, pool_);
+    // registerTreePredictExpedia(cataLog, pool_);
+    optimization::registerVectorFunction(
+        "decision_tree_predict",
+        TreePrediction::signatures(),
+        std::make_unique<TreePrediction>(
+            0,
+            "/home/cactusdb/resources/model/expedia/tree/0.txt",
+            3979,
+        true),
+        {},
+        /*deterministic=*/true,
+        cataLog);
     
     queryPlan = PlanBuilder(planNodeIdGenerator)
         .tableScan(S_listingsExtType,{}, "")
@@ -3257,18 +3268,18 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             },
         JoinType::kInner  
         )
-        .filter(
-        "prop_location_score1 > 1.0 "
-        " and prop_location_score2 > 0.1 "
-        " and prop_log_historical_price > 4.0 "
-        " and count_bookings > 5 "
-        " and srch_booking_window > 10 "
-        " and srch_length_of_stay > 1"
-        )
         .project({
-        "prop_location_score1",
-        "prop_location_score2",
-        "prop_log_historical_price",
+        
+        //filter expressions
+        "count_bookings",
+        "srch_booking_window",
+        "srch_length_of_stay",
+
+
+        
+        "prop_location_score1", //f
+        "prop_location_score2", //f
+        "prop_log_historical_price", //f
         "price_usd",
         "orig_destination_distance",
         "prop_review_score",
@@ -3298,6 +3309,15 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         "one_hot_srch_destination_id(srch_destination_id) as oh_srch_destination_id"
         })
         .project({
+
+        //filter expressions
+        "prop_location_score1", //f
+        "prop_location_score2", //f
+        "prop_log_historical_price", //f
+        "count_bookings",
+        "srch_booking_window",
+        "srch_length_of_stay",
+
         "transform(concat("
 
             // Numerical block
@@ -3313,7 +3333,24 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
 
         "), x -> CAST(x AS REAL)) as u_features"
         })
-        .project({"decision_tree_predict(u_features)"});
+        .project({
+            "decision_tree_predict(u_features) as decision_tree_result",
+            //filter expressions
+            "prop_location_score1", //f
+            "prop_location_score2", //f
+            "prop_log_historical_price", //f
+            "count_bookings",
+            "srch_booking_window",
+            "srch_length_of_stay",
+        })
+        .filter(
+        "prop_location_score1 > 1.0 "
+        " and prop_location_score2 > 0.1 "
+        " and prop_log_historical_price > 4.0 "
+        " and count_bookings > 5 "
+        " and srch_booking_window > 10 "
+        " and srch_length_of_stay > 1"
+        );
 
     cataLog.setIdAddressMap(
           readS_listings_extensionDataPlanNodeId,

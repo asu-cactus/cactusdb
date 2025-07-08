@@ -2290,7 +2290,8 @@ void registerTreePredictExpedia(
     CataLog& catalog,
     std::shared_ptr<memory::MemoryPool> pool) {
     
-    VectorMaker maker{pool.get()};
+    // VectorMaker maker{pool.get()};
+
     optimization::registerVectorFunction(
         "decision_tree_predict",
         TreePrediction::signatures(),
