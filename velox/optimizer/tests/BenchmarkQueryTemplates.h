@@ -3062,7 +3062,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
   else if(workload == "imbridge"){  
     if(queryTemplate == "expedia"){
 
-        std::cout << "We are here!!!\n";
+        // std::cout << "We are here!!!\n";
         //expedia starts here
         //std::string dataDir = getenv("CD_DATA_DIR_PREFIX");
         auto R1_hotelsType = ROW(
@@ -3385,6 +3385,446 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           std::make_shared<OutputStat>(R2_searchesNumRows, R2_searchesNumCols))));
         
               //expedia ends here
+    }
+
+    else if(queryTemplate == "creditcard"){
+        //creditcard starts here 
+
+        auto CreditCardType = ROW(
+            {
+                "time", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
+                "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
+                "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28",
+                "amount", "class"
+            },
+            {
+                DOUBLE(), // Time
+                DOUBLE(), // V1
+                DOUBLE(), // V2
+                DOUBLE(), // V3
+                DOUBLE(), // V4
+                DOUBLE(), // V5
+                DOUBLE(), // V6
+                DOUBLE(), // V7
+                DOUBLE(), // V8
+                DOUBLE(), // V9
+                DOUBLE(), // V10
+                DOUBLE(), // V11
+                DOUBLE(), // V12
+                DOUBLE(), // V13
+                DOUBLE(), // V14
+                DOUBLE(), // V15
+                DOUBLE(), // V16
+                DOUBLE(), // V17
+                DOUBLE(), // V18
+                DOUBLE(), // V19
+                DOUBLE(), // V20
+                DOUBLE(), // V21
+                DOUBLE(), // V22
+                DOUBLE(), // V23
+                DOUBLE(), // V24
+                DOUBLE(), // V25
+                DOUBLE(), // V26
+                DOUBLE(), // V27
+                DOUBLE(), // V28
+                DOUBLE(), // Amount
+                BIGINT()  // Class
+            });
+
+            std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+        if (dataDirPrefix == "") {
+        // use default value:
+        dataDirPrefix =
+            "/home/cactusdb/resources/data/parquet/creditcard/";
+        }
+        std::vector<std::string> creditcardDataPaths =
+            getFilePathsFromDir(dataDirPrefix + "creditcard");
+        
+        int creditcardNumRows, creditcardNumCols;
+
+        readDataStats(
+        dataDirPrefix + "creditcard_stats.txt",
+        creditcardNumRows,
+        creditcardNumCols);
+
+        PlanNodeId readcreditcardDataPlanNodeId;
+
+        optimization::registerVectorFunction(
+            "decision_forest_predict",
+            ForestPrediction::signatures(),
+            std::make_unique<ForestPrediction>("/home/cactusdb/resources/model/creditcard/tree_model",
+                 29, true),
+                {},
+        /*deterministic=*/true,
+            cataLog);
+
+        const std::string statsDir = "/home/cactusdb/resources/model/creditcard/scaler_files";
+
+        // List of features to register:
+        const std::vector<std::string> features = {
+        "v1","v2","v3","v4","v5","v6","v7","v8","v9",
+        "v10","v11","v12","v13","v14","v15","v16","v17","v18","v19",
+        "v20","v21","v22","v23","v24","v25","v26","v27","v28",
+        "amount"
+        };
+
+        for (auto& feature : features) {
+            // Build full path to that feature’s stats file (e.g. "/…/v1.txt")
+            const std::string filePath = fmt::format("{}/{}.txt", statsDir, feature);
+            registerFeatureMinMaxScaler(cataLog, pool_, feature, filePath);
+        }
+    
+
+        queryPlan = PlanBuilder(planNodeIdGenerator)
+        .tableScan(CreditCardType,{}, "")
+        .capturePlanNodeId(readcreditcardDataPlanNodeId)
+        .project({
+            "v1 as fv1",
+            "v2 as fv2",
+            "v3 as fv3",
+
+            "time", "v1_minmax_scaler(transform(array_constructor(v1),    x -> CAST(x AS REAL))) as v1",
+                "v2_minmax_scaler(transform(array_constructor(v2),    x -> CAST(x AS REAL))) as v2",
+                "v3_minmax_scaler(transform(array_constructor(v3),    x -> CAST(x AS REAL))) as v3",
+                "v4_minmax_scaler(transform(array_constructor(v4),    x -> CAST(x AS REAL))) as v4",
+                "v5_minmax_scaler(transform(array_constructor(v5),    x -> CAST(x AS REAL))) as v5",
+                "v6_minmax_scaler(transform(array_constructor(v6),    x -> CAST(x AS REAL))) as v6",
+                "v7_minmax_scaler(transform(array_constructor(v7),    x -> CAST(x AS REAL))) as v7",
+                "v8_minmax_scaler(transform(array_constructor(v8),    x -> CAST(x AS REAL))) as v8",
+                "v9_minmax_scaler(transform(array_constructor(v9),    x -> CAST(x AS REAL))) as v9",
+                "v10_minmax_scaler(transform(array_constructor(v10),  x -> CAST(x AS REAL))) as v10",
+                "v11_minmax_scaler(transform(array_constructor(v11),  x -> CAST(x AS REAL))) as v11",
+                "v12_minmax_scaler(transform(array_constructor(v12),  x -> CAST(x AS REAL))) as v12",
+                "v13_minmax_scaler(transform(array_constructor(v13),  x -> CAST(x AS REAL))) as v13",
+                "v14_minmax_scaler(transform(array_constructor(v14),  x -> CAST(x AS REAL))) as v14",
+                "v15_minmax_scaler(transform(array_constructor(v15),  x -> CAST(x AS REAL))) as v15",
+                "v16_minmax_scaler(transform(array_constructor(v16),  x -> CAST(x AS REAL))) as v16",
+                "v17_minmax_scaler(transform(array_constructor(v17),  x -> CAST(x AS REAL))) as v17",
+                "v18_minmax_scaler(transform(array_constructor(v18),  x -> CAST(x AS REAL))) as v18",
+                "v19_minmax_scaler(transform(array_constructor(v19),  x -> CAST(x AS REAL))) as v19",
+                "v20_minmax_scaler(transform(array_constructor(v20),  x -> CAST(x AS REAL))) as v20",
+                "v21_minmax_scaler(transform(array_constructor(v21),  x -> CAST(x AS REAL))) as v21",
+                "v22_minmax_scaler(transform(array_constructor(v22),  x -> CAST(x AS REAL))) as v22",
+                "v23_minmax_scaler(transform(array_constructor(v23),  x -> CAST(x AS REAL))) as v23",
+                "v24_minmax_scaler(transform(array_constructor(v24),  x -> CAST(x AS REAL))) as v24",
+                "v25_minmax_scaler(transform(array_constructor(v25),  x -> CAST(x AS REAL))) as v25",
+                "v26_minmax_scaler(transform(array_constructor(v26),  x -> CAST(x AS REAL))) as v26",
+                "v27_minmax_scaler(transform(array_constructor(v27),  x -> CAST(x AS REAL))) as v27",
+                "v28_minmax_scaler(transform(array_constructor(v28),  x -> CAST(x AS REAL))) as v28",
+                "amount_minmax_scaler(transform(array_constructor(amount), x -> CAST(x AS REAL))) as amount", "class"
+        })
+        .project({
+            "concat(v1, v2, v3, v4, v5, v6, v7, v8, v9,"
+            "v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,"
+            "v20, v21, v22, v23, v24, v25, v26, v27, v28,"
+            "amount) as u_features", "fv1", "fv2", "fv3"
+        })
+        .project({"decision_forest_predict(u_features) as prediction_result"}, "fv1", "fv2", "fv3")
+        .filter("fv1 > 1 AND fv2 < 0.27 AND fv3 > 0.3");
+
+
+        cataLog.setIdAddressMap(
+          readcreditcardDataPlanNodeId,
+          creditcardDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readcreditcardDataPlanNodeId, "creditcard");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readcreditcardDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(creditcardNumRows, creditcardNumCols))));
+
+    //creditcard ends here 
+    }
+
+    else if(queryTemplate == "flights"){
+        //flights starts here 
+    //    auto R1_airlinesNames = std::vector<std::string>{"airlineid", "name1", "name2", "name4", "acountry", "active"};
+        auto R1_airlinesType = ROW({"airlineid", "name1", "name2", "name4", "acountry", "active"}, {VARCHAR(), BIGINT(), VARCHAR(), VARCHAR(), VARCHAR(), VARCHAR()});
+
+        // auto R2_sairportsNames = std::vector<std::string>{"sairportid", "scity", "scountry", "slatitude", "slongitude", "stimezone", "sdst"};
+        auto R2_sairportsType = ROW({"sairportid", "scity", "scountry", "slatitude", "slongitude", "stimezone", "sdst"}, {VARCHAR(), VARCHAR(), VARCHAR(), DOUBLE(), DOUBLE(), BIGINT(), VARCHAR()});
+
+        // auto R3_dairportsNames = std::vector<std::string>{"dairportid", "dcity", "dcountry", "dlatitude", "dlongitude", "dtimezone", "ddst"};
+        auto R3_dairportsType = ROW({"dairportid", "dcity", "dcountry", "dlatitude", "dlongitude", "dtimezone", "ddst"}, {VARCHAR(), VARCHAR(), VARCHAR(), DOUBLE(), DOUBLE(), BIGINT(), VARCHAR()});
+
+        // auto S_routesNames = std::vector<std::string>{ "airlineid", "sairportid", "dairportid", "codeshare"};
+        auto S_routesType = ROW({ "airlineid", "sairportid", "dairportid", "codeshare"}, { VARCHAR(), VARCHAR(), VARCHAR(), VARCHAR()});
+
+        std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+        if (dataDirPrefix == "") {
+        // use default value:
+        dataDirPrefix =
+            "/home/cactusdb/resources/data/parquet/flights/";
+        }
+        std::vector<std::string> R1_airlinesDataPaths =
+            getFilePathsFromDir(dataDirPrefix + "R1_airlines");
+        std::vector<std::string> R2_sairportsDataPaths =
+            getFilePathsFromDir(dataDirPrefix + "R2_sairports");
+        std::vector<std::string> R3_dairportsDataPaths =
+            getFilePathsFromDir(dataDirPrefix + "R3_dairports");
+        std::vector<std::string> S_routesDataPaths =
+            getFilePathsFromDir(dataDirPrefix + "S_routes_100G");
+
+        std::cout << "File Path Read!\n";
+
+        int R1_airlinesNumRows, R1_airlinesNumCols, R2_sairportsNumRows, R2_sairportsNumCols, R3_dairportsNumRows, R3_dairportsNumCols, S_routesNumRows, S_routesNumCols;
+
+        readDataStats(
+        dataDirPrefix + "R1_airlines_stats.txt",
+        R1_airlinesNumRows,
+        R1_airlinesNumCols);
+        readDataStats(
+        dataDirPrefix + "R2_sairports_stats.txt",
+        R2_sairportsNumRows,
+        R2_sairportsNumCols);
+        readDataStats(
+        dataDirPrefix + "R3_dairports_stats.txt",
+        R3_dairportsNumRows,
+        R3_dairportsNumCols);
+        readDataStats(
+        dataDirPrefix + "S_routes_100G_stats.txt",
+        S_routesNumRows,
+        S_routesNumCols);
+
+        std::cout << "Stats Read!\n";
+
+        PlanNodeId readR1_airlinesDataPlanNodeId;
+        PlanNodeId readR2_sairportsDataPlanNodeId;
+        PlanNodeId readR3_dairportsDataPlanNodeId;
+        PlanNodeId readS_routesDataPlanNodeId;
+
+        std::vector<std::pair<std::string, std::string>> encoderSpecs = {
+            {"one_hot_dtimezone", "/home/cactusdb/resources/model/flights/onehotencoders/dtimezone.csv"},
+            {"one_hot_name1",     "/home/cactusdb/resources/model/flights/onehotencoders/name1.csv"},
+            {"one_hot_stimezone", "/home/cactusdb/resources/model/flights/onehotencoders/stimezone.csv"}
+        };
+
+        std::vector<std::pair<std::string, std::string>> stringEncoderSpecs = {
+            {"one_hot_acountry",                  "/home/cactusdb/resources/model/flights/onehotencoders/acountry.csv"},
+            {"one_hot_active",                    "/home/cactusdb/resources/model/flights/onehotencoders/active.csv"},
+            {"one_hot_dcity",                     "/home/cactusdb/resources/model/flights/onehotencoders/dcity.csv"},
+            {"one_hot_dcountry",                  "/home/cactusdb/resources/model/flights/onehotencoders/dcountry.csv"},
+            {"one_hot_ddst",                      "/home/cactusdb/resources/model/flights/onehotencoders/ddst.csv"},
+            {"one_hot_name2",                     "/home/cactusdb/resources/model/flights/onehotencoders/name2.csv"},
+            {"one_hot_name4",                     "/home/cactusdb/resources/model/flights/onehotencoders/name4.csv"},
+            {"one_hot_scity",                     "/home/cactusdb/resources/model/flights/onehotencoders/scity.csv"},
+            {"one_hot_scountry",                  "/home/cactusdb/resources/model/flights/onehotencoders/scountry.csv"},
+            {"one_hot_sdst",                      "/home/cactusdb/resources/model/flights/onehotencoders/sdst.csv"}
+        };
+
+        for (const auto& [functionName, filePath] : encoderSpecs) {
+            registerOneHotInt(functionName, filePath, cataLog, pool_);
+        }
+
+        for (const auto& [functionName, filePath] : stringEncoderSpecs) {
+            registerOneHotString(functionName, filePath, cataLog, pool_);
+        }
+
+        const std::string statsDir = "/home/cactusdb/resources/model/flights/scaler_files";
+
+        // List of features to register:
+        const std::vector<std::string> features = {
+        "dlatitude","dlongitude","slatitude","slongitude"
+        };
+
+        for (auto& feature : features) {
+            // Build full path to that feature’s stats file (e.g. "/…/v1.txt")
+            const std::string filePath = fmt::format("{}/{}.txt", statsDir, feature);
+            registerFeatureMinMaxScaler(cataLog, pool_, feature, filePath);
+        }
+
+        optimization::registerVectorFunction(
+            "decision_forest_predict",
+            ForestPrediction::signatures(),
+            std::make_unique<ForestPrediction>("/home/cactusdb/resources/model/flights/rf_dot_trees_custom",
+                 29, true),
+                {},
+        /*deterministic=*/true,
+            cataLog);
+
+        
+        queryPlan = PlanBuilder(planNodeIdGenerator)
+        // 1) Read S_routes
+            .tableScan(S_routesType, {}, "")
+            .capturePlanNodeId(readS_routesDataPlanNodeId)
+            // .project({
+            //     "airlineid", "sairportid", "dairportid", "codeshare"
+            // });
+        // 2) Join with R1_airlines on airlineid
+        .hashJoin(
+            /*leftKeys*/ {"airlineid"},
+            /*rightKeys*/ {"r1_airlines_airlineid"},
+            /*buildSide*/
+            PlanBuilder(planNodeIdGenerator)
+                .tableScan(R1_airlinesType, {}, "")
+                .capturePlanNodeId(readR1_airlinesDataPlanNodeId)
+                .project({
+                    "airlineid as r1_airlines_airlineid",
+                    "name1", "name2", "name4", "acountry", "active"
+                })
+                .planNode(),
+            /*leftFiltersRightFilters*/ {},
+            /*outputColumns*/ {
+                // from S_routes
+                "airlineid",
+                "sairportid",
+                "dairportid",
+                // from R1_airlines
+                "name1", "name2", "name4", "acountry", "active"
+            },
+            JoinType::kInner
+        )
+
+        // 3) Join with R2_sairports on sairportid
+        .hashJoin(
+            {"sairportid"},
+            {"r2_sairports_sairportid"},
+            PlanBuilder(planNodeIdGenerator)
+                .tableScan(R2_sairportsType, {}, "")
+                .capturePlanNodeId(readR2_sairportsDataPlanNodeId)
+                .project({
+                    "sairportid as r2_sairports_sairportid",
+                    "slatitude", "slongitude",
+                    "scity", "scountry", "stimezone", "sdst"
+                })
+                .planNode(),
+            {},
+            {
+                // carry forward
+                "airlineid",
+                "sairportid",
+                "dairportid",
+                "name1", "name2", "name4", "acountry", "active",
+                // new from R2_sairports
+                "slatitude", "slongitude", "scity", "scountry", "stimezone", "sdst"
+            },
+            JoinType::kInner
+        )
+
+        // 4) Join with R3_dairports on dairportid
+        .hashJoin(
+            {"dairportid"},
+            {"r3_dairports_dairportid"},
+            PlanBuilder(planNodeIdGenerator)
+                .tableScan(R3_dairportsType, {}, "")
+                .capturePlanNodeId(readR3_dairportsDataPlanNodeId)
+                .project({
+                    "dairportid as r3_dairports_dairportid",
+                    "dlatitude", "dlongitude",
+                    "dcity", "dcountry", "dtimezone", "ddst"
+                })
+                .planNode(),
+            {},
+            {
+                // carry forward
+                "airlineid",
+                "sairportid",
+                "dairportid",
+                "name1", "name2", "name4", "acountry", "active",
+                "slatitude", "slongitude", "scity", "scountry", "stimezone", "sdst",
+                // new from R3_dairports
+                "dlatitude", "dlongitude", "dcity", "dcountry", "dtimezone", "ddst"
+            },
+            JoinType::kInner
+        )
+        .project({
+
+            "name2","name4","name1",
+
+            "airlineid",
+            "sairportid",
+            "dairportid",
+
+            "slatitude_minmax_scaler(transform(array_constructor(slatitude),    x -> CAST(x AS REAL))) as slatitude",
+            "slongitude_minmax_scaler(transform(array_constructor(slongitude),    x -> CAST(x AS REAL))) as slongitude",
+            "dlatitude_minmax_scaler(transform(array_constructor(dlatitude),    x -> CAST(x AS REAL))) as dlatitude",
+            "dlongitude_minmax_scaler(transform(array_constructor(dlongitude),    x -> CAST(x AS REAL))) as dlongitude",
+
+
+            "one_hot_dtimezone(dtimezone) as one_hot_dtimezone",
+            "one_hot_name1(name1)     as one_hot_name1",
+            "one_hot_stimezone(stimezone) as one_hot_stimezone",
+
+            "one_hot_acountry(acountry)                          as one_hot_acountry",
+            "one_hot_active(active)                              as one_hot_active",
+            "one_hot_dcity(dcity)                                as one_hot_dcity",
+            "one_hot_dcountry(dcountry)                          as one_hot_dcountry",
+            "one_hot_ddst(ddst)                                  as one_hot_ddst",
+            "one_hot_name2(name2)                                as one_hot_name2",
+            "one_hot_name4(name4)                                as one_hot_name4",
+            "one_hot_scity(scity)                                as one_hot_scity",
+            "one_hot_scountry(scountry)                          as one_hot_scountry",
+            "one_hot_sdst(sdst)                                  as one_hot_sdst"
+        })
+        .project({
+            "name2","name4","name1",
+
+            "airlineid",
+            "sairportid",
+            "dairportid",
+
+            "transform( concat( slatitude,slongitude, dlatitude,dlongitude,"
+            "one_hot_name1, one_hot_name2,one_hot_name4,one_hot_acountry,one_hot_active,one_hot_scity,"
+            "one_hot_scountry,one_hot_stimezone,one_hot_sdst,one_hot_dcity,one_hot_dcountry,one_hot_dtimezone,one_hot_ddst), x -> CAST(x AS REAL)) as u_feature"
+        })
+        .project({
+            "name2","name4","name1",
+
+            "airlineid",
+            "sairportid",
+            "dairportid",
+
+            "decision_forest_predict(u_feature)"
+        })
+        .filter(
+            "name2 = 't' AND name4 = 't' AND name1 > 2"
+        );
+
+        //flights ends here
+        cataLog.setIdAddressMap(
+          readR1_airlinesDataPlanNodeId,
+          R1_airlinesDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readR1_airlinesDataPlanNodeId, "r1_airlines");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readR1_airlinesDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(R1_airlinesNumRows, R1_airlinesNumCols))));
+          
+          cataLog.setIdAddressMap(
+          readR2_sairportsDataPlanNodeId,
+          R2_sairportsDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readR2_sairportsDataPlanNodeId, "r2_sairports");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readR2_sairportsDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(R2_sairportsNumRows, R2_sairportsNumCols))));
+
+          cataLog.setIdAddressMap(
+          readR3_dairportsDataPlanNodeId,
+          R3_dairportsDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readR3_dairportsDataPlanNodeId, "r3_dairports");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readR3_dairportsDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(R3_dairportsNumRows, R3_dairportsNumCols))));
+
+          cataLog.setIdAddressMap(
+          readS_routesDataPlanNodeId,
+          S_routesDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readS_routesDataPlanNodeId, "s_routes");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readS_routesDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(S_routesNumRows, S_routesNumCols))));
+
+        // return queryPlan;
+
     }
     
   }
