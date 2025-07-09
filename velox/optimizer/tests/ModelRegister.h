@@ -2304,3 +2304,21 @@ void registerTreePredictExpedia(
         /*deterministic=*/true,
         catalog);
 }
+
+void registerFeatureMinMaxScaler(
+    CataLog& catalog,
+    std::shared_ptr<memory::MemoryPool> pool,
+    const std::string& featureName,
+    const std::string& fileName) {
+
+  const std::string& statsPath = fileName;
+  const std::string udfName = fmt::format("{}_minmax_scaler", featureName);
+
+  optimization::registerVectorFunction(
+      udfName,                          // function name
+      MinMaxScaler::signatures(),       
+      std::make_unique<MinMaxScaler>(statsPath),
+      /*extra params=*/{},
+      /*deterministic=*/true,
+      catalog);
+}
