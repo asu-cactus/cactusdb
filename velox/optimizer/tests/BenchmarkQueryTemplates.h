@@ -3268,6 +3268,14 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             },
         JoinType::kInner  
         )
+        .filter(
+        "prop_location_score1 > 1.0 "
+        " and prop_location_score2 > 0.1 "
+        " and prop_log_historical_price > 4.0 "
+        " and count_bookings > 5 "
+        " and srch_booking_window > 10 "
+        " and srch_length_of_stay > 1"
+        )
         .project({
         
         //filter expressions
@@ -3342,15 +3350,15 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             "count_bookings",
             "srch_booking_window",
             "srch_length_of_stay",
-        })
-        .filter(
-        "prop_location_score1 > 1.0 "
-        " and prop_location_score2 > 0.1 "
-        " and prop_log_historical_price > 4.0 "
-        " and count_bookings > 5 "
-        " and srch_booking_window > 10 "
-        " and srch_length_of_stay > 1"
-        );
+        });
+        // .filter(
+        // "prop_location_score1 > 1.0 "
+        // " and prop_location_score2 > 0.1 "
+        // " and prop_log_historical_price > 4.0 "
+        // " and count_bookings > 5 "
+        // " and srch_booking_window > 10 "
+        // " and srch_length_of_stay > 1"
+        // );
 
     cataLog.setIdAddressMap(
           readS_listings_extensionDataPlanNodeId,
@@ -3520,7 +3528,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             "v20, v21, v22, v23, v24, v25, v26, v27, v28,"
             "amount) as u_features", "fv1", "fv2", "fv3"
         })
-        .project({"decision_forest_predict(u_features) as prediction_result"}, "fv1", "fv2", "fv3")
+        .project({"decision_forest_predict(u_features) as prediction_result", "fv1", "fv2", "fv3"})
         .filter("fv1 > 1 AND fv2 < 0.27 AND fv3 > 0.3");
 
 
