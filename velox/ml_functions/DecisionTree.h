@@ -258,6 +258,24 @@ class Tree {
     }
   }
 
+  inline float predictSingleMissing(float* inputValues, int curBase) {
+  int curIndex = 0;
+  while (!tree[curIndex].isLeaf) {
+    const float fv = inputValues[curBase + tree[curIndex].indexID];
+    if (std::isnan(fv)) {
+      curIndex = tree[curIndex].isMissTrackLeft
+                   ? tree[curIndex].leftChild
+                   : tree[curIndex].rightChild;
+    } else {
+      curIndex = (fv < tree[curIndex].threshold)
+                   ? tree[curIndex].leftChild
+                   : tree[curIndex].rightChild;
+    }
+  }
+  float result = (float)(tree[curIndex].leafValue);
+  return result;
+}
+
   inline float predictSingle(float* input, int curBase) {
     int curIndex = 0;
     while (!tree[curIndex].isLeaf) {
@@ -345,21 +363,26 @@ class TreePrediction : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-    BaseVector::ensureWritable(rows, type, context.pool(), output);
+        
+      BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-    int numInputs = rows.size();
-    std::vector<float> resultVector(numInputs);
+      auto arrayVec   = args[0]->as<ArrayVector>();
+      const auto* rawOffsets = arrayVec->offsets()->as<vector_size_t>();      // :contentReference[oaicite:0]{index=0}
+      float* elements = arrayVec->elements()->values()->asMutable<float>();                    // :contentReference[oaicite:1]{index=1}
 
-    if (hasMissing) {
-      this->tree->predictMissing(
-          args[0], resultVector, numInputs, this->numFeatures);
-    } else {
-      this->tree->predict(args[0], resultVector, numInputs, this->numFeatures);
+      std::vector<float> result(rows.size(), 0.0f);
+      rows.applyToSelected([&](vector_size_t row) {
+        int rowStart = rawOffsets[row];
+        float pred = hasMissing
+          ? tree->predictSingleMissing(elements, rowStart)
+          : tree->predictSingle(elements, rowStart);
+        result[row] = pred;
+      });
+
+      // 5) Wrap it up into your FlatVector<float>
+      VectorMaker maker{context.pool()};
+      output = maker.flatVector<float>(result, REAL());
     }
-
-    VectorMaker maker{context.pool()};
-    output = maker.flatVector<float>(resultVector, REAL());
-  }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()
