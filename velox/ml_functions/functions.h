@@ -16,8 +16,11 @@
 #pragma once
 #include <torch/torch.h>
 #include <Eigen/Dense>
+#include <Eigen/Sparse>
 #include <chrono>
 #include <filesystem>
+#include <map>
+#include <vector>
 #include "BaseFunction.h"
 #include "BatchNorm.h"
 #include "ChatGPT.h"
@@ -37,9 +40,6 @@
 #include "SequencePooling.h"
 #include "XGBoost.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
-#include <Eigen/Sparse>
-#include <map>
-#include <vector>
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -1389,8 +1389,8 @@ class Softmax : public MLFunction {
       inputMatrix.row(rowIndex++) = rowVector;
     }
 
-    Eigen::ArrayXXf exp = inputMatrix.array().exp();
-    Eigen::ArrayXXf sum = exp.rowwise().sum();
+    Eigen::Array<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> exp = inputMatrix.array().exp();
+    Eigen::Array<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> sum = exp.rowwise().sum();
     for (int i = 0; i < exp.rows(); i++) {
       exp.row(i) /= sum(i);
     }
@@ -1669,16 +1669,15 @@ class MinMaxScaler : public MLFunction {
       inputMatrix.row(rowIndex++) = rowVector;
     }
 
-    Eigen::Map<
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        minVals(scalerMinValues_, 1, numCols);
-    Eigen::Map<
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        maxVals(scalerMaxValues_, 1, numCols);
+    Eigen::Map<const Eigen::RowVectorXf> minVals(scalerMinValues_, numCols);
+    Eigen::Map<const Eigen::RowVectorXf> maxVals(scalerMaxValues_, numCols);
+
+    // Compute range
+    Eigen::RowVectorXf range = maxVals - minVals;
+
     Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
         resultMatrix =
-            (inputMatrix.rowwise() - minVals.row(0)).array().rowwise() /
-        (maxVals.row(0) - minVals.row(0)).array();
+            (inputMatrix.rowwise() - minVals).array().rowwise() / range.array();
 
     auto baseOffset = elementsOutput->size();
     elementsOutput->resize(baseOffset + rows.end() * numCols);
@@ -2039,11 +2038,10 @@ class TorchDNNV2 : public MLFunction {
     hasArgmax_ = false;
     model_ = torch::nn::Sequential();
     if (2 * numOps != dims.size()) {
-      throw std::runtime_error(
-          fmt::format(
-              "Mismatched number of  2*kernel types and dimensions: {} vs {}",
-              2 * numOps,
-              dims.size()));
+      throw std::runtime_error(fmt::format(
+          "Mismatched number of  2*kernel types and dimensions: {} vs {}",
+          2 * numOps,
+          dims.size()));
     }
     assert(2 * numOps == dims.size());
     for (int i = 0; i < numOps; ++i) {
@@ -2077,9 +2075,8 @@ class TorchDNNV2 : public MLFunction {
         model_->push_back(LibTorchArgmaxKernel(1));
         hasArgmax_ = true;
       } else {
-        throw std::runtime_error(
-            fmt::format(
-                "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
+        throw std::runtime_error(fmt::format(
+            "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
       }
     }
     // enable evaluation mode, this is required for inference, otherwise some
@@ -2309,9 +2306,8 @@ class TorchDNNV2CUDA : public MLFunction {
         model_->push_back(LibTorchArgmaxKernel(1));
         hasArgmax_ = true;
       } else {
-        throw std::runtime_error(
-            fmt::format(
-                "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
+        throw std::runtime_error(fmt::format(
+            "Unsupported kernel type of TorchDNNV2: {}", kernelTypes[i]));
       }
     }
     // enable evaluation mode, this is required for inference, otherwise some
