@@ -62,7 +62,8 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
       std::string expr,
       std::vector<std::string> exprSources,
       std::string rootNodeId,
-      std::string& finalPushdownNodeId) {
+      std::string& finalPushdownNodeId,
+      int distance = 0) {
     std::string pushdownNodeId;
     std::string curNodeId = curNode->id();
     std::string_view curNodeName = curNode->name();
@@ -112,13 +113,14 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
     // traverse the source nodes to find the lowest pushdown node
     for (const auto& source : sources) {
       std::string returnedPushdownNodeId = findPushdownNodeId(
-          source, expr, exprSources, rootNodeId, finalPushdownNodeId);
+          source, expr, exprSources, rootNodeId, finalPushdownNodeId, distance+1);
       // A pushdown through a JOIN node is considered as a valid pushdown
       // update the finalPushdownNodeId
       if ((curNodeName.find("Join") != std::string::npos ||
            curNodeName.find("Project") != std::string::npos ||
            curNodeName.find("Filter") != std::string::npos) &&
-          returnedPushdownNodeId != "") {
+          returnedPushdownNodeId != "" && distance > 1) {
+        // Only update the node once the pushdown distance is larger than 1
         finalPushdownNodeId = returnedPushdownNodeId;
       } else {
         // If find a expr can be further pushed down, then update the

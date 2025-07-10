@@ -865,6 +865,14 @@ std::string removeUnnecessaryCast(const std::string& exprStr) {
   return rewrittenExpr;
 }
 
+std::string removeDataTypeSuffixes(const std::string& input) {
+    // Matches <ANYTHING> after an identifier (non-greedy)
+    std::regex typeSuffixRegex(R"(<[^<>]*>)");
+    
+    // Replace all occurrences of <DATA_TYPE> with an empty string
+    return std::regex_replace(input, typeSuffixRegex, "");
+}
+
 std::vector<RowVectorPtr> splitRowVectorIntoBatches(
     RowVectorPtr inputVector,
     size_t batchSize) {
