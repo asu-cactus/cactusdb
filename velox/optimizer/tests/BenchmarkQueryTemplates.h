@@ -60,6 +60,8 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
   PlanBuilder queryPlan;
 
   if (workload == "movielens") {
+    cataLog.loadDataSparsityFromFile(
+        "/home/velox/data/parquet/movielens/final/sparsity.txt");
     auto movieTagDataRowType =
         ROW({"mt_movie_id", "mt_relevance_score"}, {INTEGER(), ARRAY(REAL())});
     auto movieDataRowType =
@@ -1202,7 +1204,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           readRatingDataPlanNodeId1,
           ratingDataPaths,
           dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "ratings");
+      cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "movie_rating");
       cataLog.addSource(std::make_shared<Source>(Source(
           readRatingDataPlanNodeId1,
           Source::Type::FILE,
@@ -1303,7 +1305,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           readRatingDataPlanNodeId1,
           ratingDataPaths,
           dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "ratings");
+      cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "movie_rating");
       cataLog.addSource(std::make_shared<Source>(Source(
           readRatingDataPlanNodeId1,
           Source::Type::FILE,
@@ -1435,12 +1437,14 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     }
 
   } else if (workload == "tpcxai") {
+    cataLog.loadDataSparsityFromFile(
+        "/home/velox/data/parquet/tpcxai_sf1/final/serving/sparsity.txt");
     std::string queryOptType =
         getEnvVar("CD_VELOX_QUERY_OPT_TYPE"); // env used for ablation study of
 
-    auto finicialAccountDataRowType =
+    auto financialAccountDataRowType =
         ROW({"fa_customer_sk", "transaction_limit"}, {BIGINT(), DOUBLE()});
-    auto finicialTransactionsDataRowType =
+    auto financialTransactionsDataRowType =
         ROW({"amount",
              "iban",
              "sender_id",
@@ -1500,7 +1504,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
     }
 
-    std::vector<std::string> finicialAccountDataPaths =
+    std::vector<std::string> financialAccountDataPaths =
         getFilePathsFromDir(dataDirPrefix + "financial_account");
     std::vector<std::string> financialTransactionsDataPaths =
         getFilePathsFromDir(dataDirPrefix + "financial_transactions");
@@ -1521,22 +1525,22 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     std::vector<std::string> reviewDataPaths =
         getFilePathsFromDir(dataDirPrefix + "review");
 
-    int finicialAccountNumRows, finicialAccountNumCols,
-        finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
-        orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
-        productNumCols, storeDeptNumRows, storeDeptNumCols,
+    int financialAccountNumRows, financialAccountNumCols,
+        financialTransactionsNumRows, financialTransactionsNumCols,
+        orderNumRows, orderNumCols, lineitemNumRows, lineitemNumCols,
+        productNumRows, productNumCols, storeDeptNumRows, storeDeptNumCols,
         productRatingNumRows, productRatingNumCols, customerNumRows,
         customerNumCols, orderReturnNumRows, orderReturnNumCols, reviewNumRows,
         reviewNumCols;
 
     readDataStats(
         dataDirPrefix + "financial_account_stats.txt",
-        finicialAccountNumRows,
-        finicialAccountNumCols);
+        financialAccountNumRows,
+        financialAccountNumCols);
     readDataStats(
         dataDirPrefix + "financial_transactions_stats.txt",
-        finicialTransactionsNumRows,
-        finicialTransactionsNumCols);
+        financialTransactionsNumRows,
+        financialTransactionsNumCols);
     readDataStats(
         dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
     readDataStats(
@@ -1631,7 +1635,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       PlanNodeId readFinancialTransactionsDataPlanNodeId;
       queryPlan =
           PlanBuilder(planNodeIdGenerator, pool_.get())
-              .tableScan(finicialTransactionsDataRowType, {}, "")
+              .tableScan(financialTransactionsDataRowType, {}, "")
               .capturePlanNodeId(readFinancialTransactionsDataPlanNodeId)
               .project(
                   {"transaction_id",
@@ -1669,7 +1673,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                           {"c_customer_sk"},
                           {"fa_customer_sk"},
                           PlanBuilder(planNodeIdGenerator, pool_.get())
-                              .tableScan(finicialAccountDataRowType, {}, "")
+                              .tableScan(financialAccountDataRowType, {}, "")
                               .capturePlanNodeId(
                                   readFinancialAccountDataPlanNodeId)
                               //  .values(batchesAccount)
@@ -1715,7 +1719,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           readFinancialTransactionsDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(OutputStat(
-              finicialTransactionsNumRows, finicialTransactionsNumCols)))));
+              financialTransactionsNumRows, financialTransactionsNumCols)))));
       cataLog.addSource(std::make_shared<Source>(Source(
           readCustomerDataPlanNodeId,
           Source::Type::FILE,
@@ -2139,13 +2143,13 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
 
       queryPlan =
           PlanBuilder(planNodeIdGenerator, pool_.get())
-              .tableScan(finicialAccountDataRowType, {}, "")
+              .tableScan(financialAccountDataRowType, {}, "")
               .capturePlanNodeId(readFinancialAccountDataPlanNodeId)
               .hashJoin(
                   {"fa_customer_sk"},
                   {"sender_id"},
                   PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(finicialTransactionsDataRowType, {}, "")
+                      .tableScan(financialTransactionsDataRowType, {}, "")
                       .capturePlanNodeId(
                           readFinancialTransactionsDataPlanNodeId)
                       .project(
@@ -2213,7 +2217,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       }
       cataLog.setIdAddressMap(
           readFinancialAccountDataPlanNodeId,
-          finicialAccountDataPaths,
+          financialAccountDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.setIdAddressMap(
           readFinancialTransactionsDataPlanNodeId,
@@ -2232,12 +2236,12 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           readFinancialAccountDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(
-              OutputStat(finicialAccountNumRows, finicialAccountNumCols)));
+              OutputStat(financialAccountNumRows, financialAccountNumCols)));
       Source financialTransactionsSrc = Source(
           readFinancialTransactionsDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(OutputStat(
-              finicialTransactionsNumRows, finicialTransactionsNumCols)));
+              financialTransactionsNumRows, financialTransactionsNumCols)));
       Source customerSrc = Source(
           readCustomerDataPlanNodeId,
           Source::Type::FILE,

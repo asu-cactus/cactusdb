@@ -151,20 +151,18 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
               serializedPlan, pool_.get());
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
-      throw std::runtime_error(
-          fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
-              queryPlanCacheId));
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
+          queryPlanCacheId));
     }
 
     auto it2 = cataLogIdAddressMapCaches_.find(queryPlanCacheId);
     if (it2 != cataLogIdAddressMapCaches_.end()) {
       cataLog.setIdAddressMap(it2->second);
     } else {
-      throw std::runtime_error(
-          fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
-              queryPlanCacheId));
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
+          queryPlanCacheId));
     }
   }
 
@@ -580,8 +578,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
           float executeTime = runPlanWithCataLog(
               pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
           jsonMessage["reward"] = executeTime;
-          LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
-                    << std::endl;
+          LOG(INFO) << "[INFO] get Cost(offline): "
+                    << " time: " << executeTime << std::endl;
         } else if (receivedJsonMessage["costMode"] == "online") {
           CostModel* cm = new SimpleCostModel(cataLog);
           CostEstimator* ce =
@@ -917,8 +915,8 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
           float executeTime = runPlanWithCataLog(
               pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
           jsonMessage["reward"] = executeTime;
-          LOG(INFO) << "[INFO] get Cost(offline): " << " time: " << executeTime
-                    << std::endl;
+          LOG(INFO) << "[INFO] get Cost(offline): "
+                    << " time: " << executeTime << std::endl;
         } else if (receivedJsonMessage["costMode"] == "online") {
           CostModel* cm = new SimpleCostModel(cataLog);
           CostEstimator* ce =
@@ -1098,88 +1096,78 @@ class ReusableMCTSTest : public HiveConnectorTestBase {
   }
 
   void collectMovieLensStats(int numThreads, int repeatRun, int verbose) {
+    std::vector<std::string> tableNames = {
+        "user", "movie", "movie_rating", "movie_relevance_tag"};
+
     std::string tableStatsPath =
-        "/home/velox/velox/optimizer/tests/tableStats.txt";
+        "/home/velox/velox/optimizer/tests/tableStats_movielens.txt";
     remove(tableStatsPath.c_str());
 
     PlanBuilder myPlan;
     CataLog cataLog;
     // Initialize planNodeIdGenerator
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    myPlan =
-        setupMovielensDBQuery("user_only", cataLog, pool_, planNodeIdGenerator);
-    std::vector<RowVectorPtr> finalResult;
-    runPlanWithCataLog(
-        pool_,
-        numThreads,
-        myPlan,
-        cataLog,
-        finalResult,
-        1 /*repeatRun*/,
-        verbose,
-        true /*copy result*/);
-    RowVectorPtr userDataRowVector = mergeRowVectors(finalResult, pool_);
 
-    // output the histogram for the user data
-    cataLog.outputHistogramForData(
-        userDataRowVector, "user", 50, tableStatsPath);
-    cataLog.clearIdAddressMap();
+    for (auto table : tableNames) {
+      myPlan = setupMovielensDBQuery(
+          fmt::format("{}_only", table), cataLog, pool_, planNodeIdGenerator);
+      std::vector<RowVectorPtr> finalResult;
+      runPlanWithCataLog(
+          pool_,
+          numThreads,
+          myPlan,
+          cataLog,
+          finalResult,
+          1 /*repeatRun*/,
+          verbose,
+          true /*copy result*/);
+      RowVectorPtr userDataRowVector = mergeRowVectors(finalResult, pool_);
+      cataLog.outputHistogramForData(
+          userDataRowVector, table, 50, tableStatsPath);
+      cataLog.clearIdAddressMap();
+    }
+  }
 
-    myPlan = setupMovielensDBQuery(
-        "movie_only", cataLog, pool_, planNodeIdGenerator);
-    finalResult.clear();
-    runPlanWithCataLog(
-        pool_,
-        numThreads,
-        myPlan,
-        cataLog,
-        finalResult,
-        1 /*repeatRun*/,
-        verbose,
-        true /*copy result*/);
-    RowVectorPtr movieDataRowVector = mergeRowVectors(finalResult, pool_);
+  void collectTPCxAIStats(int numThreads, int repeatRun, int verbose) {
+    std::string tableStatsPath =
+        "/home/velox/velox/optimizer/tests/tableStats_tpcxai.txt";
+    remove(tableStatsPath.c_str());
 
-    // output the histogram for the user data
-    cataLog.outputHistogramForData(
-        movieDataRowVector, "movie", 50, tableStatsPath);
-    cataLog.clearIdAddressMap();
+    std::vector<std::string> tableNames = {
+        "financial_account",
+        "financial_transaction",
+        "order",
+        "lineitem",
+        "product",
+        "store_dept",
+        "product_rating",
+        "customer",
+        "review",
+        "order_returns"};
 
-    myPlan = setupMovielensDBQuery(
-        "movie_rating_only", cataLog, pool_, planNodeIdGenerator);
-    finalResult.clear();
-    runPlanWithCataLog(
-        pool_,
-        numThreads,
-        myPlan,
-        cataLog,
-        finalResult,
-        1 /*repeatRun*/,
-        verbose,
-        true /*copy result*/);
-    RowVectorPtr movieRatingDataRowVector = mergeRowVectors(finalResult, pool_);
-    cataLog.outputHistogramForData(
-        movieRatingDataRowVector, "movie_rating", 50, tableStatsPath);
-    cataLog.clearIdAddressMap();
+    PlanBuilder myPlan;
+    CataLog cataLog;
+    // Initialize planNodeIdGenerator
+    auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
 
-    myPlan = setupMovielensDBQuery(
-        "movie_tag_only", cataLog, pool_, planNodeIdGenerator);
-    finalResult.clear();
-    runPlanWithCataLog(
-        pool_,
-        numThreads,
-        myPlan,
-        cataLog,
-        finalResult,
-        1 /*repeatRun*/,
-        verbose,
-        true /*copy result*/);
-    RowVectorPtr movieTagDataRowVector = mergeRowVectors(finalResult, pool_);
-    cataLog.outputHistogramForData(
-        movieTagDataRowVector, "movie_relevance_tag", 50, tableStatsPath);
-
-    // std::cout << "userDataRowVector: " << userDataRowVector->toString()
-    //           << std::endl;
-    // std::cout << "DONE" << std::endl;
+    for (auto table : tableNames) {
+      myPlan = setupTPCxAIQuery(
+          fmt::format("{}_only", table), cataLog, pool_, planNodeIdGenerator);
+      std::vector<RowVectorPtr> finalResult;
+      runPlanWithCataLog(
+          pool_,
+          numThreads,
+          myPlan,
+          cataLog,
+          finalResult,
+          1 /*repeatRun*/,
+          verbose,
+          true /*copy result*/);
+      RowVectorPtr userDataRowVector = mergeRowVectors(finalResult, pool_);
+      cataLog.outputHistogramForData(
+          userDataRowVector, table, 50, tableStatsPath);
+      cataLog.clearIdAddressMap();
+    }
   }
 
  private:
@@ -1248,6 +1236,9 @@ int main(int argc, char** argv) {
     dummyFeatureSizes.push_back(movieFeatureSize);
   } else if (mode == "collect_ml_stats") {
     demo.collectMovieLensStats(numDriver, repeatRun, verbose);
+    return 0;
+  } else if (mode == "collect_tpcxai_stats") {
+    demo.collectTPCxAIStats(numDriver, repeatRun, verbose);
     return 0;
   }
 

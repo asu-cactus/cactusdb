@@ -387,6 +387,27 @@ class CataLog {
     }
   }
 
+  void loadDataSparsityFromFile(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+      LOG(WARNING) << "[readDataSparsity] Failed to open file: " << path
+                   << ".\n";
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+      std::istringstream iss(line);
+      std::string tableColName;
+      float sparsityValue;
+      if (iss >> tableColName >> sparsityValue) {
+        setDataSrcSparsity(tableColName, sparsityValue);
+      } else {
+        std::cerr << "[readDataSparsity] invalid line format: " << line
+                  << std::endl;
+      }
+    }
+  }
+
   void setDataSrcSparsity(std::string name, float sparsity) {
     // the name should be in tableName_colName
     dataSrcSparsityMap[name] = sparsity;
@@ -399,10 +420,10 @@ class CataLog {
     if (it != dataSrcSparsityMap.end()) {
       return it->second;
     } else {
-      LOG(FATAL) << fmt::format(
-          "[ERROR] name: {} not exist in dataSrcSparsityMap, return default value: 1",
+      LOG(WARNING) << fmt::format(
+          "[WARNING] col name: {} not exist in dataSrcSparsityMap, return default value: 0",
           name);
-      return 1; // Default sparsity
+      return 0; // Default sparsity
     }
   }
 

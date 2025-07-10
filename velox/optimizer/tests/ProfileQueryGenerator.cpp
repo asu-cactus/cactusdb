@@ -548,6 +548,12 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         pool_,
         planNodeIdGenerator);
 
+    if (rewrite) {
+      // Randomly rewrite the query plan to generate various query plans.
+      queryPlan = rewriteQuery(
+          cataLog, pool_, queryPlan, planNodeIdGenerator, verbose, "random", 1);
+    }
+
     float executeTime = runPlanWithCataLog(
         pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
 

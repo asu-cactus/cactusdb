@@ -2461,7 +2461,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
 
       planState.getPossibleActions(planNode, cataLog);
     }
-    if (queryOptType == "mlq2-mul2join" || queryOptType == "mlq2-optimized") {
+    // Currently temporary disabled mul2join for queryOptType == mlq2-optimized
+    if (queryOptType == "mlq2-mul2join") {
       testAction =
           std::make_pair("mat_mul10_1", "Mul2JoinAggHorizontalRewriteAction");
 

@@ -374,9 +374,12 @@ PlanBuilder setupTPCxAIQuery(
       getEnvVar("CD_VELOX_QUERY_OPT_TYPE"); // env used for ablation study of
   PlanBuilder queryPlan;
 
-  auto finicialAccountDataRowType =
+  cataLog.loadDataSparsityFromFile(
+      "/home/velox/data/parquet/tpcxai_sf1/final/serving/sparsity.txt");
+
+  auto financialAccountDataRowType =
       ROW({"fa_customer_sk", "transaction_limit"}, {BIGINT(), DOUBLE()});
-  auto finicialTransactionsDataRowType = ROW(
+  auto financialTransactionsDataRowType = ROW(
       {"amount", "iban", "sender_id", "receiver_id", "transaction_id", "time"},
       {DOUBLE(), VARCHAR(), BIGINT(), VARCHAR(), BIGINT(), VARCHAR()});
   auto orderDataRowType =
@@ -429,9 +432,9 @@ PlanBuilder setupTPCxAIQuery(
         "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
   }
 
-  std::vector<std::string> finicialAccountDataPaths =
+  std::vector<std::string> financialAccountDataPaths =
       getFilePathsFromDir(dataDirPrefix + "financial_account");
-  std::vector<std::string> finicialTransactionsDataPaths =
+  std::vector<std::string> financialTransactionsDataPaths =
       getFilePathsFromDir(dataDirPrefix + "financial_transactions");
   std::vector<std::string> orderDataPaths =
       getFilePathsFromDir(dataDirPrefix + "order");
@@ -450,8 +453,8 @@ PlanBuilder setupTPCxAIQuery(
   std::vector<std::string> reviewDataPaths =
       getFilePathsFromDir(dataDirPrefix + "review");
 
-  int finicialAccountNumRows, finicialAccountNumCols,
-      finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
+  int financialAccountNumRows, financialAccountNumCols,
+      financialTransactionsNumRows, financialTransactionsNumCols, orderNumRows,
       orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
       productNumCols, storeDeptNumRows, storeDeptNumCols, productRatingNumRows,
       productRatingNumCols, customerNumRows, customerNumCols,
@@ -459,12 +462,12 @@ PlanBuilder setupTPCxAIQuery(
 
   readDataStats(
       dataDirPrefix + "financial_account_stats.txt",
-      finicialAccountNumRows,
-      finicialAccountNumCols);
+      financialAccountNumRows,
+      financialAccountNumCols);
   readDataStats(
       dataDirPrefix + "financial_transactions_stats.txt",
-      finicialTransactionsNumRows,
-      finicialTransactionsNumCols);
+      financialTransactionsNumRows,
+      financialTransactionsNumCols);
   readDataStats(dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
   readDataStats(
       dataDirPrefix + "lineitem_stats.txt", lineitemNumRows, lineitemNumCols);
@@ -667,13 +670,13 @@ PlanBuilder setupTPCxAIQuery(
     PlanNodeId readFinancialTransactionsDataPlanNodeId;
     queryPlan =
         PlanBuilder(planNodeIdGenerator, pool_.get())
-            .tableScan(finicialAccountDataRowType, {}, "")
+            .tableScan(financialAccountDataRowType, {}, "")
             .capturePlanNodeId(readFinancialAccountDataPlanNodeId)
             .hashJoin(
                 {"fa_customer_sk"},
                 {"sender_id"},
                 PlanBuilder(planNodeIdGenerator, pool_.get())
-                    .tableScan(finicialTransactionsDataRowType, {}, "")
+                    .tableScan(financialTransactionsDataRowType, {}, "")
                     .capturePlanNodeId(readFinancialTransactionsDataPlanNodeId)
                     .project(
                         {"transaction_id",
@@ -706,11 +709,11 @@ PlanBuilder setupTPCxAIQuery(
 
     cataLog.setIdAddressMap(
         readFinancialAccountDataPlanNodeId,
-        finicialAccountDataPaths,
+        financialAccountDataPaths,
         dwio::common::FileFormat::PARQUET);
     cataLog.setIdAddressMap(
         readFinancialTransactionsDataPlanNodeId,
-        finicialTransactionsDataPaths,
+        financialTransactionsDataPaths,
         dwio::common::FileFormat::PARQUET);
     cataLog.addNodeIdRelationName(
         readFinancialAccountDataPlanNodeId, "financial_account");
@@ -720,32 +723,84 @@ PlanBuilder setupTPCxAIQuery(
         readFinancialAccountDataPlanNodeId,
         Source::Type::FILE,
         std::make_shared<OutputStat>(
-            OutputStat(finicialAccountNumRows, finicialAccountNumCols)));
+            OutputStat(financialAccountNumRows, financialAccountNumCols)));
     Source financialTransactionsSrc = Source(
         readFinancialTransactionsDataPlanNodeId,
         Source::Type::FILE,
         std::make_shared<OutputStat>(OutputStat(
-            finicialTransactionsNumRows, finicialTransactionsNumCols)));
+            financialTransactionsNumRows, financialTransactionsNumCols)));
     cataLog.addSource(std::make_shared<Source>(financialAccountSrc));
     cataLog.addSource(std::make_shared<Source>(financialTransactionsSrc));
-  } else if (queryType == "readCustomer") {
+  } else if (queryType == "financial_account_only") {
+    PlanNodeId readfinancialAccountDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(financialAccountDataRowType, {}, "")
+                    .capturePlanNodeId(readfinancialAccountDataPlanNodeId);
+    cataLog.setIdAddressMap(
+        readfinancialAccountDataPlanNodeId,
+        financialAccountDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType == "financial_transaction_only") {
+    PlanNodeId readfinancialTransactionDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(financialTransactionsDataRowType, {}, "")
+                    .capturePlanNodeId(readfinancialTransactionDataPlanNodeId);
+    cataLog.setIdAddressMap(
+        readfinancialTransactionDataPlanNodeId,
+        financialTransactionsDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType == "order_only") {
+    PlanNodeId readOrderDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(orderDataRowType, {}, "")
+                    .capturePlanNodeId(readOrderDataPlanNodeId);
+    cataLog.setIdAddressMap(
+        readOrderDataPlanNodeId,
+        orderDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType == "lineitem_only") {
+    PlanNodeId readLineitemDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(lineitemDataRowType, {}, "")
+                    .capturePlanNodeId(readLineitemDataPlanNodeId);
+    cataLog.setIdAddressMap(
+        readLineitemDataPlanNodeId,
+        lineitemDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType == "product_only") {
+    PlanNodeId readProductDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(productDataRowType, {}, "")
+                    .capturePlanNodeId(readProductDataPlanNodeId);
+
+    cataLog.setIdAddressMap(
+        readProductDataPlanNodeId,
+        productDataPaths,
+        dwio::common::FileFormat::PARQUET);
+
+  } else if (queryType == "store_dept_only") {
+    PlanNodeId readStoreDeptPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(storeDeptDataRowType, {}, "")
+                    .capturePlanNodeId(readStoreDeptPlanNodeId);
+    cataLog.setIdAddressMap(
+        readStoreDeptPlanNodeId,
+        storeDeptDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType == "product_rating_only") {
+    PlanNodeId readProductRatingPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(productRatingDataRowType, {}, "")
+                    .capturePlanNodeId(readProductRatingPlanNodeId);
+    cataLog.setIdAddressMap(
+        readProductRatingPlanNodeId,
+        productRatingDataPaths,
+        dwio::common::FileFormat::PARQUET);
+  } else if (queryType == "customer_only") {
     PlanNodeId readCustomerDataPlanNodeId;
     queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                     .tableScan(customerDataRowType, {}, "")
-                    .capturePlanNodeId(readCustomerDataPlanNodeId)
-                    .project(
-                        {"c_customer_sk",
-                         "c_customer_id",
-                         "c_current_addr_sk",
-                         "c_first_name",
-                         "c_last_name",
-                         "c_preferred_cust_flag",
-                         "c_birth_day",
-                         "c_birth_month",
-                         "c_birth_year",
-                         "c_birth_country",
-                         "c_login",
-                         "c_email_address"});
+                    .capturePlanNodeId(readCustomerDataPlanNodeId);
     cataLog.setIdAddressMap(
         readCustomerDataPlanNodeId,
         customerDataPaths,
@@ -757,12 +812,11 @@ PlanBuilder setupTPCxAIQuery(
         std::make_shared<OutputStat>(
             OutputStat(customerNumRows, customerNumCols)));
     cataLog.addSource(std::make_shared<Source>(customerSrc));
-  } else if (queryType == "readReview") {
+  } else if (queryType == "review_only") {
     PlanNodeId readReviewDataPlanNodeId;
     queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                     .tableScan(reviewDataRowType, {}, "")
-                    .capturePlanNodeId(readReviewDataPlanNodeId)
-                    .project({"id", "text"});
+                    .capturePlanNodeId(readReviewDataPlanNodeId);
     cataLog.setIdAddressMap(
         readReviewDataPlanNodeId,
         reviewDataPaths,
@@ -773,13 +827,11 @@ PlanBuilder setupTPCxAIQuery(
         Source::Type::FILE,
         std::make_shared<OutputStat>(OutputStat(reviewNumRows, reviewNumCols)));
     cataLog.addSource(std::make_shared<Source>(reviewSrc));
-  } else if (queryType == "readOrderReturn") {
+  } else if (queryType == "order_returns_only") {
     PlanNodeId readOrderReturnDataPlanNodeId;
-    queryPlan =
-        PlanBuilder(planNodeIdGenerator, pool_.get())
-            .tableScan(orderReturnDataRowType, {}, "")
-            .capturePlanNodeId(readOrderReturnDataPlanNodeId)
-            .project({"or_order_id", "or_product_id", "or_return_quantity"});
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(orderReturnDataRowType, {}, "")
+                    .capturePlanNodeId(readOrderReturnDataPlanNodeId);
     cataLog.setIdAddressMap(
         readOrderReturnDataPlanNodeId,
         orderReturnDataPaths,
@@ -792,7 +844,6 @@ PlanBuilder setupTPCxAIQuery(
         std::make_shared<OutputStat>(
             OutputStat(orderReturnNumRows, orderReturnNumCols)));
     cataLog.addSource(std::make_shared<Source>(orderReturnSrc));
-
   } else {
     throw std::runtime_error(
         "[setupTPCxAIQuery] Unsupported query type: " + queryType);
@@ -808,6 +859,8 @@ PlanBuilder setupMovielensDBQuery(
   std::string queryOptType =
       getEnvVar("CD_VELOX_QUERY_OPT_TYPE"); // env used for ablation study of
                                             // rewrite rules
+  cataLog.loadDataSparsityFromFile(
+      "/home/velox/data/parquet/movielens/final/sparsity.txt");
   PlanBuilder queryPlan;
 
   auto movieTagDataRowType =
@@ -890,7 +943,7 @@ PlanBuilder setupMovielensDBQuery(
         readRatingDataPlanNodeId,
         ratingDataPaths,
         dwio::common::FileFormat::PARQUET);
-  } else if (queryType.find("movie_tag_only") != std::string::npos) {
+  } else if (queryType.find("movie_relevance_tag_only") != std::string::npos) {
     PlanNodeId readMovieTagDataPlanNodeId;
     queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                     .tableScan(movieTagDataRowType, {}, "")
@@ -2168,8 +2221,7 @@ PlanBuilder setupMovielensDBQuery(
                    "m_movie_id",
                    "cosine_similarity_q3(mt_relevance_ir, mt_relevance_ir1) as cosine_sim"});
 
-    } else if (
-        queryOptType.find("mlq3-optimized") != std::string::npos) {
+    } else if (queryOptType.find("mlq3-optimized") != std::string::npos) {
       auto movieTagQueryPlan =
           PlanBuilder(planNodeIdGenerator, pool_.get())
               .tableScan(movieTagDataRowType, {}, "")
@@ -2516,58 +2568,57 @@ std::vector<std::string> sampleUserMovieFilterExpr(
         predefinedMovieFilterExprs.begin(),
         predefinedMovieFilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
-  } else if (filterTable == "user_movie_genres"){
+  } else if (filterTable == "user_movie_genres") {
     randomGenerator.setIntRange(1, 3);
     combinedFilterExprSets.insert(
         combinedFilterExprSets.end(),
         predefinedUserFilterExprs.begin(),
         predefinedUserFilterExprs.end());
     combinedFilterExprSets.insert(
-        combinedFilterExprSets.end(),
-        movieGenresFilterExprs);
+        combinedFilterExprSets.end(), movieGenresFilterExprs);
     sampleFilterPool = combinedFilterExprSets;
   } else if (filterTable == "template1") {
     randomGenerator.setIntRange(0, 2);
-    std::vector<std::vector<std::string>> template3FilterExprs = {movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
+    std::vector<std::vector<std::string>> template3FilterExprs = {
+        movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
     combinedFilterExprSets.insert(
-      combinedFilterExprSets.end(),
-      template3FilterExprs.begin(),
-      template3FilterExprs.end());
+        combinedFilterExprSets.end(),
+        template3FilterExprs.begin(),
+        template3FilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
   } else if (filterTable == "template2") {
     randomGenerator.setIntRange(0, 2);
-    std::vector<std::vector<std::string>> template2FilterExprs = {movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
+    std::vector<std::vector<std::string>> template2FilterExprs = {
+        movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
     combinedFilterExprSets.insert(
-      combinedFilterExprSets.end(),
-      template2FilterExprs.begin(),
-      template2FilterExprs.end());
+        combinedFilterExprSets.end(),
+        template2FilterExprs.begin(),
+        template2FilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
   } else if (filterTable == "template3") {
     randomGenerator.setIntRange(0, 2);
-    std::vector<std::vector<std::string>> template3FilterExprs = {movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
+    std::vector<std::vector<std::string>> template3FilterExprs = {
+        movieGenresFilterExprs, movieSpokenLanguageFilterExprs};
     combinedFilterExprSets.insert(
-      combinedFilterExprSets.end(),
-      template3FilterExprs.begin(),
-      template3FilterExprs.end());
+        combinedFilterExprSets.end(),
+        template3FilterExprs.begin(),
+        template3FilterExprs.end());
     sampleFilterPool = combinedFilterExprSets;
-  } else if(filterTable == "age_gender_occupation_genre"){
+  } else if (filterTable == "age_gender_occupation_genre") {
     randomGenerator.setIntRange(1, 3);
     combinedFilterExprSets.insert(
         combinedFilterExprSets.end(),
         predefinedUserFilterExprs.begin(),
-        predefinedUserFilterExprs.end()-1);
+        predefinedUserFilterExprs.end() - 1);
     combinedFilterExprSets.insert(
-        combinedFilterExprSets.end(),
-        movieGenresFilterExprs);
+        combinedFilterExprSets.end(), movieGenresFilterExprs);
     sampleFilterPool = combinedFilterExprSets;
-  } else if(filterTable == "genre_rating"){
+  } else if (filterTable == "genre_rating") {
     randomGenerator.setIntRange(1, 3);
     combinedFilterExprSets.insert(
-        combinedFilterExprSets.end(),
-        movieGenresFilterExprs);
+        combinedFilterExprSets.end(), movieGenresFilterExprs);
     combinedFilterExprSets.insert(
-        combinedFilterExprSets.end(),
-        ratingTimestampFilterExprs);
+        combinedFilterExprSets.end(), ratingTimestampFilterExprs);
     sampleFilterPool = combinedFilterExprSets;
   } else {
     throw std::invalid_argument(

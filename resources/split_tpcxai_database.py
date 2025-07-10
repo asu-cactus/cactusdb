@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import math
 import os
+import resources_utils
 
 
 def create_tpcxai_dataset(data_dir):
@@ -18,8 +19,8 @@ def create_tpcxai_dataset(data_dir):
             df = pq.read_table(os.path.join(root, file)).to_pandas()
 
             # Convert timestamp columns to varchar
-            for col in df.select_dtypes(include=['datetime64[ns]']).columns:
-              df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            for col in df.select_dtypes(include=["datetime64[ns]"]).columns:
+                df[col] = df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
 
             df_dict[dataset_name] = df
             batch_size = math.ceil(len(df) / NUM_SPLIT)
@@ -42,3 +43,19 @@ def create_tpcxai_dataset(data_dir):
 
 create_tpcxai_dataset("data/tpcxai_sf1/final/training")
 create_tpcxai_dataset("data/tpcxai_sf1/final/serving")
+
+column_sparsity_map = {}
+column_sparsity_map = resources_utils.count_sparsity_over_data(
+    "data/tpcxai_sf1/final/training", column_sparsity_map
+)
+with open("./data/parquet/tpcxai_sf1/final/training/sparsity.txt", "w") as f:
+    for col, sparsity in column_sparsity_map.items():
+        f.write(f"{col} {sparsity}\n")
+
+column_sparsity_map = {}
+column_sparsity_map = resources_utils.count_sparsity_over_data(
+    "data/tpcxai_sf1/final/serving", column_sparsity_map
+)
+with open("./data/parquet/tpcxai_sf1/final/serving/sparsity.txt", "w") as f:
+    for col, sparsity in column_sparsity_map.items():
+        f.write(f"{col} {sparsity}\n")
