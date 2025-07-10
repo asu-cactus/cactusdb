@@ -152,20 +152,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               serializedPlan, pool_.get());
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
-      throw std::runtime_error(
-          fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
-              queryPlanCacheId));
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found queryPlanCaches.",
+          queryPlanCacheId));
     }
 
     auto it2 = cataLogIdAddressMapCaches_.find(queryPlanCacheId);
     if (it2 != cataLogIdAddressMapCaches_.end()) {
       cataLog.setIdAddressMap(it2->second);
     } else {
-      throw std::runtime_error(
-          fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
-              queryPlanCacheId));
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found in cataLogIdAddressMapCaches.",
+          queryPlanCacheId));
     }
   }
 
@@ -417,6 +415,19 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
                     .values({inputRowVector})
                     .project({fmt::format(modelComputationStr, "input")});
+
+    // Create ruleManager
+    RuleManager ruleManager;
+    // Create planState
+    PlanState planState(ruleManager);
+
+    auto planNode = queryPlan.planNode();
+    planState.getPossibleActions(planNode, cataLog);
+    if (rewrite) {
+      // Randomly rewrite the query plan to generate various query plans.
+      queryPlan = rewriteQuery(
+          cataLog, pool_, queryPlan, planNodeIdGenerator, verbose, "fuse", 1);
+    }
 
     float executeTime = runPlanWithCataLog(
         pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
