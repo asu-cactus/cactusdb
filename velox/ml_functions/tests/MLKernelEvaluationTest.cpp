@@ -70,6 +70,7 @@ class MLKernelEvaluationTest : public HiveConnectorTestBase {
       bool enableSpill,
       int repeatRun);
   void testMatMul();
+  void testMinMaxScaler();
   void testMatAdd();
 
   std::unique_ptr<MemoryManager> memoryManager_;
@@ -178,13 +179,85 @@ void MLKernelEvaluationTest::testMatMul() {
       {maker.flatVector<int>(filterColumn),
        maker.arrayVector<float>(inputFeatures, REAL())});
 
-  auto myPlan = exec::test::PlanBuilder(pool_.get())
-                    .values({inputRowVector})
-                    .filter("attr = 1")
-                    // .project({"attr", "mat_mul(x)"})
-                    // .project({"attr", "mat_mul2(mat_vector_add(mat_mul(x)))"})
-                    .project({"attr", "mat_vector_add(mat_mul(x))"})
-                    .planNode();
+  auto myPlan =
+      exec::test::PlanBuilder(pool_.get())
+          .values({inputRowVector})
+          .filter("attr = 1")
+          // .project({"attr", "mat_mul(x)"})
+          // .project({"attr", "mat_mul2(mat_vector_add(mat_mul(x)))"})
+          .project({"attr", "mat_vector_add(mat_mul(x))"})
+          .planNode();
+
+  std::chrono::steady_clock::time_point begin =
+      std::chrono::steady_clock::now();
+  auto results =
+      exec::test::AssertQueryBuilder(myPlan).maxDrivers(4).copyResults(
+          pool_.get());
+
+  std::cout << "Results:" << results->toString() << std::endl;
+  std::cout << results->toString(0, results->size()) << std::endl;
+}
+
+void MLKernelEvaluationTest::testMinMaxScaler() {
+  // Test case of Matrix Multiplication
+  // input feature: 8 x 4
+  // weights: 4 x 2
+  // output: 8 x 2
+  std::vector<int> filterColumn = {0, 1, 0, 1, 0, 1, 0, 1};
+  std::vector<std::vector<float>> inputFeatures = {
+      {1, 1, 1, 1},
+      {2, 2, 2, 2},
+      {3, 3, 3, 3},
+      {4, 4, 4, 4},
+      {5, 5, 5, 5},
+      {6, 6, 6, 6},
+      {7, 7, 7, 7},
+      {8, 8, 8, 8}};
+
+  std::vector<std::vector<float>> weights = {{1, 1}, {2, 2}, {3, 3}, {4, 4}};
+  std::vector<std::vector<float>> bias = {{1, 2}};
+
+  exec::registerVectorFunction(
+      "mat_mul",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(weights)), 4, 2));
+  exec::registerVectorFunction(
+      "mat_vector_add",
+      MatrixVectorAddition::signatures(),
+      std::make_unique<MatrixVectorAddition>(
+          std::move(flattenVectorToPointer(bias)), 2));
+
+  std::vector<std::vector<float>> weights2 = {{1, 1, 1, 1}, {2, 2, 3, 3}};
+  exec::registerVectorFunction(
+      "mat_mul2",
+      MatrixMultiply::signatures(),
+      std::make_unique<MatrixMultiply>(
+          std::move(flattenVectorToPointer(weights2)), 2, 2));
+
+  std::vector<std::vector<float>> minValues = {{0, 0, 0, 0}};
+  std::vector<std::vector<float>> maxValues = {{2, 4, 8, 16}};
+  exec::registerVectorFunction(
+      "min_max_scaler",
+      MinMaxScaler::signatures(),
+      std::make_unique<MinMaxScaler>(
+          std::move(flattenVectorToPointer(minValues)),
+          std::move(flattenVectorToPointer(maxValues)),
+          4));
+
+  auto inputRowVector = maker.rowVector(
+      {"attr", "x"},
+      {maker.flatVector<int>(filterColumn),
+       maker.arrayVector<float>(inputFeatures, REAL())});
+
+  auto myPlan =
+      exec::test::PlanBuilder(pool_.get())
+          .values({inputRowVector})
+          .filter("attr = 1")
+          // .project({"attr", "mat_mul(x)"})
+          // .project({"attr", "mat_mul2(mat_vector_add(mat_mul(x)))"})
+          .project({"attr", "mat_vector_add(mat_mul(min_max_scaler(x)))"})
+          .planNode();
 
   std::chrono::steady_clock::time_point begin =
       std::chrono::steady_clock::now();
@@ -255,7 +328,8 @@ void MLKernelEvaluationTest::run(
     bool enableSpill,
     int repeatRun) {
   testMatMul();
-  // testMatAdd();
+  testMatAdd();
+  testMinMaxScaler();
 }
 
 DEFINE_bool(spill, false, "Whether enable spilling");

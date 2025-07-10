@@ -289,7 +289,7 @@ class PlanState {
         // Get the sparsity from the catalog
         auto inputName = getInputExprName(action.first);
         float sparsity = cataLog.getDataSrcSparsity(inputName);
-        if (sparsity > maxSparsity) {
+        if (sparsity > maxSparsity && sparsity < 1.0) {
           maxSparsity = sparsity;
           selectedAction = {targetExpr, "MatMulDense2SparseRewriteAction"};
         }

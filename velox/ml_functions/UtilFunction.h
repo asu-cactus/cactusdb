@@ -369,7 +369,7 @@ std::string getEnvVar(std::string const& key) {
 void readDataStats(const std::string& path, int& numRows, int& numCols) {
   std::ifstream file(path);
   if (!file.is_open()) {
-    std::cerr << "Cannot open " << path << std::endl;
+    LOG(WARNING) << "[readDataStats] Cannot open " << path << std::endl;
     exit(1);
   }
   std::string line;

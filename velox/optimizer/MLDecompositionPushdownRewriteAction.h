@@ -115,7 +115,9 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
           source, expr, exprSources, rootNodeId, finalPushdownNodeId);
       // A pushdown through a JOIN node is considered as a valid pushdown
       // update the finalPushdownNodeId
-      if (curNodeName.find("Join") != std::string::npos &&
+      if ((curNodeName.find("Join") != std::string::npos ||
+           curNodeName.find("Project") != std::string::npos ||
+           curNodeName.find("Filter") != std::string::npos) &&
           returnedPushdownNodeId != "") {
         finalPushdownNodeId = returnedPushdownNodeId;
       } else {

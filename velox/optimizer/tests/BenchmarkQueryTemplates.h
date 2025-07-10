@@ -60,6 +60,8 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
   PlanBuilder queryPlan;
 
   if (workload == "movielens") {
+    cataLog.loadDataSparsityFromFile(
+        "/home/velox/data/parquet/movielens/final/sparsity.txt");
     auto movieTagDataRowType =
         ROW({"mt_movie_id", "mt_relevance_score"}, {INTEGER(), ARRAY(REAL())});
     auto movieDataRowType =
@@ -749,6 +751,99 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       Source movieTagSrc2 = Source(
           readMovieTagDataPlanNodeId2, Source::Type::FILE, movieTagStats2);
       cataLog.addSource(std::make_shared<Source>(movieTagSrc2));
+    } else if (queryTemplate == "template4") {
+      registerGenderEncoder(cataLog, pool_);
+      // gender_encoder
+      registerMovielensAgeMinMaxScaler(
+          cataLog, pool_, "q4_user_age_minmax_scaler.txt");
+      // user_occupation_minmax_scaler
+      registerMovielensOccupationMinMaxScaler(
+          cataLog, pool_, "q4_user_occupation_minmax_scaler.txt");
+      // user_occupation_minmax_scaler
+      registerMovielensGenerOneHotEncoder(cataLog, pool_);
+      // genres_encode
+      // registerNNfunctions
+      //  Register model
+      int hidden1 = randomGenerator.genRandomIntValue();
+      int hidden2 = randomGenerator.genRandomIntValue();
+      int hidden3 = randomGenerator.genRandomIntValue();
+      std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << ", "
+                << hidden3 << std::endl;
+      // auto modelStr = registerNNModel({4, hidden1, hidden2, 384}, cataLog,
+      // modelGroupId_, false);
+
+      int modelGroupId_ = 0;
+      std::string ffnnstring = registerNNModel(
+          {21, hidden1, hidden2, hidden3, 1},
+          cataLog,
+          modelGroupId_,
+          randomGenerator.genRandomIntValue());
+      // std::cout << ffnnstring << "\n";
+      queryPlan = PlanBuilder(planNodeIdGenerator)
+                      .tableScan(userDataRowType, {}, "")
+                      .capturePlanNodeId(readUserDataPlanNodeId)
+                      .nestedLoopJoin(
+                          PlanBuilder(planNodeIdGenerator)
+                              .tableScan(movieDataRowType, {}, "")
+                              .capturePlanNodeId(readMovieDataPlanNodeId)
+                              .planNode(),
+                          {// what columns to project from the join
+                           "u_user_id",
+                           "u_age",
+                           "u_gender",
+                           "u_occupation",
+                           "m_movie_id",
+                           "m_genres"});
+
+      // Filter here
+      if (generateFilter) {
+        std::vector<std::string> filterExpr = sampleUserMovieFilterExpr(
+            "age_gender_occupation_genre", timestampSeed);
+        for (auto expr : filterExpr) {
+          queryPlan = queryPlan.filter(expr);
+        }
+        // myPlan = myPlan.filter(filterExpr);
+      }
+
+      queryPlan =
+          queryPlan
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "gender_encoder(u_gender) as u_gender_encoded",
+                   "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as u_age_encoded",
+                   "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as u_occupation_encoded",
+                   "genres_encoder(m_genres) as m_genres_encoded"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   "transform(concat(u_gender_encoded,u_age_encoded,u_occupation_encoded,m_genres_encoded), x-> CAST(x AS REAL)) as features"})
+              .project(
+                  {"u_user_id",
+                   "m_movie_id",
+                   fmt::format(ffnnstring, "features")});
+
+      // — user side
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId,
+          userDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readUserDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(userNumRows, userNumCols))));
+
+      // — movie side
+      cataLog.setIdAddressMap(
+          readMovieDataPlanNodeId,
+          movieDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readMovieDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
     } else if (queryTemplate == "template5") {
       // gender_encoder
       registerGenderEncoder(cataLog, pool_);
@@ -759,11 +854,24 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       registerMovielensOccupationMinMaxScaler(
           cataLog, pool_, "q4_user_occupation_minmax_scaler.txt");
 
-      std::vector<std::vector<int>> userModelStructures =
-          readModelStructureFromFile(
-              "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+      // std::vector<std::vector<int>> userModelStructures =
+      //     readModelStructureFromFile(
+      //         "/home/velox/velox/optimizer/tests/user_dummy_model_structure.txt");
+      // auto modelStr = registerNNModel(
+      //     userModelStructures[0], cataLog, modelGroupId_, false);
+
+      int hidden1 = randomGenerator.genRandomIntValue();
+      int hidden2 = randomGenerator.genRandomIntValue();
+      std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2
+                << std::endl;
       auto modelStr = registerNNModel(
-          userModelStructures[0], cataLog, modelGroupId_, false);
+          {3, hidden1, hidden2, 3706}, cataLog, modelGroupId_, false);
+
+      //   auto modelStr =
+      //       registerNNModel({3, 1024, 2048, 3706}, cataLog, modelGroupId_,
+      //       false);
+
+      // std::cout << "[INFO] modelStr: " << modelStr << std::endl;
 
       queryPlan =
           PlanBuilder(planNodeIdGenerator)
@@ -844,10 +952,18 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       queryPlan = PlanBuilder(planNodeIdGenerator)
                       .tableScan(userDataRowType, {}, "")
                       .capturePlanNodeId(readUserDataPlanNodeId)
+                      .project(
+                          {"u_user_id",
+                           "u_age",
+                           "u_age",
+                           "u_gender",
+                           "u_occupation",
+                           "u_zipcode"})
                       .nestedLoopJoin(
                           PlanBuilder(planNodeIdGenerator)
                               .tableScan(movieDataRowType, {}, "")
                               .capturePlanNodeId(readMovieDataPlanNodeId)
+                              .project({"m_movie_id", "m_genres"})
                               .planNode(),
                           {// what columns to project from the join
                            "u_user_id",
@@ -857,14 +973,6 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                            "u_occupation",
                            "u_zipcode",
                            "m_genres"})
-                      // .project({
-                      //     "CAST (u_user_id AS INTEGER) AS u_user_id",
-                      //     "CAST (m_movie_id as INTEGER) AS m_movie_id",
-                      //     "u_age",
-                      //     "u_gender",
-                      //     "u_occupation",
-                      //     "u_zipcode",
-                      //     "m_genres"})
                       .project(
                           {"u_user_id",
                            "m_movie_id",
@@ -946,10 +1054,17 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           PlanBuilder(planNodeIdGenerator)
               .tableScan(userDataRowType, {}, "")
               .capturePlanNodeId(readUserDataPlanNodeId)
+              .project(
+                  {"u_user_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "u_zipcode"})
               .nestedLoopJoin(
                   PlanBuilder(planNodeIdGenerator)
                       .tableScan(movieDataRowType, {}, "")
                       .capturePlanNodeId(readMovieDataPlanNodeId)
+                      .project({"m_movie_id", "m_genres"})
                       .planNode(),
                   {// what columns to project from the join
                    "u_user_id",
@@ -1007,6 +1122,194 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           readMovieDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+    } else if (queryTemplate == "template8") {
+      // register vector function
+      registerMovielensRatingMapToArray(cataLog, pool_);
+
+      int modelGroupId = 0;
+      int hidden1 = randomGenerator.genRandomIntValue();
+      int hidden2 = randomGenerator.genRandomIntValue();
+      int hidden3 = randomGenerator.genRandomIntValue();
+      std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << ", "
+                << hidden3 << std::endl;
+      auto autoencoder = registerNNModel(
+          /*layers=*/{3706, hidden1, hidden2, hidden3, 1},
+          cataLog,
+          modelGroupId,
+          randomGenerator.genRandomIntValue());
+
+      queryPlan = PlanBuilder(planNodeIdGenerator)
+                      .tableScan(userDataRowType, {}, "")
+                      .capturePlanNodeId(readUserDataPlanNodeId)
+                      .project(
+                          {"u_user_id",
+                           "u_gender",
+                           "u_age",
+                           "u_occupation",
+                           "u_zipcode"})
+                      .hashJoin(
+                          {"u_user_id"},
+                          {"r_user_id"},
+                          PlanBuilder(planNodeIdGenerator)
+                              .tableScan(ratingDataRowType, {}, "")
+                              .capturePlanNodeId(readRatingDataPlanNodeId1)
+                              .project(
+                                  {"r_user_id",
+                                   "r_timestamp",
+                                   "r_movie_id",
+                                   "r_rating"})
+                              .planNode(),
+                          {}, // extra filters
+                          // join project columns
+                          {"u_user_id",
+                           "u_gender",
+                           "u_age",
+                           "u_occupation",
+                           "u_zipcode",
+                           "r_movie_id",
+                           "r_rating"},
+                          /*joinType=*/core::JoinType::kInner);
+
+      if (generateFilter) {
+        std::vector<std::string> filterExpr =
+            sampleUserMovieFilterExpr("user", timestampSeed);
+        for (auto expr : filterExpr) {
+          queryPlan = queryPlan.filter(expr);
+        }
+        // myPlan = myPlan.filter(filterExpr);
+      }
+
+      queryPlan =
+          queryPlan
+              .partialAggregation(
+                  {"u_user_id"},
+                  {"(map_agg(r_movie_id, r_rating)) as map_ratings"})
+              .finalAggregation()
+              .project({"u_user_id", "map_to_array(map_ratings) as mappings_"})
+              .project({"u_user_id", fmt::format(autoencoder, "mappings_")});
+
+      // user_side
+      cataLog.setIdAddressMap(
+          readUserDataPlanNodeId,
+          userDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readUserDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(userNumRows, userNumCols))));
+
+      // rating side
+      cataLog.setIdAddressMap(
+          readRatingDataPlanNodeId1,
+          ratingDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "movie_rating");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readRatingDataPlanNodeId1,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(ratingNumRows, ratingNumCols))));
+    } else if (queryTemplate == "template9") {
+      registerMovielensPopularityMinMaxScaler(cataLog, pool_);
+      registerMovielensVoteAverageMinMaxScaler(cataLog, pool_);
+      registerMovielensVoteCountMinMaxScaler(cataLog, pool_);
+      registerMovielensRatingMinMaxScaler(cataLog, pool_);
+      registerMovielensGenerOneHotEncoder(cataLog, pool_);
+      int hidden1 = randomGenerator.genRandomIntValue();
+      int hidden2 = randomGenerator.genRandomIntValue();
+      std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2
+                << std::endl;
+      int modelGroupId = 0;
+      auto dnnString = registerNNModel(
+          {4, hidden1, hidden2, 384}, cataLog, modelGroupId_, false);
+      queryPlan = PlanBuilder(planNodeIdGenerator)
+                      .tableScan(movieDataRowType, {}, "")
+                      .capturePlanNodeId(readMovieDataPlanNodeId)
+                      .project(
+                          {"m_movie_id",
+                           "m_genres",
+                           "m_title",
+                           "m_spoken_languages",
+                           "m_popularity",
+                           "m_vote_average",
+                           "m_vote_count"})
+                      .hashJoin(
+                          {"m_movie_id"},
+                          {"r_movie_id"},
+                          PlanBuilder(planNodeIdGenerator)
+                              .tableScan(ratingDataRowType, {}, "")
+                              .capturePlanNodeId(readRatingDataPlanNodeId1)
+                              .project(
+                                  {"r_user_id",
+                                   "r_movie_id",
+                                   "r_rating",
+                                   "r_timestamp"})
+                              .planNode(),
+                          "",
+                          {"r_user_id",
+                           "r_movie_id",
+                           "m_movie_id",
+                           "m_genres",
+                           "m_title",
+                           "m_spoken_languages",
+                           "m_popularity",
+                           "m_vote_average",
+                           "m_vote_count",
+                           "r_rating",
+                           "r_timestamp"},
+                          /*joinType=*/core::JoinType::kInner);
+
+      // filter expressions
+      if (generateFilter) {
+        std::vector<std::string> filterExpr =
+            sampleUserMovieFilterExpr("genre_rating", timestampSeed);
+        for (auto expr : filterExpr) {
+          queryPlan = queryPlan.filter(expr);
+        }
+        // myPlan = myPlan.filter(filterExpr);
+      }
+
+      queryPlan =
+          queryPlan
+              .project(
+                  {"r_user_id",
+                   "r_movie_id",
+                   "movie_popularity_minmax_scaler(transform(array_constructor(m_popularity),    x-> CAST(x AS REAL))) as m_popularity_norm",
+                   "movie_vote_average_minmax_scaler(transform(array_constructor(m_vote_average), x-> CAST(x AS REAL))) as m_vote_avg_norm",
+                   "movie_vote_count_minmax_scaler(transform(array_constructor(m_vote_count),    x-> CAST(x AS REAL))) as m_vote_count_norm",
+                   "rating_minmax_scaler(transform(array_constructor(r_rating),  x-> CAST(x AS REAL))) as r_rating_norm",
+                   // one-hot encode genres
+                   "genres_encoder(m_genres)  as m_genres_one_hot"})
+              .project(
+                  {"r_user_id",
+                   "r_movie_id",
+                   "transform(concat(m_popularity_norm,m_vote_avg_norm,m_vote_count_norm,r_rating_norm,m_genres_one_hot),x -> CAST(x AS REAL)) as features"})
+              .project(
+                  {"r_user_id",
+                   "r_movie_id",
+                   fmt::format(dnnString, "features")});
+
+      // movie side
+      cataLog.setIdAddressMap(
+          readMovieDataPlanNodeId,
+          movieDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readMovieDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
+
+      // rating side
+      cataLog.setIdAddressMap(
+          readRatingDataPlanNodeId1,
+          ratingDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "movie_rating");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readRatingDataPlanNodeId1,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(ratingNumRows, ratingNumCols))));
     } else if (queryTemplate == "template10") {
       // Embedding
       VectorMaker maker{pool_.get()};
@@ -1048,10 +1351,17 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           PlanBuilder(planNodeIdGenerator)
               .tableScan(userDataRowType, {}, "")
               .capturePlanNodeId(readUserDataPlanNodeId)
+              .project(
+                  {"u_user_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "u_zipcode"})
               .nestedLoopJoin(
                   PlanBuilder(planNodeIdGenerator)
                       .tableScan(movieDataRowType, {}, "")
                       .capturePlanNodeId(readMovieDataPlanNodeId)
+                      .project({"m_movie_id", "m_genres"})
                       .planNode(),
                   {// what columns to project from the join
                    "u_user_id",
@@ -1070,7 +1380,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                    "u_occupation",
                    "u_zipcode",
                    "m_genres",
-                   "gender_encoder(u_gender) as gender_encoded",
+                   "transform(gender_encoder(u_gender), x-> CAST(x AS REAL)) as gender_encoded",
                    "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as age_encoded",
                    "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as occupation_encoded"})
               .project(
@@ -1081,7 +1391,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                    "u_occupation",
                    "u_zipcode",
                    "m_genres",
-                   "transform(concat(gender_encoded,age_encoded,occupation_encoded,embed), x-> CAST(x AS REAL)) as features"})
+                   "concat(gender_encoded,age_encoded,occupation_encoded,embed) as features"})
               .project(
                   {"u_user_id",
                    "m_movie_id",
@@ -1127,12 +1437,14 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     }
 
   } else if (workload == "tpcxai") {
+    cataLog.loadDataSparsityFromFile(
+        "/home/velox/data/parquet/tpcxai_sf1/final/serving/sparsity.txt");
     std::string queryOptType =
         getEnvVar("CD_VELOX_QUERY_OPT_TYPE"); // env used for ablation study of
 
-    auto finicialAccountDataRowType =
+    auto financialAccountDataRowType =
         ROW({"fa_customer_sk", "transaction_limit"}, {BIGINT(), DOUBLE()});
-    auto finicialTransactionsDataRowType =
+    auto financialTransactionsDataRowType =
         ROW({"amount",
              "iban",
              "sender_id",
@@ -1192,7 +1504,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
     }
 
-    std::vector<std::string> finicialAccountDataPaths =
+    std::vector<std::string> financialAccountDataPaths =
         getFilePathsFromDir(dataDirPrefix + "financial_account");
     std::vector<std::string> financialTransactionsDataPaths =
         getFilePathsFromDir(dataDirPrefix + "financial_transactions");
@@ -1213,22 +1525,22 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
     std::vector<std::string> reviewDataPaths =
         getFilePathsFromDir(dataDirPrefix + "review");
 
-    int finicialAccountNumRows, finicialAccountNumCols,
-        finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
-        orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
-        productNumCols, storeDeptNumRows, storeDeptNumCols,
+    int financialAccountNumRows, financialAccountNumCols,
+        financialTransactionsNumRows, financialTransactionsNumCols,
+        orderNumRows, orderNumCols, lineitemNumRows, lineitemNumCols,
+        productNumRows, productNumCols, storeDeptNumRows, storeDeptNumCols,
         productRatingNumRows, productRatingNumCols, customerNumRows,
         customerNumCols, orderReturnNumRows, orderReturnNumCols, reviewNumRows,
         reviewNumCols;
 
     readDataStats(
         dataDirPrefix + "financial_account_stats.txt",
-        finicialAccountNumRows,
-        finicialAccountNumCols);
+        financialAccountNumRows,
+        financialAccountNumCols);
     readDataStats(
         dataDirPrefix + "financial_transactions_stats.txt",
-        finicialTransactionsNumRows,
-        finicialTransactionsNumCols);
+        financialTransactionsNumRows,
+        financialTransactionsNumCols);
     readDataStats(
         dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
     readDataStats(
@@ -1323,7 +1635,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       PlanNodeId readFinancialTransactionsDataPlanNodeId;
       queryPlan =
           PlanBuilder(planNodeIdGenerator, pool_.get())
-              .tableScan(finicialTransactionsDataRowType, {}, "")
+              .tableScan(financialTransactionsDataRowType, {}, "")
               .capturePlanNodeId(readFinancialTransactionsDataPlanNodeId)
               .project(
                   {"transaction_id",
@@ -1361,7 +1673,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                           {"c_customer_sk"},
                           {"fa_customer_sk"},
                           PlanBuilder(planNodeIdGenerator, pool_.get())
-                              .tableScan(finicialAccountDataRowType, {}, "")
+                              .tableScan(financialAccountDataRowType, {}, "")
                               .capturePlanNodeId(
                                   readFinancialAccountDataPlanNodeId)
                               //  .values(batchesAccount)
@@ -1407,7 +1719,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           readFinancialTransactionsDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(OutputStat(
-              finicialTransactionsNumRows, finicialTransactionsNumCols)))));
+              financialTransactionsNumRows, financialTransactionsNumCols)))));
       cataLog.addSource(std::make_shared<Source>(Source(
           readCustomerDataPlanNodeId,
           Source::Type::FILE,
@@ -1647,6 +1959,47 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       cataLog.addSource(std::make_shared<Source>(productRatingSrc));
       cataLog.addSource(std::make_shared<Source>(productSrc));
       cataLog.addSource(std::make_shared<Source>(customerSrc));
+    } else if (queryTemplate == "template5") {
+      PlanNodeId readReviewDataPlanNodeId;
+      // registerTPCxAIHFTokenizer
+      registerTPCxAIHFTokenizer(cataLog, pool_);
+      registerTPCxAITFFeatureExtractor(cataLog, pool_);
+
+      int modelGroupId_ = 0;
+      int hidden1 = randomGenerator.genRandomIntValue();
+      int hidden2 = randomGenerator.genRandomIntValue();
+      // int hidden3 = randomGenerator.genRandomIntValue();
+      std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << ", "
+                << std::endl;
+      auto modelStr = registerNNModel(
+          {50265, hidden1, hidden2, 1}, cataLog, modelGroupId_, false);
+
+      queryPlan =
+          PlanBuilder(planNodeIdGenerator)
+              .tableScan(reviewDataRowType, {}, "")
+              .capturePlanNodeId(readReviewDataPlanNodeId)
+              .project(
+                  {"id", "extract_tf_features(hf_tokenizer(text)) as feature"});
+
+      if (generateFilter) {
+        std::vector<std::string> filterExpr =
+            sampleTPCxAIFilterExpr("idReview", timestampSeed);
+        for (auto expr : filterExpr) {
+          queryPlan = queryPlan.filter(expr);
+        }
+      }
+      queryPlan = queryPlan.project({fmt::format(modelStr, "feature")});
+
+      // review Data read
+      cataLog.setIdAddressMap(
+          readReviewDataPlanNodeId,
+          reviewDataPaths,
+          dwio::common::FileFormat::PARQUET);
+      cataLog.addNodeIdRelationName(readReviewDataPlanNodeId, "review");
+      cataLog.addSource(std::make_shared<Source>(Source(
+          readReviewDataPlanNodeId,
+          Source::Type::FILE,
+          std::make_shared<OutputStat>(reviewNumRows, reviewNumCols))));
     } else if (queryTemplate == "template6") { // uc8
       // Register model
       int hidden1 = randomGenerator.genRandomIntValue();
@@ -1790,13 +2143,13 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
 
       queryPlan =
           PlanBuilder(planNodeIdGenerator, pool_.get())
-              .tableScan(finicialAccountDataRowType, {}, "")
+              .tableScan(financialAccountDataRowType, {}, "")
               .capturePlanNodeId(readFinancialAccountDataPlanNodeId)
               .hashJoin(
                   {"fa_customer_sk"},
                   {"sender_id"},
                   PlanBuilder(planNodeIdGenerator, pool_.get())
-                      .tableScan(finicialTransactionsDataRowType, {}, "")
+                      .tableScan(financialTransactionsDataRowType, {}, "")
                       .capturePlanNodeId(
                           readFinancialTransactionsDataPlanNodeId)
                       .project(
@@ -1864,7 +2217,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       }
       cataLog.setIdAddressMap(
           readFinancialAccountDataPlanNodeId,
-          finicialAccountDataPaths,
+          financialAccountDataPaths,
           dwio::common::FileFormat::PARQUET);
       cataLog.setIdAddressMap(
           readFinancialTransactionsDataPlanNodeId,
@@ -1883,12 +2236,12 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           readFinancialAccountDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(
-              OutputStat(finicialAccountNumRows, finicialAccountNumCols)));
+              OutputStat(financialAccountNumRows, financialAccountNumCols)));
       Source financialTransactionsSrc = Source(
           readFinancialTransactionsDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(OutputStat(
-              finicialTransactionsNumRows, finicialTransactionsNumCols)));
+              financialTransactionsNumRows, financialTransactionsNumCols)));
       Source customerSrc = Source(
           readCustomerDataPlanNodeId,
           Source::Type::FILE,
@@ -2168,787 +2521,8 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                    "array_constructor(avg_return_ratio, avg_num_return) as features"})
               .project({"o_customer_sk", fmt::format(modelStr, "features")});
 
-    } else {
-      throw std::runtime_error(
-          "Unsupported query template for tpcxai workload : " + queryTemplate);
-    }
-
-  } else {
-    throw std::runtime_error(
-        "Unsupported workload: " + workload +
-        ". Currently, movielens and tpcxai are supported.");
-  }
-
-  return queryPlan;
-}
-
-PlanBuilder setupProfileQueryPlanFromTemplate1(
-    std::string workload,
-    std::string queryTemplate,
-    int& modelGroupId_,
-    CataLog& cataLog,
-    std::shared_ptr<memory::MemoryPool> pool_,
-    std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
-    int randomSeed = -1) {
-  // bool generateFilter = stringToBool(getEnvVar("CD_PROFILE_W_FILTER"));
-  bool generateFilter = true;
-
-  unsigned timestampSeed =
-      std::chrono::system_clock::now().time_since_epoch().count();
-  if (randomSeed != -1) {
-    timestampSeed = randomSeed;
-  }
-  RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
-  randomGenerator.setIntRange(10, 3000);
-  PlanBuilder queryPlan;
-
-  if (workload == "movielens1") {
-    auto movieTagDataRowType =
-        ROW({"mt_movie_id", "mt_relevance_score"}, {INTEGER(), ARRAY(REAL())});
-    auto movieDataRowType =
-        ROW({"m_movie_id",
-             "m_title",
-             "m_genres",
-             "m_spoken_languages",
-             "m_popularity",
-             "m_vote_average",
-             "m_vote_count",
-             "m_overview"},
-            {INTEGER(),
-             VARCHAR(),
-             VARCHAR(),
-             VARCHAR(),
-             REAL(),
-             REAL(),
-             INTEGER(),
-             VARCHAR()});
-    auto userDataRowType =
-        ROW({"u_user_id", "u_gender", "u_age", "u_occupation", "u_zipcode"},
-            {INTEGER(), VARCHAR(), INTEGER(), INTEGER(), VARCHAR()});
-    auto ratingDataRowType =
-        ROW({"r_user_id", "r_movie_id", "r_rating", "r_timestamp"},
-            {INTEGER(), INTEGER(), INTEGER(), INTEGER()});
-
-    std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
-
-    if (dataDirPrefix == "") {
-      // use default value:
-      dataDirPrefix = "/home/velox/resources/data/parquet/movielens/final/";
-    }
-
-    std::vector<std::string> movieTagDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "movie_tag_relevance");
-    std::vector<std::string> movieDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "movie");
-    std::vector<std::string> userDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "user");
-    std::vector<std::string> ratingDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "rating");
-
-    int movieTagNumRows, movieTagNumCols, movieNumRows, movieNumCols,
-        userNumRows, userNumCols, ratingNumRows, ratingNumCols;
-
-    readDataStats(
-        dataDirPrefix + "movie_tag_relevance_stats.txt",
-        movieTagNumRows,
-        movieTagNumCols);
-    readDataStats(
-        dataDirPrefix + "movie_stats.txt", movieNumRows, movieNumCols);
-    readDataStats(dataDirPrefix + "user_stats.txt", userNumRows, userNumCols);
-    readDataStats(
-        dataDirPrefix + "rating_stats.txt", ratingNumRows, ratingNumCols);
-
-    PlanNodeId readMovieTagDataPlanNodeId;
-    PlanNodeId readUserDataPlanNodeId;
-    PlanNodeId readMovieDataPlanNodeId;
-    PlanNodeId readRatingDataPlanNodeId1;
-    PlanNodeId readRatingDataPlanNodeId2;
-
-    if (queryTemplate == "user_only") {
-      std::unordered_map<std::string, int> genderMapping;
-      genderMapping["F"] = 0;
-      genderMapping["M"] = 1;
-
-      optimization::registerVectorFunction(
-          "gender_encoder",
-          StringEncoder::signatures(),
-          std::make_unique<StringEncoder>(std::move(genderMapping)),
-          {},
-          true,
-          cataLog);
-
-      int modelGroupId_ = 0;
-      auto modelStr =
-          registerNNModel({3, 128, 3}, cataLog, modelGroupId_, false);
-
-      std::cout << "[INFO] modelStr: " << modelStr << std::endl;
-
-      queryPlan =
-          PlanBuilder(planNodeIdGenerator)
-              .tableScan(userDataRowType, {}, "")
-              .capturePlanNodeId(readUserDataPlanNodeId)
-              .project(
-                  {"u_user_id",
-                   "u_age",
-                   "gender_encoder(u_gender) as u_gender_encoded",
-                   "u_occupation",
-                   "u_zipcode"})
-              .project({
-                  "u_user_id",
-                  "transform(concat(array_constructor(u_age), u_gender_encoded, array_constructor(u_occupation)), x-> CAST(x AS REAL)) as u_features" // ARRAY(REAL)
-              })
-              .project({"u_user_id", fmt::format(modelStr, "u_features")});
-
-      // select u_user_id, dnn(features) as pred from users;
-      // select dnn(features) as pred from users;
-      // Set data files for the data source nodes, it is okay if the node
-      // is actually not used
-      cataLog.setIdAddressMap(
-          readUserDataPlanNodeId,
-          userDataPaths,
-          dwio::common::FileFormat::PARQUET);
-
-      cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-
-      std::shared_ptr<OutputStat> userStats =
-          std::make_shared<OutputStat>(OutputStat(userNumRows, userNumCols));
-      Source userSrc =
-          Source(readUserDataPlanNodeId, Source::Type::FILE, userStats);
-      cataLog.addSource(std::make_shared<Source>(userSrc));
-
-    }
-
-    // TODO
-    // template 4
-    else if (queryTemplate == "template4") {
-      registerGenderEncoder(cataLog, pool_);
-      // gender_encoder
-      registerMovielensAgeMinMaxScaler(
-          cataLog, pool_, "q4_user_age_minmax_scaler.txt");
-      // user_occupation_minmax_scaler
-      registerMovielensOccupationMinMaxScaler(
-          cataLog, pool_, "q4_user_occupation_minmax_scaler.txt");
-      // user_occupation_minmax_scaler
-      registerMovielensGenerOneHotEncoder(cataLog, pool_);
-      // genres_encode
-      // registerNNfunctions
-      //  Register model
-      int hidden1 = randomGenerator.genRandomIntValue();
-      int hidden2 = randomGenerator.genRandomIntValue();
-      int hidden3 = randomGenerator.genRandomIntValue();
-      std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << ", "
-                << hidden3 << std::endl;
-      // auto modelStr = registerNNModel({4, hidden1, hidden2, 384}, cataLog,
-      // modelGroupId_, false);
-
-      int modelGroupId_ = 0;
-      std::string ffnnstring = registerNNModel(
-          {21, hidden1, hidden2, hidden3, 1},
-          cataLog,
-          modelGroupId_,
-          randomGenerator.genRandomIntValue());
-      // std::cout << ffnnstring << "\n";
-      queryPlan = PlanBuilder(planNodeIdGenerator)
-                      .tableScan(userDataRowType, {}, "")
-                      .capturePlanNodeId(readUserDataPlanNodeId)
-                      .nestedLoopJoin(
-                          PlanBuilder(planNodeIdGenerator)
-                              .tableScan(movieDataRowType, {}, "")
-                              .capturePlanNodeId(readMovieDataPlanNodeId)
-                              .planNode(),
-                          {// what columns to project from the join
-                           "u_user_id",
-                           "u_age",
-                           "u_gender",
-                           "u_occupation",
-                           "m_movie_id",
-                           "m_genres"});
-
-      // Filter here
-      if (generateFilter) {
-        std::vector<std::string> filterExpr = sampleUserMovieFilterExpr(
-            "age_gender_occupation_genre", timestampSeed);
-        for (auto expr : filterExpr) {
-          queryPlan = queryPlan.filter(expr);
-        }
-        // myPlan = myPlan.filter(filterExpr);
-      }
-
-      queryPlan =
-          queryPlan
-              .project(
-                  {"gender_encoder(u_gender) as u_gender_encoded",
-                   "user_age_minmax_scaler(transform(array_constructor(u_age), x-> CAST(x AS REAL))) as u_age_encoded",
-                   "user_occupation_minmax_scaler(transform(array_constructor(u_occupation), x-> CAST(x AS REAL))) as u_occupation_encoded",
-                   "genres_encoder(m_genres) as m_genres_encoded"})
-              .project(
-                  {"transform(concat(u_gender_encoded,u_age_encoded,u_occupation_encoded,m_genres_encoded), x-> CAST(x AS REAL)) as features"}
-                  // ARRAY(REAL)
-                  )
-              .project({fmt::format(ffnnstring, "features")});
-
-      // — user side
-      cataLog.setIdAddressMap(
-          readUserDataPlanNodeId,
-          userDataPaths,
-          dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-      cataLog.addSource(std::make_shared<Source>(Source(
-          readUserDataPlanNodeId,
-          Source::Type::FILE,
-          std::make_shared<OutputStat>(userNumRows, userNumCols))));
-
-      // — movie side
-      cataLog.setIdAddressMap(
-          readMovieDataPlanNodeId,
-          movieDataPaths,
-          dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-      cataLog.addSource(std::make_shared<Source>(Source(
-          readMovieDataPlanNodeId,
-          Source::Type::FILE,
-          std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
-    }
-
-    else if (queryTemplate == "template9") {
-      registerMovielensPopularityMinMaxScaler(cataLog, pool_);
-      registerMovielensVoteAverageMinMaxScaler(cataLog, pool_);
-      registerMovielensVoteCountMinMaxScaler(cataLog, pool_);
-      registerMovielensRatingMinMaxScaler(cataLog, pool_);
-      registerMovielensGenerOneHotEncoder(cataLog, pool_);
-      int hidden1 = randomGenerator.genRandomIntValue();
-      int hidden2 = randomGenerator.genRandomIntValue();
-      std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2
-                << std::endl;
-      int modelGroupId = 0;
-      auto dnnString = registerNNModel(
-          {4, hidden1, hidden2, 384}, cataLog, modelGroupId_, false);
-      queryPlan = PlanBuilder(planNodeIdGenerator)
-                      .tableScan(movieDataRowType, {}, "")
-                      .capturePlanNodeId(readMovieDataPlanNodeId)
-                      .hashJoin(
-                          {"m_movie_id"},
-                          {"r_movie_id"},
-                          PlanBuilder(planNodeIdGenerator)
-                              .tableScan(ratingDataRowType, {}, "")
-                              .capturePlanNodeId(readRatingDataPlanNodeId1)
-                              .project({"r_movie_id", "r_rating"})
-                              .planNode(),
-                          "",
-                          {"m_movie_id",
-                           "m_genres",
-                           "m_title",
-                           "m_spoken_languages",
-                           "m_popularity",
-                           "m_vote_average",
-                           "m_vote_count",
-                           "r_rating"},
-                          /*joinType=*/core::JoinType::kInner);
-
-      // filter expressions
-      if (generateFilter) {
-        std::vector<std::string> filterExpr =
-            sampleUserMovieFilterExpr("genre_rating", timestampSeed);
-        for (auto expr : filterExpr) {
-          queryPlan = queryPlan.filter(expr);
-        }
-        // myPlan = myPlan.filter(filterExpr);
-      }
-
-      queryPlan =
-          queryPlan
-              .project(
-                  {"movie_popularity_minmax_scaler(transform(array_constructor(m_popularity),    x-> CAST(x AS REAL))) as m_popularity_norm",
-                   "movie_vote_average_minmax_scaler(transform(array_constructor(m_vote_average), x-> CAST(x AS REAL))) as m_vote_avg_norm",
-                   "movie_vote_count_minmax_scaler(transform(array_constructor(m_vote_count),    x-> CAST(x AS REAL))) as m_vote_count_norm",
-                   "rating_minmax_scaler(transform(array_constructor(r_rating),  x-> CAST(x AS REAL))) as r_rating_norm",
-                   // one-hot encode genres
-                   "genres_encoder(m_genres)  as m_genres_one_hot"})
-              .project(
-                  {"transform(concat(m_popularity_norm,m_vote_avg_norm,m_vote_count_norm,r_rating_norm,m_genres_one_hot),x -> CAST(x AS REAL)) as features"})
-              .project({fmt::format(dnnString, "features")});
-
-      // movie side
-      cataLog.setIdAddressMap(
-          readMovieDataPlanNodeId,
-          movieDataPaths,
-          dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readMovieDataPlanNodeId, "movie");
-      cataLog.addSource(std::make_shared<Source>(Source(
-          readMovieDataPlanNodeId,
-          Source::Type::FILE,
-          std::make_shared<OutputStat>(movieNumRows, movieNumCols))));
-
-      // rating side
-      cataLog.setIdAddressMap(
-          readRatingDataPlanNodeId1,
-          ratingDataPaths,
-          dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "ratings");
-      cataLog.addSource(std::make_shared<Source>(Source(
-          readRatingDataPlanNodeId1,
-          Source::Type::FILE,
-          std::make_shared<OutputStat>(ratingNumRows, ratingNumCols))));
-    }
-
-    else if (queryTemplate == "movie_rating_pivot") {
-      queryPlan =
-          PlanBuilder(planNodeIdGenerator)
-              .tableScan(ratingDataRowType, {}, "")
-              .capturePlanNodeId(readRatingDataPlanNodeId1)
-              .project({"r_user_id", "r_movie_id", "r_rating", "r_timestamp"})
-              .partialAggregation(
-                  {"r_user_id"}, {"map_agg(r_movie_id, r_rating)"})
-              .finalAggregation();
-      cataLog.setIdAddressMap(
-          readRatingDataPlanNodeId1,
-          ratingDataPaths,
-          dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "movie_rating");
-      std::shared_ptr<OutputStat> ratingStats = std::make_shared<OutputStat>(
-          OutputStat(ratingNumRows, ratingNumCols));
-      Source ratingSrc1 =
-          Source(readRatingDataPlanNodeId1, Source::Type::FILE, ratingStats);
-      cataLog.addSource(std::make_shared<Source>(ratingSrc1));
-
-    }
-
-    else if (queryTemplate == "template8") {
-      // register vector function
-      registerMovielensRatingMapToArray(cataLog, pool_);
-
-      int modelGroupId = 0;
-      int hidden1 = randomGenerator.genRandomIntValue();
-      int hidden2 = randomGenerator.genRandomIntValue();
-      int hidden3 = randomGenerator.genRandomIntValue();
-      std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << ", "
-                << hidden3 << std::endl;
-      auto autoencoder = registerNNModel(
-          /*layers=*/{3706, hidden1, hidden2, hidden3, 1},
-          cataLog,
-          modelGroupId,
-          randomGenerator.genRandomIntValue());
-
-      queryPlan = PlanBuilder(planNodeIdGenerator)
-                      .tableScan(userDataRowType, {}, "")
-                      .capturePlanNodeId(readUserDataPlanNodeId)
-                      .hashJoin(
-                          {"u_user_id"},
-                          {"r_user_id"},
-                          PlanBuilder(planNodeIdGenerator)
-                              .tableScan(ratingDataRowType, {}, "")
-                              .capturePlanNodeId(readRatingDataPlanNodeId1)
-                              .project(
-                                  {"r_user_id",
-                                   "r_timestamp",
-                                   "r_movie_id",
-                                   "r_rating"})
-                              .planNode(),
-                          {}, // extra filters
-                          // join project columns
-                          {"u_user_id",
-                           "u_gender",
-                           "u_age",
-                           "u_occupation",
-                           "u_zipcode",
-                           "r_movie_id",
-                           "r_rating"},
-                          /*joinType=*/core::JoinType::kInner);
-
-      if (generateFilter) {
-        std::vector<std::string> filterExpr =
-            sampleUserMovieFilterExpr("user", timestampSeed);
-        for (auto expr : filterExpr) {
-          queryPlan = queryPlan.filter(expr);
-        }
-        // myPlan = myPlan.filter(filterExpr);
-      }
-
-      queryPlan =
-          queryPlan
-              .partialAggregation(
-                  {"u_user_id"},
-                  {"(map_agg(r_movie_id, r_rating)) as map_ratings"})
-              .finalAggregation()
-              .project({"u_user_id", "map_to_array(map_ratings) as mappings_"})
-              .project({fmt::format(autoencoder, "mappings_")});
-      ;
-
-      // user_side
-      cataLog.setIdAddressMap(
-          readUserDataPlanNodeId,
-          userDataPaths,
-          dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readUserDataPlanNodeId, "user");
-      cataLog.addSource(std::make_shared<Source>(Source(
-          readUserDataPlanNodeId,
-          Source::Type::FILE,
-          std::make_shared<OutputStat>(userNumRows, userNumCols))));
-
-      // rating side
-      cataLog.setIdAddressMap(
-          readRatingDataPlanNodeId1,
-          ratingDataPaths,
-          dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readRatingDataPlanNodeId1, "ratings");
-      cataLog.addSource(std::make_shared<Source>(Source(
-          readRatingDataPlanNodeId1,
-          Source::Type::FILE,
-          std::make_shared<OutputStat>(ratingNumRows, ratingNumCols))));
-    }
-
-  }
-
-  /*************************************tpcxai*************************************/
-
-  else if (workload == "tpcxai1") {
-    auto finicialAccountDataRowType =
-        ROW({"fa_customer_sk", "transaction_limit"}, {BIGINT(), DOUBLE()});
-    auto finicialTransactionsDataRowType =
-        ROW({"amount",
-             "iban",
-             "sender_id",
-             "receiver_id",
-             "transaction_id",
-             "time"},
-            {DOUBLE(), VARCHAR(), BIGINT(), VARCHAR(), BIGINT(), VARCHAR()});
-    auto orderDataRowType =
-        ROW({"o_order_id", "o_customer_sk", "weekday", "date", "store"},
-            {BIGINT(), BIGINT(), VARCHAR(), VARCHAR(), BIGINT()});
-    auto lineitemDataRowType =
-        ROW({"li_order_id", "li_product_id", "quantity", "price"},
-            {BIGINT(), BIGINT(), BIGINT(), DOUBLE()});
-    auto productDataRowType =
-        ROW({"p_product_id", "name", "department"},
-            {BIGINT(), VARCHAR(), VARCHAR()});
-    auto storeDeptDataRowType =
-        ROW({"store", "department", "num_of_week"},
-            {BIGINT(), VARCHAR(), BIGINT()});
-    auto productRatingRowType =
-        ROW({"user_id", "product_id"}, {BIGINT(), BIGINT()});
-    auto customerDataRowType =
-        ROW({"c_customer_sk",
-             "c_customer_id",
-             "c_current_addr_sk",
-             "c_first_name",
-             "c_last_name",
-             "c_preferred_cust_flag",
-             "c_birth_day",
-             "c_birth_month",
-             "c_birth_year",
-             "c_birth_country",
-             "c_login",
-             "c_email_address"},
-            {INTEGER(),
-             VARCHAR(),
-             INTEGER(),
-             VARCHAR(),
-             VARCHAR(),
-             VARCHAR(),
-             INTEGER(),
-             INTEGER(),
-             INTEGER(),
-             VARCHAR(),
-             VARCHAR(),
-             VARCHAR()});
-    auto orderReturnDataRowType =
-        ROW({"or_order_id", "or_product_id", "or_return_quantity"},
-            {BIGINT(), BIGINT(), INTEGER()});
-    auto reviewDataRowType = ROW({"id", "text"}, {INTEGER(), VARCHAR()});
-
-    std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
-
-    if (dataDirPrefix == "") {
-      // use default value:
-      dataDirPrefix =
-          "/home/velox/resources/data/parquet/tpcxai_sf1/final/serving/";
-    }
-
-    std::vector<std::string> finicialAccountDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "financial_account");
-    std::vector<std::string> financialTransactionsDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "financial_transactions");
-    std::vector<std::string> orderDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "order");
-    std::vector<std::string> lineitemDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "lineitem");
-    std::vector<std::string> productDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "product");
-    std::vector<std::string> storeDeptDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "store_dept");
-    std::vector<std::string> productRatingDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "product_rating");
-    std::vector<std::string> customerDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "customer");
-    std::vector<std::string> orderReturnDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "order_returns");
-    std::vector<std::string> reviewDataPaths =
-        getFilePathsFromDir(dataDirPrefix + "review");
-
-    int finicialAccountNumRows, finicialAccountNumCols,
-        finicialTransactionsNumRows, finicialTransactionsNumCols, orderNumRows,
-        orderNumCols, lineitemNumRows, lineitemNumCols, productNumRows,
-        productNumCols, storeDeptNumRows, storeDeptNumCols,
-        productRatingNumRows, productRatingNumCols, customerNumRows,
-        customerNumCols, orderReturnNumRows, orderReturnNumCols, reviewNumRows,
-        reviewNumCols;
-
-    readDataStats(
-        dataDirPrefix + "financial_account_stats.txt",
-        finicialAccountNumRows,
-        finicialAccountNumCols);
-    readDataStats(
-        dataDirPrefix + "financial_transactions_stats.txt",
-        finicialTransactionsNumRows,
-        finicialTransactionsNumCols);
-    readDataStats(
-        dataDirPrefix + "order_stats.txt", orderNumRows, orderNumCols);
-    readDataStats(
-        dataDirPrefix + "lineitem_stats.txt", lineitemNumRows, lineitemNumCols);
-    readDataStats(
-        dataDirPrefix + "product_stats.txt", productNumRows, productNumCols);
-    readDataStats(
-        dataDirPrefix + "store_dept_stats.txt",
-        storeDeptNumRows,
-        storeDeptNumCols);
-    readDataStats(
-        dataDirPrefix + "product_rating_stats.txt",
-        productRatingNumRows,
-        productRatingNumCols);
-    readDataStats(
-        dataDirPrefix + "customer_stats.txt", customerNumRows, customerNumCols);
-    readDataStats(
-        dataDirPrefix + "order_returns_stats.txt",
-        orderReturnNumRows,
-        orderReturnNumCols);
-    readDataStats(
-        dataDirPrefix + "review_stats.txt", reviewNumRows, reviewNumCols);
-
-    PlanNodeId readOrderDataPlanNodeId;
-    PlanNodeId readOrderReturnDataPlanNodeId;
-    PlanNodeId readLineitemDataPlanNodeId;
-    PlanNodeId readProductDataPlanNodeId;
-    PlanNodeId readReviewDataPlanNodeId;
-    PlanNodeId readCustomerDataPlanNodeId;
-    PlanNodeId readProductRatingPlanNodeId;
-
-    if (queryTemplate == "template5") {
-      // registerTPCxAIHFTokenizer
-      registerTPCxAIHFTokenizer(cataLog, pool_);
-      registerTPCxAITFFeatureExtractor(cataLog, pool_);
-
-      int modelGroupId_ = 0;
-      int hidden1 = randomGenerator.genRandomIntValue();
-      int hidden2 = randomGenerator.genRandomIntValue();
-      // int hidden3 = randomGenerator.genRandomIntValue();
-      std::cout << "[INFO] hidden units: " << hidden1 << ", " << hidden2 << ", "
-                << std::endl;
-      auto modelStr = registerNNModel(
-          {50265, hidden1, hidden2, 1}, cataLog, modelGroupId_, false);
-
-      queryPlan =
-          PlanBuilder(planNodeIdGenerator)
-              .tableScan(reviewDataRowType, {}, "")
-              .capturePlanNodeId(readReviewDataPlanNodeId)
-              .project(
-                  {"id", "extract_tf_features(hf_tokenizer(text)) as feature"});
-
-      if (generateFilter) {
-        std::vector<std::string> filterExpr =
-            sampleTPCxAIFilterExpr("idReview", timestampSeed);
-        for (auto expr : filterExpr) {
-          queryPlan = queryPlan.filter(expr);
-        }
-      }
-      queryPlan = queryPlan.project({fmt::format(modelStr, "feature")});
-
-      // review Data read
-      cataLog.setIdAddressMap(
-          readReviewDataPlanNodeId,
-          reviewDataPaths,
-          dwio::common::FileFormat::PARQUET);
-      cataLog.addNodeIdRelationName(readReviewDataPlanNodeId, "review");
-      cataLog.addSource(std::make_shared<Source>(Source(
-          readReviewDataPlanNodeId,
-          Source::Type::FILE,
-          std::make_shared<OutputStat>(reviewNumRows, reviewNumCols))));
-    }
-
-    else if (queryTemplate == "template9") {
-      // Register model
-      int hidden1 = randomGenerator.genRandomIntValue();
-
-      std::cout << "[INFO] hidden units: " << hidden1 << std::endl;
-      auto modelStr =
-          registerNNModel({2, hidden1, 30}, cataLog, modelGroupId_, false);
-      auto makeGroupsBuilder = [&]() {
-        auto plan =
-            PlanBuilder(planNodeIdGenerator)
-                .tableScan(orderDataRowType, {}, "")
-                .capturePlanNodeId(readOrderDataPlanNodeId)
-                .hashJoin(
-                    {"o_order_id"},
-                    {"li_order_id"},
-                    PlanBuilder(planNodeIdGenerator)
-                        .tableScan(lineitemDataRowType, {}, "")
-                        .capturePlanNodeId(readLineitemDataPlanNodeId)
-                        .planNode(),
-                    /*extraFilter=*/{},
-                    /*outputCols=*/
-                    {"o_customer_sk",
-                     "o_order_id",
-                     "date",
-                     "weekday",
-                     "store",
-                     "li_product_id",
-                     "quantity",
-                     "price"},
-                    JoinType::kInner)
-                .hashJoin(
-                    {"li_product_id"},
-                    {"p_product_id"},
-                    PlanBuilder(planNodeIdGenerator)
-                        .tableScan(productDataRowType, {}, "")
-                        .capturePlanNodeId(readProductDataPlanNodeId)
-                        .planNode(),
-                    /*extraFilter=*/{},
-                    /*outputCols=*/
-                    {
-                        "o_customer_sk",
-                        "o_order_id",
-                        "date",
-                        "weekday",
-                        "store", // from order table
-                        "li_product_id",
-                        "quantity",
-                        "price", // from lineitem table
-                        "name",
-                        "department" // from product table
-                    },
-                    JoinType::kInner)
-                .project(
-                    {"o_customer_sk",
-                     "date",
-                     "weekday", // from order table
-                     "store AS store_id", // from order table
-                     "CAST(o_order_id AS INTEGER) AS o_order_id",
-                     "quantity",
-                     "price", // from lineitem table
-                     "li_product_id AS product_id", // from lineitem table
-                     "name",
-                     "department"}) // from product table
-                .hashJoin(
-                    {"o_order_id"},
-                    {"or_order_id"},
-                    PlanBuilder(planNodeIdGenerator)
-                        .tableScan(orderReturnDataRowType, {}, "")
-                        .capturePlanNodeId(readOrderReturnDataPlanNodeId)
-                        .planNode(),
-                    /*extraFilter=*/{},
-                    /*outputCols=*/
-                    {"o_customer_sk",
-                     "o_order_id",
-                     "date",
-                     "store_id",
-                     "product_id",
-                     "department",
-                     "quantity",
-                     "price",
-                     "or_return_quantity"},
-                    JoinType::kInner)
-                .project(
-                    {"o_customer_sk",
-                     "o_order_id",
-                     "date",
-                     "store_id",
-                     "product_id",
-                     "department",
-                     "year(parse_datetime(date, 'yyyy-MM-dd HH:mm:ss')) AS year_",
-                     "quantity",
-                     "price",
-                     "or_return_quantity",
-                     "(cast(or_return_quantity as DOUBLE) * price) as rq_p",
-                     "(cast(quantity as DOUBLE) * price) as q_p"})
-                .partialAggregation(
-                    /*groupKeys=*/
-                    {"o_customer_sk",
-                     "o_order_id",
-                     "date",
-                     "store_id",
-                     "product_id",
-                     "department"},
-                    /*aggregates=*/
-                    {"min(year_) as invoice_year",
-                     "sum(rq_p) as num",
-                     "sum(q_p) as den"})
-                .finalAggregation()
-                .project(
-                    {"o_customer_sk",
-                     "o_order_id",
-                     "invoice_year",
-                     "(num / den) AS ratio",
-                     "date",
-                     "store_id",
-                     "product_id",
-                     "department"});
-        if (generateFilter) {
-          std::vector<std::string> filterExpr = sampleTPCxAIFilterExpr(
-              "orderTime_store_product_department", timestampSeed);
-          for (auto expr : filterExpr) {
-            plan = plan.filter(expr);
-          }
-        }
-        // order
-        cataLog.setIdAddressMap(
-            readOrderDataPlanNodeId,
-            orderDataPaths,
-            dwio::common::FileFormat::PARQUET);
-        cataLog.addNodeIdRelationName(readOrderDataPlanNodeId, "order");
-        cataLog.addSource(std::make_shared<Source>(Source(
-            readOrderDataPlanNodeId,
-            Source::Type::FILE,
-            std::make_shared<OutputStat>(orderNumRows, orderNumCols))));
-
-        // lineitem
-        cataLog.setIdAddressMap(
-            readLineitemDataPlanNodeId,
-            lineitemDataPaths,
-            dwio::common::FileFormat::PARQUET);
-        cataLog.addNodeIdRelationName(readLineitemDataPlanNodeId, "lineitem");
-        cataLog.addSource(std::make_shared<Source>(Source(
-            readLineitemDataPlanNodeId,
-            Source::Type::FILE,
-            std::make_shared<OutputStat>(lineitemNumRows, lineitemNumCols))));
-
-        // Product
-        cataLog.setIdAddressMap(
-            readProductDataPlanNodeId,
-            productDataPaths,
-            dwio::common::FileFormat::PARQUET);
-        cataLog.addNodeIdRelationName(readProductDataPlanNodeId, "product");
-        cataLog.addSource(std::make_shared<Source>(Source(
-            readProductDataPlanNodeId,
-            Source::Type::FILE,
-            std::make_shared<OutputStat>(productNumRows, productNumCols))));
-
-        // order_return
-        cataLog.setIdAddressMap(
-            readOrderReturnDataPlanNodeId,
-            orderReturnDataPaths,
-            dwio::common::FileFormat::PARQUET);
-        cataLog.addNodeIdRelationName(
-            readOrderReturnDataPlanNodeId, "order_returns");
-        cataLog.addSource(std::make_shared<Source>(Source(
-            readOrderReturnDataPlanNodeId,
-            Source::Type::FILE,
-            std::make_shared<OutputStat>(
-                orderReturnNumRows, orderReturnNumCols))));
-        return plan;
-      };
-
-    }
-
-    else if (queryTemplate == "template10") {
+    } else if (queryTemplate == "template10") {
+      PlanNodeId readProductRatingPlanNodeId;
       // department_encode
       registerTPCxAIDepartmentEncoder(cataLog, pool_);
       int hidden1 = randomGenerator.genRandomIntValue();
@@ -3056,12 +2630,15 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           readProductDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(productNumRows, productNumCols))));
+    } else {
+      throw std::runtime_error(
+          "Unsupported query template for tpcxai workload : " + queryTemplate);
     }
 
   } else {
     throw std::runtime_error(
         "Unsupported workload: " + workload +
-        ". Currently only movielens is supported.");
+        ". Currently, movielens and tpcxai are supported.");
   }
 
   return queryPlan;

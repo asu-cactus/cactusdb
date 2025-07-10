@@ -17,16 +17,16 @@ logging.basicConfig(
 )
 
 # Path to the binary
-binary = "/home/cactusdb/_build/release/velox/optimizer/tests/profile_query_generator"
+binary = "/home/velox/_build/release/velox/optimizer/tests/profile_query_generator"
 
 # Workload-template combinations
 workload_template_pairs = [
-    ("movielens1", "template4"),
-    ("movielens1", "template8"),
-    ("movielens1", "template9"),
-    ("tpcxai1",    "template5"),
-    ("tpcxai1",    "template10"),
-    ("tpcxai1",    "template9"),
+    ("movielens", "template4"),
+    ("movielens", "template8"),
+    ("movielens", "template9"),
+    ("tpcxai",    "template5"),
+    ("tpcxai",    "template10"),
+    ("tpcxai",    "template9"),
 ]
 
 # Number of repetitions per command
