@@ -363,12 +363,12 @@ class TreePrediction : public MLFunction {
       const TypePtr& type,
       exec::EvalCtx& context,
       VectorPtr& output) const override {
-        
+
       BaseVector::ensureWritable(rows, type, context.pool(), output);
 
       auto arrayVec   = args[0]->as<ArrayVector>();
-      const auto* rawOffsets = arrayVec->offsets()->as<vector_size_t>();      // :contentReference[oaicite:0]{index=0}
-      float* elements = arrayVec->elements()->values()->asMutable<float>();                    // :contentReference[oaicite:1]{index=1}
+      const auto* rawOffsets = arrayVec->offsets()->as<vector_size_t>();      
+      float* elements = arrayVec->elements()->values()->asMutable<float>();                 
 
       std::vector<float> result(rows.size(), 0.0f);
       rows.applyToSelected([&](vector_size_t row) {
