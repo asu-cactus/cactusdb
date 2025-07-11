@@ -2693,10 +2693,10 @@ std::vector<std::string> sampleTPCxAIFilterExpr(
                                                       "weekday <= 5"};
   std::vector<std::string> orderTimeFilterExprs = {
       // range from 2012-01-02 to 2013-12-29
-      "date < cast('2012-06-01 00:00:00' as timestamp)",
-      "date > cast('2012-07-01 00:00:00' as timestamp)",
-      "date >= cast('2013-08-01 00:00:00' as timestamp)",
-      "date <= cast('2013-09-01 00:00:00' as timestamp)",
+      "cast(date as timestamp) < cast('2012-06-01 00:00:00' as timestamp)",
+      "cast(date as timestamp) > cast('2012-07-01 00:00:00' as timestamp)",
+      "cast(date as timestamp) >= cast('2013-08-01 00:00:00' as timestamp)",
+      "cast(date as timestamp) <= cast('2013-09-01 00:00:00' as timestamp)",
   };
 
   std::vector<std::string> lineitemPriceFilterExprs = {
@@ -2948,7 +2948,7 @@ PlanBuilder rewriteQuery(
     PlanBuilder& plan,
     std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator,
     int verbose,
-    std::string rewriteStrategt = "random",
+    std::string rewriteStrategy = "random",
     int maxRewriteNum = 8) {
   VectorMaker maker{pool_.get()};
   unsigned timestampSeed =
@@ -2987,9 +2987,13 @@ PlanBuilder rewriteQuery(
         auto optimizationRules = entry.second;
 
         for (auto action : optimizationRules) {
-          if (rewriteStrategt == "pushdown" &&
+          if (rewriteStrategy == "pushdown" &&
               action != "MLDecompositionPushdownRewriteAction") {
             // if pushdown strategy, only select pushdown actions
+            continue;
+          } else if (
+              rewriteStrategy == "fuse" &&
+              action != "MultiLayerUDF2TorchNNRewriteAction") {
             continue;
           }
           availableActions.push_back(std::make_pair(targetExprStr, action));

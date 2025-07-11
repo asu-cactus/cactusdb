@@ -1988,7 +1988,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
           queryPlan = queryPlan.filter(expr);
         }
       }
-      queryPlan = queryPlan.project({fmt::format(modelStr, "feature")});
+      queryPlan = queryPlan.project({"id", fmt::format(modelStr, "feature")});
 
       // review Data read
       cataLog.setIdAddressMap(
@@ -2073,7 +2073,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                    "quantity",
                    "price",
                    "array_constructor(quantity, scan_count, weekday) as features",
-                   "department_encoder(department) as department_encoded"})
+                   "transform(department_encoder(department), x-> CAST(x as BIGINT)) as department_encoded"})
               .project(
                   {"o_order_id",
                    "date",
@@ -2284,11 +2284,15 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
               .project(
                   {"store",
                    "department",
+                   "store as store_id",
+                   "department as department_id",
                    "num_of_week",
                    "concat(features1, features2) as features"})
               .project(
                   {"store",
                    "department",
+                   "store_id",
+                   "department_id",
                    "num_of_week",
                    fmt::format(modelStr, "features")});
       if (generateFilter) {
@@ -2572,7 +2576,9 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
                       .capturePlanNodeId(readProductDataPlanNodeId)
                       .planNode(),
                   "",
-                  {"c_birth_day",
+                  {"user_id",
+                   "product_id",
+                   "c_birth_day",
                    "c_birth_month",
                    "c_birth_year",
                    "c_birth_country",
@@ -2590,13 +2596,18 @@ PlanBuilder setupProfileQueryPlanFromTemplate(
       queryPlan =
           queryPlan
               .project(
-                  {"department_encoder(department) department_",
-                   "(1922.0 -   cast(c_birth_year as double))/(79.0) AS birth_year",
-                   "(12.0   -   cast(c_birth_month as double))/(11.0) AS birth_month",
-                   "(31.0   -   cast(c_birth_day as double))/(30.0) AS birth_day"})
+                  {"user_id",
+                   "product_id",
+                   "transform(department_encoder(department), x-> CAST(x AS DOUBLE)) as department_",
+                   "array_constructor((1922.0 -   cast(c_birth_year as double))/(79.0)) AS birth_year",
+                   "array_constructor((12.0   -   cast(c_birth_month as double))/(11.0)) AS birth_month",
+                   "array_constructor((31.0   -   cast(c_birth_day as double))/(30.0)) AS birth_day"})
               .project(
-                  {"transform(concat(department_,array_constructor(birth_year),array_constructor(birth_month),array_constructor(birth_day)),x-> CAST(x AS REAL)) as features"})
-              .project({fmt::format(modelStr, "features")});
+                  {"user_id",
+                   "product_id",
+                   "transform(concat(department_,birth_year,birth_month,birth_day),x-> CAST(x AS REAL)) as features"})
+              .project(
+                  {"user_id", "product_id", fmt::format(modelStr, "features")});
 
       cataLog.setIdAddressMap(
           readCustomerDataPlanNodeId,

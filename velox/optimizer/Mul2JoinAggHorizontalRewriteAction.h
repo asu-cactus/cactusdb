@@ -327,7 +327,7 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
               std::set<std::string> matMulAggKeysToAdd;
               for (std::string colName : nestedLoopProjectExprSets) {
                 if (containsStrButNotEqual(colName, srcName) &&
-                    containsStrButNotEqual(colName, "id")) {
+                    (containsStrButNotEqual(colName, "id") || containsStrButNotEqual(colName, "sk"))) {
                   matMulAggKeysToAdd.insert(colName);
                   // matMulAggKey = colName;
                   break;
@@ -337,7 +337,14 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
               // contain id
               if (matMulAggKeysToAdd.empty()) {
                 for (std::string colName : nestedLoopProjectExprSets) {
-                  if (containsStrButNotEqual(colName, "id")) {
+                  if (containsStrButNotEqual(colName, "id") || containsStrButNotEqual(colName, "sk")) {
+                    matMulAggKeysToAdd.insert(colName);
+                  } else if (
+                      colName == "id" &&
+                      nestedLoopProjectExprSets.size() == 5) {
+                    // if the id col is the only one left then use it
+                    // the rewrite action will introduce 3 additional column,
+                    // the weight block block row idx, block col idx
                     matMulAggKeysToAdd.insert(colName);
                   }
                 }
