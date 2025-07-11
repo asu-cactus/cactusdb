@@ -3222,6 +3222,26 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         {},
         /*deterministic=*/true,
         cataLog);
+
+    const std::string statsDir = "/home/cactusdb/resources/model/expedia/scaler_files";
+
+        // List of features to register:
+        const std::vector<std::string> features = {
+        "prop_location_score1", //f
+        "prop_location_score2", //f
+        "prop_log_historical_price", //f
+        "price_usd",
+        "orig_destination_distance",
+        "prop_review_score",
+        "avg_bookings_usd",
+        "stdev_bookings_usd",
+        };
+
+        for (auto& feature : features) {
+            // Build full path to that feature’s stats file (e.g. "/…/v1.txt")
+            const std::string filePath = fmt::format("{}/{}.txt", statsDir, feature);
+            registerFeatureMinMaxScaler(cataLog, pool_, feature, filePath);
+        }
     
     queryPlan = PlanBuilder(planNodeIdGenerator)
         .tableScan(S_listingsExtType,{}, "")
@@ -3277,22 +3297,16 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         " and srch_length_of_stay > 1"
         )
         .project({
-        
-        //filter expressions
-        "count_bookings",
-        "srch_booking_window",
-        "srch_length_of_stay",
+        "prop_id","s_listings_srch_id",
 
-
-        
-        "prop_location_score1", //f
-        "prop_location_score2", //f
-        "prop_log_historical_price", //f
-        "price_usd",
-        "orig_destination_distance",
-        "prop_review_score",
-        "avg_bookings_usd",
-        "stdev_bookings_usd",
+        "prop_location_score1_minmax_scaler(transform(array_constructor(prop_location_score1),    x -> CAST(x AS REAL))) as prop_location_score1",
+        "prop_location_score2_minmax_scaler(transform(array_constructor(prop_location_score2),    x -> CAST(x AS REAL))) as prop_location_score2",
+        "prop_log_historical_price_minmax_scaler(transform(array_constructor(prop_log_historical_price),    x -> CAST(x AS REAL))) as prop_log_historical_price",
+        "price_usd_minmax_scaler(transform(array_constructor(price_usd),    x -> CAST(x AS REAL))) as price_usd",
+        "orig_destination_distance_minmax_scaler(transform(array_constructor(orig_destination_distance),    x -> CAST(x AS REAL))) as orig_destination_distance",
+        "prop_review_score_minmax_scaler(transform(array_constructor(prop_review_score),    x -> CAST(x AS REAL))) as prop_review_score",
+        "avg_bookings_usd_minmax_scaler(transform(array_constructor(avg_bookings_usd),    x -> CAST(x AS REAL))) as avg_bookings_usd",
+        "stdev_bookings_usd_minmax_scaler(transform(array_constructor(stdev_bookings_usd),    x -> CAST(x AS REAL))) as stdev_bookings_usd",
 
         // One-hot UDFs with alias names
         "one_hot_prop_starrating(prop_starrating) as oh_prop_starrating",
@@ -3318,19 +3332,13 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         })
         .project({
 
-        //filter expressions
-        "prop_location_score1", //f
-        "prop_location_score2", //f
-        "prop_log_historical_price", //f
-        "count_bookings",
-        "srch_booking_window",
-        "srch_length_of_stay",
+        "prop_id","s_listings_srch_id",
 
         "transform(concat("
 
             // Numerical block
-            "array_constructor(prop_location_score1, prop_location_score2, prop_log_historical_price, price_usd, "
-                            "orig_destination_distance, prop_review_score, avg_bookings_usd, stdev_bookings_usd), "
+            "prop_location_score1, prop_location_score2, prop_log_historical_price, price_usd, "
+                            "orig_destination_distance, prop_review_score, avg_bookings_usd, stdev_bookings_usd, "
 
             // Categorical block
             "oh_prop_starrating, oh_prop_brand_bool, oh_count_clicks, oh_count_bookings, "
@@ -3342,14 +3350,8 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         "), x -> CAST(x AS REAL)) as u_features"
         })
         .project({
-            "decision_tree_predict(u_features) as decision_tree_result",
-            //filter expressions
-            "prop_location_score1", //f
-            "prop_location_score2", //f
-            "prop_log_historical_price", //f
-            "count_bookings",
-            "srch_booking_window",
-            "srch_length_of_stay",
+            "prop_id","s_listings_srch_id",
+            "decision_tree_predict(u_features) as decision_tree_result"
         });
         // .filter(
         // "prop_location_score1 > 1.0 "
@@ -3488,6 +3490,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         .tableScan(CreditCardType,{}, "")
         .capturePlanNodeId(readcreditcardDataPlanNodeId)
         .project({
+            "amount as pamount",
             "v1 as fv1",
             "v2 as fv2",
             "v3 as fv3",
@@ -3526,10 +3529,10 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             "concat(v1, v2, v3, v4, v5, v6, v7, v8, v9,"
             "v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,"
             "v20, v21, v22, v23, v24, v25, v26, v27, v28,"
-            "amount) as u_features", "fv1", "fv2", "fv3"
+            "amount) as u_features", "fv1", "fv2", "fv3", "pamount"
         })
-        .project({"decision_forest_predict(u_features) as prediction_result", "fv1", "fv2", "fv3"})
-        .filter("fv1 > 1 AND fv2 < 0.27 AND fv3 > 0.3");
+        .project({"pamount","decision_forest_predict(u_features) as prediction_result", "fv1", "fv2", "fv3"})
+        .filter("fv1 > 1.0 AND fv2 < 0.27 AND fv3 > 0.3");
 
 
         cataLog.setIdAddressMap(
