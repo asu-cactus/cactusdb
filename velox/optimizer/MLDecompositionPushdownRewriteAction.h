@@ -113,7 +113,12 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
     // traverse the source nodes to find the lowest pushdown node
     for (const auto& source : sources) {
       std::string returnedPushdownNodeId = findPushdownNodeId(
-          source, expr, exprSources, rootNodeId, finalPushdownNodeId, distance+1);
+          source,
+          expr,
+          exprSources,
+          rootNodeId,
+          finalPushdownNodeId,
+          distance + 1);
       // A pushdown through a JOIN node is considered as a valid pushdown
       // update the finalPushdownNodeId
       if ((curNodeName.find("Join") != std::string::npos ||
@@ -300,6 +305,11 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                   searchStart = matches.suffix().first;
                 }
 
+                if (pushDownExpression.find("divide") != std::string::npos) {
+                  // divide computation, needs to handle it
+                  pushDownExpression = reformatDivideExpr(pushDownExpression);
+                }
+
                 // Replace the double quotes with single quotes
                 pushDownExpression = replaceDoubleQuotes(pushDownExpression);
 
@@ -327,7 +337,7 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
                 }
 
                 LOG(INFO) << "[INFO] target expression: nodeName: " << nodeName
-                          << " rewriteExpr: "
+                          << " target: " << target << " rewriteExpr: "
                           << targetExprStr + " AS " + targetExprName
                           << std::endl;
                 findRewriteTarget = true;
@@ -546,6 +556,9 @@ class MLDecompositionPushdownRewriteAction : public RewriteAction {
               // std::cout << "[DEBUG] pushDownExpression: " <<
               // pushDownExpression
               //           << std::endl;
+            } else {
+              pushDownExpression =
+                  reformatComparisonExprWOCast(pushDownExpression);
             }
             pushDownExpression = replaceDoubleQuotes(pushDownExpression);
 

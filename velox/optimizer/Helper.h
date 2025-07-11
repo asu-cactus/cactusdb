@@ -755,6 +755,22 @@ std::string fix_cast_function_parsing(std::string input) {
   return result;
 }
 
+std::string reformatComparisonExprWOCast(const std::string& exprStr) {
+  // Match: op(identifier, value)
+  std::regex pattern(
+      R"((eq|neq|lt|lte|gt|gte)\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,\s*([^)]+?)\s*\))");
+
+  std::smatch match;
+  if (std::regex_search(exprStr, match, pattern)) {
+    std::string op = match[1];
+    std::string source = match[2];
+    std::string value = match[3];
+    return fmt::format("{} {} {}", source, op, value);
+  } else {
+    throw std::runtime_error("Failed to parse expression: " + exprStr);
+  }
+}
+
 /**
  * @brief Function to reformat the comparison expression to a standard format,
  * the input following the format:
@@ -769,6 +785,8 @@ std::string fix_cast_function_parsing(std::string input) {
 std::string reformatComparisonExpr(std::string exprStr) {
   std::regex pattern(
       R"((eq|neq|lt|lte|gt|gte)\(cast\s+(.*?)\s+as\s+(\w+),\s*(.*?)\s*\))");
+  std::regex pattern2(
+      R"((eq|neq|lt|lte|gt|gte)\(\s*(.*?)\s*,cast\s+(.*?)\s+as\s+(\w+))");
   // Match the exprStr string against the pattern
   std::smatch match;
   if (std::regex_search(exprStr, match, pattern)) {
@@ -797,6 +815,40 @@ std::string reformatComparisonExpr(std::string exprStr) {
 
     if (dataType == "DOUBLE" || dataType == "REAL") {
       compareValue = std::to_string(std::stod(compareValue));
+    } else if (dataType == "TIMESTAMP") {
+      compareValue = fmt::format("cast {} as TIMESTAMP", compareValue);
+    }
+
+    // Return the reformatted expression
+    return expression + " " + operatorStr + " " + compareValue;
+  } else if (std::regex_search(exprStr, match, pattern2)) {
+    // Handle the second pattern
+    std::string operatorStr = match[1]; // Operator
+    std::string expression = match[2]; // Expression
+    std::string compareValue = match[3]; // CompareValue
+    std::string dataType = match[4]; // Expression
+
+    if (operatorStr == "eq") {
+      operatorStr = "=";
+    } else if (operatorStr == "neq") {
+      operatorStr = "!=";
+    } else if (operatorStr == "lt") {
+      operatorStr = "<";
+    } else if (operatorStr == "lte") {
+      operatorStr = "<=";
+    } else if (operatorStr == "gt") {
+      operatorStr = ">";
+    } else if (operatorStr == "gte") {
+      operatorStr = ">=";
+    } else {
+      throw std::runtime_error(
+          "Unsupported operator in the expression: " + exprStr);
+    }
+
+    if (dataType == "DOUBLE" || dataType == "REAL") {
+      compareValue = std::to_string(std::stod(compareValue));
+    } else if (dataType == "TIMESTAMP") {
+      compareValue = fmt::format("cast ({} as TIMESTAMP)", compareValue);
     }
 
     // Return the reformatted expression
@@ -807,6 +859,21 @@ std::string reformatComparisonExpr(std::string exprStr) {
 
   // If no match, return an empty optional
   return "";
+}
+
+std::string reformatDivideExpr(std::string exprStr) {
+  // Regular expression to capture divide(ROW["field"], value)
+  std::regex pattern(
+      R"(divide\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,\s*([^\)]+)\s*\))");
+
+  std::smatch match;
+  if (std::regex_search(exprStr, match, pattern) && match.size() == 3) {
+    std::string field = match[1].str(); // e.g., business_hour
+    std::string value = match[2].str(); // e.g., 23
+    return fmt::format("{} / {}.0", field, value);
+  } else {
+    return exprStr;
+  }
 }
 
 /**
@@ -866,11 +933,11 @@ std::string removeUnnecessaryCast(const std::string& exprStr) {
 }
 
 std::string removeDataTypeSuffixes(const std::string& input) {
-    // Matches <ANYTHING> after an identifier (non-greedy)
-    std::regex typeSuffixRegex(R"(<[^<>]*>)");
-    
-    // Replace all occurrences of <DATA_TYPE> with an empty string
-    return std::regex_replace(input, typeSuffixRegex, "");
+  // Matches <ANYTHING> after an identifier (non-greedy)
+  std::regex typeSuffixRegex(R"(<[^<>]*>)");
+
+  // Replace all occurrences of <DATA_TYPE> with an empty string
+  return std::regex_replace(input, typeSuffixRegex, "");
 }
 
 std::vector<RowVectorPtr> splitRowVectorIntoBatches(
