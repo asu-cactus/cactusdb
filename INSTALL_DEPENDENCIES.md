@@ -240,7 +240,16 @@ PostgresML can be installed from source code or using `apt-get` in Ubuntu.
 
 https://postgresml.org/docs/open-source/pgml/developers/self-hosting/building-from-source
 
+https://web.archive.org/web/20241210195416/https://postgresml.org/docs/open-source/pgml/developers/self-hosting/building-from-source
+
 ```bash
+sudo apt-get install build-essential clang cmake pkg-config libssl-dev binutils lld
+
+git clone https://github.com/postgresml/postgresml && \
+  cd postgresml && \
+  git checkout 13e98ec90b370ac4570288031555ab1cc0eb4512 && \
+  git submodule update --init --recursive && \
+  cd pgml-extension
 cargo install cargo-pgrx --version 0.12.9
 cargo pgrx install
 ```
