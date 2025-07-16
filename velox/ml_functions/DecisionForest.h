@@ -144,6 +144,28 @@ class Forest {
       outData[rowIndex] = accumulatedResult;
     }
   }
+
+  inline float predictSingle(float* inputValues, int curBase) {
+  // average over all trees, then threshold if classification
+  float acc = 0.0f;
+  for (int t = 0; t < numTrees; ++t) {
+    Node* tree = forest[t];
+    int idx = 0;
+    // traverse tree t
+    while (!tree[idx].isLeaf) {
+      float fv = inputValues[curBase + tree[idx].indexID];
+      idx = (fv < tree[idx].threshold)
+            ? tree[idx].leftChild
+            : tree[idx].rightChild;
+    }
+    acc += tree[idx].leafValue;
+  }
+  acc /= numTrees;
+  if (isClassification) {
+    acc = (acc > 0.0f) ? 1.0f : 0.0f;
+  }
+  return acc;
+}
 };
 
 class ForestPrediction : public MLFunction {
@@ -167,23 +189,35 @@ class ForestPrediction : public MLFunction {
   }
 
   void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& type,
-      exec::EvalCtx& context,
-      VectorPtr& output) const override {
-    BaseVector::ensureWritable(rows, type, context.pool(), output);
+    const SelectivityVector& rows,
+    std::vector<VectorPtr>& args,
+    const TypePtr& type,
+    exec::EvalCtx& context,
+    VectorPtr& output) const override {
+  // 1) make output writable
+  BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-    int numInputs = rows.size();
+  // 2) pull apart the input array
+  auto arrayVec = args[0]->as<ArrayVector>();
+  const auto* rawOffsets = arrayVec->offsets()->as<vector_size_t>();
+  float* elements =
+      arrayVec->elements()->values()->asMutable<float>();
 
-    std::vector<float> resultVector(numInputs);
+  // 3) prepare result buffer
+  std::vector<float> result(rows.size(), 0.0f);
 
-    this->forest->predict(args[0], resultVector, numInputs, this->numFeatures);
+  // 4) only compute for selected rows
+  rows.applyToSelected([&](vector_size_t row) {
+    int rowStart = rawOffsets[row];  
+    // call your new single-row predictor
+    float pred = forest->predictSingle(elements, rowStart);
+    result[row] = pred;
+  });
 
-    VectorMaker maker{context.pool()};
-
-    output = maker.flatVector<float>(resultVector, REAL());
-  }
+  // 5) wrap into a FlatVector<float>
+  VectorMaker maker{context.pool()};
+  output = maker.flatVector<float>(result, REAL());
+}
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()

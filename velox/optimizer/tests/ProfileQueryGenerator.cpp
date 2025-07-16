@@ -434,7 +434,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << myPlan.planNode()->toString(true, true) << std::endl;
     auto serializedPlan = myPlan.planNode()->serialize();
     std::string queryOutPutPath =
-        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+        "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
     augmentSerializedPlan(serializedPlan, cataLog);
     writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
@@ -448,7 +448,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         pool_, numThreads, myPlan, cataLog, repeatRun, verbose);
 
     std::string latencyOutputPath =
-        "/home/velox/velox/optimizer/tests/executionLatency.txt";
+        "/home/cactusdb/velox/optimizer/tests/executionLatency.txt";
     writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
@@ -510,7 +510,7 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
     auto [minLatency, optimalRuleName] = minHeapOfRuleLatency.top();
 
     std::string optimalRuleOutputPath =
-        "/home/velox/velox/optimizer/tests/optimalRule.txt";
+        "/home/cactusdb/velox/optimizer/tests/optimalRule.txt";
     writeStringToFile(optimalRuleName, optimalRuleOutputPath);
 
     std::cout << "[INFO] Optimal Rule: " << optimalRuleName << std::endl;
@@ -552,18 +552,18 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
         pool_, numThreads, queryPlan, cataLog, repeatRun, verbose);
 
     std::string latencyOutputPath =
-        "/home/velox/velox/optimizer/tests/executionLatency.txt";
+        "/home/cactusdb/velox/optimizer/tests/executionLatency.txt";
     writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
     auto serializedPlan = queryPlan.planNode()->serialize();
     std::string queryOutPutPath =
-        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
+        "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
     augmentSerializedPlan(serializedPlan, cataLog);
     writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
     auto queryPlanStr = queryPlan.planNode()->toString(true, true);
     std::string queryPlanStrOutputPath =
-        "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
+        "/home/cactusdb/velox/optimizer/tests/queryPlanStr.txt";
     writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
@@ -605,21 +605,27 @@ class IntegratedMCTSTest : public HiveConnectorTestBase {
               << queryPlan.planNode()->toString(true, true) << std::endl;
 
     std::string latencyOutputPath =
-        "/home/velox/velox/optimizer/tests/executionLatency.txt";
+        "/home/cactusdb/velox/optimizer/tests/executionLatency.txt";
     writeStringToFile(std::to_string(executeTime), latencyOutputPath);
 
-    auto serializedPlan = queryPlan.planNode()->serialize();
-    std::string queryOutPutPath =
-        "/home/velox/velox/optimizer/tests/serializedQueryPlan.json";
-    augmentSerializedPlan(serializedPlan, cataLog);
-    writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
+    // unregisterCustomType("tree_type");
+
+    // auto serializedPlan = queryPlan.planNode()->serialize();
+    // std::string queryOutPutPath =
+    //     "/home/cactusdb/velox/optimizer/tests/serializedQueryPlan.json";
+    // augmentSerializedPlan(serializedPlan, cataLog);
+    // writeStringToFile(folly::toJson(serializedPlan), queryOutPutPath);
 
     auto queryPlanStr = queryPlan.planNode()->toString(true, true);
     std::string queryPlanStrOutputPath =
-        "/home/velox/velox/optimizer/tests/queryPlanStr.txt";
+        "/home/cactusdb/velox/optimizer/tests/queryPlanStr.txt";
     writeStringToFile(queryPlanStr, queryPlanStrOutputPath);
 
     std::cout << "[INFO] Execution time: " << executeTime << std::endl;
+
+    
+
+    
   }
 
  private:
