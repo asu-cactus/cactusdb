@@ -145,43 +145,48 @@ class VeloxTreePrediction : public MLFunction {
   }
 
   void apply(
+    const SelectivityVector& rows,
+    std::vector<VectorPtr>& args,
+    const TypePtr& type,
+    exec::EvalCtx& context,
+    VectorPtr& output) const override {
 
-      const SelectivityVector& rows,
+  BaseVector::ensureWritable(rows, type, context.pool(), output);
 
-      std::vector<VectorPtr>& args,
+  // 1) Decode the first arg (array<REAL>) with the same selection mask:
+  BaseVector* rawArray = args[0].get();
+  exec::LocalDecodedVector decodedHolder(context, *rawArray, rows);
+  auto decoded = decodedHolder.get();
 
-      const TypePtr& type,
+  // 2) Extract the underlying ArrayVector and its offsets+elements
+  auto arrayVec = decoded->base()->as<ArrayVector>();
+  const auto* offsets  = arrayVec->offsets()->as<vector_size_t>();
+  float* elements      = arrayVec->elements()->values()->asMutable<float>();
 
-      exec::EvalCtx& context,
+  // 3) Grab your forest pointers & output vector
+  auto flatInput  = args[1]->as<SimpleVector<std::shared_ptr<void>>>();
+  auto flatResult = output->asFlatVector<float>();
 
-      VectorPtr& output) const override {
-    BaseVector::ensureWritable(rows, type, context.pool(), output);
+  // 4) Also grab the physical→logical index map
+  //    decoded->indices()[i] tells you which physical row
+  //    corresponds to logical position i
+  const auto* indices = decoded->indices();
 
-    BaseVector* left = args[0].get();
+  rows.applyToSelected([&](vector_size_t row) {
+    // the real ArrayVector row is:
+    vector_size_t rawRow = indices[row];
 
-    exec::LocalDecodedVector leftHolder(context, *left, rows);
+    // now use the offsets[rawRow], not row*numFeatures
+    int curBase = offsets[rawRow];
 
-    auto decodedLeftArray = leftHolder.get();
+    auto treePtr = std::static_pointer_cast<Tree>(flatInput->valueAt(row));
+    float pred = treePtr->predictSingleMissing(elements, curBase);
 
-    auto baseLeftArray =
-        decodedLeftArray->base()->as<ArrayVector>()->elements();
+    flatResult->set(row, pred);
+  });
+}
 
-    float* input1Values = baseLeftArray->values()->asMutable<float>();
 
-    auto flatInput = args[1]->as<SimpleVector<std::shared_ptr<void>>>();
-
-    auto flatResult = output->asFlatVector<float>();
-
-    rows.applyToSelected([&](auto row) {
-      flatResult->set(
-
-          row,
-          std::static_pointer_cast<Tree>(flatInput->valueAt(row))
-              ->predictSingle(input1Values, row * numFeatures)
-
-      );
-    });
-  }
 
   static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
     return {exec::FunctionSignatureBuilder()

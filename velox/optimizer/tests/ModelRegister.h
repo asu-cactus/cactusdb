@@ -2322,3 +2322,38 @@ void registerFeatureMinMaxScaler(
       /*deterministic=*/true,
       catalog);
 }
+
+void registerForesttoRelationalFunctions(std::string modelPath, int numCols) {
+    std::cout << "To register function for TreePrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "decision_tree_predict",
+        TreePrediction::signatures(),
+        std::make_unique<TreePrediction>(
+            0, fmt::format("{}/0.txt", modelPath), numCols, true));
+
+    std::cout << "To register type for Tree" << std::endl;
+
+    registerCustomType("tree_type", std::make_unique<TreeTypeFactories>());
+
+    std::cout << "To register function for VeloxTreePrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "velox_decision_tree_predict",
+        VeloxTreePrediction::signatures(),
+        std::make_unique<VeloxTreePrediction>(numCols));
+
+    std::cout << "To register function for VeloxTreeConstruction" << std::endl;
+
+    exec::registerVectorFunction(
+        "velox_decision_tree_construct",
+        VeloxTreeConstruction::signatures(),
+        std::make_unique<VeloxTreeConstruction>());
+
+    std::cout << "To register function for ForestPrediction" << std::endl;
+
+    exec::registerVectorFunction(
+        "decision_forest_predict",
+        TreePrediction::signatures(),
+        std::make_unique<ForestPrediction>(modelPath, numCols, true));
+  }

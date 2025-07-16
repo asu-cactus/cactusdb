@@ -29,6 +29,8 @@
 #include "velox/optimizer/Helper.h"
 #include "velox/optimizer/PlanState.h"
 #include "velox/optimizer/Register.h"
+#include "velox/optimizer/DecisionForestUDF2RelationRewriteAction.h"
+#include "velox/optimizer/RewriteAction.h"
 #include "velox/optimizer/RuleManager.h"
 #include "velox/optimizer/tests/BenchmarkUtils.h"
 #include "velox/optimizer/tests/ModelRegister.h"
@@ -2201,6 +2203,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
   RandomGenerator randomGenerator = RandomGenerator(-1, 1, timestampSeed);
   randomGenerator.setIntRange(10, 3000);
   PlanBuilder queryPlan;
+  VectorMaker maker{pool_.get()};
 
   if (workload == "movielens1") {
     auto movieTagDataRowType =
@@ -3246,6 +3249,28 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
     queryPlan = PlanBuilder(planNodeIdGenerator)
         .tableScan(S_listingsExtType,{}, "")
         .capturePlanNodeId(readS_listings_extensionDataPlanNodeId)
+        .filter("prop_location_score1 > 1.0 and prop_location_score2 > 0.1 and prop_log_historical_price > 4.0")
+        .hashJoin(
+            {"srch_id"},
+            {"searches_srch_id"},
+            PlanBuilder(planNodeIdGenerator)
+                .tableScan(
+                R2_searchesType,{},"")
+                .capturePlanNodeId(readR2_searchesDataPlanNodeId)
+                .project({"srch_id as searches_srch_id","year","month","weekofyear","time","site_id",
+                        "visitor_location_country_id","srch_destination_id","srch_length_of_stay","srch_booking_window",
+                        "srch_adults_count","srch_children_count","srch_room_count","CAST(srch_saturday_night_bool AS INTEGER) as srch_saturday_night_bool","CAST(random_bool AS INTEGER) as random_bool"
+                    })
+                .filter("srch_booking_window > 10 and srch_length_of_stay > 1")
+                .planNode(),
+            {}, //extra filters
+            {
+                //projections
+                "srch_id","prop_id","position","prop_location_score1","prop_location_score2","prop_log_historical_price","price_usd","orig_destination_distance",
+                "year","month","weekofyear","time","site_id","visitor_location_country_id","srch_destination_id","srch_length_of_stay","srch_booking_window","srch_adults_count","srch_children_count","srch_room_count","srch_saturday_night_bool","random_bool"
+            },
+        JoinType::kInner  
+        )
         .hashJoin(
             {"prop_id"},  
             {"hotels_prop_id"},
@@ -3253,51 +3278,23 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
                 .tableScan(R1_hotelsType,{},"")
                 .capturePlanNodeId(readR1_HotelsDataPlanNodeId)
                 .project({
-                    "prop_id as hotels_prop_id","prop_country_id","prop_starrating","prop_review_score","prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings"
+                    "prop_id as hotels_prop_id","prop_country_id","prop_starrating","prop_review_score","CAST(prop_brand_bool AS INTEGER) as prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings"
                 })
+                .filter("count_bookings > 5")
                 .planNode(),
                 {},
             { //projections
                 //from the s_listings
-                "srch_id","prop_id","position","prop_location_score1","prop_location_score2","prop_log_historical_price","price_usd","promotion_flag","orig_destination_distance",
+                "srch_id","prop_id","position","prop_location_score1","prop_location_score2","prop_log_historical_price","price_usd","orig_destination_distance",
+                //from searches
+                "year","month","weekofyear","time","site_id","visitor_location_country_id","srch_destination_id","srch_length_of_stay","srch_booking_window","srch_adults_count","srch_children_count","srch_room_count","srch_saturday_night_bool","random_bool",
                 //from the hotels
-                "hotels_prop_id","prop_country_id","prop_starrating","prop_review_score","prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings"
+                "prop_country_id","prop_starrating","prop_review_score","prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings"
             },
             JoinType::kInner
         )
-        .project(
-            {
-                "srch_id as s_listings_srch_id","prop_id","position","prop_location_score1","prop_location_score2","prop_log_historical_price","price_usd","promotion_flag","orig_destination_distance",
-                //from the hotels
-                "hotels_prop_id","prop_country_id","prop_starrating","prop_review_score","prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings"
-            }
-        )
-        .hashJoin(
-            {"s_listings_srch_id"},
-            {"srch_id"},
-            PlanBuilder(planNodeIdGenerator)
-                .tableScan(
-                R2_searchesType,{},"")
-                .capturePlanNodeId(readR2_searchesDataPlanNodeId)
-                .planNode(),
-            {}, //extra filters
-            {
-                //projections
-                "s_listings_srch_id","prop_id","position","prop_location_score1","prop_location_score2","prop_log_historical_price","price_usd","promotion_flag","orig_destination_distance","hotels_prop_id","prop_country_id","prop_starrating","prop_review_score","prop_brand_bool","count_clicks","avg_bookings_usd","stdev_bookings_usd","count_bookings",
-                "srch_id","year","month","weekofyear","time","site_id","visitor_location_country_id","srch_destination_id","srch_length_of_stay","srch_booking_window","srch_adults_count","srch_children_count","srch_room_count","srch_saturday_night_bool","random_bool"
-            },
-        JoinType::kInner  
-        )
-        .filter(
-        "prop_location_score1 > 1.0 "
-        " and prop_location_score2 > 0.1 "
-        " and prop_log_historical_price > 4.0 "
-        " and count_bookings > 5 "
-        " and srch_booking_window > 10 "
-        " and srch_length_of_stay > 1"
-        )
         .project({
-        "prop_id","s_listings_srch_id",
+        "prop_id","srch_id",
 
         "prop_location_score1_minmax_scaler(transform(array_constructor(prop_location_score1),    x -> CAST(x AS REAL))) as prop_location_score1",
         "prop_location_score2_minmax_scaler(transform(array_constructor(prop_location_score2),    x -> CAST(x AS REAL))) as prop_location_score2",
@@ -3310,7 +3307,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
 
         // One-hot UDFs with alias names
         "one_hot_prop_starrating(prop_starrating) as oh_prop_starrating",
-        "one_hot_prop_brand_bool(CAST(prop_brand_bool AS INTEGER)) as oh_prop_brand_bool",
+        "one_hot_prop_brand_bool(prop_brand_bool) as oh_prop_brand_bool",
         "one_hot_count_clicks(count_clicks) as oh_count_clicks",
         "one_hot_count_bookings(count_bookings) as oh_count_bookings",
         "one_hot_srch_length_of_stay(srch_length_of_stay) as oh_srch_length_of_stay",
@@ -3318,8 +3315,8 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         "one_hot_srch_adults_count(srch_adults_count) as oh_srch_adults_count",
         "one_hot_srch_children_count(srch_children_count) as oh_srch_children_count",
         "one_hot_srch_room_count(srch_room_count) as oh_srch_room_count",
-        "one_hot_srch_saturday_night_bool(CAST(srch_saturday_night_bool AS INTEGER)) as oh_srch_saturday_night_bool",
-        "one_hot_random_bool(CAST(random_bool AS INTEGER)) as oh_random_bool",
+        "one_hot_srch_saturday_night_bool(srch_saturday_night_bool) as oh_srch_saturday_night_bool",
+        "one_hot_random_bool(random_bool) as oh_random_bool",
         "one_hot_position(position) as oh_position",
         "one_hot_prop_country_id(prop_country_id) as oh_prop_country_id",
         "one_hot_year(year) as oh_year",
@@ -3332,7 +3329,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         })
         .project({
 
-        "prop_id","s_listings_srch_id",
+        "prop_id","srch_id",
 
         "transform(concat("
 
@@ -3350,7 +3347,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         "), x -> CAST(x AS REAL)) as u_features"
         })
         .project({
-            "prop_id","s_listings_srch_id",
+            "prop_id","srch_id",
             "decision_tree_predict(u_features) as decision_tree_result"
         });
         // .filter(
@@ -3393,6 +3390,62 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           readR2_searchesDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(R2_searchesNumRows, R2_searchesNumCols))));
+
+    
+    //let's try the optimization rule DecisionForestUDF2RelationRewriteAction
+        auto planNode = queryPlan.planNode();
+        // Create ruleManager
+        RuleManager ruleManager;
+        // Create planState
+        PlanState planState(ruleManager);
+
+        planState.getPossibleActions(planNode, cataLog);
+        // Print possible actions
+        std::cout << "Available Actions: " << std::endl;
+        for (const auto& entry : planState.actionsPair) {
+            std::cout << entry.first << ": " << entry.second << std::endl;
+        }
+
+        // 1) Define your list of (expression, rule) pairs:
+        std::vector<std::pair<std::string, std::string>> actions = {
+        // {R"(one_hot_count_bookings(ROW["count_bookings"]))",            "MLDecompositionPushdownRewriteAction"},
+        // {R"(one_hot_count_clicks(ROW["count_clicks"]))",                "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_month(ROW["month"]))",                              "MLDecompositionPushdownRewriteAction"},
+        // {R"(one_hot_prop_country_id(ROW["prop_country_id"]))",          "MLDecompositionPushdownRewriteAction"},
+        // {R"(one_hot_prop_starrating(ROW["prop_starrating"]))",          "MLDecompositionPushdownRewriteAction"}
+        {R"(one_hot_site_id(ROW["site_id"]))",                          "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_srch_adults_count(ROW["srch_adults_count"]))",      "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_srch_booking_window(ROW["srch_booking_window"]))",  "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_srch_children_count(ROW["srch_children_count"]))",  "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_srch_destination_id(ROW["srch_destination_id"]))",  "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_srch_length_of_stay(ROW["srch_length_of_stay"]))",  "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_srch_room_count(ROW["srch_room_count"]))",          "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_time(ROW["time"]))",                                "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_visitor_location_country_id(ROW["visitor_location_country_id"]))",
+                                                                            "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_weekofyear(ROW["weekofyear"]))",                    "MLDecompositionPushdownRewriteAction"},
+        {R"(one_hot_year(ROW["year"]))",                                "MLDecompositionPushdownRewriteAction"}
+        };
+
+        // 2) Apply each action one at a time and then update the plan:
+        for (auto const& action : actions) {
+            // a) Apply the single rewrite action
+            planState.takeAction(
+                planNode,
+                nullptr,
+                maker,
+                queryPlan,
+                pool_,
+                planNodeIdGenerator,
+                std::vector{action},
+                cataLog
+            );
+
+            // b) Refresh planState to pick up the change
+            planState.update(queryPlan, cataLog);
+
+            planNode = queryPlan.planNode();
+        }
         
               //expedia ends here
     }
@@ -3461,6 +3514,15 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         PlanNodeId readcreditcardDataPlanNodeId;
 
         optimization::registerVectorFunction(
+            "xgboost_predict",
+            XGBoostPrediction::signatures(),
+            std::make_unique<XGBoostPrediction>("/home/cactusdb/resources/model/creditcard/creditcard_xgb_model.json",
+                 29),
+                {},
+        /*deterministic=*/true,
+            cataLog);
+        
+        optimization::registerVectorFunction(
             "decision_forest_predict",
             ForestPrediction::signatures(),
             std::make_unique<ForestPrediction>("/home/cactusdb/resources/model/creditcard/tree_model",
@@ -3489,11 +3551,9 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         queryPlan = PlanBuilder(planNodeIdGenerator)
         .tableScan(CreditCardType,{}, "")
         .capturePlanNodeId(readcreditcardDataPlanNodeId)
+        // .filter("v1 > 1.0 AND v2 < 0.27 AND v3 > 0.3")
         .project({
             "amount as pamount",
-            "v1 as fv1",
-            "v2 as fv2",
-            "v3 as fv3",
 
             "time", "v1_minmax_scaler(transform(array_constructor(v1),    x -> CAST(x AS REAL))) as v1",
                 "v2_minmax_scaler(transform(array_constructor(v2),    x -> CAST(x AS REAL))) as v2",
@@ -3529,10 +3589,9 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             "concat(v1, v2, v3, v4, v5, v6, v7, v8, v9,"
             "v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,"
             "v20, v21, v22, v23, v24, v25, v26, v27, v28,"
-            "amount) as u_features", "fv1", "fv2", "fv3", "pamount"
+            "amount) as u_features", "pamount"
         })
-        .project({"pamount","decision_forest_predict(u_features) as prediction_result", "fv1", "fv2", "fv3"})
-        .filter("fv1 > 1.0 AND fv2 < 0.27 AND fv3 > 0.3");
+        .project({"pamount","xgboost_predict(u_features) as prediction_result"});
 
 
         cataLog.setIdAddressMap(
@@ -3544,6 +3603,39 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           readcreditcardDataPlanNodeId,
           Source::Type::FILE,
           std::make_shared<OutputStat>(creditcardNumRows, creditcardNumCols))));
+
+    //     registerForesttoRelationalFunctions("/home/cactusdb/resources/model/creditcard/tree_model", 29);
+
+    //     //let's try the optimization rule DecisionForestUDF2RelationRewriteAction
+    //     auto planNode = queryPlan.planNode();
+    //     // Create ruleManager
+    //     RuleManager ruleManager;
+    //     // Create planState
+    //     PlanState planState(ruleManager);
+
+    //     planState.getPossibleActions(planNode, cataLog);
+    //     // Print possible actions
+    //     std::cout << "Available Actions: " << std::endl;
+    //     for (const auto& entry : planState.actionsPair) {
+    //         std::cout << entry.first << ": " << entry.second << std::endl;
+    //     }
+
+    //     std::pair<std::string, std::string> testAction(
+    //       "decision_forest_predict(ROW[\"u_features\"])",
+    //       "DecisionForestUDF2RelationRewriteAction");
+
+    //     // decision_forest_predict(ROW["u_features"]): DecisionForestUDF2RelationRewriteAction
+    //     planState.takeAction(
+    //       planNode,
+    //       nullptr,
+    //       maker,
+    //       queryPlan,
+    //       pool_,
+    //       planNodeIdGenerator,
+    //       {testAction},
+    //       cataLog);
+    //   // Update the planState (getPossibleAction after apply one action)
+    //   planState.update(queryPlan, cataLog);
 
     //creditcard ends here 
     }
@@ -3650,7 +3742,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             "decision_forest_predict",
             ForestPrediction::signatures(),
             std::make_unique<ForestPrediction>("/home/cactusdb/resources/model/flights/rf_dot_trees_custom",
-                 29, true),
+                 6756, true),
                 {},
         /*deterministic=*/true,
             cataLog);
@@ -3675,6 +3767,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
                     "airlineid as r1_airlines_airlineid",
                     "name1", "name2", "name4", "acountry", "active"
                 })
+                .filter("name2 = 't' AND name4 = 't' AND name1 > 2")
                 .planNode(),
             /*leftFiltersRightFilters*/ {},
             /*outputColumns*/ {
@@ -3742,8 +3835,6 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         )
         .project({
 
-            "name2","name4","name1",
-
             "airlineid",
             "sairportid",
             "dairportid",
@@ -3770,8 +3861,6 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             "one_hot_sdst(sdst)                                  as one_hot_sdst"
         })
         .project({
-            "name2","name4","name1",
-
             "airlineid",
             "sairportid",
             "dairportid",
@@ -3781,17 +3870,15 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             "one_hot_scountry,one_hot_stimezone,one_hot_sdst,one_hot_dcity,one_hot_dcountry,one_hot_dtimezone,one_hot_ddst), x -> CAST(x AS REAL)) as u_feature"
         })
         .project({
-            "name2","name4","name1",
-
             "airlineid",
             "sairportid",
             "dairportid",
 
             "decision_forest_predict(u_feature)"
-        })
-        .filter(
-            "name2 = 't' AND name4 = 't' AND name1 > 2"
-        );
+        });
+        // .filter(
+        //     "name2 = 't' AND name4 = 't' AND name1 > 2"
+        // );
 
         //flights ends here
         cataLog.setIdAddressMap(
@@ -3835,6 +3922,57 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
           std::make_shared<OutputStat>(S_routesNumRows, S_routesNumCols))));
 
         // return queryPlan;
+
+        registerForesttoRelationalFunctions("/home/cactusdb/resources/model/flights/rf_dot_trees_custom", 6756);
+
+        //let's try the optimization rule DecisionForestUDF2RelationRewriteAction
+        auto planNode = queryPlan.planNode();
+        // Create ruleManager
+        RuleManager ruleManager;
+        // Create planState
+        PlanState planState(ruleManager);
+
+        planState.getPossibleActions(planNode, cataLog);
+        // Print possible actions
+        std::cout << "Available Actions: " << std::endl;
+        for (const auto& entry : planState.actionsPair) {
+            std::cout << entry.first << ": " << entry.second << std::endl;
+        }
+
+       std::vector<std::pair<std::string, std::string>> actions = {
+  {R"(one_hot_acountry(ROW["acountry"]))",       "MLDecompositionPushdownRewriteAction"},
+  {R"(one_hot_active(ROW["active"]))",           "MLDecompositionPushdownRewriteAction"},
+//   {R"(one_hot_dcity(ROW["dcity"]))",             "MLDecompositionPushdownRewriteAction"},
+//   {R"(one_hot_dcountry(ROW["dcountry"]))",       "MLDecompositionPushdownRewriteAction"},
+//   {R"(one_hot_ddst(ROW["ddst"]))",               "MLDecompositionPushdownRewriteAction"},
+//   {R"(one_hot_dtimezone(ROW["dtimezone"]))",     "MLDecompositionPushdownRewriteAction"},
+  {R"(one_hot_name1(ROW["name1"]))",             "MLDecompositionPushdownRewriteAction"},
+  {R"(one_hot_name2(ROW["name2"]))",             "MLDecompositionPushdownRewriteAction"},
+  {R"(one_hot_name4(ROW["name4"]))",             "MLDecompositionPushdownRewriteAction"}
+//   {R"(one_hot_scity(ROW["scity"]))",             "MLDecompositionPushdownRewriteAction"},
+//   {R"(one_hot_scountry(ROW["scountry"]))",       "MLDecompositionPushdownRewriteAction"},
+//   {R"(one_hot_sdst(ROW["sdst"]))",               "MLDecompositionPushdownRewriteAction"},
+//   {R"(one_hot_stimezone(ROW["stimezone"]))",     "MLDecompositionPushdownRewriteAction"}
+};
+
+        for (auto const& action : actions) {
+                // a) Wrap the single action in a temporary vector and apply it
+                planState.takeAction(
+                    planNode,
+                    nullptr,
+                    maker,
+                    queryPlan,
+                    pool_,
+                    planNodeIdGenerator,
+                    std::vector{action},
+                    cataLog
+                );
+
+                // b) Immediately refresh planState with any changes
+                planState.update(queryPlan, cataLog);
+
+                planNode = queryPlan.planNode();
+        }
 
     }
     
