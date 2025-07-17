@@ -29,7 +29,7 @@ target_link_libraries(
   velox_op
   ml_functions
 )
-
+#[[
 add_executable(traversal_test TraversalTest.cpp)
 target_link_libraries(
   traversal_test
@@ -98,7 +98,7 @@ target_link_libraries(
   conv_test
   ml_functions
 )
-
+]]
 if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)
 endif()

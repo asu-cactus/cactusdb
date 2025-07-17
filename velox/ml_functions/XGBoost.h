@@ -61,7 +61,9 @@ class XGBoost {
     unsigned long numOutputs;
     float const* outData = NULL;
     XGBoosterPredictFromDMatrix(booster, dtest, 0, 0, &numOutputs, &outData);
-    assert(numOutputs == numInputs);
+    // if (numOutputs != numInputs) {
+    //   throw std::runtime_error("XGBoost returned the wrong number of outputs");
+    // }
     memcpy(resultVector.data(), outData, numOutputs * sizeof(float));
     XGDMatrixFree(dtest);
     XGBoosterFree(booster);

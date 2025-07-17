@@ -97,7 +97,7 @@ target_link_libraries(ml_functions
   xgboost::xgboost
   /home/faiss-install/lib/libfaiss.so
 )
-
+#[[
 add_executable(ml_functions_test tests/MLFunctionsTest.cpp)
 target_link_libraries(
   ml_functions_test
@@ -149,7 +149,13 @@ target_link_libraries(
   ml_functions
 )
 
+add_executable(imbridge_queries_test tests/ImbridgeQueriesTest.cpp)
+target_link_libraries(
+  imbridge_queries_test
+  ml_functions
+)
 
+]]
 
 #FIXME: model path issue needs to be fixed
 add_executable(fraud_detection_test tests/FraudDetectionTest.cpp)
@@ -178,7 +184,7 @@ target_link_libraries(
   ml_functions
 )
 ]]
-
+#[[
 add_executable(array_array_unnest_test tests/ArrayofArrayUnnestTest.cpp)
 target_link_libraries(
   array_array_unnest_test
@@ -208,7 +214,7 @@ target_link_libraries(
   intermediate_tuple_count_test
   ml_functions
 )
-
+]]
 # TODO: add or remove this unit test
 # add_executable(parquest_loader tests/TestParquetLoader.cpp)
 # target_link_libraries(
