@@ -136,8 +136,9 @@ class AblationStudyTest : public HiveConnectorTestBase {
               serializedPlan, pool_.get());
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
-      throw std::runtime_error(fmt::format(
-          "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+      throw std::runtime_error(
+          fmt::format(
+              "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
     }
   }
 
@@ -2535,6 +2536,23 @@ class AblationStudyTest : public HiveConnectorTestBase {
       testAction = std::make_pair(
           "relu(mat_vector_add11_2(mat_mul11_1(ROW[\"mt_relevance_score\"])))",
           "MultiLayerUDF2TorchNNRewriteAction");
+      planState.takeAction(
+          planNode,
+          nullptr,
+          maker,
+          myPlan,
+          pool_,
+          planNodeIdGenerator,
+          {testAction},
+          cataLog);
+
+      planState.update(myPlan, cataLog);
+      planNode = myPlan.planNode();
+      planState.getPossibleActions(planNode, cataLog);
+
+      testAction = std::make_pair(
+          "mat_mul10_1(ROW[\"mt_relevance_score\"])",
+          "MatMulDense2SparseRewriteAction");
       planState.takeAction(
           planNode,
           nullptr,
