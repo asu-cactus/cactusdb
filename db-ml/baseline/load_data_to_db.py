@@ -411,7 +411,112 @@ def load_llm_recommendation_data_to_postgres(num_user_data, num_movie_data):
 
     print("[INFO] load llm recommendation data to postgres success!")
 
+def load_expedia_data_to_postgres():
+    utils.execute_sql_query_via_psycopg2("""
+        DROP TABLE IF EXISTS Expedia_S_listings_extension CASCADE;
+        CREATE TABLE Expedia_S_listings_extension (
+            srch_id INT,
+            prop_id INT,
+            position INT,
+            prop_location_score1 FLOAT,
+            prop_location_score2 FLOAT,
+            prop_log_historical_price FLOAT,
+            price_usd FLOAT,
+            promotion_flag INT,
+            orig_destination_distance FLOAT);
+        COPY Expedia_S_listings_extension FROM '/home/imbridge_data/IMBridge_exp/public_datasets/Expedia/converted/S_listings_extension.csv' DELIMITER ',' CSV HEADER;
 
+
+        DROP TABLE IF EXISTS Expedia_R1_hotels CASCADE;
+        CREATE TABLE Expedia_R1_hotels (
+            prop_id INT,
+            prop_country_id INT,
+            prop_starrating INT,
+            prop_review_score FLOAT,
+            prop_brand_bool INT,
+            count_clicks INT,
+            avg_bookings_usd FLOAT,
+            stdev_bookings_usd FLOAT,
+            count_bookings INT);
+        COPY Expedia_R1_hotels FROM '/home/imbridge_data/IMBridge_exp/public_datasets/Expedia/converted/R1_hotels.csv' DELIMITER ',' CSV HEADER;
+
+    
+        DROP TABLE IF EXISTS Expedia_R2_searches CASCADE;
+        CREATE TABLE Expedia_R2_searches (
+            srch_id INT,
+            year INT,
+            month INT,
+            weekofyear INT,
+            time INT,
+            site_id INT,
+            visitor_location_country_id INT,
+            srch_destination_id INT,
+            srch_length_of_stay INT,
+            srch_booking_window INT,
+            srch_adults_count INT,
+            srch_children_count INT,
+            srch_room_count INT,
+            srch_saturday_night_bool INT,
+            random_bool INT
+        );
+        COPY Expedia_R2_searches FROM '/home/imbridge_data/IMBridge_exp/public_datasets/Expedia/converted/R2_searches.csv' DELIMITER ',' CSV HEADER;
+    """)
+
+def load_flights_data_to_postgres():
+    utils.execute_sql_query_via_psycopg2("""
+        DROP TABLE IF EXISTS Flights_S_routes_extension CASCADE;
+        CREATE TABLE Flights_S_routes_extension (
+            airlineid INT,
+            sairportid INT,
+            dairportid INT,
+            codeshare INT
+        );
+        COPY Flights_S_routes_extension FROM '/home/imbridge_data/IMBridge_exp/public_datasets/Flights/converted/S_routes_first4.csv' DELIMITER ',' CSV HEADER;
+                                         
+        DROP TABLE IF EXISTS Flights_R1_airlines CASCADE;
+        CREATE TABLE Flights_R1_airlines (
+            airlineid INT,
+            name1 INT,
+            name2 INT,
+            name4 INT,
+            acountry INT,
+            active INT
+        );
+        COPY Flights_R1_airlines FROM '/home/imbridge_data/IMBridge_exp/public_datasets/Flights/converted/R1_airlines.csv' DELIMITER ',' CSV HEADER;
+
+        DROP TABLE IF EXISTS Flights_R2_sairports CASCADE;
+        CREATE TABLE Flights_R2_sairports (
+            sairportid INT,
+            scity INT,
+            scountry INT,
+            slatitude FLOAT,
+            slongitude FLOAT,
+            stimezone INT,
+            sdst INT
+        );
+        COPY Flights_R2_sairports FROM '/home/imbridge_data/IMBridge_exp/public_datasets/Flights/converted/R2_sairports.csv' DELIMITER ',' CSV HEADER;
+                                         
+        DROP TABLE IF EXISTS Flights_R3_dairports CASCADE;
+        CREATE TABLE Flights_R3_dairports (
+            dairportid INT,
+            dcity INT,
+            dcountry INT,
+            dlatitude FLOAT,
+            dlongitude FLOAT,
+            dtimezone INT,
+            ddst INT
+        );
+        COPY Flights_R3_dairports FROM '/home/imbridge_data/IMBridge_exp/public_datasets/Flights/converted/R3_dairports.csv' DELIMITER ',' CSV HEADER;
+    """)
+
+def load_credit_card_data_to_postgres():
+    utils.execute_sql_query_via_psycopg2("""
+        DROP TABLE IF EXISTS Credit_Card_extension CASCADE;
+        CREATE TABLE Credit_Card_extension (
+            Time FLOAT,V1 FLOAT,V2 FLOAT,V3 FLOAT,V4 FLOAT,V5 FLOAT,V6 FLOAT,V7 FLOAT,V8 FLOAT,V9 FLOAT,V10 FLOAT,V11 FLOAT,V12 FLOAT,V13 FLOAT,V14 FLOAT,V15 FLOAT,V16 FLOAT,V17 FLOAT,V18 FLOAT,V19 FLOAT,V20 FLOAT,V21 FLOAT,V22 FLOAT,V23 FLOAT,V24 FLOAT,V25 FLOAT,V26 FLOAT,V27 FLOAT,V28 FLOAT,Amount FLOAT,Class VARCHAR(10)
+        );
+        COPY Credit_Card_extension FROM '/home/imbridge_data/IMBridge_exp/public_datasets/Credit_Card/creditcard.csv' DELIMITER ',' CSV HEADER;    
+    """)
 def main():
     parser = argparse.ArgumentParser(description="Argument parser")
 
@@ -441,6 +546,17 @@ def main():
         load_movielens_recommendation_to_datastore()
     elif dataset == "tpcxai":
         load_tpcxai_final_to_datastore()
+    elif dataset == "expedia":
+        load_expedia_data_to_postgres()
+    elif dataset == "flights":
+        load_flights_data_to_postgres()
+    elif dataset == "credit_card":
+        load_credit_card_data_to_postgres()
+    else:
+        raise ValueError(
+            "Invalid dataset name. Available options: all, movielens, ffnn, movielens_recommendation, tpcxai, expedia"
+        )
+
 
 
 if __name__ == "__main__":

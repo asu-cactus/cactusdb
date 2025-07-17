@@ -172,10 +172,10 @@ def fetch_data_from_postgres_via_psycopg2(command):
         # Close the cursor and connection
         cursor.close()
         connection.close()
-
+        return df
     except (Exception, psycopg2.DatabaseError) as error:
         print(f"Error: {error}")
-    return df
+    
 
 
 def convert_df_int64_to_int32(df):

@@ -4796,3 +4796,157 @@ class TPCxAIUsecase8PipelinePGML(Pipeline):
         query_prediction = "SELECT pgml.predict_batch('uc8_xgboost_model', array_agg(features)) as prediction from uc8_serving_data;"
         result_df = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
         return result_df.values
+
+
+class ImbridgeUsecase01PipelinePGML(Pipeline):
+    def __del__(self):
+        utils.execute_sql_query_via_psycopg2(
+            """
+          DROP VIEW IF EXISTS imbridge1_serving_data CASCADE;
+        """
+        )
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super().__init__("imbridge-usecase1-pgml", num_loop=num_loop)
+        # self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        query_to_fetch_serving_data = """
+        CREATE OR REPLACE VIEW imbridge1_serving_data as (
+            SELECT ARRAY [ prop_location_score1::real, prop_location_score2::real, prop_log_historical_price::real, price_usd::real,
+                    orig_destination_distance::real, prop_review_score::real, avg_bookings_usd::real, stdev_bookings_usd::real,
+                    position::int, prop_country_id::int, prop_starrating::int, prop_brand_bool::int, count_clicks::int, count_bookings::int,
+                    year::int, month::int, weekofyear::int, time::int, site_id::int, visitor_location_country_id::int, srch_destination_id::int,
+                    srch_length_of_stay::int, srch_booking_window::int, srch_adults_count::int, srch_children_count::int,
+                    srch_room_count::int, srch_saturday_night_bool::int, random_bool::int ] AS features
+            FROM Expedia_S_listings_extension JOIN Expedia_R1_hotels ON Expedia_S_listings_extension.prop_id = Expedia_R1_hotels.prop_id
+            JOIN Expedia_R2_searches ON Expedia_S_listings_extension.srch_id = Expedia_R2_searches.srch_id
+            WHERE prop_location_score1 > 1 and prop_location_score2 > 0.1
+            and prop_log_historical_price > 4 and count_bookings > 5
+            and srch_booking_window > 10 and srch_length_of_stay > 1
+        );
+        CREATE EXTENSION IF NOT EXISTS pgml;
+        """
+
+        # Prepare serving data
+        utils.execute_sql_query_via_psycopg2(query_to_fetch_serving_data)
+
+
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        return None
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        # non-batch prediction query
+        # query_prediction = "SELECT o_order_id, pgml.predict('uc8_xgboost_model', features) as prediction from uc8_serving_data;"
+
+        # batch prediction query
+        query_prediction = "SET max_parallel_workers_per_gather = 0; SELECT pgml.predict('imbridge1_model_classification', array_agg(features)) as prediction from imbridge1_serving_data;"
+        result_df = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
+        return result_df.values
+
+class ImbridgeUsecase02PipelinePGML(Pipeline):
+    def __del__(self):
+        utils.execute_sql_query_via_psycopg2(
+        """
+          DROP VIEW IF EXISTS imbridge2_serving_data CASCADE;
+        """
+        )
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super().__init__("imbridge-usecase2-pgml", num_loop=num_loop)
+        # self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        query_to_fetch_serving_data = """
+        CREATE OR REPLACE VIEW imbridge2_serving_data as (
+            SELECT ARRAY [ slatitude::real, slongitude::real, dlatitude::real, dlongitude::real, name1::int, name2::int, name4::int, acountry::int, active::int,
+                        scity::int, scountry::int, stimezone::int, sdst::int, dcity::int, dcountry::int, dtimezone::int, ddst::int ] AS features
+                FROM flights_s_routes_extension JOIN flights_r1_airlines ON flights_s_routes_extension.airlineid = flights_r1_airlines.airlineid
+                JOIN flights_r2_sairports ON flights_s_routes_extension.sairportid = flights_r2_sairports.sairportid JOIN flights_r3_dairports
+                ON flights_s_routes_extension.dairportid = flights_r3_dairports.dairportid
+                WHERE name2 = 1 and name4 = 1 and name1 > 2.8
+        );
+        CREATE EXTENSION IF NOT EXISTS pgml;
+        """
+
+        # Prepare serving data
+        utils.execute_sql_query_via_psycopg2(query_to_fetch_serving_data)
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        return None
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        # non-batch prediction query
+        # query_prediction = "SELECT o_order_id, pgml.predict('uc8_xgboost_model', features) as prediction from uc8_serving_data;"
+
+        # batch prediction query
+        query_prediction = "SET max_parallel_workers_per_gather = 4; SELECT pgml.predict_batch('imbridge2_model_rf', array_agg(features)) as prediction FROM imbridge2_serving_data;"
+        result_df = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
+        return result_df.values
+    
+
+class ImbridgeUsecase03PipelinePGML(Pipeline):
+    def __del__(self):
+        utils.execute_sql_query_via_psycopg2(
+        """
+          DROP VIEW IF EXISTS imbridge3_serving_data CASCADE;
+        """
+        )
+
+    def __init__(
+        self,
+        num_loop=10,
+    ):
+        super().__init__("imbridge-usecase3-pgml", num_loop=num_loop)
+        # self.postgres_conn_param = utils.get_connectorx_configuration()
+        # TODO: init
+        query_to_fetch_serving_data = """
+        CREATE OR REPLACE VIEW imbridge3_serving_data as (
+            SELECT ARRAY [ V1::real, V2::real, V3::real, V4::real, V5::real, V6::real, V7::real, V8::real, V9::real, V10::real, V11::real, V12::real, V13::real, V14::real, V15::real, V16::real, V17::real, V18::real, V19::real, V20::real, V21::real, V22::real, V23::real, V24::real, V25::real, V26::real, V27::real, V28::real, Amount::real] AS features
+            FROM Credit_Card_extension
+            );
+        CREATE EXTENSION IF NOT EXISTS pgml;
+        """
+
+        # Prepare serving data
+        utils.execute_sql_query_via_psycopg2(query_to_fetch_serving_data)
+
+
+    def loading_meta_impl(self):
+        pass
+
+    def data_loading_impl(self, batch_size):
+        return None
+
+    def data_processing_impl(self, data):
+        return data
+
+    def model_inference_impl(self, data):
+        # TODO model inference
+        # non-batch prediction query
+        # query_prediction = "SELECT o_order_id, pgml.predict('uc8_xgboost_model', features) as prediction from uc8_serving_data;"
+
+        # batch prediction query
+        query_prediction = "SET max_parallel_workers_per_gather = 4; SELECT pgml.predict_batch('imbridge3_model_xgboost', array_agg(features)) as prediction from imbridge3_serving_data;"
+        result_df = utils.fetch_data_from_postgres_via_psycopg2(query_prediction)
+        return result_df.values
+    
