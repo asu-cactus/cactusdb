@@ -148,7 +148,7 @@ create_blocks(int row, int col, float* values, int block_size) {
         ? col - current_col
         : block_size; // Adjust block size for the last block
 
-    // Create a new block of size row x current_block_size
+  // Create a new block of size row x current_block_size
     std::vector<float> block(row * current_block_size);
 
     // Fill the block with values
@@ -770,6 +770,25 @@ std::string reformatComparisonExprWOCast(const std::string& exprStr) {
     throw std::runtime_error("Failed to parse expression: " + exprStr);
   }
 }
+
+std::string reformatNonTargetExprs(const std::string& input) {
+    std::string output = input;
+
+    // 1. Replace ROW["x"] with x
+    output = std::regex_replace(output, std::regex("ROW\\[\"(\\w+)\"\\]"), "$1");
+
+    // 2. Replace lambda ROW<x:TYPE> -> with x ->
+    output = std::regex_replace(output, std::regex("lambda\\s+ROW<([a-zA-Z_][a-zA-Z0-9_]*):[a-zA-Z]+>\\s*->"), "$1 ->");
+
+    // 3. Replace cast x as real -> CAST(x AS REAL)
+    output = std::regex_replace(output, std::regex("cast\\s+(\\w+)\\s+as\\s+(\\w+)", std::regex_constants::icase), "CAST($1 AS $2)");
+
+    // 4. Remove quotes around simple literals (but not for strings with spaces or punctuation)
+    output = std::regex_replace(output, std::regex("\"([A-Za-z0-9_]+)\""), "$1");
+
+    return output;
+}
+
 
 /**
  * @brief Function to reformat the comparison expression to a standard format,
