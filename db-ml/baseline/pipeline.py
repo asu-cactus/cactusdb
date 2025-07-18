@@ -4290,7 +4290,7 @@ class TPCxAIUsecase07MLPipelineSystemDS(Pipeline):
             num_product = len(self.bi)
 
             # for i in tqdm(range(5)):
-            for i in tqdm(range(num_input)):
+            for i in tqdm(range(int(num_input))):
                 try:
                     user_id = data[i, 0]
                     product_id = data[i, 1]

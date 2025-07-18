@@ -1585,6 +1585,9 @@ PlanBuilder setupMovielensDBQuery(
           PlanBuilder(planNodeIdGenerator, pool_.get())
               .tableScan(movieTagDataRowType, {}, "")
               .capturePlanNodeId(readMovieTagDataPlanNodeId)
+              .project(
+                  {"mt_movie_id",
+                   "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_score"})
               .hashJoin(
                   {"mt_movie_id"},
                   {"m_movie_id"},
@@ -1624,6 +1627,17 @@ PlanBuilder setupMovielensDBQuery(
                    "m_popularity",
                    "m_vote_average",
                    "m_vote_count"})
+              .project(
+                  {"u_user_id",
+                   "u_age",
+                   "u_gender",
+                   "u_occupation",
+                   "m_movie_id",
+                   "mt_relevance_score",
+                   "mt_movie_id",
+                   "m_popularity",
+                   "m_vote_average",
+                   "m_vote_count"})
               .project({
                   "u_user_id",
                   "u_age",
@@ -1632,7 +1646,9 @@ PlanBuilder setupMovielensDBQuery(
                   "transform(array_constructor(if (u_gender = 'M', 1, 0)), x->Cast(x AS real)) as u_gender",
                   "m_movie_id",
                   "mt_movie_id",
-                  "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_score",
+                  "m_vote_average",
+                  "m_vote_count",
+                  "mt_relevance_score",
                   "llm_ffnn_minmax_scaler(transform(array_constructor(m_popularity, m_vote_average, m_vote_count), x-> CAST(X as REAL)))  AS m_trending_features",
                   "llm_ffnn_interest_scaler(transform(array_constructor(u_age, u_occupation), x-> CAST(X as REAL)))  AS u_interest_features",
               })
@@ -1951,6 +1967,10 @@ PlanBuilder setupMovielensDBQuery(
           PlanBuilder(planNodeIdGenerator, pool_.get())
               .tableScan(movieTagDataRowType, {}, "")
               .capturePlanNodeId(readMovieTagDataPlanNodeId)
+              .project({
+                  "mt_movie_id",
+                  "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_score",
+              })
               .hashJoin(
                   {"mt_movie_id"},
                   {"m_movie_id"},
@@ -1981,7 +2001,7 @@ PlanBuilder setupMovielensDBQuery(
                    "m_vote_count"})
               .project({
                   "m_movie_id",
-                  "relu(mat_vector_add10_4(mat_mul10_3(relu(mat_vector_add10_2(mat_mul10_1(mt_relevance_score)))))) AS mt_relevance_score",
+                  "mt_relevance_score",
                   "mt_movie_id",
                   "m_popularity",
                   "m_vote_average",
