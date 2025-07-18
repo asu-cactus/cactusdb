@@ -1,10 +1,10 @@
-# CactusDB Early Release for VLDB Submission
+# CactusDB Early Release for SIGMOD Submission
 
-**Note:** This is an early release of the CactusDB codebase for VLDB reviewers. An official release will be available soon.
+**Note:** This is an early release of the CactusDB codebase for SIGMOD reviewers. An official release will be available soon.
 
 CactusDB is a UDF-centric database built on top of Meta's high-performance database engine, [Velox](https://github.com/facebookincubator/velox). It enables the co-optimization of SQL queries nested with model inference.
 
-- [CactusDB Early Release for VLDB Submission](#cactusdb-early-release-for-vldb-submission)
+- [CactusDB Early Release for SIGMOD Submission](#cactusdb-early-release-for-sigmod-submission)
   - [Getting Started](#getting-started)
     - [Dependencies](#dependencies)
     - [Set-Up Through Docker](#set-up-through-docker)
