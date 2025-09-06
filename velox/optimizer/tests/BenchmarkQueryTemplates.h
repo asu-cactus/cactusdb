@@ -3551,7 +3551,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
         queryPlan = PlanBuilder(planNodeIdGenerator)
         .tableScan(CreditCardType,{}, "")
         .capturePlanNodeId(readcreditcardDataPlanNodeId)
-        // .filter("v1 > 1.0 AND v2 < 0.27 AND v3 > 0.3")
+        .filter("v1 > 1.0 AND v2 < 0.27 AND v3 > 0.3")
         .project({
             "amount as pamount",
 
@@ -3591,7 +3591,7 @@ PlanBuilder setupProfileQueryPlanFromTemplate1(
             "v20, v21, v22, v23, v24, v25, v26, v27, v28,"
             "amount) as u_features", "pamount"
         })
-        .project({"pamount","xgboost_predict(u_features) as prediction_result"});
+        .project({"pamount","decision_forest_predict(u_features) as prediction_result"});
 
 
         cataLog.setIdAddressMap(
