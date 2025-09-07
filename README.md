@@ -21,8 +21,6 @@ CactusDB is a UDF-centric database built on top of Meta's high-performance datab
   - [FAQ](#faq)
   - [License](#license)
 
-
-
 ## Getting Started
 
 ### Dependencies
@@ -44,14 +42,13 @@ The following dependencies are required to run CactusDB and other baselines:
 - PostgresML
 - Faiss
 
-To manually install the dependencies, please refer to [this file](/INSTALL_DEPENDENCIES.md) for more details.
+To manually install the dependencies, please refer to [this file](./INSTALL_DEPENDENCIES.md) for more details.
 
 > **Note:** Some paths of the loaded data are hard-coded for the Docker environment. Please modify these paths as necessary when running the code. We are currently working on refactoring this.
 
-
 ### Set-Up Through Docker
 
-We recommend using the provided Dockerfile to set up the environment. See the [Docker setup guide](/docker-doc/README.md) for more details. Alternatively, you can manually install the dependencies by following the instructions [here](/INSTALL_DEPENDENCIES.md). CactusDB has been tested and supports Linux (x86) and macOS (Apple Silicon). For Windows users, we recommend using Docker with Windows Subsystem for Linux (WSL).
+We recommend using the provided Dockerfile to set up the environment. See the [Docker setup guide](./docker-doc/README.md) for more details. Alternatively, you can manually install the dependencies by following the instructions [here](./INSTALL_DEPENDENCIES.md). CactusDB has been tested and supports Linux (x86) and macOS (Apple Silicon). For Windows users, we recommend using Docker with Windows Subsystem for Linux (WSL).
 
 ### Compile CactusDB
 
@@ -93,7 +90,7 @@ The following figures shows the query tree of Q1 in the MovieLens Recommendation
 
 ### Run on Baselines
 
-The implementation of baselines is located under the [db-ml/baseline](/db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
+The implementation of baselines is located under the [db-ml/baseline](./db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
 
 ```bash
 cd db-ml/baseline
@@ -106,6 +103,7 @@ python benchmark_movielens.py
 ### Run on CactusDB
 
 After compiling the CactusDB, `cd _build/release/velox/optimizer/tests`. You can run the with, without optimization, or abalation study by using the following commands.
+
 ```bash
 # set the optimization type by setting the CD_VELOX_QUERY_OPT_TYPE variable, with following options:
 # CD_VELOX_QUERY_OPT_TYPE= : w/o optimization
@@ -120,7 +118,7 @@ export CD_VELOX_QUERY_OPT_TYPE=XXX
 
 ### Run Baselines
 
-The implementation of baselines is located under the [db-ml/baseline](/db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
+The implementation of baselines is located under the [db-ml/baseline](./db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
 
 Before running the baseline benchmarks for different workloads, load the data into the datastore by executing the following command:
 
@@ -138,7 +136,7 @@ python benchmark_movielens.py
 
 You can configure the baselines by modifying the `benchmark_movielens.py` file. For more details on the benchmark scripts, refer to the [baseline README](./db-ml/baseline/README.md).
 
-For more detailed instructions, refer to the [baseline README](/db-ml/baseline/README.md).
+For more detailed instructions, refer to the [baseline README](./db-ml/baseline/README.md).
 
 ### Run CactusDB
 
@@ -146,11 +144,12 @@ To run other workloads on CactusDB, please refer to the [**this file**](./velox/
 
 ## Development Guide
 
-Please check [this file](/DEVELOP_GUIDE.md) to see the supported ML kernels and how to implement the pipeline within CactusDB. Other functions/APIs can be checked through [**this link**](https://sigmod2026-a.github.io/cactusdb.github.io/)
+Please check [this file](./DEVELOP_GUIDE.md) to see the supported ML kernels and how to implement the pipeline within CactusDB. Other functions/APIs can be checked through [**this link**](https://sigmod2026-a.github.io/cactusdb.github.io/)
 
 ## FAQ
 
 - **If Spark/Hadoop is not started, run the following commands:**
+
   ```bash
   service ssh start
   start-all.sh
@@ -162,11 +161,8 @@ Please check [this file](/DEVELOP_GUIDE.md) to see the supported ML kernels and 
   export NUM_THREADS=4
   ```
 
-
 ## License
 
 CactusDB is licensed under the Apache 2.0 License, the same as Velox. You can find a copy of the license [here](LICENSE).
 
 <!-- TODO -->
-
-

@@ -67,6 +67,12 @@ target_link_libraries(
   ml_functions
 )
 
+add_executable(model_loading_Test ModelLoadingTest.cpp)
+target_link_libraries(
+  model_loading_Test
+  ml_functions
+)
+
 add_executable(sparse_dense_conversion_test sparseDenseMatMulConversionTemplateTest.cpp)
 target_link_libraries(
   sparse_dense_conversion_test
