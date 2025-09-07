@@ -287,8 +287,9 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                 if (std::regex_search(
                         exprStr, matches, patternToMatchRawSource)) {
                   auto matchedDataSrc = matches[1].str();
-                  auto rewriteExpr = std::regex_replace(
-                      exprStr, patternToMatchRawSource, matchedDataSrc);
+                  // auto rewriteExpr = std::regex_replace(
+                      // exprStr, patternToMatchRawSource, matchedDataSrc);
+                  auto rewriteExpr = reformatNonTargetExprs(exprStr);
                   // Store the data source in the exprSets and the
                   // computation in the finalProjectExprSets
                   preComputeExprSets.insert(matchedDataSrc);
@@ -297,7 +298,6 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                   matMulAggKeySets.insert(matchedDataSrc);
                   finalProjectExprSets.insert(
                       rewriteExpr + " AS " + projectionsNames[exprIdx]);
-
                 } else {
                   LOG(ERROR)
                       << "Error: undefined-edge case detected: " << exprStr
@@ -412,7 +412,15 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                       .capturePlanNodeId(p2);
               // Re-create the plan from the source node of target rewrite
               // project node
-              rewritePlan.nestedLoopJoin(srcNode, nestedLoopProjectExprs);
+              // rewritePlan.nestedLoopJoin(srcNode, nestedLoopProjectExprs);
+              auto newPlan = exec::test::PlanBuilder(planNodeIdGenerator, pool_.get());
+              newPlan.setRoot(srcNode);
+              newPlan.nestedLoopJoin(
+                rewritePlan.planNode(),
+                nestedLoopProjectExprs
+              );
+              rewritePlan = newPlan;
+
               // Add the pre-computation expressions if they exist
               if (hasPrecomputeProject) {
                 rewritePlan.project(preComputeExprs);
@@ -425,7 +433,7 @@ class Mul2JoinAggHorizontalRewriteAction : public RewriteAction {
                   // .singleAggregation({"idx"}, {"array_cat(t, w_col) AS v"})
                   .partialAggregation(matMulAggKeys, matMulAggExprs)
                   .localPartition(matMulAggKeys)
-                  .intermediateAggregation()
+                  // .intermediateAggregation()
                   .finalAggregation()
                   .project(finalProjectExprs);
               cataLog.setIdAddressMap(

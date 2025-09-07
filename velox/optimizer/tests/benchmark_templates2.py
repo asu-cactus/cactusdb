@@ -205,7 +205,7 @@ if __name__ == "__main__":
     output_size = 3706
     for _ in tqdm(range(10000)):
         for query_template in list_query_templates:
-            params_base = f"-query_template={query_template} -workload=movielens -verbose=1 -num_repeat=1 -rewrite=true"
+            params_base = f"-query_template={query_template} -workload=tpcxai -verbose=1 -num_repeat=1 -rewrite=true"
 
             # Hard code num_tag = 1
             configure_model_params(query_template, input_size, output_size)
@@ -237,7 +237,7 @@ if __name__ == "__main__":
 
                 # process query table statistics
                 tableStats = read_file(
-                    "/home/velox/velox/optimizer/tests/tableStats_movielens.txt"
+                    "/home/velox/velox/optimizer/tests/tableStats_tpcxai.txt"
                 )
 
                 with open(tableStatsPath, "w") as file:
@@ -255,7 +255,7 @@ if __name__ == "__main__":
                         "num_user": -1,
                         "num_movie": 1,
                         "num_tag": 1,
-                        "workload": "movielens",
+                        "workload": "tpcxai",
                         "template": query_template,
                         "serializedPlanPath": serializedPlanPath,
                         "tableStatsPath": tableStatsPath,
