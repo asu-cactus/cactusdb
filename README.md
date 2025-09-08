@@ -4,7 +4,7 @@
 
 CactusDB is a UDF-centric database built on top of Meta's high-performance database engine, [Velox](https://github.com/facebookincubator/velox). It enables the co-optimization of SQL queries nested with model inference.
 
-- [CactusDB Early Release for SIGMOD Submission](#cactusdb-early-release-for-sigmod-submission)
+<!-- - [CactusDB Early Release for SIGMOD Submission](#cactusdb-early-release-for-sigmod-submission)
   - [Getting Started](#getting-started)
     - [Dependencies](#dependencies)
     - [Set-Up Through Docker](#set-up-through-docker)
@@ -19,7 +19,7 @@ CactusDB is a UDF-centric database built on top of Meta's high-performance datab
     - [Run CactusDB](#run-cactusdb)
   - [Development Guide](#development-guide)
   - [FAQ](#faq)
-  - [License](#license)
+  - [License](#license) -->
 
 ## Getting Started
 
@@ -142,9 +142,10 @@ For more detailed instructions, refer to the [baseline README](./db-ml/baseline/
 
 To run other workloads on CactusDB, please refer to the [**this file**](./velox/optimizer/tests/README.md).
 
-## Development Guide
+## Supported Functions/APIs
 
-Please check [this file](./DEVELOP_GUIDE.md) to see the supported ML kernels and how to implement the pipeline within CactusDB. Other functions/APIs can be checked through [**this link**](https://sigmod2026-a.github.io/cactusdb.github.io/)
+<!-- Please check [this file](./DEVELOP_GUIDE.md) to see the supported ML kernels and how to implement the pipeline within CactusDB. Other  -->
+Functions/APIs can be checked through [**this link**](https://sigmod2026-a.github.io/cactusdb.github.io/)
 
 ## FAQ
 

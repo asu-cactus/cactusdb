@@ -192,7 +192,7 @@ if __name__ == "__main__":
 
     # TODO: use time_stamp to name the result file after finalizing the code
 
-    result_df_name1 = "./generatedQueryPlan/result_optimizer_profile_{}.csv".format(
+    result_df_name1 = "./generatedQueryPlan/query_benchmark_results_{}.csv".format(
         time_stamp
     )
 
