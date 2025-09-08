@@ -1,0 +1,1 @@
+This folder contains the implementations of Query2Vec and Model2Vec, along with their training scripts and supporting Python utility functions.

@@ -118,7 +118,7 @@ export CD_VELOX_QUERY_OPT_TYPE=XXX
 
 ### Run Baselines
 
-The implementation of baselines is located under the [db-ml/baseline](./db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
+The implementation of baselines is located under the [db-ml/baseline](./db-ml/baseline/README.md). Ensure all dependencies are installed, including those listed in `requirements.txt`.
 
 Before running the baseline benchmarks for different workloads, load the data into the datastore by executing the following command:
 

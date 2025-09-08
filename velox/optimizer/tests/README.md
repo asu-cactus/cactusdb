@@ -1,6 +1,6 @@
 ## Model2Vec and Query2Vec
 
-The implementations of Model2Vec and Query2Vec are located in the [python](../python/) folder. Benchmarking with generated models and queries is required to prepare training data for both components.
+The implementations of Model2Vec and Query2Vec are located in the [python](../python/README.md) folder. Benchmarking with generated models and queries is required to prepare training data for both components.
 
 1. Run the following scripts to collect training data:
   - `benchmark_with_model_template.py` → for Model2Vec
