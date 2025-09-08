@@ -221,7 +221,7 @@ if __name__ == "__main__":
     create_path(output_dir)
     create_path(os.path.join(output_dir, "query"))
 
-    result_df_name1 = "./generatedQueryPlan/result_optimizer_profile_{}.csv".format(
+    result_df_name1 = "./generatedQueryPlan/model_benchmark_results_{}.csv".format(
         time_stamp
     )
 
