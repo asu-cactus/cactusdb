@@ -90,7 +90,7 @@ The following figures shows the query tree of Q1 in the MovieLens Recommendation
 
 ### Run on Baselines
 
-The implementation of baselines is located under the [db-ml/baseline](./db-ml/baseline/). Ensure all dependencies are installed, including those listed in `requirements.txt`.
+The implementation of baselines is located under the [db-ml/baseline](./db-ml/baseline/README.md). Ensure all dependencies are installed, including those listed in `requirements.txt`.
 
 ```bash
 cd db-ml/baseline
