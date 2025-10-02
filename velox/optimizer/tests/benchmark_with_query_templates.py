@@ -11,6 +11,7 @@ import shutil
 from tqdm.auto import tqdm
 import pdb
 
+
 def get_current_time(timeshift=0):
     current_time = time.localtime(time.time() + timeshift)
     return time.strftime("%Y-%m-%d-%H-%M-%S", current_time)
@@ -84,7 +85,7 @@ def sample_model_structure(num_layer, model_scale, input_size, output_size):
     assert num_layer >= 3
     num_hidden_layers = num_layer - 2  # excluding input and output layers
     model_structure = [input_size]
-   
+
     if model_scale == "small":
         layer_range = (100, 256)
     elif model_scale == "medium":
@@ -138,7 +139,10 @@ def write_model_structure_to_file(model_structure, table):
 def configure_model_params(query_template, input_size, output_size):
     if "template" in query_template:
         user_model_structure = sample_model_structure(
-            sample_model_num_layer(), sample_model_scale("user"), input_size, output_size
+            sample_model_num_layer(),
+            sample_model_scale("user"),
+            input_size,
+            output_size,
         )
         write_model_structure_to_file(user_model_structure, "user")
     else:
@@ -174,7 +178,6 @@ if __name__ == "__main__":
     if "ml-q1" in list_query_template:
         collect_movielens_stats()
 
-
     # random.shuffle(run_configs)
     result_df = None
 
@@ -189,97 +192,102 @@ if __name__ == "__main__":
 
     # TODO: use time_stamp to name the result file after finalizing the code
 
-    result_df_name1 = "./generatedQueryPlan/result_optimizer_profile_{}.csv".format(
+    result_df_name1 = "./generatedQueryPlan/query_benchmark_results_{}.csv".format(
         time_stamp
     )
-    result_df_name2 = "result_optimizer_profile.csv"
 
     # if os.path.exists(result_df_name):
     #   new_result_df_name = "result_optimizer_profile_{}.csv".format(get_current_time(-3600))
     #   os.rename(result_df_name, new_result_df_name)
-    query_template = "template7"  # hard code for now, can be changed later
+    # query_template = "template7"  # hard code for now, can be changed later
+    list_query_templates = ["template" + str(i) for i in range(4, 11)]
     input_size = 3
     output_size = 3706
-    for _ in tqdm(range(100)):
+    for _ in tqdm(range(10000)):
+        for query_template in list_query_templates:
+            params_base = f"-query_template={query_template} -workload=movielens -verbose=1 -num_repeat=1 -rewrite=true"
 
-        params_base = f"-query_template={query_template} -workload=movielens -verbose=1 -num_repeat=1"
+            # Hard code num_tag = 1
+            configure_model_params(query_template, input_size, output_size)
 
-
-        # Hard code num_tag = 1
-        configure_model_params(query_template, input_size, output_size)
-
-
-        uuid_str = str(uuid.uuid4())
-        serializedPlanPath = os.path.join(
-            output_dir, "query", "{}.json".format(uuid_str)
-        )
-        tableStatsPath = os.path.join(output_dir, "stats", "{}.txt".format(uuid_str))
-
-        try:
-            print("[DEBUG] params: ", params_base)
-            latency = run_cpp_program("/", params_base)
-
-            # generate uuid for the current one
-
-            # process serialized plan
-            serializedPlan = read_file(
-                "/home/velox/velox/optimizer/tests/serializedQueryPlan.json"
+            uuid_str = str(uuid.uuid4())
+            serializedPlanPath = os.path.join(
+                output_dir, "query", "{}.json".format(uuid_str)
             )
-            serializedPlan = json.loads(serializedPlan)
-            remove_type_attribute(serializedPlan)
-            serializedPlan = json.dumps(serializedPlan)
-
-            with open(serializedPlanPath, "w") as file:
-                file.write(serializedPlan)
-
-            # process query table statistics
-            tableStats = read_file("/home/velox/velox/optimizer/tests/tableStats.txt")
-
-            with open(tableStatsPath, "w") as file:
-                file.write(tableStats)
-
-            # read execution time
-            executionTime = float(
-                read_file("/home/velox/velox/optimizer/tests/executionLatency.txt")
+            tableStatsPath = os.path.join(
+                output_dir, "stats", "{}.txt".format(uuid_str)
             )
-            os.remove("/home/velox/velox/optimizer/tests/executionLatency.txt")
 
-            # print(executionTime)
-            df = pd.DataFrame(
-                {
-                    "num_user": -1,
-                    "num_movie": 1,
-                    "num_tag": 1,
-                    "serializedPlanPath": serializedPlanPath,
-                    "tableStatsPath": tableStatsPath,
-                    "executionTime": executionTime,
-                    "params": params_base,
-                    "error": "",
-                },
-                index=[0],
-            )
-        except Exception as e:
-            print("Error occurred: ", e)
-            df = pd.DataFrame(
-                {
-                    "num_user": 1,
-                    "num_movie": 1,
-                    "num_tag": 1,
-                    "serializedPlanPath": serializedPlanPath,
-                    "tableStatsPath": tableStatsPath,
-                    "executionTime": "",
-                    "params": params_base,
-                    "error": e,
-                },
-                index=[0],
-            )
-        if result_df is None:
-            result_df = df
-        else:
-            result_df = pd.concat([result_df, df], axis=0)
+            try:
+                print("[DEBUG] params: ", params_base)
+                latency = run_cpp_program("/", params_base)
 
-        result_df.to_csv(result_df_name1, index=False, sep="|")
-        result_df.to_csv(result_df_name2, index=False, sep="|")
+                # generate uuid for the current one
+
+                # process serialized plan
+                serializedPlan = read_file(
+                    "/home/velox/velox/optimizer/tests/serializedQueryPlan.json"
+                )
+                serializedPlan = json.loads(serializedPlan)
+                remove_type_attribute(serializedPlan)
+                serializedPlan = json.dumps(serializedPlan)
+
+                with open(serializedPlanPath, "w") as file:
+                    file.write(serializedPlan)
+
+                # process query table statistics
+                tableStats = read_file(
+                    "/home/velox/velox/optimizer/tests/tableStats_movielens.txt"
+                )
+
+                with open(tableStatsPath, "w") as file:
+                    file.write(tableStats)
+
+                # read execution time
+                executionTime = float(
+                    read_file("/home/velox/velox/optimizer/tests/executionLatency.txt")
+                )
+                os.remove("/home/velox/velox/optimizer/tests/executionLatency.txt")
+
+                # print(executionTime)
+                df = pd.DataFrame(
+                    {
+                        "num_user": -1,
+                        "num_movie": 1,
+                        "num_tag": 1,
+                        "workload": "movielens",
+                        "template": query_template,
+                        "serializedPlanPath": serializedPlanPath,
+                        "tableStatsPath": tableStatsPath,
+                        "executionTime": executionTime,
+                        "params": params_base,
+                        "error": "",
+                    },
+                    index=[0],
+                )
+            except Exception as e:
+                print("Error occurred: ", e)
+                df = pd.DataFrame(
+                    {
+                        "num_user": 1,
+                        "num_movie": 1,
+                        "num_tag": 1,
+                        "workload": "movielens",
+                        "template": query_template,
+                        "serializedPlanPath": serializedPlanPath,
+                        "tableStatsPath": tableStatsPath,
+                        "executionTime": "",
+                        "params": params_base,
+                        "error": e,
+                    },
+                    index=[0],
+                )
+            if result_df is None:
+                result_df = df
+            else:
+                result_df = pd.concat([result_df, df], axis=0)
+
+            result_df.to_csv(result_df_name1, index=False, sep="|")
 
     pd.set_option("display.max_rows", None)
     pd.set_option("display.max_columns", None)
