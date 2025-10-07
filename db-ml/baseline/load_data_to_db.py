@@ -16,12 +16,12 @@ import concurrent.futures
 import multiprocessing
 
 
-def load_movielens_final_to_datastore():
+def load_movielens_recommendation_to_datastore():
     conn_string = utils.get_postgres_connection_config()
     db = create_engine(conn_string)
     conn = db.connect()
 
-    data_dir = "../../resources/data/movielens/final"
+    data_dir = "/home/velox/resources/data/movielens/final"
     df_movie = pq.read_table(os.path.join(data_dir, "movie.parquet")).to_pandas()
     a = LabelEncoder().fit(df_movie["m_movie_id"])
     b = a.transform(df_movie["m_movie_id"])
@@ -32,6 +32,14 @@ def load_movielens_final_to_datastore():
     df_movie_tag = pq.read_table(
         os.path.join(data_dir, "movie_tag_relevance.parquet")
     ).to_pandas()
+
+    utils.execute_sql_query_via_psycopg2(
+        """
+        DROP TABLE IF EXISTS movielens_user CASCADE;
+        DROP TABLE IF EXISTS movielens_movie CASCADE;
+        DROP TABLE IF EXISTS movielens_rating CASCADE;
+
+    """)
 
     df_user.to_sql("movielens_user", db, index=False, if_exists="replace")
     df_movie.to_sql("movielens_movie", db, index=False, if_exists="replace")
@@ -45,7 +53,7 @@ def load_movielens_final_to_datastore():
     df_movie_tag_name = "movielens_movie_tag"
     db_connection = utils.get_psycopg2_connection()
     cursor = db_connection.cursor()
-    cursor.execute("DROP TABLE IF EXISTS {}".format(df_movie_tag_name))
+    cursor.execute("DROP TABLE IF EXISTS {} CASCADE".format(df_movie_tag_name))
     cursor.execute(
         """
                 CREATE TABLE IF NOT EXISTS {} (
@@ -57,6 +65,7 @@ def load_movielens_final_to_datastore():
     )
     db_connection.commit()
 
+    os.makedirs("./cache", exist_ok=True)
     df_movie_tag.to_csv("./cache/ml-movie-tag.csv", index=False, header=True)
     data_file_abs_path = os.path.abspath("./cache/ml-movie-tag.csv")
 
@@ -99,32 +108,134 @@ def load_movielens_final_to_datastore():
 
     movie_path_in_hdfs = os.path.join(data_path, "movie")
     utils.load_csv_to_hdfs(
-        "../../resources/data/movielens/final/movie.parquet",
+        "/home/velox/resources/data/movielens/final/movie.parquet",
         movie_path_in_hdfs,
         overwrite=True,
     )
     user_path_in_hdfs = os.path.join(data_path, "user")
     utils.load_csv_to_hdfs(
-        "../../resources/data/movielens/final/user.parquet",
+        "/home/velox/resources/data/movielens/final/user.parquet",
         user_path_in_hdfs,
         overwrite=True,
     )
     rating_path_in_hdfs = os.path.join(data_path, "rating")
     utils.load_csv_to_hdfs(
-        "../../resources/data/movielens/final/rating.parquet",
+        "/home/velox/resources/data/movielens/final/rating.parquet",
         rating_path_in_hdfs,
         overwrite=True,
     )
 
     movie_tag_path_in_hdfs = os.path.join(data_path, "movie_tag")
     utils.load_csv_to_hdfs(
-        "../../resources/data/movielens/final/movie_tag_relevance.parquet", 
-        movie_tag_path_in_hdfs, 
-        overwrite=True
+        "/home/velox/resources/data/movielens/final/movie_tag_relevance.parquet",
+        movie_tag_path_in_hdfs,
+        overwrite=True,
     )
 
     print("[INFO] load movielens dataset to hadoop success!")
 
+
+def load_tpcxai_sf1_final_to_datastore():
+    # table needs to be loaded into the database
+    # order, lineitem, product, financial_account, financial_transactions
+    conn_string = utils.get_postgres_connection_config()
+    db = create_engine(conn_string)
+    conn = db.connect()
+
+    data_dir = "/home/velox/resources/data/tpcxai_sf1/final"
+    parquet_files_to_load = [
+        "order",
+        "lineitem",
+        "product",
+        "financial_account",
+        "financial_transactions",
+        "store_dept",
+        "product_rating",
+        "customer",
+        "order_returns",
+        "review",
+    ]
+
+    conn_params = utils.get_connectorx_configuration()
+
+    for file in parquet_files_to_load:
+        for dataset in ["training", "serving"]:
+            if dataset == "training" and file == "store_dept":
+                continue
+            df_parquet_path = os.path.join(data_dir, dataset, "{}.parquet".format(file))
+            table_name = "tpcxai_{}_{}".format(file, dataset)
+            utils.load_parquet_to_postgres(df_parquet_path, table_name, conn_params)
+
+    print("[INFO] load movielens dataset to postgres success!")
+
+    # check hdfs path exist
+    data_path = "/user/velox/data/tpcxai"
+    if not utils.check_hdfs_dir_exist(data_path):
+        utils.create_hdfs_dir(data_path)
+
+    for file in parquet_files_to_load:
+        for dataset in ["training", "serving"]:
+            path_in_hdfs = os.path.join(data_path, "{}_{}".format(file, dataset))
+            utils.load_csv_to_hdfs(
+                "/home/velox/resources/data/tpcxai_sf1/final/{}/{}.parquet".format(
+                    dataset, file
+                ),
+                path_in_hdfs,
+                overwrite=True,
+            )
+
+    print("[INFO] load movielens dataset to hadoop success!")
+
+def load_tpcxai_sf10_final_to_datastore():
+    # table needs to be loaded into the database
+    # order, lineitem, product, financial_account, financial_transactions
+    conn_string = utils.get_postgres_connection_config()
+    db = create_engine(conn_string)
+    conn = db.connect()
+
+    data_dir = "/home/velox/resources/data/tpcxai_sf10/final"
+    parquet_files_to_load = [
+        # "order",
+        # "lineitem",
+        # "product",
+        # "financial_account",
+        # "financial_transactions",
+        # "store_dept",
+        # "product_rating",
+        "customer",
+        "order_returns",
+        "review",
+    ]
+
+    conn_params = utils.get_connectorx_configuration()
+
+    for file in parquet_files_to_load:
+        for dataset in ["training", "serving"]:
+            if dataset == "training" and file == "store_dept":
+                continue
+            df_parquet_path = os.path.join(data_dir, dataset, "{}.parquet".format(file))
+            table_name = "tpcxai_{}_{}".format(file, dataset)
+            utils.load_parquet_to_postgres(df_parquet_path, table_name, conn_params)
+
+    print("[INFO] load movielens dataset to postgres success!")
+
+    # check hdfs path exist
+    data_path = "/user/velox/data/tpcxai"
+    if not utils.check_hdfs_dir_exist(data_path):
+        utils.create_hdfs_dir(data_path)
+
+    for file in parquet_files_to_load:
+        for dataset in ["training", "serving"]:
+            path_in_hdfs = os.path.join(data_path, "{}_{}".format(file, dataset))
+            utils.load_csv_to_hdfs(
+                "/home/velox/resources/data/tpcxai_sf10/final/{}/{}.parquet".format(
+                    dataset, file
+                ),
+                path_in_hdfs,
+                overwrite=True,
+            )
+
+    print("[INFO] load movielens dataset to hadoop success!")
 
 def load_movielens_to_postgres():
     conn_string = utils.get_postgres_connection_config()
@@ -339,16 +450,14 @@ def load_llm_recommendation_data_to_postgres(num_user_data, num_movie_data):
     db = create_engine(conn_string)
     conn = db.connect()
 
-    movie_data = pd.read_csv("../../data/mr_movie_metadata.csv")
+    movie_data = pd.read_csv("/home/velox/resources/data/llm/mr_movie_metadata.csv")
     movie_data = utils.change_df_dtypes(movie_data).iloc[:num_movie_data]
 
-    user_data = pd.read_csv("../../data/mr_user_genre_ratings.csv")
+    user_data = pd.read_csv("/home/velox/resources/data/llm/mr_user_genre_ratings.csv")
     user_data = utils.change_df_dtypes(user_data).iloc[:num_user_data]
 
     user_data.to_sql("llm_recommend_user", db, index=False, if_exists="replace")
     movie_data.to_sql("llm_recommend_movie", db, index=False, if_exists="replace")
-
-    # data = utils.convert_df_int64_to_int32(data)
 
     print("[INFO] load llm recommendation data to postgres success!")
 
@@ -367,16 +476,24 @@ def main():
 
     args = parser.parse_args()
     dataset = args.dataset
+    utils.setup_postgres_for_evadb()
 
     if dataset == "all":
-        load_movielens_to_postgres()
-        load_ffnn_data_to_postgres()
+        # load_movielens_to_postgres()
+        # load_ffnn_data_to_postgres()
+        load_movielens_recommendation_to_datastore()
+        load_tpcxai_sf1_final_to_datastore()
+        load_tpcxai_sf10_final_to_datastore()
     elif dataset == "movielens":
         load_movielens_to_postgres()
     elif dataset == "ffnn":
         load_ffnn_data_to_postgres()
-    elif dataset == "movielens_final":
-        load_movielens_final_to_datastore()
+    elif dataset == "movielens_recommendation":
+        load_movielens_recommendation_to_datastore()
+    elif dataset == "tpcxai-sf1":
+        load_tpcxai_sf1_final_to_datastore()
+    elif dataset == "tpcxai-sf10":
+        load_tpcxai_sf10_final_to_datastore()
 
 
 if __name__ == "__main__":

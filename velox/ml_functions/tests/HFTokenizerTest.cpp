@@ -1,12 +1,25 @@
-// TODO: Resolve dependencies
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #define EIGEN_USE_BLAS
 
 #include <folly/init/Init.h>
-#include <torch/torch.h>
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/ml_functions/HuggingFaceTokenizer.h"
+#include "velox/ml_functions/functions.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
 
@@ -78,7 +91,8 @@ void HFTokenizerTest::testHuggingFaceTokenizer() {
   sentences.push_back("Sometimes I find the show interesting.");
   sentences.push_back("The new design is awful!");
   sentences.push_back("I dislike horror movies.");
-  sentences.push_back("Having to wait two months for the next series to come out is frustrating.");
+  sentences.push_back(
+      "Having to wait two months for the next series to come out is frustrating.");
   auto sentenceFlatVector = maker.flatVector<std::string>(sentences);
   auto inputRowVector = maker.rowVector({"in1"}, {sentenceFlatVector});
 
@@ -89,7 +103,8 @@ void HFTokenizerTest::testHuggingFaceTokenizer() {
   exec::registerVectorFunction(
       "hf_tokenizer",
       HuggingFaceTokenizer::signatures(),
-      std::make_unique<HuggingFaceTokenizer>("/home/velox/resources/model/tokenizer/roberta.json"));
+      std::make_unique<HuggingFaceTokenizer>(
+          "/home/velox/resources/model/tokenizer/roberta.json"));
 
   auto myPlan = exec::test::PlanBuilder(pool_.get())
                     .values({inputRowVector})

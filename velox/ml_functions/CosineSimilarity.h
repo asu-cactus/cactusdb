@@ -1,13 +1,30 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
 #include <Eigen/Dense>
 #include <cmath>
 #include <iostream>
+#include "BaseFunction.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/vector/tests/utils/VectorTestBase.h"
-#include "velox/functions/lib/RowsTranslationUtil.h"
 #include "velox/functions/lib/LambdaFunctionUtil.h"
+#include "velox/functions/lib/RowsTranslationUtil.h"
+#include "velox/vector/tests/utils/VectorMaker.h"
+#include "velox/vector/tests/utils/VectorTestBase.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::test;
@@ -44,11 +61,15 @@ class CosineSimilarity : public MLFunction {
 
     exec::LocalDecodedVector leftHolder(context, *left, rows);
     auto decodedLeftArray = leftHolder.get();
+    auto leftInputOffset =
+        decodedLeftArray->base()->as<ArrayVector>()->rawOffsets();
     auto baseLeftArray =
         decodedLeftArray->base()->as<ArrayVector>()->elements();
 
     exec::LocalDecodedVector rightHolder(context, *right, rows);
     auto decodedRightArray = rightHolder.get();
+    auto rightInputOffset =
+        decodedRightArray->base()->as<ArrayVector>()->rawOffsets();
     auto baseRightArray =
         decodedRightArray->base()->as<ArrayVector>()->elements();
     float* input1Values = baseLeftArray->values()->asMutable<float>();
@@ -56,19 +77,16 @@ class CosineSimilarity : public MLFunction {
 
     int numInput = rows.size();
 
-    Eigen::Map<
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        input1Matrix(input1Values, numInput, dims[0]);
-    Eigen::Map<
-        Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>
-        input2Matrix(input2Values, numInput, dims[0]);
-
-    std::vector<float> resultVector;
+    std::vector<float> resultVector(numInput);
 
     rows.applyToSelected([&](vector_size_t i) {
       // Map the input values into Eigen vectors
-      Eigen::Map<Eigen::VectorXf> vec1(input1Values + i * dims[0], dims[0]);
-      Eigen::Map<Eigen::VectorXf> vec2(input2Values + i * dims[0], dims[0]);
+      auto leftIndexInRaw = decodedLeftArray->index(i);
+      auto rightIndexInRaw = decodedRightArray->index(i);
+      Eigen::Map<Eigen::VectorXf> vec1(
+          input1Values + leftInputOffset[leftIndexInRaw], dims[0]);
+      Eigen::Map<Eigen::VectorXf> vec2(
+          input2Values + rightInputOffset[rightIndexInRaw], dims[0]);
 
       // Compute cosine similarity
       float dotProduct = vec1.dot(vec2);
@@ -77,8 +95,7 @@ class CosineSimilarity : public MLFunction {
       float cosineSim = dotProduct / (norm1 * norm2 + 1e-8);
 
       // Store the result
-      // resultVector.push_back(1.0);
-      resultVector.push_back(cosineSim);
+      resultVector[i] = cosineSim;
     });
 
     VectorMaker maker{context.pool()};

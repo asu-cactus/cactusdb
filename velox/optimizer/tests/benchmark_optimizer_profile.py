@@ -11,11 +11,14 @@ import shutil
 from tqdm.auto import tqdm
 
 
-def get_current_time():
-    return time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
+def get_current_time(timeshift=0):
+    current_time = time.localtime(time.time() + timeshift)
+    return time.strftime("%Y-%m-%d-%H-%M-%S", current_time)
 
 
-def create_path(path):
+def create_path(path, overwrite=False):
+    if os.path.exists(path) and overwrite:
+        shutil.rmtree(path)
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -28,7 +31,25 @@ def run_cpp_program(path, params):
         )
     ]
     result = subprocess.run(
-        execution_command, stdout=subprocess.PIPE, shell=True
+        execution_command,
+        stdout=subprocess.PIPE,
+        shell=True,
+        timeout=60 * 15,  # 15 minutes
+    ).stdout
+
+    # print("result", result)
+    return result
+
+
+def collect_movielens_stats():
+    execution_command = [
+        "/home/velox/_build/release/velox/optimizer/tests/reusable_mcts_test -mode=collect_ml_stats"
+    ]
+    result = subprocess.run(
+        execution_command,
+        stdout=subprocess.PIPE,
+        shell=True,
+        timeout=60 * 30,  # 30 minutes
     ).stdout
 
     # print("result", result)
@@ -72,7 +93,7 @@ def sample_model_structure(num_layer, model_scale):
         middle_layer_range = (512, 1024)
         output_layer_range = (3, 10)
     elif model_scale == "large":
-        input_layer_range = (50000, 100000)
+        input_layer_range = (1000, 10000)
         middle_layer_range = (512, 2048)
         output_layer_range = (10, 100)
 
@@ -154,15 +175,34 @@ def configure_model_params(query_template, params_base, num_tag):
 
 
 if __name__ == "__main__":
-    list_num_user = [100, 500, 1000]
-    list_num_movie = [100, 500, 1000]
-    list_num_tag = [25, 50, 100, 1000, 5000]
+    os.environ["CD_PROFILE_W_FILTER"] = "True"
+    # setting for synthetic data
+    # list_num_user = [100, 500, 1000]
+    # list_num_movie = [100, 500, 1000]
+    list_num_user = np.arange(100, 8000, 100)
+    list_num_user = np.random.choice(list_num_user, 20, replace=True)
+    list_num_movie = np.arange(100, 8000, 100)
+    list_num_movie = np.random.choice(list_num_movie, 20, replace=True)
     list_query_template = ["user", "movie", "movie_user", "movie_user_tag"]
+    list_num_tag = np.arange(50, 5000, 50)
+    list_num_tag = np.random.choice(list_num_tag, 5, replace=True)
     # list_num_user = [100]
     # list_num_movie = [50]
     # list_num_tag = [25]
 
-    num_repeat = 4
+    # setting for movielens dataset
+    # list_num_user = np.arange(100, 2000, 100)
+    # list_num_user = np.random.choice(list_num_user, 10, replace=True)
+    # list_num_movie = np.arange(100, 2000, 100)
+    # list_num_movie = np.random.choice(list_num_movie, 1, replace=True)
+    # list_query_template = ["ml-q1", "ml-q2", "ml-q3"]
+    # list_num_tag = np.arange(50, 5000, 50)
+    # list_num_tag = np.random.choice(list_num_tag, 5, replace=True)
+
+    if "ml-q1" in list_query_template:
+        collect_movielens_stats()
+
+    num_repeat = 1
     run_configs = list(
         itertools.product(
             list_query_template,
@@ -171,11 +211,38 @@ if __name__ == "__main__":
             list_num_tag,
         )
     )
+
+    # Generate permutations based on the query template
+    effective_run_configs = []
+    for query_template in list_query_template:
+        if query_template == "user":
+            for num_user in list_num_user:
+                effective_run_configs.append((query_template, num_user, 1, 1))
+        elif query_template == "movie":
+            for num_movie in list_num_movie:
+                effective_run_configs.append((query_template, 1, num_movie, 1))
+        elif query_template == "movie_user":
+            for num_user in list_num_user:
+                for num_movie in list_num_movie:
+                    effective_run_configs.append(
+                        (query_template, num_user, num_movie, 1)
+                    )
+        elif query_template == "movie_user_tag":
+            for num_user in list_num_user:
+                for num_movie in list_num_movie:
+                    for num_tag in list_num_tag:
+                        effective_run_configs.append(
+                            (query_template, num_user, num_movie, num_tag)
+                        )
+
+    run_configs = effective_run_configs
+
+    # random.shuffle(run_configs)
     result_df = None
 
     # TODO: clean up for development
-    if os.path.exists("./generatedQueryPlan"):
-      shutil.rmtree("./generatedQueryPlan")
+    # if os.path.exists("./generatedQueryPlan"):
+    #   shutil.rmtree("./generatedQueryPlan")
     time_stamp = get_current_time()
     output_dir = os.path.join("generatedQueryPlan", time_stamp)
     create_path(output_dir)
@@ -184,8 +251,13 @@ if __name__ == "__main__":
 
     # TODO: use time_stamp to name the result file after finalizing the code
 
-    # result_df_name = "result_optimizer_profile_{}.csv".format(time_stamp)
-    result_df_name = "result_optimizer_profile.csv"
+    result_df_name1 = "./generatedQueryPlan/result_optimizer_profile_v1_{}.csv".format(
+        time_stamp
+    )
+
+    # if os.path.exists(result_df_name):
+    #   new_result_df_name = "result_optimizer_profile_{}.csv".format(get_current_time(-3600))
+    #   os.rename(result_df_name, new_result_df_name)
 
     for config in tqdm(run_configs):
         query_template, num_user, num_movie, num_tag = config
@@ -195,13 +267,17 @@ if __name__ == "__main__":
         )
 
         params_base = configure_model_params(query_template, params_base, num_tag)
+        uuid_str = str(uuid.uuid4())
+        serializedPlanPath = os.path.join(
+            output_dir, "query", "{}.json".format(uuid_str)
+        )
+        tableStatsPath = os.path.join(output_dir, "stats", "{}.txt".format(uuid_str))
 
         try:
             print("[DEBUG] params: ", params_base)
             latency = run_cpp_program("/", params_base)
 
             # generate uuid for the current one
-            uuid_str = str(uuid.uuid4())
 
             # process serialized plan
             serializedPlan = read_file(
@@ -210,17 +286,13 @@ if __name__ == "__main__":
             serializedPlan = json.loads(serializedPlan)
             remove_type_attribute(serializedPlan)
             serializedPlan = json.dumps(serializedPlan)
-            serializedPlanPath = os.path.join(
-                output_dir, "query", "{}.json".format(uuid_str)
-            )
+
             with open(serializedPlanPath, "w") as file:
                 file.write(serializedPlan)
 
             # process query table statistics
             tableStats = read_file("/home/velox/velox/optimizer/tests/tableStats.txt")
-            tableStatsPath = os.path.join(
-                output_dir, "stats", "{}.txt".format(uuid_str)
-            )
+
             with open(tableStatsPath, "w") as file:
                 file.write(tableStats)
 
@@ -228,6 +300,8 @@ if __name__ == "__main__":
             executionTime = float(
                 read_file("/home/velox/velox/optimizer/tests/executionLatency.txt")
             )
+            os.remove("/home/velox/velox/optimizer/tests/executionLatency.txt")
+
             # print(executionTime)
             df = pd.DataFrame(
                 {
@@ -237,6 +311,7 @@ if __name__ == "__main__":
                     "serializedPlanPath": serializedPlanPath,
                     "tableStatsPath": tableStatsPath,
                     "executionTime": executionTime,
+                    "params": params_base,
                     "error": "",
                 },
                 index=[0],
@@ -247,9 +322,10 @@ if __name__ == "__main__":
                     "num_user": num_user,
                     "num_movie": num_movie,
                     "num_tag": num_tag,
-                    "serializedPlanPath": "",
-                    "tableStatsPath": "",
+                    "serializedPlanPath": serializedPlanPath,
+                    "tableStatsPath": tableStatsPath,
                     "executionTime": "",
+                    "params": params_base,
                     "error": e,
                 },
                 index=[0],
@@ -259,7 +335,7 @@ if __name__ == "__main__":
         else:
             result_df = pd.concat([result_df, df], axis=0)
 
-        result_df.to_csv(result_df_name, index=False, sep="|")
+        result_df.to_csv(result_df_name1, index=False, sep="|")
 
     pd.set_option("display.max_rows", None)
     pd.set_option("display.max_columns", None)

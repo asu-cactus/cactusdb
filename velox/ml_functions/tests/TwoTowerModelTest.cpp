@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <folly/init/Init.h>
 #include <torch/torch.h>
 #include <random>
@@ -10,14 +25,8 @@
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/ml_functions/BatchNorm.h"
-#include "velox/ml_functions/Concat.h"
-#include "velox/ml_functions/CosineSimilarity.h"
-#include "velox/ml_functions/Dropout.h"
-#include "velox/ml_functions/Embedding.h"
-#include "velox/ml_functions/Encoder.h"
-#include "velox/ml_functions/SequencePooling.h"
 #include "velox/ml_functions/UtilFunction.h"
+#include "velox/ml_functions/functions.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
 #include "velox/parse/TypeResolver.h"
 
@@ -46,7 +55,8 @@ class TowTowerModelTest : public HiveConnectorTestBase {
     auto hiveConnector =
         connector::getConnectorFactory(
             connector::hive::HiveConnectorFactory::kHiveConnectorName)
-            ->newConnector(kHiveConnectorId, std::make_shared<core::MemConfig>());
+            ->newConnector(
+                kHiveConnectorId, std::make_shared<core::MemConfig>());
     connector::registerConnector(hiveConnector);
 
     // SetUp();
@@ -87,7 +97,8 @@ class TowTowerModelTest : public HiveConnectorTestBase {
   std::shared_ptr<core::QueryCtx> queryCtx_{
       std::make_shared<core::QueryCtx>(executor_.get())};
 
-  std::shared_ptr<memory::MemoryPool> pool_{memory::MemoryManager::getInstance()->addLeafPool()};
+  std::shared_ptr<memory::MemoryPool> pool_{
+      memory::MemoryManager::getInstance()->addLeafPool()};
   VectorMaker maker{pool_.get()};
 };
 
@@ -403,7 +414,7 @@ void TowTowerModelTest::registerFunction() {
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -433,7 +444,7 @@ void TowTowerModelTest::registerFunction() {
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -613,7 +624,7 @@ void TowTowerModelTest::testStringEncoder() {
                        "zipcode",
                        "title",
                        "genres"})
-                //   .limit(0, numSamples, false)
+                  //   .limit(0, numSamples, false)
                   .planNode();
 
   std::shared_ptr<folly::Executor> executor =
@@ -918,7 +929,7 @@ void TowTowerModelTest::testDataProcessing() {
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -948,7 +959,7 @@ void TowTowerModelTest::testDataProcessing() {
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -1207,7 +1218,7 @@ void TowTowerModelTest::testDataProcessing() {
                "zipcode",
                "title",
                "genres"})
-        //   .limit(0, numSamples, false)
+          //   .limit(0, numSamples, false)
           .planNode();
 
   std::shared_ptr<folly::Executor> executor =
@@ -1739,7 +1750,7 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
   // movid_id
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -1769,7 +1780,7 @@ void TowTowerModelTest::testTwoTowerModelInference() {
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -2413,7 +2424,7 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -2443,7 +2454,7 @@ void TowTowerModelTest::testEndtoEndPipeline(int numSamples) {
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -3155,7 +3166,7 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
           batchNorm3BiasVector->elements()->values()->asMutable<float>(),
           128));
 
-  int movieIdNumEmbedding = 3668;
+  int movieIdNumEmbedding = 3706;
   std::vector<std::vector<float>> movieIdEmbeddingWeights =
       randomGenerator.genFloat2dVector(movieIdNumEmbedding, embeddingDims);
   auto movieIdEmbeddingWeightsVector =
@@ -3185,7 +3196,7 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
           genderEmbeddingWeightsVector->elements()
               ->values()
               ->asMutable<float>(),
-          genderNumEmbedding,
+          genresNumEmbedding,
           embeddingDims));
 
   exec::registerVectorFunction(
@@ -3381,8 +3392,6 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
 
   boost::interprocess::interprocess_semaphore semaphore(numSplit);
 
-
-
   std::vector<int> userIds = randomGenerator.gen1DInt(numSamples, 1, 6040);
   auto userIdFlatVector = maker.flatVector<int>(userIds, INTEGER());
   auto userRowVector = maker.rowVector({"u_user_id"}, {userIdFlatVector});
@@ -3507,7 +3516,6 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
   waitForFinishedDrivers(taskUser);
   waitForFinishedDrivers(taskMovie);
 
-
   std::chrono::steady_clock::time_point preprocessEnd =
       std::chrono::steady_clock::now();
 
@@ -3551,13 +3559,10 @@ void TowTowerModelTest::testEndtoEndPipelineMultiThreading(
           .project({"cosine_similarity(user_nn_out, movie_nn_out)"})
           .planNode();
 
-
   auto finalScore = exec::test::AssertQueryBuilder(finalInferencePlan)
                         .copyResults(pool_.get());
 
-
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-
 
   std::cout << "Preprocess Time (sec) = "
             << (std::chrono::duration_cast<std::chrono::microseconds>(

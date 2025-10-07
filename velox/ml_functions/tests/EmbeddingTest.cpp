@@ -1,23 +1,26 @@
-// TODO: Resolve dependencies
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #define EIGEN_USE_BLAS
 
 #include <folly/init/Init.h>
-#include <torch/torch.h>
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
-#include "velox/ml_functions/BatchNorm.h"
-#include "velox/ml_functions/Concat.h"
-#include "velox/ml_functions/CosineSimilarity.h"
-#include "velox/ml_functions/DotProduct.h"
-#include "velox/ml_functions/Dropout.h"
-#include "velox/ml_functions/Embedding.h"
-#include "velox/ml_functions/Encoder.h"
-#include "velox/ml_functions/HuggingFaceServerless.h"
-#include "velox/ml_functions/PositionEncoding.h"
-#include "velox/ml_functions/SequencePooling.h"
+#include "velox/ml_functions/functions.h"
 #include "velox/ml_functions/tests/MLTestUtility.h"
-#include "velox/optimizer/Helper.h"
 #include "velox/parse/TypeResolver.h"
 
 using namespace facebook::velox;
@@ -26,7 +29,30 @@ using namespace facebook::velox::exec;
 using namespace facebook::velox::exec::test;
 using namespace facebook::velox::core;
 
-// Utility function to generate random float/int values
+std::vector<facebook::velox::RowVectorPtr> splitRowVectorIntoBatches(
+    facebook::velox::RowVectorPtr inputVector,
+    size_t batchSize) {
+  // Total number of rows in the input RowVector
+  size_t totalRows = inputVector->size();
+
+  // Result vector to hold all the batches
+  std::vector<RowVectorPtr> batches;
+
+  // Split the input RowVector into batches
+  for (size_t start = 0; start < totalRows; start += batchSize) {
+    // Calculate the size of the current batch
+    size_t currentBatchSize = std::min(batchSize, totalRows - start);
+
+    // Slice the RowVector directly
+    RowVectorPtr batch = std::dynamic_pointer_cast<RowVector>(
+        inputVector->slice(start, currentBatchSize));
+
+    // Add the batch to the result
+    batches.push_back(batch);
+  }
+
+  return batches;
+}
 
 class EmbeddingTest : public HiveConnectorTestBase {
  public:
@@ -508,14 +534,15 @@ void EmbeddingTest::testCosineSimilarity() {
   auto indicesArrayVector3 = maker.flatVector<int>({0, 1, 2, 3, 4});
 
   auto inputRowVector = maker.rowVector(
-      {"in1", "in2", "id"}, {indicesArrayVector1, indicesArrayVector2, indicesArrayVector3});
+      {"in1", "in2", "id"},
+      {indicesArrayVector1, indicesArrayVector2, indicesArrayVector3});
 
-  auto inputRowVectorBatches = optimization::splitRowVectorIntoBatches(inputRowVector, 2);
-  std::cout << "[INFO] Number of Batches: " << inputRowVectorBatches.size() << std::endl;
+  auto inputRowVectorBatches = splitRowVectorIntoBatches(inputRowVector, 2);
+  std::cout << "[INFO] Number of Batches: " << inputRowVectorBatches.size()
+            << std::endl;
 
   // Print input
-  std::cout << "[INFO] input: \n"
-            << inputRowVector->toString() << std::endl;
+  std::cout << "[INFO] input: \n" << inputRowVector->toString() << std::endl;
 
   exec::registerVectorFunction(
       "cosine_similarity",
@@ -630,7 +657,8 @@ void EmbeddingTest::testHuggingFace() {
   // Add negative sentences
   sentences.push_back("The new design is awful!");
   sentences.push_back("I dislike horror movies.");
-  sentences.push_back("Having to wait two months for the next series to come out is frustrating.");
+  sentences.push_back(
+      "Having to wait two months for the next series to come out is frustrating.");
   auto sentenceFlatVector = maker.flatVector<std::string>(sentences);
   auto inputRowVector = maker.rowVector({"in1"}, {sentenceFlatVector});
 
@@ -644,7 +672,19 @@ void EmbeddingTest::testHuggingFace() {
   exec::registerVectorFunction(
       "hf_embedding_extractor",
       HuggingFaceServerless::signatures(),
-      std::make_unique<HuggingFaceServerless>(textEmbeddingExtractionAPI, HuggingFaceTaskType::TEXT_FEATURE_EXTRACTION));
+      std::make_unique<HuggingFaceServerless>(
+          textEmbeddingExtractionAPI,
+          HuggingFaceTaskType::TEXT_FEATURE_EXTRACTION));
+
+  std::string textEmbeddingExtractionMiniLMAPI =
+      "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2";
+
+  exec::registerVectorFunction(
+      "hf_minilm_embedding_extractor",
+      HuggingFaceServerless::signatures(),
+      std::make_unique<HuggingFaceServerless>(
+          textEmbeddingExtractionMiniLMAPI,
+          HuggingFaceTaskType::TEXT_FEATURE_EXTRACTION));
 
   std::string textClassificationAPI =
       "https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-sentiment-latest";
@@ -662,19 +702,31 @@ void EmbeddingTest::testHuggingFace() {
   auto results =
       exec::test::AssertQueryBuilder(myPlan).copyResults(pool_.get());
 
-  std::cout << "[INFO] Sentiment Classification Results \n\n\n"
-            << results->toString(0, results->size()) << "\n\n\n\n" << std::endl;
+  std::cout << "[INFO] Sentiment Classification Results \n\n"
+            << results->toString(0, results->size()) << "\n\n"
+            << std::endl;
 
-   auto myPlan1 = exec::test::PlanBuilder(pool_.get())
-                    .values({inputRowVector})
-                    .project({"in1", "hf_embedding_extractor(in1)"})
-                    .planNode();
+  auto myPlan1 = exec::test::PlanBuilder(pool_.get())
+                     .values({inputRowVector})
+                     .project({"in1", "hf_embedding_extractor(in1)"})
+                     .planNode();
 
   auto results1 =
       exec::test::AssertQueryBuilder(myPlan1).copyResults(pool_.get());
 
   std::cout << "[INFO] Embedding Extraction Results: \n\n\n"
             << results1->toString(0, results1->size()) << std::endl;
+
+  auto myPlan2 = exec::test::PlanBuilder(pool_.get())
+                     .values({inputRowVector})
+                     .project({"in1", "hf_minilm_embedding_extractor(in1)"})
+                     .planNode();
+
+  auto results2 =
+      exec::test::AssertQueryBuilder(myPlan2).copyResults(pool_.get());
+
+  std::cout << "[INFO] MiniLM L6 Embedding Extraction Results: \n\n\n"
+            << results2->toString(0, results2->size()) << std::endl;
 };
 
 // Test Embedding Layer
@@ -863,10 +915,10 @@ int main(int argc, char** argv) {
   // demo.testConcat1();
   // demo.testConcat2();
   // demo.testConcat3();
-  demo.testCosineSimilarity();
+  // demo.testCosineSimilarity();
   // demo.testEmbedding_MatMul();
   // demo.testSequencePooling();
   // demo.testDotProduct();
   // demo.testPositionEncoding();
-  // demo.testHuggingFace();
+  demo.testHuggingFace();
 }

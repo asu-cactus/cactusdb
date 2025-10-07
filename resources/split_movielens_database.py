@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np 
 import math
 import os 
+import resources_utils
 
 
 
@@ -29,3 +30,9 @@ def create_movielens_data(data_dir):
                 f.write(f'{num_cols}\n')
 
 create_movielens_data('data/movielens/final')
+
+column_sparsity_map = {}
+column_sparsity_map = resources_utils.count_sparsity_over_data("data/movielens/final", column_sparsity_map)
+with open("./data/parquet/movielens/final/sparsity.txt", "w") as f:
+  for col, sparsity in column_sparsity_map.items():
+    f.write(f"{col} {sparsity}\n")

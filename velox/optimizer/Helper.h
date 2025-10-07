@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,11 @@
 #include "CataLog.h"
 #include "velox/common/base/Fs.h"
 #include "velox/common/file/FileSystems.h"
+#include "velox/dwio/parquet/RegisterParquetReader.h"
+#include "velox/dwio/parquet/RegisterParquetWriter.h"
+#include "velox/dwio/parquet/writer/Writer.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
+#include "velox/ml_functions/functions.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
 
 using namespace facebook::velox::exec;
@@ -134,8 +138,8 @@ create_weight_block(int total_size, float* values, int block_numbers) {
 
 std::vector<std::vector<float>>
 create_blocks(int row, int col, float* values, int block_size) {
-  int num_blocks = (col + block_size - 1) /
-      block_size; // Calculate the number of blocks needed
+  int num_blocks =
+      static_cast<int>(std::ceil(static_cast<float>(col) / block_size));
   std::vector<std::vector<float>> blocks(
       num_blocks); // Initialize vector of blocks
   int current_col = 0; // Current column index in the values array
@@ -144,7 +148,7 @@ create_blocks(int row, int col, float* values, int block_size) {
         ? col - current_col
         : block_size; // Adjust block size for the last block
 
-    // Create a new block of size row x current_block_size
+  // Create a new block of size row x current_block_size
     std::vector<float> block(row * current_block_size);
 
     // Fill the block with values
@@ -274,28 +278,69 @@ std::vector<int> extractUDFDimension(std::string udfName) {
   std::shared_ptr<VectorFunction> myUDF =
       getVectorFunction(udfName, {ARRAY(REAL())}, {}, config);
   if (udfName.find("mat_mul") != std::string::npos) {
-    std::shared_ptr<MatrixMultiply> myMulUDF =
-        std::dynamic_pointer_cast<MatrixMultiply>(myUDF);
-    return myMulUDF->getDims();
+    if (udfName.find("_h") != std::string::npos) {
+      // block based MatrixMultiply
+      myUDF = getVectorFunction(
+          udfName, {ARRAY(REAL()), ARRAY(REAL())}, {}, config);
+      std::shared_ptr<MatrixMultiply_h> myMulUDF =
+          std::dynamic_pointer_cast<MatrixMultiply_h>(myUDF);
+      std::vector<int> dims = myMulUDF->getDims();
+      return {dims[2] /*block size */, dims[1]};
+    } else {
+      // non-block based MatrixMultiply
+      std::shared_ptr<MatrixMultiply> myMulUDF =
+          std::dynamic_pointer_cast<MatrixMultiply>(myUDF);
+      return myMulUDF->getDims();
+    }
   } else if (udfName.find("mat_vector_add") != std::string::npos) {
     std::shared_ptr<MatrixVectorAddition> myAddUDF =
         std::dynamic_pointer_cast<MatrixVectorAddition>(myUDF);
     return myAddUDF->getDims();
+  } else if (udfName.find("torchdnn") != std::string::npos) {
+    std::shared_ptr<TorchDNNV2> myTorchDNN =
+        std::dynamic_pointer_cast<TorchDNNV2>(myUDF);
+    return myTorchDNN->getDims();
   } else {
     return {};
   }
 }
 
+void augmentTorchDNNExpression(
+    folly::dynamic& serializedPlan,
+    std::string udfName) {
+  core::QueryConfig config({});
+  std::shared_ptr<VectorFunction> myUDF =
+      getVectorFunction(udfName, {ARRAY(REAL())}, {}, config);
+  std::shared_ptr<TorchDNNV2> myTorchDNN =
+      std::dynamic_pointer_cast<TorchDNNV2>(myUDF);
+  assert(myTorchDNN);
+  std::vector<velox::dl::KernelType> kernelTypes = myTorchDNN->getKernelTypes();
+
+  folly::dynamic jsonArray = folly::dynamic::array;
+  for (auto kernelType : kernelTypes) {
+    jsonArray.push_back(kernelTypeToString(kernelType));
+  }
+  serializedPlan["torchdnn_kernels"] = jsonArray;
+}
+
 void augmentFunctionExpression(folly::dynamic& serializedPlan) {
   if (serializedPlan.count("functionName")) {
     std::string functionName = serializedPlan["functionName"].asString();
-    std::vector<int> dims = extractUDFDimension(functionName);
-    if (dims.size() > 0) {
-      folly::dynamic jsonArray = folly::dynamic::array;
-      for (int value : dims) {
-        jsonArray.push_back(value);
+    try {
+      std::vector<int> dims = extractUDFDimension(functionName);
+      if (dims.size() > 0) {
+        folly::dynamic jsonArray = folly::dynamic::array;
+        for (int value : dims) {
+          jsonArray.push_back(value);
+        }
+        serializedPlan["dims"] = jsonArray;
       }
-      serializedPlan["dims"] = jsonArray;
+      if (functionName.find("torchdnn") != std::string::npos) {
+        augmentTorchDNNExpression(serializedPlan, functionName);
+      }
+    } catch (const std::exception& e) {
+      std::cout << "Error: extractUDFDimension: " << functionName << " "
+                << e.what() << std::endl;
     }
     if (serializedPlan.count("inputs")) {
       for (auto& input : serializedPlan["inputs"]) {
@@ -326,7 +371,12 @@ void augmentTableScanNode(folly::dynamic& serializedPlan, CataLog& cataLog) {
   }
 }
 
-void augmentSerializedPlan(folly::dynamic& serializedPlan, CataLog& cataLog) {
+// if the query plan takes in-memory data, the data will be stored in
+// sources'data attribute, we we may not need it
+void augmentSerializedPlan(
+    folly::dynamic& serializedPlan,
+    CataLog& cataLog,
+    bool removeSourceData = false) {
   if (serializedPlan.count("projections")) {
     for (auto& project : serializedPlan["projections"]) {
       if (project.count("functionName")) {
@@ -339,6 +389,9 @@ void augmentSerializedPlan(folly::dynamic& serializedPlan, CataLog& cataLog) {
 
   if (serializedPlan.count("sources")) {
     for (auto& source : serializedPlan["sources"]) {
+      if (removeSourceData && source.count("data")) {
+        source.erase("data");
+      }
       augmentSerializedPlan(source, cataLog);
     }
   }
@@ -457,6 +510,64 @@ void parseDLExpressions(
   parseDLExpressions(inner, parsedSingleExpr, matchedExpr);
 }
 
+std::string getInputExprName(const std::string& targetExprStr) {
+  std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+  std::smatch matches;
+  // Object to capture the matched data source
+  std::string matchedDataSrc;
+  // Search out the matched data source and store in matches
+  if (std::regex_search(targetExprStr, matches, patternToMatchRawSource)) {
+    matchedDataSrc = matches[1].str();
+  } else {
+    std::cout << "Uncaptured data source" << std::endl;
+  }
+  return matchedDataSrc;
+}
+
+bool parseInnerExpressions(
+    const std::string& input,
+    std::string& funcName,
+    std::string& innermostExpression) {
+  std::vector<int> parenStack;
+  int maxDepthCloseIdx = -1;
+
+  // Track current depth
+  int depth = 0;
+  parenStack.push_back(-1);
+
+  for (int i = 0; i < input.length(); ++i) {
+    if (input[i] == '(') {
+      parenStack.push_back(i);
+      ++depth;
+    } else if (input[i] == ')') {
+      if (maxDepthCloseIdx < 0) {
+        maxDepthCloseIdx = i;
+      }
+      --depth;
+    }
+  }
+
+  if (depth == 0) {
+    int len = parenStack.size();
+    if (len > 1 && maxDepthCloseIdx > 0) {
+      innermostExpression = input.substr(
+          parenStack[len - 2] + 1, maxDepthCloseIdx - parenStack[len - 2]);
+      funcName = input.substr(
+          parenStack[len - 2] + 1,
+          parenStack[len - 1] - parenStack[len - 2] - 1);
+      funcName = trim(funcName);
+      innermostExpression = trim(innermostExpression);
+
+    } else {
+      return false;
+    }
+  } else {
+    std::cout << "Invalid input: " << input << std::endl;
+    return false;
+  }
+  return true;
+}
+
 // Function to split a string based on a delimiter
 std::vector<std::string> splitString(const std::string& str, char delimiter) {
   std::vector<std::string> tokens;
@@ -488,7 +599,15 @@ bool containsStrButNotEqual(const std::string& str, const std::string& subStr) {
  * expression
  */
 std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
-  std::regex patternToMatchRawSource("ROW\\[\"(.*?)\"\\]");
+  // Regex Explanation:
+  // (lambda\\s+ROW<.*?>\\s*->.*) : Matches and consumes an entire lambda
+  // expression.
+  //      This is the "skip" pattern. It's in the first capture group.
+  // |                             : OR
+  // (ROW\\[\"(.*?)\"\\])           : Matches your desired ROW["..."] pattern.
+  //      The actual source name will be in the third capture group.
+  std::regex patternToMatchRawSource(
+      "(lambda\\s+ROW<.*?>\\s*->.*)|(ROW\\[\"(.*?)\"\\])");
   std::smatch matches;
   // Object to capture the matched data source
   std::vector<std::string> matchedDataSources;
@@ -498,8 +617,12 @@ std::vector<std::string> findDataSrcFromExpr(const std::string& expr) {
   // Search out the matched data source and store in matches
   while (std::regex_search(
       searchStart, expr.cend(), matches, patternToMatchRawSource)) {
-    // The captured group is in matches[1]
-    matchedDataSources.push_back(matches[1].str());
+    // The desired capture group for the data source is now group #3.
+    // If matches[3] is valid, it means the second part of the regex
+    // (our target) was matched.
+    if (matches[3].matched) {
+      matchedDataSources.push_back(matches[3].str());
+    }
     // Update the search start position
     searchStart = matches.suffix().first;
   }
@@ -532,11 +655,12 @@ std::shared_ptr<const core::PlanNode> findPlanNodeById(
 
 /**
  * @brief Function to find the nodeIds between two nodeId
- * 
+ *
  * @param planNode The current planNode to search for the nodeIds
  * @param sourceNodeId The source nodeId
  * @param targetNodeId The target nodeId
- * @return std::vector<std::string> The nodeIds between the source and target nodeId 
+ * @return std::vector<std::string> The nodeIds between the source and target
+ * nodeId
  */
 
 std::vector<std::string> findNodeIdsBetweenIds(
@@ -568,7 +692,7 @@ std::vector<std::string> findNodeIdsBetweenIds(
 
 /**
  * @brief Function to add the projection field in the serialized plan
- * 
+ *
  * @param serializedPlan The serialized plan to add the projection field
  * @param filedToBeAdded The field to be added in the projection
  * @param nodeIds The nodeIds to add the projection field
@@ -595,7 +719,9 @@ void addProjectionFiledInSerializedPlan(
       serializedPlan["outputType"]["cTypes"].push_back(filedToBeAdded["type"]);
       serializedPlan["outputType"]["names"].push_back(
           filedToBeAdded["fieldName"]);
-    } else if (currentNodeName.find("Filter") != std::string::npos) {
+    } else if (
+        currentNodeName.find("Filter") != std::string::npos ||
+        currentNodeName.find("LimitNode") != std::string::npos) {
       // No need to add the filed to the FilterNode
     } else {
       throw std::runtime_error(
@@ -615,18 +741,222 @@ void addProjectionFiledInSerializedPlan(
 // In Velox, when parsing the cast function, parentheses are omitted in the
 // exprStr output, making it unusable directly. This function reconstructs the
 // correct cast expression by adding the necessary parentheses to match the body
-// of the expression. For example: Input: eq(cast
-// argmax(ROW["trending_prediction"]) as BIGINT, 1) Output:
-// eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
+// of the expression. For example:
+// Input: eq(cast argmax(ROW["trending_prediction"]) as BIGINT, 1)
+// Output: eq(cast(argmax(ROW["trending_prediction"]) as BIGINT), 1)
 std::string fix_cast_function_parsing(std::string input) {
   // Use regex to match the pattern "cast" followed by a space and a function
   // call
-  std::regex cast_regex(R"(cast\s+(\w+\(.*?\))\s+as\s+(\w+))");
+  std::regex cast_regex(R"(cast\s+(\w+.*?)\s+as\s+(\w+))");
 
   // Use a lambda function for the replacement to insert parentheses
   std::string result =
       std::regex_replace(input, cast_regex, R"(cast($1 as $2))");
   return result;
+}
+
+std::string reformatComparisonExprWOCast(const std::string& exprStr) {
+  // Match: op(identifier, value)
+  std::regex pattern(
+      R"((eq|neq|lt|lte|gt|gte)\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,\s*([^)]+?)\s*\))");
+
+  std::smatch match;
+  if (std::regex_search(exprStr, match, pattern)) {
+    std::string op = match[1];
+    std::string source = match[2];
+    std::string value = match[3];
+    return fmt::format("{} {} {}", source, op, value);
+  } else {
+    throw std::runtime_error("Failed to parse expression: " + exprStr);
+  }
+}
+
+std::string reformatNonTargetExprs(const std::string& input) {
+    std::string output = input;
+
+    // 1. Replace ROW["x"] with x
+    output = std::regex_replace(output, std::regex("ROW\\[\"(\\w+)\"\\]"), "$1");
+
+    // 2. Replace lambda ROW<x:TYPE> -> with x ->
+    output = std::regex_replace(output, std::regex("lambda\\s+ROW<([a-zA-Z_][a-zA-Z0-9_]*):[a-zA-Z]+>\\s*->"), "$1 ->");
+
+    // 3. Replace cast x as real -> CAST(x AS REAL)
+    output = std::regex_replace(output, std::regex("cast\\s+(\\w+)\\s+as\\s+(\\w+)", std::regex_constants::icase), "CAST($1 AS $2)");
+
+    // 4. Remove quotes around simple literals (but not for strings with spaces or punctuation)
+    output = std::regex_replace(output, std::regex("\"([A-Za-z0-9_]+)\""), "$1");
+
+    return output;
+}
+
+
+/**
+ * @brief Function to reformat the comparison expression to a standard format,
+ * the input following the format:
+ * [Operator](cast [Expression] as [DataType], [CompareValue])
+ * The output format: [Expression] [Operator] [CompareValue]
+ *
+ *
+ * @param exprStr The input comparison expression string
+ * @return std::string The reformatted comparison expression
+ */
+
+std::string reformatComparisonExpr(std::string exprStr) {
+  std::regex pattern(
+      R"((eq|neq|lt|lte|gt|gte)\(cast\s+(.*?)\s+as\s+(\w+),\s*(.*?)\s*\))");
+  std::regex pattern2(
+      R"((eq|neq|lt|lte|gt|gte)\(\s*(.*?)\s*,cast\s+(.*?)\s+as\s+(\w+))");
+  // Match the exprStr string against the pattern
+  std::smatch match;
+  if (std::regex_search(exprStr, match, pattern)) {
+    // Extract the matched groups
+    std::string operatorStr = match[1]; // Operator
+    std::string expression = match[2]; // Expression
+    std::string dataType = match[3]; // Expression
+    std::string compareValue = match[4]; // CompareValue
+
+    if (operatorStr == "eq") {
+      operatorStr = "=";
+    } else if (operatorStr == "neq") {
+      operatorStr = "!=";
+    } else if (operatorStr == "lt") {
+      operatorStr = "<";
+    } else if (operatorStr == "lte") {
+      operatorStr = "<=";
+    } else if (operatorStr == "gt") {
+      operatorStr = ">";
+    } else if (operatorStr == "gte") {
+      operatorStr = ">=";
+    } else {
+      throw std::runtime_error(
+          "Unsupported operator in the expression: " + exprStr);
+    }
+
+    if (dataType == "DOUBLE" || dataType == "REAL") {
+      compareValue = std::to_string(std::stod(compareValue));
+    } else if (dataType == "TIMESTAMP") {
+      compareValue = fmt::format("cast {} as TIMESTAMP", compareValue);
+    }
+
+    // Return the reformatted expression
+    return expression + " " + operatorStr + " " + compareValue;
+  } else if (std::regex_search(exprStr, match, pattern2)) {
+    // Handle the second pattern
+    std::string operatorStr = match[1]; // Operator
+    std::string expression = match[2]; // Expression
+    std::string compareValue = match[3]; // CompareValue
+    std::string dataType = match[4]; // Expression
+
+    if (operatorStr == "eq") {
+      operatorStr = "=";
+    } else if (operatorStr == "neq") {
+      operatorStr = "!=";
+    } else if (operatorStr == "lt") {
+      operatorStr = "<";
+    } else if (operatorStr == "lte") {
+      operatorStr = "<=";
+    } else if (operatorStr == "gt") {
+      operatorStr = ">";
+    } else if (operatorStr == "gte") {
+      operatorStr = ">=";
+    } else {
+      throw std::runtime_error(
+          "Unsupported operator in the expression: " + exprStr);
+    }
+
+    if (dataType == "DOUBLE" || dataType == "REAL") {
+      compareValue = std::to_string(std::stod(compareValue));
+    } else if (dataType == "TIMESTAMP") {
+      compareValue = fmt::format("cast ({} as TIMESTAMP)", compareValue);
+    }
+
+    // Return the reformatted expression
+    return expression + " " + operatorStr + " " + compareValue;
+  } else {
+    throw std::runtime_error("Failed to match the pattern: " + exprStr);
+  }
+
+  // If no match, return an empty optional
+  return "";
+}
+
+std::string reformatDivideExpr(std::string exprStr) {
+  // Regular expression to capture divide(ROW["field"], value)
+  std::regex pattern(
+      R"(divide\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,\s*([^\)]+)\s*\))");
+
+  std::smatch match;
+  if (std::regex_search(exprStr, match, pattern) && match.size() == 3) {
+    std::string field = match[1].str(); // e.g., business_hour
+    std::string value = match[2].str(); // e.g., 23
+    return fmt::format("{} / {}.0", field, value);
+  } else {
+    return exprStr;
+  }
+}
+
+/**
+ * @brief Function to rewrite the lambda expression in the input expression
+ * string to a standard format, the input following the format:
+ * lambda ROW<[ParameterName]:[DataType]> -> cast ROW["[ParameterName]"] as
+ * [TargetType]
+ * The output format: lambda [ParameterName] -> cast [ParameterName] as
+ * [TargetType]
+ *
+ * @param exprStr The input expression string
+ * @return std::string The rewritten expression string
+ */
+std::string rewriteLambdaInExpStr(const std::string& exprStr) {
+  // Define a regex pattern to match the lambda syntax
+  std::regex lambdaRegex(
+      R"(lambda ROW<([^:]+):[^>]+> -> cast ROW\["\1"\] as ([A-Z]+))");
+  std::smatch matches;
+
+  // Search for the lambda expression
+  if (std::regex_search(exprStr, matches, lambdaRegex)) {
+    std::string paramName = matches[1]; // Extract the parameter name
+    std::string targetType = matches[2]; // Extract the target type (e.g., REAL)
+
+    // Rewrite the lambda expression
+    std::string rewrittenLambda =
+        " " + paramName + " -> cast (" + paramName + " as " + targetType + ")";
+
+    // Replace the original lambda expression with the rewritten one
+    return std::regex_replace(exprStr, lambdaRegex, rewrittenLambda);
+  }
+
+  // If no match, return the original input
+  return exprStr;
+}
+
+std::string removeUnnecessaryCast(const std::string& exprStr) {
+  // Define a regex pattern to match the cast syntax
+  std::regex castRegex(R"(cast ROW\[\"([^"]+)\"\] as [A-Z]+)");
+  std::vector<std::string> columnNames;
+
+  auto begin = std::sregex_iterator(exprStr.begin(), exprStr.end(), castRegex);
+  auto end = std::sregex_iterator();
+
+  std::string rewrittenExpr = exprStr;
+
+  for (std::sregex_iterator i = begin; i != end; ++i) {
+    std::smatch match = *i;
+    if (match.size() > 1) {
+      std::string columnName = match[1];
+      std::string matchedStr = match.str();
+      rewrittenExpr = std::regex_replace(
+          rewrittenExpr, std::regex(escapeRegex(matchedStr)), columnName);
+    }
+  }
+  return rewrittenExpr;
+}
+
+std::string removeDataTypeSuffixes(const std::string& input) {
+  // Matches <ANYTHING> after an identifier (non-greedy)
+  std::regex typeSuffixRegex(R"(<[^<>]*>)");
+
+  // Replace all occurrences of <DATA_TYPE> with an empty string
+  return std::regex_replace(input, typeSuffixRegex, "");
 }
 
 std::vector<RowVectorPtr> splitRowVectorIntoBatches(
@@ -672,6 +1002,99 @@ std::vector<std::shared_ptr<TempFilePath>> splitRowVectorIntoBatchFiles(
     batchFiles.push_back(file);
   }
   return batchFiles;
+}
+
+// Function from ParquetTestBase.h
+std::unique_ptr<dwio::common::FileSink> createSink(
+    const std::string& filePath,
+    std::shared_ptr<memory::MemoryPool> rootPool) {
+  auto sink = dwio::common::FileSink::create(
+      fmt::format("file:{}", filePath), {.pool = rootPool.get()});
+  return sink;
+}
+
+// Function from ParquetTestBase.h
+std::unique_ptr<facebook::velox::parquet::Writer> createWriter(
+    std::unique_ptr<dwio::common::FileSink> sink,
+    std::shared_ptr<memory::MemoryPool> rootPool,
+    std::function<
+        std::unique_ptr<facebook::velox::parquet::DefaultFlushPolicy>()>
+        flushPolicy,
+    const RowTypePtr& rowType,
+    facebook::velox::common::CompressionKind compressionKind =
+        facebook::velox::common::CompressionKind_NONE) {
+  facebook::velox::parquet::WriterOptions options;
+  options.memoryPool = rootPool.get();
+  options.flushPolicyFactory = flushPolicy;
+  options.compression = compressionKind;
+  return std::make_unique<facebook::velox::parquet::Writer>(
+      std::move(sink), options, rowType);
+}
+
+void writeRowVectorToParquetFile(
+    RowVectorPtr rowVector,
+    const std::string& filePath,
+    std::shared_ptr<memory::MemoryPool> rootPool) {
+  auto sink = createSink(filePath, rootPool);
+  auto sinkPtr = sink.get();
+  uint64_t kRowsInRowGroup = 1000;
+  uint64_t kBytesInRowGroup = 128 * 1024 * 1024;
+  auto writer = createWriter(
+      std::move(sink),
+      rootPool,
+      [&]() {
+        return std::make_unique<facebook::velox::parquet::LambdaFlushPolicy>(
+            kRowsInRowGroup, kBytesInRowGroup, [&]() { return false; });
+      },
+      asRowType(rowVector->type()));
+  writer->write(rowVector);
+  writer->flush();
+  writer->close();
+}
+
+std::vector<std::string> splitRowVectorsIntoBatchParquetFiles(
+    RowVectorPtr inputVector,
+    size_t batchSize,
+    const std::string& outputDir,
+    std::shared_ptr<memory::MemoryPool> rootPool) {
+  // Check if the output directory exists
+  if (fs::exists(outputDir)) {
+    // If it exists, remove it to start fresh
+    LOG(WARNING) << "Output directory already exists: " << outputDir
+                 << ". Removing it to start fresh." << std::endl;
+    fs::remove_all(outputDir);
+  }
+  // Split the input RowVector into batches
+  auto batches = splitRowVectorIntoBatches(inputVector, batchSize);
+  // Result vector to hold all the batch file paths
+  std::vector<std::string> batchFiles;
+  // Write each batch to a Parquet file
+  for (size_t i = 0; i < batches.size(); ++i) {
+    // Create a unique file path for each batch
+    std::string filePath = fmt::format("{}/part_{}.parquet", outputDir, i);
+    // Write the RowVector to the Parquet file
+    writeRowVectorToParquetFile(batches[i], filePath, rootPool);
+    // Add the file path to the result vector
+    batchFiles.push_back(filePath);
+  }
+  return batchFiles;
+}
+
+std::vector<std::string> readFileByLines(const std::string& filename) {
+  std::ifstream file(filename);
+  std::vector<std::string> lines;
+  std::string line;
+
+  if (!file.is_open()) {
+    std::cerr << "Failed to open file: " << filename << std::endl;
+    return lines;
+  }
+
+  while (std::getline(file, line)) {
+    lines.push_back(line);
+  }
+
+  return lines;
 }
 
 } // namespace optimization

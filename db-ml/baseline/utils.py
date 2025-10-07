@@ -8,7 +8,25 @@ import multiprocessing
 import subprocess
 import connectorx as cx
 import requests
+import tempfile
 from openai import OpenAI
+import pyarrow.parquet as pq
+from psycopg2 import sql
+import shutil
+import faiss
+
+
+def create_folder(folder_path, overwrite=False):
+    """
+    Recreate a folder. If it exists, delete it first.
+
+    Args:
+      folder_path (str): The path to the folder to recreate.
+    """
+    if os.path.exists(folder_path):
+        if overwrite:
+            shutil.rmtree(folder_path)
+    os.makedirs(folder_path)
 
 
 def get_sys_num_threads():
@@ -76,6 +94,54 @@ def fetch_data_from_postgres_via_connectorx(sql):
     return df
 
 
+def execute_sql_query_via_psycopg2(query, fetch_results=False):
+    """
+    Executes a SQL query using psycopg2.
+
+    Args:
+        query (str): The SQL query to execute.
+        fetch_results (bool): Whether to fetch and return the query results (default is False).
+
+    Returns:
+        list: Query results if fetch_results is True, otherwise None.
+    """
+    connection = None
+    db_params = {
+        "dbname": "postgresdb",
+        "user": "postgresdb",
+        "password": "postgresdb",
+        "host": "localhost",
+        "port": "5432",
+    }
+    try:
+        # Connect to the database
+        connection = psycopg2.connect(**db_params)
+        cursor = connection.cursor()
+
+        # Execute the SQL query
+        cursor.execute(sql.SQL(query))
+
+        # Commit changes for DML queries (INSERT, UPDATE, DELETE)
+        connection.commit()
+
+        # Fetch and return results if required
+        if fetch_results:
+            results = cursor.fetchall()
+            return results
+
+    except psycopg2.Error as e:
+        print(f"Error while executing query: {e}")
+        connection.rollback()
+    finally:
+        # Close the cursor and connection
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+    return None
+
+
 # TODO: in the future, fetching results from DB should utilize connectorx
 # for better performance, while connectorx can only execute one query at once
 def fetch_data_from_postgres_via_psycopg2(command):
@@ -132,6 +198,7 @@ def check_hdfs_dir_exist(directory_path):
     result = subprocess.run(command, capture_output=True)
     print(result)
     return result.returncode == 0
+
 
 def check_hdfs_file_exist(file_path):
     command = ["hdfs", "dfs", "-test", "-e", file_path]
@@ -241,38 +308,68 @@ def get_openAI_client():
     return client
 
 
+def get_HF_key():
+    if not "HF_TOKEN" in os.environ:
+        raise Exception("Please set the HF_TOKEN environment variable.")
+    return os.environ["HF_TOKEN"]
+
+
+def hf_MiniLM_model(list_of_sentences):
+    # Hugging Face API endpoint
+    url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+
+    # Your API key
+    headers = {"Authorization": "Bearer {}".format(get_HF_key())}
+
+    # Input data (sentence for embedding)
+    data = {"inputs": list_of_sentences}
+
+    # Make the request
+    count_failures = 0
+    response = requests.post(url, headers=headers, json=data)
+    while response.status_code != 200:
+        count_failures += 1
+        response = requests.post(url, headers=headers, json=data)
+    embeddings = np.array(response.json())
+
+    num_input_token = np.sum([len(x.split()) for x in list_of_sentences])
+    num_output_token = np.sum([len(x) for x in embeddings])
+
+    return embeddings, num_input_token, num_output_token, count_failures
+
+
 def get_openAI_key():
     if not "OPENAI_API_KEY" in os.environ:
         raise Exception("Please set the OPENAI_API_KEY environment variable.")
     return os.environ["OPENAI_API_KEY"]
 
+
 def chatgpt_server_restfulAPI(message):
-  openAI_key = get_openAI_key()
-  # Replace 'your_api_key' with your actual OpenAI API key
-  url = 'https://api.openai.com/v1/chat/completions'
+    openAI_key = get_openAI_key()
+    # Replace 'your_api_key' with your actual OpenAI API key
+    url = "https://api.openai.com/v1/chat/completions"
 
-  headers = {
-      'Authorization': f'Bearer {openAI_key}',
-      'Content-Type': 'application/json'
-  }
+    headers = {
+        "Authorization": f"Bearer {openAI_key}",
+        "Content-Type": "application/json",
+    }
 
-  # Define the conversation or prompt
-  data = {
-      "model": "gpt-3.5-turbo",
-      "messages": [
-          {"role": "user", "content": message}
-      ]
-  }
-  count_failures = 0
-  response = requests.post(url, headers=headers, json=data)
-  while response.status_code != 200:
-      count_failures += 1
-      response = requests.post(url, headers=headers, json=data)
-  response = response.json()
-  returned_message = response['choices'][0]['message']['content']
-  num_input_token = response['usage']['prompt_tokens']
-  num_output_token = response['usage']['completion_tokens']
-  return returned_message, num_input_token, num_output_token, count_failures
+    # Define the conversation or prompt
+    data = {
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": message}],
+    }
+    count_failures = 0
+    response = requests.post(url, headers=headers, json=data)
+    while response.status_code != 200:
+        count_failures += 1
+        response = requests.post(url, headers=headers, json=data)
+    response = response.json()
+    returned_message = response["choices"][0]["message"]["content"]
+    num_input_token = response["usage"]["prompt_tokens"]
+    num_output_token = response["usage"]["completion_tokens"]
+    return returned_message, num_input_token, num_output_token, count_failures
+
 
 def chatgpt_server(openAI_client, message):
     chat_completion = openAI_client.chat.completions.create(
@@ -283,3 +380,93 @@ def chatgpt_server(openAI_client, message):
         max_tokens=500,
     )
     return chat_completion.choices[0].message.content
+
+
+def load_parquet_to_postgres(parquet_file, table_name, conn_params, show_schema=False):
+    # Step 1: Read the Parquet file and get the schema
+    table = pq.read_table(parquet_file)
+    schema = table.schema
+    df = table.to_pandas()
+
+    # Step 2: Generate the CREATE TABLE statement
+    column_definitions = []
+    for field in schema:
+        postgres_type = map_arrow_to_postgres(field.type)
+        column_definitions.append(f"{field.name} {postgres_type}")
+
+    create_table_query = f"CREATE TABLE {table_name} ({', '.join(column_definitions)});"
+    if show_schema:
+        print("create_table_query:", create_table_query)
+
+    # Step 3: Write the data to a temporary CSV file
+    # Generate a temporary file path
+    temp_file = tempfile.NamedTemporaryFile(delete=False)
+    temp_file_path = temp_file.name
+
+    df.to_csv(temp_file_path, index=False)
+
+    # Step 4: Execute the SQL commands in PostgreSQL
+    try:
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(**conn_params)
+        cur = conn.cursor()
+        # Drop the table if it already exists
+        cur.execute("DROP TABLE IF EXISTS {} CASCADE".format(table_name))
+        conn.commit()
+        # Create the table
+        cur.execute(create_table_query)
+
+        # Load the data using COPY
+        with open(temp_file_path, "r") as f:
+            cur.copy_expert(sql.SQL(f"COPY {table_name} FROM STDIN WITH CSV HEADER"), f)
+
+        # Commit the transaction
+        conn.commit()
+        print(f"Table {table_name} created and data loaded successfully.")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+    temp_file.close()
+
+
+def map_arrow_to_postgres(arrow_type):
+    """Map PyArrow types to PostgreSQL types."""
+    if arrow_type == "int32":
+        return "INTEGER"
+    elif arrow_type == "int64":
+        return "BIGINT"
+    elif arrow_type == "float":
+        return "REAL"
+    elif arrow_type == "double":
+        return "DOUBLE PRECISION"
+    elif arrow_type == "string":
+        return "TEXT"
+    elif arrow_type == "bool":
+        return "BOOLEAN"
+    elif arrow_type == "timestamp[ns]":
+        return "TIMESTAMP"
+    else:
+        raise ValueError(f"Unsupported type: {arrow_type}")
+
+
+def get_rag_reference(model):
+    movie_data = pd.read_csv(
+        "/home/velox/resources/data/llm/wiki_movie_plots_deduped.csv"
+    )
+    movie_data["augmented_text"] = movie_data["Title"] + " " + movie_data["Plot"]
+    embeddings = model.encode(movie_data["augmented_text"].tolist())
+
+    # embeddings = np.array(
+    #     [
+    #         np.array(model.encode(x + " " + y))
+    #         for x, y in zip(movie_data["Title"], movie_data["Plot"])
+    #     ]
+    # )
+    dimension = len(embeddings[0])
+    index = faiss.IndexFlatL2(dimension)
+    index.add(embeddings)
+    return index, movie_data

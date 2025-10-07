@@ -359,7 +359,7 @@ class MultiLayerUDF2TorchNNRewriteActionTest : public HiveConnectorTestBase {
     // Set data source config.
     int layer_number = 3;
     int input_features_size = 800;//597540
-    int num_samples = 1000;
+    int num_samples = 5000;
     int first_layer_output_size = 1000;
     int second_layer_output_size = 1024;
     int third_layer_output_size = 14588;

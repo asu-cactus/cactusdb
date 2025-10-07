@@ -1,4 +1,20 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
+#include <fstream>
 #include <random>
 
 // TODO: add namespace
@@ -34,10 +50,15 @@ class RandomGenerator {
     distR_ = std::uniform_real_distribution<float>(0, 1);
     distI_ = std::uniform_int_distribution<int>((int)0, (int)10);
   }
+  
   RandomGenerator(float lb, float ub, int randomSeed = 0) {
     gen_ = std::mt19937(randomSeed);
     distR_ = std::uniform_real_distribution<float>(lb, ub);
     distI_ = std::uniform_int_distribution<int>((int)lb, (int)ub);
+  }
+
+  void setSeed(int randomSeed) {
+    gen_ = std::mt19937(randomSeed);
   }
 
   void setFloatRange(float lb, float ub) {
@@ -148,6 +169,10 @@ class RandomSampler {
 
   template <typename T>
   std::vector<T> sampleFromSets(int numSamples, const std::vector<T>& set) {
+    if (set.size() == 0) {
+      throw std::invalid_argument(
+          "[sampleFromSets] The input set is empty, please provide a non-empty set");
+    }
     std::vector<T> result;
     std::uniform_int_distribution<int> dist(0, set.size() - 1);
     for (int i = 0; i < numSamples; i++) {

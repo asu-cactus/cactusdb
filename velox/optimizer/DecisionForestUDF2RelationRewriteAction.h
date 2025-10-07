@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -172,7 +172,7 @@ class DecisionForestUDF2RelationRewriteAction : public RewriteAction {
 
               // Get the original decision forest UDF
               std::shared_ptr<ForestPrediction> myDecisionForestUDF =
-                  dynamic_pointer_cast<ForestPrediction>(myUDF);
+                  std::dynamic_pointer_cast<ForestPrediction>(myUDF);
               assert(myDecisionForestUDF);
 
               int numCols = myDecisionForestUDF->getNumFeatures();

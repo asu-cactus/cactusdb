@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) 2025 ASU Cactus Lab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
 #include <time.h>
 #include <Eigen/Dense>
@@ -10,7 +25,7 @@
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "velox/ml_functions/functions.h"
+#include "BaseFunction.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
 using namespace facebook::velox;
@@ -335,8 +350,8 @@ class TimeDiffInDays : public MLFunction {
     auto decodedRightArray = rightHolder.get();
     auto inputTimes2 = decodedRightArray->base()->as<FlatVector<int64_t>>(); */
     
-    LocalDecodedVector decodedInput1(context, *args[0], rows);
-    LocalDecodedVector decodedInput2(context, *args[1], rows); 
+    exec::LocalDecodedVector decodedInput1(context, *args[0], rows);
+    exec::LocalDecodedVector decodedInput2(context, *args[1], rows); 
 
     std::vector<int64_t> results;
     int secondsInADay = 86400;

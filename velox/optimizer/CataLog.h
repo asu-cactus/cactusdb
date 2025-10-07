@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) 2025 ASU Cactus Lab.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,27 @@
 #pragma once
 #include <map>
 #include <string>
+#include "velox/core/PlanNode.h"
 #include "velox/cost_model/Source.h"
+#include "velox/dwio/common/Options.h"
+#include "velox/exec/tests/utils/TempFilePath.h"
+#include "velox/type/Type.h"
+
+using namespace facebook::velox;
+using namespace facebook::velox::exec::test;
+
+// Function to split a string based on a delimiter
+std::vector<std::string> splitString(const std::string& str, char delimiter) {
+  std::vector<std::string> tokens;
+  std::stringstream ss(str);
+  std::string token;
+
+  while (std::getline(ss, token, delimiter)) {
+    tokens.push_back(token);
+  }
+
+  return tokens;
+}
 
 class CataLog {
  public:
@@ -35,6 +55,9 @@ class CataLog {
       int flag,
       std::string nameSuffix = "") {
     // TODO: better naming convention for the flag variable
+    for (auto& path : filePath) {
+      preserveTempFilePaths.push_back(path);
+    }
     if (flag == 1) {
       std::string key = name + "_weights" + nameSuffix;
 
@@ -190,6 +213,11 @@ class CataLog {
   // Get the entire file address map for PlanNodeId
   std::map<core::PlanNodeId, std::vector<std::string>> getIdAddressMap() {
     return idFileAddrMap;
+  }
+
+  void setIdAddressMap(
+      std::map<core::PlanNodeId, std::vector<std::string>> map) {
+    idFileAddrMap = map;
   }
 
   // Set the schema for a given PlanNodeId
@@ -359,6 +387,50 @@ class CataLog {
     }
   }
 
+  void loadDataSparsityFromFile(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+      LOG(WARNING) << "[readDataSparsity] Failed to open file: " << path
+                   << ".\n";
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+      std::istringstream iss(line);
+      std::string tableColName;
+      float sparsityValue;
+      if (iss >> tableColName >> sparsityValue) {
+        setDataSrcSparsity(tableColName, sparsityValue);
+      } else {
+        std::cerr << "[readDataSparsity] invalid line format: " << line
+                  << std::endl;
+      }
+    }
+  }
+
+  void setDataSrcSparsity(std::string name, float sparsity) {
+    // the name should be in tableName_colName
+    dataSrcSparsityMap[name] = sparsity;
+  }
+
+  float getDataSrcSparsity(std::string name) const {
+    // TODO: need to add table name to form the full name
+    // e.g. movie_tag_relevance_mt_relevance
+    auto it = dataSrcSparsityMap.find(name);
+    if (it != dataSrcSparsityMap.end()) {
+      return it->second;
+    } else {
+      LOG(WARNING) << fmt::format(
+          "[WARNING] col name: {} not exist in dataSrcSparsityMap, return default value: 0",
+          name);
+      return 0; // Default sparsity
+    }
+  }
+
+  void clearDataSrcSparsity() {
+    dataSrcSparsityMap.clear();
+  }
+
   std::vector<std::string> getRegisteredDataSrcFiles(std::string name) {
     auto it = registeredDataSrcFiles.find(name);
     if (it != registeredDataSrcFiles.end()) {
@@ -465,6 +537,59 @@ class CataLog {
     categoricalColVals.clear();
   }
 
+  void addFactorizableOpSrc(
+      std::string opName,
+      std::vector<std::string> srcNames) {
+    factorizableOpSrcMap[opName] = srcNames;
+  }
+
+  std::vector<std::string> getFactorizableOpSrc(std::string opName) {
+    auto it = factorizableOpSrcMap.find(opName);
+    if (it != factorizableOpSrcMap.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] opName: {} not exist in factorizableOpSrcMap", opName);
+      return {};
+    }
+  }
+
+  std::unordered_map<std::string, std::vector<std::string>>
+  getfactorizableOpSrcMap() {
+    return factorizableOpSrcMap;
+  }
+
+  void clearFactorizableOpSrc() {
+    factorizableOpSrcMap.clear();
+  }
+
+  void addFactorizableSrcPushdownNodes(
+      std::string opName,
+      std::vector<std::string> pushdownNodes) {
+    factorizableSrcPushdownNodesMap[opName] = pushdownNodes;
+  }
+
+  std::vector<std::string> getFactorizableSrcPushdownNodes(std::string opName) {
+    auto it = factorizableSrcPushdownNodesMap.find(opName);
+    if (it != factorizableSrcPushdownNodesMap.end()) {
+      return it->second;
+    } else {
+      LOG(FATAL) << fmt::format(
+          "[ERROR] opName: {} not exist in factorizableSrcPushdownNodesMap",
+          opName);
+      return {};
+    }
+  }
+
+  std::unordered_map<std::string, std::vector<std::string>>
+  getFactorizableSrcPushdownNodesMap() {
+    return factorizableSrcPushdownNodesMap;
+  }
+
+  void clearFactorizableSrcPushdownNodes() {
+    factorizableSrcPushdownNodesMap.clear();
+  }
+
   template <typename T>
   void processNumericColumn(
       std::string colName,
@@ -502,7 +627,6 @@ class CataLog {
       double binValue = static_cast<double>(minValue) + b * binSize;
       bins[b] = std::to_string(binValue);
     }
-    
     bins[numBins] = std::to_string(maxValue);
 
     for (size_t j = 0; j < numRows; ++j) {
@@ -534,12 +658,23 @@ class CataLog {
     for (size_t j = 0; j < numRows; ++j) {
       if (!stringVector->isNullAt(j)) {
         std::string value = stringVector->valueAt(j).str();
-        categoryCounts[value]++;
-        totalCount++;
-        uniqueCategories.insert(value);
+        if (colName.find("genres") != std::string::npos) {
+          // TODO: add method to automatically split string based on delimiter
+          // special case: if it is genres, needs to split by '|'
+          // example of movie genres: "Action|Adventure|Science Fiction"
+          std::vector<std::string> words = splitString(value, '|');
+          for (const auto& word : words) {
+            categoryCounts[word]++;
+            totalCount++;
+            uniqueCategories.insert(word);
+          }
+        } else {
+          categoryCounts[value]++;
+          totalCount++;
+          uniqueCategories.insert(value);
+        }
       }
     }
-
     std::vector<std::string> categoricalValsToIterate;
     if (categoricalColVals.find(colName) != categoricalColVals.end()) {
       // Use the unique values from the categoricalColVals map if exists
@@ -551,6 +686,9 @@ class CataLog {
 
     size_t index = 0;
     for (const auto& category : categoricalValsToIterate) {
+      if (index >= bins.size()) {
+        break;
+      }
       bins[index] = category;
       if (categoryCounts.find(category) == categoryCounts.end()) {
         frequencies[index] = 0;
@@ -581,7 +719,7 @@ class CataLog {
 
       // initialize the bins
       std::vector<double> frequencies(numBins, 0);
-      std::vector<std::string> bins(numBins+1); // bins store the bin edges
+      std::vector<std::string> bins(numBins + 1); // bins store the bin edges
       if (child->typeKind() == TypeKind::INTEGER) {
         // Handle INTEGER type
         auto numericVector = child->asFlatVector<int32_t>();
@@ -609,7 +747,8 @@ class CataLog {
         columnType = "Numerical";
       } else if (child->typeKind() == TypeKind::VARCHAR) {
         // Handle VARCHAR type
-        if (columnName.find("title") == std::string::npos) {
+        if (columnName.find("title") == std::string::npos &&
+            columnName.find("overview") == std::string::npos) {
           // skip title columns
           auto stringVector = child->asFlatVector<StringView>();
           processCategoricalColumn(
@@ -640,9 +779,37 @@ class CataLog {
           outFile << ",";
         }
       }
-      outFile << "]" << "\n";
+      outFile << "]"
+              << "\n";
     }
     outFile.close();
+  }
+
+  std::unordered_map<std::string, int> getIntermediateStateTupleCounterMap() {
+    return intermediateStateTupleCounterMap;
+  }
+
+  int getIntermediateStateTupleCounter(std::string intermediateStateName) {
+    auto it = intermediateStateTupleCounterMap.find(intermediateStateName);
+    if (it != intermediateStateTupleCounterMap.end()) {
+      return it->second;
+    } else {
+      return 0;
+    }
+  }
+
+  void setIntermediateStateTupleCounter(
+      std::string intermediateStateName,
+      int counter) {
+    intermediateStateTupleCounterMap[intermediateStateName] = counter;
+  }
+
+  void clearIntermediateStateTupleCounter(std::string intermediateStateName) {
+    intermediateStateTupleCounterMap.erase(intermediateStateName);
+  }
+
+  void clearIntermediateStateTupleCounterMap() {
+    intermediateStateTupleCounterMap.clear();
   }
 
  private:
@@ -650,7 +817,7 @@ class CataLog {
   // Default values
   int defaultBlocksNum = 4;
   int defaultBlocksSize = 256;
-  int blockingThreshold = 1;
+  int blockingThreshold = 256;
   int defaultSplits = 392;
   // Maps for storing data
   std::map<std::string, std::vector<int>> dataSourceStatMap;
@@ -679,6 +846,12 @@ class CataLog {
   // vars to store per-column statistics
   std::unordered_map<std::string, std::pair<int, int>> numericalColMinMaxs;
   std::unordered_map<std::string, std::vector<std::string>> categoricalColVals;
+  std::unordered_map<std::string, std::vector<std::string>>
+      factorizableOpSrcMap;
+  std::unordered_map<std::string, std::vector<std::string>>
+      factorizableSrcPushdownNodesMap;
+  std::unordered_map<std::string, int> intermediateStateTupleCounterMap;
+  std::unordered_map<std::string, float> dataSrcSparsityMap;
 
   // Helper function to find schema in a map based on key
   RowTypePtr findSchemaInMap(
