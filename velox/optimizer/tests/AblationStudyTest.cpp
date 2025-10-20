@@ -136,9 +136,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
               serializedPlan, pool_.get());
       planBuilder.setRoot(deserlizedUpdatedPlanNode);
     } else {
-      throw std::runtime_error(
-          fmt::format(
-              "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
+      throw std::runtime_error(fmt::format(
+          "[ERROR]queryPlanCacheId: {} was not found.", queryPlanCacheId));
     }
   }
 
@@ -2211,6 +2210,8 @@ class AblationStudyTest : public HiveConnectorTestBase {
     } else if (model == "ml-q1" || model == "ml-q2" || model == "ml-q3") {
       myPlan =
           setupMovielensDBQuery(model, cataLog, pool_, planNodeIdGenerator);
+    } else if (model == "nyc-taxi") {
+      myPlan = setupNYCTaxiQuery(model, cataLog, pool_, planNodeIdGenerator);
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }
@@ -2304,6 +2305,7 @@ class AblationStudyTest : public HiveConnectorTestBase {
       registerMLQ3UserMovieRatingModelFunctions(cataLog, pool_);
       registerMLMovieTagEncoderModelFunctions(cataLog, pool_);
       registerMLMovieTagEncoderModelFunctions1(cataLog, pool_);
+    } else if (model == "nyc-taxi") {
     } else {
       throw std::runtime_error(fmt::format("Non-supported model: {}", model));
     }

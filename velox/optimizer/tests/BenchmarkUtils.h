@@ -851,6 +851,94 @@ PlanBuilder setupTPCxAIQuery(
   return queryPlan;
 }
 
+PlanBuilder setupNYCTaxiQuery(
+    std::string queryType,
+    CataLog& cataLog,
+    std::shared_ptr<memory::MemoryPool> pool_,
+    std::shared_ptr<core::PlanNodeIdGenerator> planNodeIdGenerator) {
+  std::string queryOptType =
+      getEnvVar("CD_VELOX_QUERY_OPT_TYPE"); // env used for ablation study of
+                                            // rewrite rules
+  cataLog.loadDataSparsityFromFile(
+      "/home/velox/data/parquet/movielens/final/sparsity.txt");
+  PlanBuilder queryPlan;
+
+  auto taxiDataRowType =
+      ROW({"vendor_id",
+           "p_t",
+           "d_t",
+           "passenger_count",
+           "trip_distance",
+           "p_lon",
+           "p_lat",
+           "ratecode_id",
+           "store_and_fwd_flag",
+           "d_lon",
+           "d_lat",
+           "payment_type",
+           "fare_amount",
+           "extra",
+           "mta_tax",
+           "tip_amount",
+           "tolls_amount",
+           "improvement_surcharge",
+           "total_amount"},
+          {INTEGER(),
+           VARCHAR(),
+           VARCHAR(),
+           INTEGER(),
+           REAL(),
+           REAL(),
+           REAL(),
+           INTEGER(),
+           VARCHAR(),
+           REAL(),
+           REAL(),
+           INTEGER(),
+           REAL(),
+           REAL(),
+           REAL(),
+           REAL(),
+           REAL(),
+           REAL(),
+           REAL()});
+
+  std::string dataDirPrefix = getEnvVar("CD_DATA_DIR_PREFIX");
+
+  if (dataDirPrefix == "") {
+    // use default value:
+    dataDirPrefix = "/home/velox/resources/data/parquet/nyc_yellow_taxi/final/";
+  }
+
+  std::vector<std::string> taxiDataPaths =
+      getFilePathsFromDir(dataDirPrefix + "yellow_tripdata_2016-01");
+
+  int taxiDataNumRows, taxiDataNumCols;
+  readDataStats(
+      dataDirPrefix + "yellow_tripdata_2016-01_stats.txt",
+      taxiDataNumRows,
+      taxiDataNumCols);
+
+  if (queryType.find("nyc-taxi") != std::string::npos) {
+    PlanNodeId readTaxiDataPlanNodeId;
+    queryPlan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .tableScan(taxiDataRowType, {}, "")
+                    .capturePlanNodeId(readTaxiDataPlanNodeId);
+    cataLog.setIdAddressMap(
+        readTaxiDataPlanNodeId,
+        taxiDataPaths,
+        dwio::common::FileFormat::PARQUET);
+    cataLog.addNodeIdRelationName(readTaxiDataPlanNodeId, "taxi_data");
+    std::shared_ptr<OutputStat> taxiStats = std::make_shared<OutputStat>(
+        OutputStat(taxiDataNumRows, taxiDataNumCols));
+    Source taxiSrc =
+        Source(readTaxiDataPlanNodeId, Source::Type::FILE, taxiStats);
+    cataLog.addSource(std::make_shared<Source>(taxiSrc));
+  }
+
+  return queryPlan;
+};
+
 PlanBuilder setupMovielensDBQuery(
     std::string queryType,
     CataLog& cataLog,
