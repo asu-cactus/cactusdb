@@ -29,10 +29,11 @@ def create_split_data(data_dir):
                 f.write(f'{num_rows}\n')
                 f.write(f'{num_cols}\n')
 
-create_split_data('data/nyc_yellow_taxi/final')
+create_split_data('data/lingodb_job/final')
 
 column_sparsity_map = {}
-column_sparsity_map = resources_utils.count_sparsity_over_data("data/nyc_yellow_taxi/final", column_sparsity_map)
-with open("./data/parquet/nyc_yellow_taxi/final/sparsity.txt", "w") as f:
+column_sparsity_map = resources_utils.count_sparsity_over_data("data/lingodb_job/final", column_sparsity_map)
+print("Sparsity Map: ", column_sparsity_map)
+with open("./data/parquet/lingodb_job/final/sparsity.txt", "w") as f:
   for col, sparsity in column_sparsity_map.items():
     f.write(f"{col} {sparsity}\n")

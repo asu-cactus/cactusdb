@@ -1,6 +1,7 @@
 import os
 import shutil
 import math
+import warnings
 import numpy as np
 import pyarrow.parquet as pq
 
@@ -28,8 +29,10 @@ def count_sparsity_over_data(data_dir, column_sparsity_map):
                 if math.isclose(column_sparsity_map[col], sparsity_value, rel_tol=1e-5):
                     continue
                 else:
-                    raise Warning(
-                        f"Column '{col}' found in multiple tables with different sparsity values: {column_sparsity_map[col]} vs {sparsity_value}"
+                    warnings.warn(
+                      f"Column '{col}' found in multiple tables with different sparsity values: {column_sparsity_map[col]} vs {sparsity_value}",
+                      UserWarning,
+                      stacklevel=2,
                     )
 
     return column_sparsity_map
