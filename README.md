@@ -1,6 +1,6 @@
-# CactusDB Early Release for SIGMOD Submission
+# CactusDB Early Release
 
-**Note:** This is an early release of the CactusDB codebase for SIGMOD reviewers. An official release will be available soon.
+**Note:** This is an early release of the CactusDB codebase. An official release will be available soon.
 
 CactusDB is a UDF-centric database built on top of Meta's high-performance database engine, [Velox](https://github.com/facebookincubator/velox). It enables the co-optimization of SQL queries nested with model inference.
 
