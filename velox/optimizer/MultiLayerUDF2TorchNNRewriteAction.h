@@ -144,7 +144,7 @@ class MultiLayerUDF2TorchNNRewriteAction : public RewriteAction {
                   assert(isSupportedDLKernel(parsedSingleExprs[i]));
                   auto dlKernelName = parsedSingleExprs[i];
                   std::vector<int> udfDims;
-                  if (dlKernelName.find("mat_mul") != std::string::npos) {
+                  if (dlKernelName.find("mat_mul") != std::string::npos || dlKernelName.find("mat_sparse_mul") != std::string::npos) {
                     auto myDL = getVectorFunction(
                         dlKernelName, {ARRAY(REAL())}, {}, config);
                     assert(myDL);

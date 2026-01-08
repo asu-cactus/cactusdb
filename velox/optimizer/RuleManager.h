@@ -42,9 +42,9 @@ class RuleManager {
         "TorchNN2TwoLayerUDFRewriteAction",
         std::make_shared<TorchNN2TwoLayerUDFRewriteAction>());
 
-    rules.emplace(
-        "Mul2JoinAggHorizontalRewriteAction",
-        std::make_shared<Mul2JoinAggHorizontalRewriteAction>());
+    // rules.emplace(
+    //     "Mul2JoinAggHorizontalRewriteAction",
+    //     std::make_shared<Mul2JoinAggHorizontalRewriteAction>());
 
     // rules.emplace("TwoLayerUDF2TorchNNRewriteAction",
     // std::make_shared<TwoLayerUDF2TorchNNRewriteAction>());
@@ -71,9 +71,9 @@ class RuleManager {
     // rules.emplace("MLFactorizationRewriteAction",
     // std::make_shared<MLFactorizationRewriteAction>());
 
-    rules.emplace(
-        "MatMulDense2SparseRewriteAction",
-        std::make_shared<MatMulDense2SparseRewriteAction>());
+    // rules.emplace(
+    //     "MatMulDense2SparseRewriteAction",
+    //     std::make_shared<MatMulDense2SparseRewriteAction>());
     // Add more rules if needed
   }
   /**

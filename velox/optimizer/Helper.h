@@ -758,7 +758,7 @@ std::string fix_cast_function_parsing(std::string input) {
 std::string reformatComparisonExprWOCast(const std::string& exprStr) {
   // Match: op(identifier, value)
   std::regex pattern(
-      R"((eq|neq|lt|lte|gt|gte)\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,\s*([^)]+?)\s*\))");
+      R"((eq|neq|lt|lte|gt|gte|like)\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,\s*([^)]+?)\s*\))");
 
   std::smatch match;
   if (std::regex_search(exprStr, match, pattern)) {

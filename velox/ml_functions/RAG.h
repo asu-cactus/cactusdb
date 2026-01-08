@@ -148,6 +148,9 @@ class RAG : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
+    // Compute the operation cost using a static cost model. Note: This is
+    // currently not utilized for query optimization as we rely on an ML-based
+    // model (optimizer/query2vec).
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
 

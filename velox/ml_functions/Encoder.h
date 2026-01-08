@@ -92,7 +92,10 @@ class IntEncoder : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
+    // Compute the operation cost using a static cost model. Note: This is
+    // currently not utilized for query optimization as we rely on an ML-based
+    // model (optimizer/query2vec).
+    // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
@@ -155,7 +158,10 @@ class StringEncoder : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
+    // Compute the operation cost using a static cost model. Note: This is
+    // currently not utilized for query optimization as we rely on an ML-based
+    // model (optimizer/query2vec).
+    // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
@@ -227,7 +233,10 @@ class StringVariadicEncoder : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
+    // Compute the operation cost using a static cost model. Note: This is
+    // currently not utilized for query optimization as we rely on an ML-based
+    // model (optimizer/query2vec).
+    // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 
@@ -298,7 +307,10 @@ class OneHotEncoder : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
+    // Compute the operation cost using a static cost model. Note: This is
+    // currently not utilized for query optimization as we rely on an ML-based
+    // model (optimizer/query2vec).
+    // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
     // return 0;
   }
@@ -373,7 +385,10 @@ class TokenFreqVector : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
+    // Compute the operation cost using a static cost model. Note: This is
+    // currently not utilized for query optimization as we rely on an ML-based
+    // model (optimizer/query2vec).
+    // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
     // return 0;
   }
@@ -442,7 +457,10 @@ class RatingMapToArray : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
+    // Compute the operation cost using a static cost model. Note: This is
+    // currently not utilized for query optimization as we rely on an ML-based
+    // model (optimizer/query2vec).
+    // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
     // return 0;
   }
@@ -506,7 +524,10 @@ class MultiHotNormalizedEncoder : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // TODO: need to implement
+    // Compute the operation cost using a static cost model. Note: This is
+    // currently not utilized for query optimization as we rely on an ML-based
+    // model (optimizer/query2vec).
+    // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
 

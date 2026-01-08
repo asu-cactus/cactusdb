@@ -1,0 +1,9 @@
+CompileFlags:
+  CompilationDatabase: build
+  Add:
+    [
+      -std=c++17,
+      -I/home/libtorch/include,
+      -I/home/libtorch/include/torch/csrc/api/include,
+      -I/home/velox/,
+    ]
