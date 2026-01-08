@@ -216,9 +216,11 @@ class MatrixMultiply : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     int factor1 = inputDims[0];
     int factor2 = dims[0];
@@ -403,9 +405,11 @@ class SparseMatrixMultiply : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     int factor1 = inputDims[0];
     int factor2 = dims[0];
@@ -559,9 +563,11 @@ class SparseMatrixMultiply1 : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     int factor1 = inputDims[0];
     int factor2 = dims[0];
@@ -813,9 +819,11 @@ class MatrixMultiply_h : public MLFunction {
   };
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector("mat_mul");
     int factor1 = inputDims[0];
     int factor2 = inputDims[1];
@@ -1013,9 +1021,11 @@ class MatrixAddition : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
 
@@ -1228,9 +1238,11 @@ class Sigmoid : public MLFunction {
   };
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
     return CostEstimate(cost, inputDims[0], inputDims[1]);
@@ -1301,9 +1313,11 @@ class Relu : public MLFunction {
   };
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
     return CostEstimate(cost, inputDims[0], inputDims[1]);
@@ -1425,9 +1439,11 @@ class Softmax : public MLFunction {
   };
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
     return CostEstimate(cost, inputDims[0], inputDims[1]);
@@ -1539,9 +1555,11 @@ class Argmax : public MLFunction {
   };
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
     return CostEstimate(cost, inputDims[0], inputDims[1]);
@@ -1715,9 +1733,11 @@ class MinMaxScaler : public MLFunction {
   };
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     float cost = coefficientVector[0] * inputDims[0] * inputDims[1];
     return CostEstimate(cost, inputDims[0], inputDims[1]);
@@ -1819,9 +1839,11 @@ class TorchDNN2Level : public MLFunction {
   };
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     float cost = getWeightedCost(
         getName(), inputDims[0] * inputDims[1] * dims[0] * dims[1]);
     return CostEstimate(cost, inputDims[0], inputDims[1]);
@@ -1928,9 +1950,11 @@ class TorchDNN : public MLFunction {
   };
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     std::vector<double> coefficientVector = getCoefficientVector(getName());
     uint64_t factor1 = inputDims[0] * dims[0] * dims[1];
     uint64_t factor2 = inputDims[0] * dims[1] * dims[2];
@@ -2233,9 +2257,11 @@ class TorchDNNV2 : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -2471,9 +2497,11 @@ class TorchDNNV2CUDA : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }

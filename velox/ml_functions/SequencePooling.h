@@ -104,7 +104,8 @@ class SequencePooling : public MLFunction {
     });
 
     int numResultMatrixRows = numUniqueRows;
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> resultMatix(numResultMatrixRows, dims[0]);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        resultMatix(numResultMatrixRows, dims[0]);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       int numEmbeddingValues = inputSizes[rawIndex];
@@ -192,9 +193,11 @@ class SequencePooling : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }

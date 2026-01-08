@@ -22,10 +22,10 @@
 #include <iomanip>
 #include <iostream>
 #include <locale>
+#include "BaseFunction.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
-#include "BaseFunction.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
 using namespace facebook::velox;
@@ -55,7 +55,6 @@ class IsWeekday : public MLFunction {
 
     const int secondsInADay = 86400;
     for (int i = 0; i < rows.size(); i++) {
-
       int64_t timestamp = inputTimes->valueAt(i);
 
       std::time_t time = static_cast<std::time_t>(timestamp);
@@ -101,9 +100,11 @@ class IsWeekday : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -157,9 +158,11 @@ class GetAge : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -200,9 +203,11 @@ class GetTransactionFeatures : public MLFunction {
     // auto tTimestamps = decodedArray3->base()->as<FlatVector<int64_t>>();
 
     for (int i = 0; i < rows.size(); i++) {
-      float totalOrder = (static_cast<float>(decodedArray0->valueAt<int64_t>(i))) / 79.0;
+      float totalOrder =
+          (static_cast<float>(decodedArray0->valueAt<int64_t>(i))) / 79.0;
       float tAmount = (decodedArray1->valueAt<float>(i)) / 16048.0;
-      float timeDiff = (static_cast<float>(decodedArray2->valueAt<int64_t>(i))) / 729.0;
+      float timeDiff =
+          (static_cast<float>(decodedArray2->valueAt<int64_t>(i))) / 729.0;
       int64_t tTimestamp = decodedArray3->valueAt<int64_t>(i);
 
       // Calculate day of week
@@ -248,9 +253,11 @@ class GetTransactionFeatures : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -331,9 +338,11 @@ class GetCustomerFeatures : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -361,9 +370,9 @@ class TimeDiffInDays : public MLFunction {
     exec::LocalDecodedVector rightHolder(context, *right, rows);
     auto decodedRightArray = rightHolder.get();
     auto inputTimes2 = decodedRightArray->base()->as<FlatVector<int64_t>>(); */
-    
+
     exec::LocalDecodedVector decodedInput1(context, *args[0], rows);
-    exec::LocalDecodedVector decodedInput2(context, *args[1], rows); 
+    exec::LocalDecodedVector decodedInput2(context, *args[1], rows);
 
     std::vector<int64_t> results;
     int secondsInADay = 86400;
@@ -403,9 +412,11 @@ class TimeDiffInDays : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -476,9 +487,11 @@ class DateToTimestamp : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }
@@ -538,9 +551,11 @@ class GetBinaryClass : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }

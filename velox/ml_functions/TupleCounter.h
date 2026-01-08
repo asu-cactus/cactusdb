@@ -58,7 +58,8 @@ class TupleCounter : public MLFunction {
         cataLog_->getIntermediateStateTupleCounter(intermediateStateName);
     cataLog_->setIntermediateStateTupleCounter(
         intermediateStateName, accumulatedCount + numSelectedRows);
-    // std::cout << "[INFO] tupleCounter execution time: " << timer.toc() << " ms"
+    // std::cout << "[INFO] tupleCounter execution time: " << timer.toc() << "
+    // ms"
     //           << std::endl;
   }
 
@@ -97,9 +98,11 @@ class TupleCounter : public MLFunction {
   }
 
   CostEstimate getCost(std::vector<int> inputDims) {
-    // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
+    // Computes the operation cost using a legacy static cost model.
+    // This method is retained for compatibility and reference purposes.
+    // NOTE: Query optimization uses an ML-based cost model
+    // (optimizer/query2vec), and this function is not invoked in that process.
+
     // TODO: Implement a static cost estimation method for the specified kernel.
     return CostEstimate(0, inputDims[0], inputDims[1]);
   }

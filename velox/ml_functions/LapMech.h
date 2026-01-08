@@ -100,7 +100,8 @@ class LapMech : public MLFunction {
     });
 
     int numInputMatrixRows = numUniqueRows;
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> inputMatrix(numInputMatrixRows, numCols);
+    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
+        inputMatrix(numInputMatrixRows, numCols);
     int rowIndex = 0;
     for (auto rawIndex : uniqueRawIndexeVector) {
       Eigen::Map<const Eigen::VectorXf> rowVector(
@@ -150,20 +151,19 @@ class LapMech : public MLFunction {
     arrayOutput->setElements(elementsOutput);
   }
 
-  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures() {
-    return {
-        exec::FunctionSignatureBuilder()
-            .argumentType("array(REAL)")
-            .argumentType("REAL")
-            .returnType("array(REAL)")
-            .build(),
-        ,
-        exec::FunctionSignatureBuilder()
-            .argumentType("array(REAL)")
-            .argumentType("DOUBLE")
-            .returnType("array(REAL)")
-            .build()}
-  };
+  static std::vector<std::shared_ptr<exec::FunctionSignature>> signatures(){
+      return {
+          exec::FunctionSignatureBuilder()
+              .argumentType("array(REAL)")
+              .argumentType("REAL")
+              .returnType("array(REAL)")
+              .build(),
+          ,
+          exec::FunctionSignatureBuilder()
+              .argumentType("array(REAL)")
+              .argumentType("DOUBLE")
+              .returnType("array(REAL)")
+              .build()}};
 }
 
 // TODO: add get and set for bias or we have a better way to store the two
@@ -194,10 +194,12 @@ void setWeights(float* weights) {
 }
 
 CostEstimate getCost(std::vector<int> inputDims) {
-  // Compute the operation cost using a static cost model. Note: This is
-    // currently not utilized for query optimization as we rely on an ML-based
-    // model (optimizer/query2vec).
-    // TODO: Implement a static cost estimation method for the specified kernel.
+  // Computes the operation cost using a legacy static cost model.
+  // This method is retained for compatibility and reference purposes.
+  // NOTE: Query optimization uses an ML-based cost model
+  // (optimizer/query2vec), and this function is not invoked in that process.
+
+  // TODO: Implement a static cost estimation method for the specified kernel.
   return CostEstimate(0, inputDims[0], inputDims[1]);
 }
 
