@@ -106,7 +106,7 @@ def kill_process_with_most_memory():
     print(f"[INFO] Killed process, PID: {pid_to_kill}, Name: {name_to_kill}, Used Memory: {memory_info}")
 
 def main():
-    threshold = 5000 * 1024 * 1024  # 5000 MB threshold in bytes
+    threshold = 2000 * 1024 * 1024  # 5000 MB threshold in bytes
 
     while True:
         # available_memory = psutil.virtual_memory().available + psutil.swap_memory().free
