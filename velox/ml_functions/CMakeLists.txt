@@ -149,9 +149,28 @@ target_link_libraries(
   ml_functions
 )
 
+add_executable(job_two_join_test tests/Job2WayJoin.cpp)
+target_link_libraries(
+  job_two_join_test
+  velox_aggregates
+  velox_type
+  velox_vector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_lib
+  velox_tpch_connector
+  velox_memory
+  velox_common_base
+  velox_vector_fuzzer
+  openblas
+  ${TORCH_LIBRARIES}
+  jsoncpp_lib
+  h5cpp::h5cpp
+  hdf5_serial
+  ${HDF5_CXX_LIBRARIES}
+)
 
 
-#FIXME: model path issue needs to be fixed
 add_executable(fraud_detection_test tests/FraudDetectionTest.cpp)
 target_link_libraries(
   fraud_detection_test
