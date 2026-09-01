@@ -4,7 +4,7 @@
 
 CactusDB is a UDF-centric database built on top of Meta's high-performance database engine, [Velox](https://github.com/facebookincubator/velox). It enables the co-optimization of SQL queries nested with model inference.
 
-<!-- - [CactusDB Early Release for SIGMOD Submission](#cactusdb-early-release-for-sigmod-submission)
+<!-- - [CactusDB Early Release](#cactusdb-early-release-for-sigmod-submission)
   - [Getting Started](#getting-started)
     - [Dependencies](#dependencies)
     - [Set-Up Through Docker](#set-up-through-docker)
